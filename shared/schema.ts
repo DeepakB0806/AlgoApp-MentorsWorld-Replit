@@ -1,4 +1,4 @@
-import { pgTable, text, varchar, integer, real, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, real, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -7,14 +7,17 @@ export const strategies = pgTable("strategies", {
   id: varchar("id", { length: 36 }).primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
-  type: text("type").notNull(), // "momentum", "mean_reversion", "arbitrage", "trend_following"
+  type: text("type").notNull(), // "scalping", "swing", "positional", "intraday"
   status: text("status").notNull().default("inactive"), // "active", "inactive", "paused"
-  riskLevel: text("risk_level").notNull().default("medium"), // "low", "medium", "high"
-  allocation: real("allocation").notNull().default(0), // percentage of portfolio
-  profitTarget: real("profit_target"), // percentage
-  stopLoss: real("stop_loss"), // percentage
-  winRate: real("win_rate").default(0),
+  symbol: text("symbol").notNull(),
+  exchange: text("exchange").notNull().default("NSE"),
+  quantity: integer("quantity").notNull().default(1),
+  entryCondition: text("entry_condition"),
+  exitCondition: text("exit_condition"),
+  stopLoss: real("stop_loss"),
+  targetProfit: real("target_profit"),
   totalTrades: integer("total_trades").default(0),
+  winningTrades: integer("winning_trades").default(0),
   profitLoss: real("profit_loss").default(0),
 });
 
@@ -22,61 +25,133 @@ export const insertStrategySchema = createInsertSchema(strategies).omit({ id: tr
 export type InsertStrategy = z.infer<typeof insertStrategySchema>;
 export type Strategy = typeof strategies.$inferSelect;
 
-// Trade
-export const trades = pgTable("trades", {
+// Webhook Configuration
+export const webhooks = pgTable("webhooks", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  strategyId: varchar("strategy_id", { length: 36 }).notNull(),
-  symbol: text("symbol").notNull(),
-  side: text("side").notNull(), // "buy", "sell"
-  quantity: real("quantity").notNull(),
-  entryPrice: real("entry_price").notNull(),
-  exitPrice: real("exit_price"),
-  profitLoss: real("profit_loss"),
-  status: text("status").notNull(), // "open", "closed", "pending"
-  timestamp: text("timestamp").notNull(),
+  name: text("name").notNull(),
+  strategyId: varchar("strategy_id", { length: 36 }),
+  webhookUrl: text("webhook_url").notNull(),
+  secretKey: text("secret_key"),
+  isActive: boolean("is_active").notNull().default(true),
+  triggerType: text("trigger_type").notNull(), // "entry", "exit", "both"
+  lastTriggered: text("last_triggered"),
+  totalTriggers: integer("total_triggers").default(0),
 });
 
-export const insertTradeSchema = createInsertSchema(trades).omit({ id: true });
-export type InsertTrade = z.infer<typeof insertTradeSchema>;
-export type Trade = typeof trades.$inferSelect;
+export const insertWebhookSchema = createInsertSchema(webhooks).omit({ id: true });
+export type InsertWebhook = z.infer<typeof insertWebhookSchema>;
+export type Webhook = typeof webhooks.$inferSelect;
+
+// Webhook Logs
+export const webhookLogs = pgTable("webhook_logs", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  webhookId: varchar("webhook_id", { length: 36 }).notNull(),
+  timestamp: text("timestamp").notNull(),
+  payload: text("payload"),
+  status: text("status").notNull(), // "success", "failed", "pending"
+  response: text("response"),
+  executionTime: integer("execution_time"),
+});
+
+export const insertWebhookLogSchema = createInsertSchema(webhookLogs).omit({ id: true });
+export type InsertWebhookLog = z.infer<typeof insertWebhookLogSchema>;
+export type WebhookLog = typeof webhookLogs.$inferSelect;
+
+// Broker API Configuration
+export const brokerConfigs = pgTable("broker_configs", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  brokerName: text("broker_name").notNull(), // "kotak_neo", "zerodha", "angel"
+  consumerKey: text("consumer_key"),
+  consumerSecret: text("consumer_secret"),
+  mobileNumber: text("mobile_number"),
+  isConnected: boolean("is_connected").notNull().default(false),
+  lastConnected: text("last_connected"),
+});
+
+export const insertBrokerConfigSchema = createInsertSchema(brokerConfigs).omit({ id: true });
+export type InsertBrokerConfig = z.infer<typeof insertBrokerConfigSchema>;
+export type BrokerConfig = typeof brokerConfigs.$inferSelect;
 
 // Position
-export const positions = pgTable("positions", {
+export interface Position {
+  trading_symbol: string;
+  exchange: string;
+  quantity: number;
+  buy_avg: number;
+  sell_avg: number;
+  pnl: number;
+  ltp: number;
+}
+
+// Order
+export interface Order {
+  order_id: string;
+  trading_symbol: string;
+  transaction_type: string; // "B", "S"
+  quantity: number;
+  price: number;
+  status: string; // "PENDING", "COMPLETE", "REJECTED", "CANCELLED"
+  order_type: string;
+  exchange: string;
+  timestamp: string;
+}
+
+// Holding
+export interface Holding {
+  trading_symbol: string;
+  quantity: number;
+  average_price: number;
+  current_price: number;
+  pnl: number;
+  pnl_percent: number;
+}
+
+// Portfolio Summary
+export interface PortfolioSummary {
+  totalValue: number;
+  dayPnL: number;
+  totalPnL: number;
+  availableMargin: number;
+}
+
+// Login Credentials for Kotak Neo
+export interface LoginCredentials {
+  consumer_key: string;
+  consumer_secret: string;
+  mobile_number: string;
+  password: string;
+  mpin: string;
+  totp_secret?: string;
+}
+
+// Order Params
+export interface OrderParams {
+  exchange_segment: string;
+  product: string;
+  price: string;
+  order_type: string;
+  quantity: string;
+  validity: string;
+  trading_symbol: string;
+  transaction_type: string;
+  amo?: string;
+  disclosed_quantity?: string;
+  market_protection?: string;
+  pf?: string;
+  trigger_price?: string;
+}
+
+// Keep User schema for compatibility
+export const users = pgTable("users", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  symbol: text("symbol").notNull(),
-  quantity: real("quantity").notNull(),
-  averagePrice: real("average_price").notNull(),
-  currentPrice: real("current_price").notNull(),
-  profitLoss: real("profit_loss").notNull(),
-  profitLossPercent: real("profit_loss_percent").notNull(),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
 });
 
-export const insertPositionSchema = createInsertSchema(positions).omit({ id: true });
-export type InsertPosition = z.infer<typeof insertPositionSchema>;
-export type Position = typeof positions.$inferSelect;
+export const insertUserSchema = createInsertSchema(users).pick({
+  username: true,
+  password: true,
+});
 
-// Portfolio Stats
-export interface PortfolioStats {
-  totalValue: number;
-  dayChange: number;
-  dayChangePercent: number;
-  totalProfitLoss: number;
-  totalProfitLossPercent: number;
-  buyingPower: number;
-}
-
-// Performance Data Point for charts
-export interface PerformanceDataPoint {
-  date: string;
-  value: number;
-  benchmark?: number;
-}
-
-// Market Data
-export interface MarketData {
-  symbol: string;
-  price: number;
-  change: number;
-  changePercent: number;
-  volume: number;
-}
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;
