@@ -120,6 +120,14 @@ The application implements the official Kotak Neo Trade API based on the Postman
   - Market data: quotes, scrip master files
   - Account APIs: margin check, limits
 - Added setup guide for Kotak Neo on Broker API page
+- Redesigned dashboard to match Kotak Neo layout:
+  - INVESTMENTS/POSITIONS/ORDERS/PLACE ORDER tabs
+  - Summary cards: Profit/Loss, Unrealised P/L, Realised P/L, Net traded value (positions)
+  - Summary cards: Total P&L, Invested Value, Current Value (holdings)
+  - Positions table with derivatives support (option_type, strike_price, expiry)
+  - Search functionality for both positions and holdings
+- Enhanced Position schema with derivatives fields and P&L breakdown
+- API field mappings documented with proper fallback logic for computed values
 
 ## Running the Application
 

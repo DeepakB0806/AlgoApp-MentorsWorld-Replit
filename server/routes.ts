@@ -456,16 +456,24 @@ export async function registerRoutes(
         const result = await getKotakHoldings(auth.session);
         if (result.success && result.data) {
           // Transform Kotak Neo response to our format
+          // Kotak Neo API field mappings (from /portfolio/v1/holdings):
+          // - symbol/scrip/trdSym/tradingSymbol: Trading symbol
+          // - holdQty/quantity: Holding quantity
+          // - avgPrc/averagePrice: Average price
+          // - ltp/currentPrice: Last traded price (or use avg if not available)
           const holdings = (result.data as unknown[]).map((hld: unknown) => {
             const h = hld as Record<string, unknown>;
-            const qty = Number(h.holdQty || h.quantity || 0);
-            const avgPrice = Number(h.avgPrc || h.averagePrice || 0);
-            const currentPrice = Number(h.ltp || h.currentPrice || avgPrice);
-            const pnl = (currentPrice - avgPrice) * qty;
+            const qty = Number(h.holdQty || h.quantity || h.qty || 0);
+            const avgPrice = Number(h.avgPrc || h.averagePrice || h.avgPrice || 0);
+            const currentPrice = Number(h.ltp || h.currentPrice || h.mktValue ? (Number(h.mktValue) / qty) : avgPrice);
+            const pnl = Number(h.unrealisedPnl || h.pnl || (currentPrice - avgPrice) * qty);
             const pnlPercent = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
             
+            // Symbol can be in many different fields depending on API version
+            const symbol = String(h.symbol || h.scrip || h.trdSym || h.tradingSymbol || h.scripName || h.isin || "Unknown");
+            
             return {
-              trading_symbol: String(h.trdSym || h.tradingSymbol || ""),
+              trading_symbol: symbol,
               quantity: qty,
               average_price: avgPrice,
               current_price: currentPrice,
