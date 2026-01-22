@@ -7,21 +7,33 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Home, Plus, Key, Trash2, Edit, CheckCircle, XCircle, RefreshCw } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Home, Plus, Key, Trash2, Edit, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { BrokerConfig, InsertBrokerConfig } from "@shared/schema";
 
+interface TestResult {
+  success: boolean;
+  message: string;
+  error?: string;
+}
+
 export default function BrokerApi() {
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
+  const [authConfigId, setAuthConfigId] = useState<string | null>(null);
+  const [totp, setTotp] = useState("");
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [editingConfig, setEditingConfig] = useState<BrokerConfig | null>(null);
   const [formData, setFormData] = useState<Partial<InsertBrokerConfig>>({
     brokerName: "kotak_neo",
     consumerKey: "",
-    consumerSecret: "",
     mobileNumber: "",
+    ucc: "",
+    mpin: "",
   });
 
   const { data: brokerConfigs = [], isLoading } = useQuery<BrokerConfig[]>({
@@ -74,14 +86,42 @@ export default function BrokerApi() {
 
   const testConnectionMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest("POST", `/api/broker-configs/${id}/test`);
+      const response = await apiRequest("POST", `/api/broker-configs/${id}/test`);
+      return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: TestResult) => {
       queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
-      toast({ title: "Connection test successful" });
+      setTestResult(data);
+      if (data.success) {
+        toast({ title: data.message || "Connection test successful" });
+      } else {
+        toast({ title: data.message || "Connection test failed", description: data.error, variant: "destructive" });
+      }
     },
-    onError: () => {
+    onError: (error: Error) => {
+      setTestResult({ success: false, message: "Connection test failed", error: error.message });
       toast({ title: "Connection test failed", variant: "destructive" });
+    },
+  });
+
+  const authenticateMutation = useMutation({
+    mutationFn: async ({ id, totp }: { id: string; totp: string }) => {
+      const response = await apiRequest("POST", `/api/broker-configs/${id}/authenticate`, { totp });
+      return response.json();
+    },
+    onSuccess: (data: TestResult) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
+      setIsAuthDialogOpen(false);
+      setTotp("");
+      setAuthConfigId(null);
+      if (data.success) {
+        toast({ title: "Authentication successful! Trading session is now active." });
+      } else {
+        toast({ title: "Authentication failed", description: data.error, variant: "destructive" });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Authentication failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -89,9 +129,11 @@ export default function BrokerApi() {
     setFormData({
       brokerName: "kotak_neo",
       consumerKey: "",
-      consumerSecret: "",
       mobileNumber: "",
+      ucc: "",
+      mpin: "",
     });
+    setTestResult(null);
   };
 
   const handleSubmit = () => {
@@ -107,10 +149,22 @@ export default function BrokerApi() {
     setFormData({
       brokerName: config.brokerName,
       consumerKey: config.consumerKey || "",
-      consumerSecret: config.consumerSecret || "",
       mobileNumber: config.mobileNumber || "",
+      ucc: config.ucc || "",
+      mpin: config.mpin || "",
     });
     setIsDialogOpen(true);
+  };
+
+  const handleAuthenticate = (configId: string) => {
+    setAuthConfigId(configId);
+    setIsAuthDialogOpen(true);
+  };
+
+  const handleAuthSubmit = () => {
+    if (authConfigId && totp) {
+      authenticateMutation.mutate({ id: authConfigId, totp });
+    }
   };
 
   const getBrokerDisplayName = (brokerName: string) => {
@@ -153,7 +207,7 @@ export default function BrokerApi() {
                     Add Broker
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-lg">
+                <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle>{editingConfig ? "Edit Broker Configuration" : "Add Broker Configuration"}</DialogTitle>
                     <DialogDescription>
@@ -180,46 +234,82 @@ export default function BrokerApi() {
                       </Select>
                     </div>
 
-                    <div>
-                      <Label>Consumer Key / API Key</Label>
-                      <Input
-                        value={formData.consumerKey}
-                        onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
-                        placeholder="Enter your API key"
-                        data-testid="input-consumer-key"
-                      />
-                    </div>
+                    {formData.brokerName === "kotak_neo" && (
+                      <>
+                        <div>
+                          <Label>Consumer Key (API Token)</Label>
+                          <Input
+                            value={formData.consumerKey || ""}
+                            onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
+                            placeholder="Get this from Neo Dashboard > Invest > Trade API"
+                            data-testid="input-consumer-key"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Login to neo.kotaksecurities.com, go to Invest → Trade API → Create Application
+                          </p>
+                        </div>
 
-                    <div>
-                      <Label>Consumer Secret / API Secret</Label>
-                      <Input
-                        type="password"
-                        value={formData.consumerSecret}
-                        onChange={(e) => setFormData({ ...formData, consumerSecret: e.target.value })}
-                        placeholder="Enter your API secret"
-                        data-testid="input-consumer-secret"
-                      />
-                    </div>
+                        <div>
+                          <Label>Mobile Number (with country code)</Label>
+                          <Input
+                            value={formData.mobileNumber || ""}
+                            onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
+                            placeholder="+919876543210"
+                            data-testid="input-mobile-number"
+                          />
+                        </div>
 
-                    <div>
-                      <Label>Mobile Number (for Kotak Neo)</Label>
-                      <Input
-                        value={formData.mobileNumber}
-                        onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
-                        placeholder="Enter registered mobile number"
-                        data-testid="input-mobile-number"
-                      />
-                    </div>
+                        <div>
+                          <Label>UCC (Unique Client Code)</Label>
+                          <Input
+                            value={formData.ucc || ""}
+                            onChange={(e) => setFormData({ ...formData, ucc: e.target.value })}
+                            placeholder="Your unique client code from Kotak"
+                            data-testid="input-ucc"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Find this in your Neo profile or account statement
+                          </p>
+                        </div>
 
-                    <div className="bg-muted/50 p-4 rounded-md">
-                      <p className="text-sm text-muted-foreground">
-                        <strong>Note:</strong> Your credentials are stored securely and used only to connect to your broker account for automated trading.
-                      </p>
-                    </div>
+                        <div>
+                          <Label>MPIN (6-digit)</Label>
+                          <Input
+                            type="password"
+                            maxLength={6}
+                            value={formData.mpin || ""}
+                            onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
+                            placeholder="Your 6-digit MPIN"
+                            data-testid="input-mpin"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Set your MPIN in Neo web: Click initials → Account Details → MPIN
+                          </p>
+                        </div>
+
+                        <Alert>
+                          <AlertTriangle className="h-4 w-4" />
+                          <AlertDescription className="text-sm">
+                            <strong>TOTP Required:</strong> You'll need to register TOTP using Google/Microsoft Authenticator. 
+                            Visit kotaksecurities.com/platform/kotak-neo-trade-api/ to register.
+                          </AlertDescription>
+                        </Alert>
+                      </>
+                    )}
+
+                    {formData.brokerName !== "kotak_neo" && (
+                      <Alert>
+                        <AlertTriangle className="h-4 w-4" />
+                        <AlertDescription>
+                          {getBrokerDisplayName(formData.brokerName || "")} integration is coming soon. 
+                          Currently only Kotak Neo is fully supported.
+                        </AlertDescription>
+                      </Alert>
+                    )}
 
                     <Button
                       onClick={handleSubmit}
-                      disabled={!formData.consumerKey || !formData.consumerSecret || createMutation.isPending || updateMutation.isPending}
+                      disabled={formData.brokerName === "kotak_neo" && !formData.consumerKey || createMutation.isPending || updateMutation.isPending}
                       data-testid="button-save-broker"
                     >
                       {createMutation.isPending || updateMutation.isPending ? "Saving..." : (editingConfig ? "Update Configuration" : "Save Configuration")}
@@ -232,7 +322,59 @@ export default function BrokerApi() {
         </div>
       </header>
 
+      <Dialog open={isAuthDialogOpen} onOpenChange={(open) => {
+        setIsAuthDialogOpen(open);
+        if (!open) {
+          setTotp("");
+          setAuthConfigId(null);
+        }
+      }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Enter TOTP</DialogTitle>
+            <DialogDescription>
+              Enter the 6-digit code from your authenticator app (Google/Microsoft Authenticator)
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div>
+              <Label>TOTP Code</Label>
+              <Input
+                type="text"
+                maxLength={6}
+                value={totp}
+                onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
+                placeholder="123456"
+                className="text-center text-2xl font-mono tracking-widest"
+                data-testid="input-totp"
+              />
+            </div>
+            <Button
+              onClick={handleAuthSubmit}
+              disabled={totp.length !== 6 || authenticateMutation.isPending}
+              data-testid="button-submit-totp"
+            >
+              {authenticateMutation.isPending ? "Authenticating..." : "Authenticate"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <div className="container mx-auto px-4 py-6">
+        {testResult && (
+          <Alert className={`mb-4 ${testResult.success ? "border-primary" : "border-destructive"}`}>
+            {testResult.success ? (
+              <CheckCircle className="h-4 w-4 text-primary" />
+            ) : (
+              <XCircle className="h-4 w-4 text-destructive" />
+            )}
+            <AlertDescription>
+              <strong>{testResult.message}</strong>
+              {testResult.error && <p className="text-sm mt-1">{testResult.error}</p>}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -282,12 +424,18 @@ export default function BrokerApi() {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">API Key</span>
-                      <span className="font-mono">••••••••{config.consumerKey?.slice(-4) || "****"}</span>
+                      <span className="font-mono">{config.consumerKey ? "••••" + config.consumerKey.slice(-4) : "Not set"}</span>
                     </div>
                     {config.mobileNumber && (
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Mobile</span>
                         <span>••••••{config.mobileNumber.slice(-4)}</span>
+                      </div>
+                    )}
+                    {config.ucc && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">UCC</span>
+                        <span>{config.ucc}</span>
                       </div>
                     )}
                     {config.lastConnected && (
@@ -296,9 +444,14 @@ export default function BrokerApi() {
                         <span>{config.lastConnected}</span>
                       </div>
                     )}
+                    {config.connectionError && (
+                      <div className="text-destructive text-xs mt-2">
+                        Error: {config.connectionError}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     <Button
                       variant="outline"
                       size="sm"
@@ -310,6 +463,19 @@ export default function BrokerApi() {
                       <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
                       Test
                     </Button>
+                    {config.brokerName === "kotak_neo" && config.consumerKey && (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => handleAuthenticate(config.id)}
+                        disabled={authenticateMutation.isPending}
+                        data-testid={`button-auth-${config.id}`}
+                      >
+                        <LogIn className="w-4 h-4 mr-2" />
+                        Login
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -334,6 +500,55 @@ export default function BrokerApi() {
         )}
 
         <Card className="mt-8">
+          <CardHeader>
+            <CardTitle>Kotak Neo API Setup Guide</CardTitle>
+            <CardDescription>Follow these steps to connect your Kotak Neo account</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex gap-4">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">1</div>
+                <div>
+                  <h4 className="font-medium">Get API Token (Consumer Key)</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Login to <a href="https://neo.kotaksecurities.com" target="_blank" rel="noopener" className="text-primary underline">neo.kotaksecurities.com</a>, 
+                    navigate to Invest → Trade API → Create Application, and copy your Token.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-4">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">2</div>
+                <div>
+                  <h4 className="font-medium">Register TOTP</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Visit <a href="https://www.kotaksecurities.com/platform/kotak-neo-trade-api/totp-registration/" target="_blank" rel="noopener" className="text-primary underline">TOTP Registration</a>, 
+                    scan the QR code with Google/Microsoft Authenticator.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-4">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">3</div>
+                <div>
+                  <h4 className="font-medium">Set MPIN</h4>
+                  <p className="text-sm text-muted-foreground">
+                    In Neo web, click your initials (top-right) → Account Details → Scroll to MPIN section → Create 6-digit MPIN.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-4">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">4</div>
+                <div>
+                  <h4 className="font-medium">Add Configuration & Login</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Add your credentials above, click "Test" to verify connectivity, then "Login" with your TOTP to start trading.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mt-4">
           <CardHeader>
             <CardTitle>Supported Brokers</CardTitle>
             <CardDescription>Connect to your preferred broker for automated trading</CardDescription>

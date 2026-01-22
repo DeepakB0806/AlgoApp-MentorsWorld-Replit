@@ -64,8 +64,13 @@ export const brokerConfigs = pgTable("broker_configs", {
   consumerKey: text("consumer_key"),
   consumerSecret: text("consumer_secret"),
   mobileNumber: text("mobile_number"),
+  ucc: text("ucc"), // Unique Client Code for Kotak Neo
+  mpin: text("mpin"), // 6-digit MPIN for Kotak Neo
   isConnected: boolean("is_connected").notNull().default(false),
   lastConnected: text("last_connected"),
+  connectionError: text("connection_error"),
+  accessToken: text("access_token"),
+  sessionId: text("session_id"),
 });
 
 export const insertBrokerConfigSchema = createInsertSchema(brokerConfigs).omit({ id: true });
@@ -117,11 +122,19 @@ export interface PortfolioSummary {
 // Login Credentials for Kotak Neo
 export interface LoginCredentials {
   consumer_key: string;
-  consumer_secret: string;
   mobile_number: string;
-  password: string;
+  ucc: string;
   mpin: string;
-  totp_secret?: string;
+  totp: string; // 6-digit TOTP from authenticator app
+}
+
+// Kotak Neo API Response
+export interface KotakNeoAuthResponse {
+  success: boolean;
+  message: string;
+  accessToken?: string;
+  sessionId?: string;
+  error?: string;
 }
 
 // Order Params

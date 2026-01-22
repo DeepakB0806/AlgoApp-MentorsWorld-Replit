@@ -114,11 +114,16 @@ export class MemStorage implements IStorage {
     const brokerConfig1: BrokerConfig = {
       id: randomUUID(),
       brokerName: "kotak_neo",
-      consumerKey: "xxxx-xxxx-xxxx-1234",
-      consumerSecret: "secret_xxxxxxxx",
-      mobileNumber: "9876543210",
-      isConnected: true,
-      lastConnected: "2026-01-22 09:15:00",
+      consumerKey: null,
+      consumerSecret: null,
+      mobileNumber: null,
+      ucc: null,
+      mpin: null,
+      isConnected: false,
+      lastConnected: null,
+      connectionError: null,
+      accessToken: null,
+      sessionId: null,
     };
     this.brokerConfigs.set(brokerConfig1.id, brokerConfig1);
   }
@@ -135,8 +140,18 @@ export class MemStorage implements IStorage {
   async createStrategy(insertStrategy: InsertStrategy): Promise<Strategy> {
     const id = randomUUID();
     const strategy: Strategy = {
-      ...insertStrategy,
       id,
+      name: insertStrategy.name,
+      description: insertStrategy.description ?? null,
+      type: insertStrategy.type,
+      status: insertStrategy.status ?? "inactive",
+      symbol: insertStrategy.symbol,
+      exchange: insertStrategy.exchange ?? "NSE",
+      quantity: insertStrategy.quantity ?? 1,
+      entryCondition: insertStrategy.entryCondition ?? null,
+      exitCondition: insertStrategy.exitCondition ?? null,
+      stopLoss: insertStrategy.stopLoss ?? null,
+      targetProfit: insertStrategy.targetProfit ?? null,
       totalTrades: 0,
       winningTrades: 0,
       profitLoss: 0,
@@ -169,8 +184,13 @@ export class MemStorage implements IStorage {
   async createWebhook(insertWebhook: InsertWebhook): Promise<Webhook> {
     const id = randomUUID();
     const webhook: Webhook = {
-      ...insertWebhook,
       id,
+      name: insertWebhook.name,
+      strategyId: insertWebhook.strategyId ?? null,
+      webhookUrl: insertWebhook.webhookUrl,
+      secretKey: insertWebhook.secretKey ?? null,
+      isActive: insertWebhook.isActive ?? true,
+      triggerType: insertWebhook.triggerType,
       lastTriggered: null,
       totalTriggers: 0,
     };
@@ -199,7 +219,15 @@ export class MemStorage implements IStorage {
 
   async createWebhookLog(insertLog: InsertWebhookLog): Promise<WebhookLog> {
     const id = randomUUID();
-    const log: WebhookLog = { ...insertLog, id };
+    const log: WebhookLog = {
+      id,
+      webhookId: insertLog.webhookId,
+      timestamp: insertLog.timestamp,
+      payload: insertLog.payload ?? null,
+      status: insertLog.status,
+      response: insertLog.response ?? null,
+      executionTime: insertLog.executionTime ?? null,
+    };
     this.webhookLogs.set(id, log);
     return log;
   }
@@ -216,10 +244,18 @@ export class MemStorage implements IStorage {
   async createBrokerConfig(insertConfig: InsertBrokerConfig): Promise<BrokerConfig> {
     const id = randomUUID();
     const config: BrokerConfig = {
-      ...insertConfig,
       id,
+      brokerName: insertConfig.brokerName,
+      consumerKey: insertConfig.consumerKey ?? null,
+      consumerSecret: insertConfig.consumerSecret ?? null,
+      mobileNumber: insertConfig.mobileNumber ?? null,
+      ucc: insertConfig.ucc ?? null,
+      mpin: insertConfig.mpin ?? null,
       isConnected: false,
       lastConnected: null,
+      connectionError: null,
+      accessToken: null,
+      sessionId: null,
     };
     this.brokerConfigs.set(id, config);
     return config;

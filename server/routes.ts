@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertStrategySchema, insertWebhookSchema, insertBrokerConfigSchema } from "@shared/schema";
+import { testKotakNeoConnectivity, authenticateKotakNeo } from "./kotak-neo-api";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -213,14 +214,88 @@ export async function registerRoutes(
       if (!config) {
         return res.status(404).json({ error: "Broker config not found" });
       }
-      // Simulate connection test
+
+      if (config.brokerName === "kotak_neo") {
+        if (!config.consumerKey) {
+          return res.status(400).json({ 
+            success: false, 
+            error: "Consumer Key (API Token) is required for Kotak Neo" 
+          });
+        }
+
+        const result = await testKotakNeoConnectivity(config.consumerKey);
+        
+        const updated = await storage.updateBrokerConfig(req.params.id, {
+          isConnected: result.success,
+          lastConnected: result.success ? new Date().toISOString().replace('T', ' ').slice(0, 19) : config.lastConnected,
+          connectionError: result.success ? null : result.error,
+        });
+
+        return res.json({ 
+          success: result.success, 
+          message: result.message,
+          error: result.error,
+          config: updated 
+        });
+      }
+
       const updated = await storage.updateBrokerConfig(req.params.id, {
-        isConnected: true,
-        lastConnected: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        isConnected: false,
+        connectionError: "Broker not yet supported for live connectivity test",
       });
-      res.json({ success: true, config: updated });
+      res.json({ success: false, message: "Broker not yet supported", config: updated });
     } catch (error) {
-      res.status(500).json({ error: "Connection test failed" });
+      res.status(500).json({ error: "Connection test failed", details: error instanceof Error ? error.message : "Unknown error" });
+    }
+  });
+
+  app.post("/api/broker-configs/:id/authenticate", async (req, res) => {
+    try {
+      const config = await storage.getBrokerConfig(req.params.id);
+      if (!config) {
+        return res.status(404).json({ error: "Broker config not found" });
+      }
+
+      const { totp } = req.body;
+      
+      if (config.brokerName !== "kotak_neo") {
+        return res.status(400).json({ error: "Authentication only supported for Kotak Neo" });
+      }
+
+      if (!config.consumerKey || !config.mobileNumber || !config.ucc || !config.mpin) {
+        return res.status(400).json({ 
+          error: "Missing required credentials. Please configure Consumer Key, Mobile Number, UCC, and MPIN." 
+        });
+      }
+
+      if (!totp) {
+        return res.status(400).json({ error: "TOTP is required for authentication" });
+      }
+
+      const result = await authenticateKotakNeo({
+        consumer_key: config.consumerKey,
+        mobile_number: config.mobileNumber,
+        ucc: config.ucc,
+        mpin: config.mpin,
+        totp: totp,
+      });
+
+      const updated = await storage.updateBrokerConfig(req.params.id, {
+        isConnected: result.success,
+        lastConnected: result.success ? new Date().toISOString().replace('T', ' ').slice(0, 19) : config.lastConnected,
+        connectionError: result.success ? null : result.error,
+        accessToken: result.accessToken || null,
+        sessionId: result.sessionId || null,
+      });
+
+      res.json({ 
+        success: result.success, 
+        message: result.message,
+        error: result.error,
+        config: updated 
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Authentication failed", details: error instanceof Error ? error.message : "Unknown error" });
     }
   });
 
