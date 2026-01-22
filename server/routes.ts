@@ -474,32 +474,46 @@ export async function registerRoutes(
           
           // Transform Kotak Neo response to our format
           // Kotak Neo API field mappings (from /portfolio/v1/holdings):
-          // Common field names: dispSym, symbol, scrip, trdSym, tradingSymbol, scripName, isin
+          // Fields: displaySymbol, symbol, quantity, averagePrice, mktValue, closingPrice, unrealisedGainLoss, prevDayLtp
           const holdings = (result.data as unknown[]).map((hld: unknown) => {
             const h = hld as Record<string, unknown>;
-            const qty = Number(h.holdQty || h.quantity || h.qty || 0);
-            const avgPrice = Number(h.avgPrc || h.averagePrice || h.avgPrice || 0);
-            // Use LTP if available, else calculate from market value, else use average price
+            const qty = Number(h.quantity || h.holdQty || h.qty || 0);
+            const avgPrice = Number(h.averagePrice || h.avgPrc || h.avgPrice || 0);
+            const prevClose = Number(h.closingPrice || h.prevDayLtp || h.prevClose || 0);
+            
+            // Current price: use mktValue/qty if available, else closingPrice
             let currentPrice = avgPrice;
-            if (h.ltp && Number(h.ltp) > 0) {
-              currentPrice = Number(h.ltp);
-            } else if (h.mktValue && qty > 0) {
+            if (h.mktValue && qty > 0) {
               currentPrice = Number(h.mktValue) / qty;
+            } else if (h.closingPrice && Number(h.closingPrice) > 0) {
+              currentPrice = Number(h.closingPrice);
             }
-            const pnl = Number(h.unrealisedPnl || h.pnl || (currentPrice - avgPrice) * qty);
+            
+            // Calculate values
+            const investedValue = avgPrice * qty;
+            const currentValue = Number(h.mktValue || currentPrice * qty);
+            const pnl = Number(h.unrealisedGainLoss || h.unrealisedPnl || (currentPrice - avgPrice) * qty);
             const pnlPercent = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
             
-            // Symbol can be in many different fields depending on API version
-            // Kotak Neo uses 'dispSym' for display symbol
-            const symbol = String(h.dispSym || h.displaySymbol || h.symbol || h.scrip || h.trdSym || h.tradingSymbol || h.scripName || h.isin || "Unknown");
+            // Today's P/L: difference from previous close
+            const todayPnl = prevClose > 0 ? (currentPrice - prevClose) * qty : 0;
+            const todayPnlPercent = prevClose > 0 ? ((currentPrice - prevClose) / prevClose) * 100 : 0;
+            
+            // Symbol: Kotak Neo uses displaySymbol or symbol
+            const symbol = String(h.displaySymbol || h.dispSym || h.symbol || h.scrip || h.trdSym || h.tradingSymbol || h.scripName || "Unknown");
             
             return {
               trading_symbol: symbol,
               quantity: qty,
               average_price: avgPrice,
               current_price: currentPrice,
+              invested_value: investedValue,
+              current_value: currentValue,
               pnl: pnl,
               pnl_percent: pnlPercent,
+              today_pnl: todayPnl,
+              today_pnl_percent: todayPnlPercent,
+              prev_close: prevClose,
             };
           });
           return res.json(holdings);

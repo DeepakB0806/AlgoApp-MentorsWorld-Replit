@@ -132,14 +132,19 @@ export interface Order {
   timestamp: string;
 }
 
-// Holding
+// Holding - matches Kotak Neo INVESTMENTS layout
 export interface Holding {
   trading_symbol: string;
   quantity: number;
-  average_price: number;
-  current_price: number;
-  pnl: number;
-  pnl_percent: number;
+  average_price: number;   // Avg cost
+  current_price: number;   // LTP (Last Traded Price)
+  invested_value: number;  // quantity * average_price
+  current_value: number;   // quantity * current_price (market value)
+  pnl: number;             // Profit/Loss amount
+  pnl_percent: number;     // Profit/Loss percentage
+  today_pnl: number;       // Today's P/L amount
+  today_pnl_percent: number; // Today's P/L percentage
+  prev_close?: number;     // Previous day closing price
 }
 
 // Portfolio Summary

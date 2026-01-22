@@ -85,12 +85,24 @@ export default function Dashboard() {
     netTradedValue: positions.reduce((sum, p) => sum + (p.ltp * Math.abs(p.quantity)), 0),
   };
 
-  // Calculate holdings summaries
+  // Calculate holdings summaries - use API values when available
   const holdingTotals = {
     totalPnL: holdings.reduce((sum, h) => sum + (h.pnl || 0), 0),
-    investedValue: holdings.reduce((sum, h) => sum + (h.average_price * h.quantity), 0),
-    currentValue: holdings.reduce((sum, h) => sum + (h.current_price * h.quantity), 0),
+    investedValue: holdings.reduce((sum, h) => sum + (h.invested_value || h.average_price * h.quantity), 0),
+    currentValue: holdings.reduce((sum, h) => sum + (h.current_value || h.current_price * h.quantity), 0),
+    todayPnL: holdings.reduce((sum, h) => sum + (h.today_pnl || 0), 0),
   };
+  
+  // Calculate percentages
+  // Overall P&L %: profit as percentage of invested value
+  const pnlPercent = holdingTotals.investedValue > 0 
+    ? ((holdingTotals.currentValue - holdingTotals.investedValue) / holdingTotals.investedValue) * 100 
+    : 0;
+  // Today's P&L %: today's change as percentage of previous day value (current - today's pnl)
+  const prevDayValue = holdingTotals.currentValue - holdingTotals.todayPnL;
+  const todayPnlPercent = prevDayValue > 0 
+    ? (holdingTotals.todayPnL / prevDayValue) * 100
+    : 0;
 
   const formatCurrency = (value: number) => {
     const absValue = Math.abs(value);
@@ -169,28 +181,35 @@ export default function Dashboard() {
             </TabsTrigger>
           </TabsList>
 
-          {/* INVESTMENTS Tab - Holdings */}
+          {/* INVESTMENTS Tab - Holdings - Kotak Neo Layout */}
           <TabsContent value="investments">
             <Card>
               <CardHeader className="pb-4">
                 <div className="flex justify-between items-start gap-4 flex-wrap">
+                  {/* Summary cards matching Kotak Neo: Current value, Total invested, Profit/Loss, Today's profit/loss */}
                   <div className="flex gap-8 flex-wrap">
                     <div>
-                      <p className="text-xs text-muted-foreground mb-1">Total P&L</p>
-                      <p className={`text-lg font-semibold ${holdingTotals.totalPnL >= 0 ? "text-primary" : "text-destructive"}`} data-testid="text-holdings-pnl">
-                        {formatPnL(holdingTotals.totalPnL)}
+                      <p className="text-xs text-muted-foreground mb-1">Current value</p>
+                      <p className="text-lg font-semibold text-foreground" data-testid="text-current-value">
+                        {formatCurrency(holdingTotals.currentValue)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground mb-1">Invested Value</p>
+                      <p className="text-xs text-muted-foreground mb-1">Total invested</p>
                       <p className="text-lg font-semibold text-foreground" data-testid="text-invested-value">
                         {formatCurrency(holdingTotals.investedValue)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground mb-1">Current Value</p>
-                      <p className="text-lg font-semibold text-foreground" data-testid="text-current-value">
-                        {formatCurrency(holdingTotals.currentValue)}
+                      <p className="text-xs text-muted-foreground mb-1">Profit/Loss</p>
+                      <p className={`text-lg font-semibold ${holdingTotals.totalPnL >= 0 ? "text-primary" : "text-destructive"}`} data-testid="text-holdings-pnl">
+                        {formatPnL(holdingTotals.totalPnL)} ({pnlPercent >= 0 ? "+" : ""}{pnlPercent.toFixed(2)}%)
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Today's profit/loss</p>
+                      <p className={`text-lg font-semibold ${holdingTotals.todayPnL >= 0 ? "text-primary" : "text-destructive"}`} data-testid="text-today-pnl">
+                        {formatPnL(holdingTotals.todayPnL)} ({todayPnlPercent >= 0 ? "+" : ""}{todayPnlPercent.toFixed(2)}%)
                       </p>
                     </div>
                   </div>
@@ -198,7 +217,7 @@ export default function Dashboard() {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
-                        placeholder="Search in investments"
+                        placeholder="Search in stocks"
                         value={searchHoldings}
                         onChange={(e) => setSearchHoldings(e.target.value)}
                         className="pl-9 w-60"
@@ -219,10 +238,13 @@ export default function Dashboard() {
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
                         <TableHead>Name</TableHead>
-                        <TableHead>Quantity</TableHead>
-                        <TableHead>Avg.cost</TableHead>
-                        <TableHead>LTP</TableHead>
-                        <TableHead className="text-right">Profit/loss</TableHead>
+                        <TableHead className="text-right">Quantity</TableHead>
+                        <TableHead className="text-right">Avg cost</TableHead>
+                        <TableHead className="text-right">LTP</TableHead>
+                        <TableHead className="text-right">Current value</TableHead>
+                        <TableHead className="text-right">Invested</TableHead>
+                        <TableHead className="text-right">Profit/loss (%)</TableHead>
+                        <TableHead className="text-right">Today's P/L (%)</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -231,14 +253,20 @@ export default function Dashboard() {
                           <TableCell>
                             <div className="font-medium" data-testid={`text-holding-symbol-${index}`}>{holding.trading_symbol}</div>
                           </TableCell>
-                          <TableCell>
-                            <div>{holding.quantity}</div>
-                            <div className="text-xs text-muted-foreground">shares</div>
+                          <TableCell className="text-right">{holding.quantity}</TableCell>
+                          <TableCell className="text-right">{holding.average_price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{holding.current_price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">
+                            {(holding.current_value || holding.current_price * holding.quantity).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                           </TableCell>
-                          <TableCell>{holding.average_price.toFixed(2)}</TableCell>
-                          <TableCell>{holding.current_price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">
+                            {(holding.invested_value || holding.average_price * holding.quantity).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                          </TableCell>
                           <TableCell className={`text-right font-medium ${holding.pnl >= 0 ? "text-primary" : "text-destructive"}`}>
-                            {holding.pnl >= 0 ? "+" : ""}{holding.pnl.toFixed(2)}
+                            {holding.pnl >= 0 ? "+" : ""}{holding.pnl.toFixed(0)} ({holding.pnl_percent >= 0 ? "+" : ""}{holding.pnl_percent.toFixed(2)}%)
+                          </TableCell>
+                          <TableCell className={`text-right font-medium ${(holding.today_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {(holding.today_pnl || 0) >= 0 ? "+" : ""}{(holding.today_pnl || 0).toFixed(0)} ({(holding.today_pnl_percent || 0) >= 0 ? "+" : ""}{(holding.today_pnl_percent || 0).toFixed(2)}%)
                           </TableCell>
                         </TableRow>
                       ))}
