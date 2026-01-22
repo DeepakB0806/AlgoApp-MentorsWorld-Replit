@@ -26,6 +26,7 @@ client/src/
 server/
 ├── routes.ts            # Express API endpoints
 ├── storage.ts           # In-memory data storage
+├── kotak-neo-api.ts     # Kotak Neo API client
 └── index.ts             # Server entry point
 
 shared/
@@ -44,10 +45,46 @@ shared/
 - `GET/POST /api/webhooks` - Webhook CRUD
 - `GET /api/webhook-logs` - Webhook execution logs
 - `GET/POST /api/broker-configs` - Broker configuration CRUD
+- `POST /api/broker-configs/:id/test` - Test broker connectivity
+- `POST /api/broker-configs/:id/authenticate` - Authenticate with TOTP
 - `GET /api/positions` - Open trading positions
 - `GET /api/orders` - Order book
 - `GET /api/holdings` - Long-term holdings
 - `GET /api/portfolio-summary` - Portfolio overview
+
+### Kotak Neo API Integration
+
+The application implements the official Kotak Neo Trade API based on the Postman collection:
+
+**Authentication Flow (2-step):**
+1. **TOTP Login**: POST to `https://mis.kotaksecurities.com/login/1.0/tradeApiLogin`
+   - Headers: `neo-fin-key: neotradeapi`, `Authorization: {consumerKey}`
+   - Body: `{ mobileNumber, ucc, totp }`
+   - Returns: `viewToken` and `sidView`
+
+2. **MPIN Validate**: POST to `https://mis.kotaksecurities.com/login/1.0/tradeApiValidate`
+   - Headers: `neo-fin-key: neotradeapi`, `Authorization: {consumerKey}`, `Auth: {viewToken}`, `sid: {sidView}`
+   - Body: `{ mpin }`
+   - Returns: `sessionToken`, `sidSession`, and `baseUrl` for trading APIs
+
+**Trading APIs (after authentication):**
+- Place Order: POST `{baseUrl}/quick/order/rule/ms/place`
+- Modify Order: POST `{baseUrl}/quick/order/vr/modify`
+- Cancel Order: POST `{baseUrl}/quick/order/cancel`
+- Order Book: GET `{baseUrl}/quick/user/orders`
+- Trade Book: GET `{baseUrl}/quick/user/trades`
+- Positions: GET `{baseUrl}/quick/user/positions`
+- Holdings: GET `{baseUrl}/portfolio/v1/holdings`
+- Check Margin: POST `{baseUrl}/quick/user/check-margin`
+- Get Limits: POST `{baseUrl}/quick/user/limits`
+- Quotes: GET `{baseUrl}/script-details/1.0/quotes/neosymbol/{exchange}|{token}/all`
+
+**Required Credentials:**
+- Consumer Key (API Token) - from Neo Dashboard > Invest > Trade API
+- Mobile Number - with country code (+91...)
+- UCC (Unique Client Code) - from account profile
+- MPIN (6-digit) - set in Neo web
+- TOTP - from Google/Microsoft Authenticator (registered with Kotak)
 
 ## Design Decisions
 
@@ -71,6 +108,13 @@ shared/
 - Added Zod validation for all POST and PATCH routes
 - Added dark trading theme with emerald/slate color scheme
 - Added data-testid attributes for testing
+- Implemented Kotak Neo API client based on official Postman collection:
+  - Two-step authentication: TOTP login + MPIN validation
+  - Full trading API support: place/modify/cancel orders
+  - Report APIs: order book, trade book, positions, holdings
+  - Market data: quotes, scrip master files
+  - Account APIs: margin check, limits
+- Added setup guide for Kotak Neo on Broker API page
 
 ## Running the Application
 
