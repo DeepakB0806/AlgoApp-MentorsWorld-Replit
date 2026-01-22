@@ -28,6 +28,7 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   error?: string;
   message?: string;
+  sessionExpired?: boolean;
 }
 
 export interface OrderParams {
@@ -531,6 +532,19 @@ export async function getHoldings(session: KotakNeoSession): Promise<ApiResponse
 
     const data = await response.json();
 
+    // Check for session expiration or authentication errors
+    if (data.error && Array.isArray(data.error)) {
+      const errorMsg = data.error[0]?.message || "Unknown error";
+      const errorCode = data.error[0]?.code;
+      console.log("Kotak Holdings API error:", errorCode, errorMsg);
+      return {
+        success: false,
+        error: errorMsg,
+        sessionExpired: errorCode === 401 || errorMsg.toLowerCase().includes("invalid session"),
+      };
+    }
+
+    // Handle various Kotak API response formats
     if (Array.isArray(data)) {
       return { success: true, data };
     }
@@ -539,8 +553,23 @@ export async function getHoldings(session: KotakNeoSession): Promise<ApiResponse
       return { success: true, data: data.data };
     }
 
+    // Check for nested response formats
+    if (data.stat === "Ok" && data.result && Array.isArray(data.result)) {
+      return { success: true, data: data.result };
+    }
+    
+    // Holdings might be under different keys
+    if (data.equityHoldings && Array.isArray(data.equityHoldings)) {
+      return { success: true, data: data.equityHoldings };
+    }
+
+    if (data.holdings && Array.isArray(data.holdings)) {
+      return { success: true, data: data.holdings };
+    }
+
     return { success: true, data: [] };
   } catch (error) {
+    console.error("Holdings API error:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Holdings error",

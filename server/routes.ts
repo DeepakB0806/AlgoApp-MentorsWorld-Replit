@@ -329,7 +329,7 @@ export async function registerRoutes(
   });
 
   // Helper to get authenticated Kotak Neo session
-  async function getAuthenticatedSession(): Promise<{ session: KotakNeoSession; consumerKey: string } | null> {
+  async function getAuthenticatedSession(): Promise<{ session: KotakNeoSession; consumerKey: string; brokerId: string } | null> {
     const configs = await storage.getBrokerConfigs();
     const kotakConfig = configs.find(c => 
       c.brokerName === "kotak_neo" && 
@@ -352,6 +352,7 @@ export async function registerRoutes(
         baseUrl: kotakConfig.baseUrl,
       },
       consumerKey: kotakConfig.consumerKey,
+      brokerId: kotakConfig.id,
     };
   }
 
@@ -454,23 +455,43 @@ export async function registerRoutes(
       if (auth) {
         // Fetch real holdings from Kotak Neo
         const result = await getKotakHoldings(auth.session);
-        if (result.success && result.data) {
+        
+        // Handle session expiration
+        if (result.sessionExpired) {
+          console.log("Session expired, clearing tokens for broker:", auth.brokerId);
+          // Clear the expired session tokens
+          await storage.updateBrokerConfig(auth.brokerId, {
+            accessToken: null,
+            sessionId: null,
+            baseUrl: null,
+            isConnected: false,
+          });
+        }
+        
+        if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
+          // Log first item to understand Kotak holdings field structure
+          console.log("First Kotak holding item:", JSON.stringify(result.data[0], null, 2));
+          
           // Transform Kotak Neo response to our format
           // Kotak Neo API field mappings (from /portfolio/v1/holdings):
-          // - symbol/scrip/trdSym/tradingSymbol: Trading symbol
-          // - holdQty/quantity: Holding quantity
-          // - avgPrc/averagePrice: Average price
-          // - ltp/currentPrice: Last traded price (or use avg if not available)
+          // Common field names: dispSym, symbol, scrip, trdSym, tradingSymbol, scripName, isin
           const holdings = (result.data as unknown[]).map((hld: unknown) => {
             const h = hld as Record<string, unknown>;
             const qty = Number(h.holdQty || h.quantity || h.qty || 0);
             const avgPrice = Number(h.avgPrc || h.averagePrice || h.avgPrice || 0);
-            const currentPrice = Number(h.ltp || h.currentPrice || h.mktValue ? (Number(h.mktValue) / qty) : avgPrice);
+            // Use LTP if available, else calculate from market value, else use average price
+            let currentPrice = avgPrice;
+            if (h.ltp && Number(h.ltp) > 0) {
+              currentPrice = Number(h.ltp);
+            } else if (h.mktValue && qty > 0) {
+              currentPrice = Number(h.mktValue) / qty;
+            }
             const pnl = Number(h.unrealisedPnl || h.pnl || (currentPrice - avgPrice) * qty);
             const pnlPercent = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
             
             // Symbol can be in many different fields depending on API version
-            const symbol = String(h.symbol || h.scrip || h.trdSym || h.tradingSymbol || h.scripName || h.isin || "Unknown");
+            // Kotak Neo uses 'dispSym' for display symbol
+            const symbol = String(h.dispSym || h.displaySymbol || h.symbol || h.scrip || h.trdSym || h.tradingSymbol || h.scripName || h.isin || "Unknown");
             
             return {
               trading_symbol: symbol,
