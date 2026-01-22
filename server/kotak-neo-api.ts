@@ -744,6 +744,7 @@ export async function authenticateKotakNeo(credentials: {
       message: result.message || "Authentication successful",
       accessToken: result.data.sessionToken,
       sessionId: result.data.sidSession,
+      baseUrl: result.data.baseUrl,
     };
   }
 

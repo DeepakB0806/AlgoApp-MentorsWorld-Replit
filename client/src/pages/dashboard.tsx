@@ -8,9 +8,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Activity, PlusCircle, RefreshCw, Home } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Activity, PlusCircle, RefreshCw, Home, Wifi, WifiOff } from "lucide-react";
 import { Link } from "wouter";
 import type { Position, Order, Holding, PortfolioSummary, OrderParams } from "@shared/schema";
+
+interface BrokerSessionStatus {
+  isAuthenticated: boolean;
+  broker: string | null;
+}
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("positions");
@@ -41,6 +46,13 @@ export default function Dashboard() {
     queryKey: ["/api/portfolio-summary"],
   });
 
+  const { data: sessionStatus } = useQuery<BrokerSessionStatus>({
+    queryKey: ["/api/broker-session-status"],
+    refetchInterval: 30000, // Check every 30 seconds
+  });
+
+  const isLiveData = sessionStatus?.isAuthenticated ?? false;
+
   const handleRefresh = () => {
     refetchPositions();
     refetchOrders();
@@ -54,9 +66,30 @@ export default function Dashboard() {
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center gap-4 flex-wrap">
-            <div>
-              <h1 className="text-2xl font-bold text-foreground" data-testid="text-dashboard-title">Trading Dashboard</h1>
-              <p className="text-muted-foreground text-sm">Live trading overview</p>
+            <div className="flex items-center gap-3">
+              <div>
+                <h1 className="text-2xl font-bold text-foreground" data-testid="text-dashboard-title">Trading Dashboard</h1>
+                <p className="text-muted-foreground text-sm">
+                  {isLiveData ? "Connected to Kotak Neo" : "Demo Mode (Mock Data)"}
+                </p>
+              </div>
+              <Badge 
+                variant={isLiveData ? "default" : "secondary"} 
+                className="flex items-center gap-1"
+                data-testid="badge-connection-status"
+              >
+                {isLiveData ? (
+                  <>
+                    <Wifi className="w-3 h-3" />
+                    LIVE
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="w-3 h-3" />
+                    DEMO
+                  </>
+                )}
+              </Badge>
             </div>
             <div className="flex gap-2 flex-wrap">
               <Link href="/">

@@ -71,6 +71,7 @@ export const brokerConfigs = pgTable("broker_configs", {
   connectionError: text("connection_error"),
   accessToken: text("access_token"),
   sessionId: text("session_id"),
+  baseUrl: text("base_url"), // Dynamic trading API base URL from Kotak Neo
 });
 
 export const insertBrokerConfigSchema = createInsertSchema(brokerConfigs).omit({ id: true });
@@ -134,6 +135,7 @@ export interface KotakNeoAuthResponse {
   message: string;
   accessToken?: string;
   sessionId?: string;
+  baseUrl?: string;
   error?: string;
 }
 

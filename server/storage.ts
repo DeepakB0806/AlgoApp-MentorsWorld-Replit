@@ -124,6 +124,7 @@ export class MemStorage implements IStorage {
       connectionError: null,
       accessToken: null,
       sessionId: null,
+      baseUrl: null,
     };
     this.brokerConfigs.set(brokerConfig1.id, brokerConfig1);
   }
@@ -256,6 +257,7 @@ export class MemStorage implements IStorage {
       connectionError: null,
       accessToken: null,
       sessionId: null,
+      baseUrl: null,
     };
     this.brokerConfigs.set(id, config);
     return config;

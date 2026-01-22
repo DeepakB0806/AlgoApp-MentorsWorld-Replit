@@ -2,7 +2,15 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertStrategySchema, insertWebhookSchema, insertBrokerConfigSchema } from "@shared/schema";
-import { testKotakNeoConnectivity, authenticateKotakNeo } from "./kotak-neo-api";
+import { 
+  testKotakNeoConnectivity, 
+  authenticateKotakNeo,
+  getPositions as getKotakPositions,
+  getOrderBook as getKotakOrders,
+  getHoldings as getKotakHoldings,
+  getLimits as getKotakLimits,
+  type KotakNeoSession
+} from "./kotak-neo-api";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -286,6 +294,7 @@ export async function registerRoutes(
         connectionError: result.success ? null : result.error,
         accessToken: result.accessToken || null,
         sessionId: result.sessionId || null,
+        baseUrl: result.baseUrl || null,
       });
 
       res.json({ 
@@ -299,9 +308,60 @@ export async function registerRoutes(
     }
   });
 
-  // Trading Data Routes (mock data)
+  // Helper to get authenticated Kotak Neo session
+  async function getAuthenticatedSession(): Promise<{ session: KotakNeoSession; consumerKey: string } | null> {
+    const configs = await storage.getBrokerConfigs();
+    const kotakConfig = configs.find(c => 
+      c.brokerName === "kotak_neo" && 
+      c.isConnected && 
+      c.accessToken && 
+      c.sessionId && 
+      c.baseUrl
+    );
+    
+    if (!kotakConfig || !kotakConfig.accessToken || !kotakConfig.sessionId || !kotakConfig.baseUrl || !kotakConfig.consumerKey) {
+      return null;
+    }
+    
+    return {
+      session: {
+        viewToken: "", // Not needed for trading APIs
+        sidView: "",
+        sessionToken: kotakConfig.accessToken,
+        sidSession: kotakConfig.sessionId,
+        baseUrl: kotakConfig.baseUrl,
+      },
+      consumerKey: kotakConfig.consumerKey,
+    };
+  }
+
+  // Trading Data Routes - fetches real data from Kotak Neo if authenticated
   app.get("/api/positions", async (req, res) => {
     try {
+      const auth = await getAuthenticatedSession();
+      
+      if (auth) {
+        // Fetch real positions from Kotak Neo
+        const result = await getKotakPositions(auth.session);
+        if (result.success && result.data) {
+          // Transform Kotak Neo response to our format
+          const positions = (result.data as unknown[]).map((pos: unknown) => {
+            const p = pos as Record<string, unknown>;
+            return {
+              trading_symbol: String(p.trdSym || p.tradingSymbol || ""),
+              exchange: String(p.exSeg || p.exchange || "NSE"),
+              quantity: Number(p.flBuyQty || p.buyQty || 0) - Number(p.flSellQty || p.sellQty || 0),
+              buy_avg: Number(p.buyAmt || 0) / Math.max(Number(p.flBuyQty || p.buyQty || 1), 1),
+              sell_avg: Number(p.sellAmt || 0) / Math.max(Number(p.flSellQty || p.sellQty || 1), 1),
+              pnl: Number(p.mtm || p.pnl || 0),
+              ltp: Number(p.ltp || 0),
+            };
+          });
+          return res.json(positions);
+        }
+      }
+      
+      // Fallback to mock data
       const positions = await storage.getPositions();
       res.json(positions);
     } catch (error) {
@@ -311,6 +371,32 @@ export async function registerRoutes(
 
   app.get("/api/orders", async (req, res) => {
     try {
+      const auth = await getAuthenticatedSession();
+      
+      if (auth) {
+        // Fetch real orders from Kotak Neo
+        const result = await getKotakOrders(auth.session);
+        if (result.success && result.data) {
+          // Transform Kotak Neo response to our format
+          const orders = (result.data as unknown[]).map((ord: unknown) => {
+            const o = ord as Record<string, unknown>;
+            return {
+              order_id: String(o.nOrdNo || o.orderId || ""),
+              trading_symbol: String(o.trdSym || o.tradingSymbol || ""),
+              transaction_type: String(o.trnsTp || o.transactionType || "B"),
+              quantity: Number(o.qty || o.quantity || 0),
+              price: Number(o.prc || o.price || 0),
+              status: String(o.ordSt || o.status || "PENDING"),
+              order_type: String(o.prcTp || o.orderType || "L"),
+              exchange: String(o.exSeg || o.exchange || "NSE"),
+              timestamp: String(o.ordDtTm || o.timestamp || new Date().toISOString()),
+            };
+          });
+          return res.json(orders);
+        }
+      }
+      
+      // Fallback to mock data
       const orders = await storage.getOrders();
       res.json(orders);
     } catch (error) {
@@ -320,6 +406,35 @@ export async function registerRoutes(
 
   app.get("/api/holdings", async (req, res) => {
     try {
+      const auth = await getAuthenticatedSession();
+      
+      if (auth) {
+        // Fetch real holdings from Kotak Neo
+        const result = await getKotakHoldings(auth.session);
+        if (result.success && result.data) {
+          // Transform Kotak Neo response to our format
+          const holdings = (result.data as unknown[]).map((hld: unknown) => {
+            const h = hld as Record<string, unknown>;
+            const qty = Number(h.holdQty || h.quantity || 0);
+            const avgPrice = Number(h.avgPrc || h.averagePrice || 0);
+            const currentPrice = Number(h.ltp || h.currentPrice || avgPrice);
+            const pnl = (currentPrice - avgPrice) * qty;
+            const pnlPercent = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
+            
+            return {
+              trading_symbol: String(h.trdSym || h.tradingSymbol || ""),
+              quantity: qty,
+              average_price: avgPrice,
+              current_price: currentPrice,
+              pnl: pnl,
+              pnl_percent: pnlPercent,
+            };
+          });
+          return res.json(holdings);
+        }
+      }
+      
+      // Fallback to mock data
       const holdings = await storage.getHoldings();
       res.json(holdings);
     } catch (error) {
@@ -329,10 +444,75 @@ export async function registerRoutes(
 
   app.get("/api/portfolio-summary", async (req, res) => {
     try {
+      const auth = await getAuthenticatedSession();
+      
+      if (auth) {
+        // Fetch real limits/margin from Kotak Neo
+        const limitsResult = await getKotakLimits(auth.session);
+        const holdingsResult = await getKotakHoldings(auth.session);
+        const positionsResult = await getKotakPositions(auth.session);
+        
+        let totalValue = 0;
+        let dayPnL = 0;
+        let totalPnL = 0;
+        let availableMargin = 0;
+        
+        // Calculate from holdings
+        if (holdingsResult.success && holdingsResult.data) {
+          (holdingsResult.data as unknown[]).forEach((h: unknown) => {
+            const hld = h as Record<string, unknown>;
+            const qty = Number(hld.holdQty || hld.quantity || 0);
+            const avgPrice = Number(hld.avgPrc || hld.averagePrice || 0);
+            const currentPrice = Number(hld.ltp || hld.currentPrice || avgPrice);
+            totalValue += currentPrice * qty;
+            totalPnL += (currentPrice - avgPrice) * qty;
+          });
+        }
+        
+        // Calculate day P&L from positions
+        if (positionsResult.success && positionsResult.data) {
+          (positionsResult.data as unknown[]).forEach((p: unknown) => {
+            const pos = p as Record<string, unknown>;
+            dayPnL += Number(pos.mtm || pos.dayPnL || 0);
+          });
+        }
+        
+        // Get available margin
+        if (limitsResult.success && limitsResult.data) {
+          const limits = limitsResult.data as Record<string, unknown>;
+          availableMargin = Number(limits.marginAvailable || limits.cash || limits.Net || 0);
+          // Add margin to total value if not already counted
+          if (totalValue === 0) {
+            totalValue = availableMargin;
+          }
+        }
+        
+        return res.json({
+          totalValue,
+          dayPnL,
+          totalPnL,
+          availableMargin,
+        });
+      }
+      
+      // Fallback to mock data
       const summary = await storage.getPortfolioSummary();
       res.json(summary);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch portfolio summary" });
+    }
+  });
+
+  // API to check broker session status
+  app.get("/api/broker-session-status", async (req, res) => {
+    try {
+      const auth = await getAuthenticatedSession();
+      res.json({
+        isAuthenticated: !!auth,
+        broker: auth ? "kotak_neo" : null,
+      });
+    } catch (error) {
+      res.json({ isAuthenticated: false, broker: null });
     }
   });
 
