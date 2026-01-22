@@ -94,10 +94,10 @@ The application implements the official Kotak Neo Trade API based on the Postman
 - Destructive: Red (hsl 0 84% 60%) - for negative P&L and sell actions
 - Background: Slate dark (hsl 222 47% 11%)
 
-### Data
-- Uses mock trading data for demonstration
-- Sample strategies: NIFTY Momentum, Bank NIFTY Scalper
-- Sample broker: Kotak Neo (pre-configured)
+### Data Storage
+- **Broker Credentials**: Stored permanently in PostgreSQL database (persists across restarts)
+- **Strategies/Webhooks**: In-memory storage (sample data resets on restart)
+- **Trading Data**: Fetched live from Kotak Neo when authenticated, mock data otherwise
 
 ## Recent Changes
 

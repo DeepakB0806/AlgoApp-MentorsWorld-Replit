@@ -1,10 +1,13 @@
 import { randomUUID } from "crypto";
-import type { 
-  Strategy, InsertStrategy,
-  Webhook, InsertWebhook,
-  WebhookLog, InsertWebhookLog,
-  BrokerConfig, InsertBrokerConfig,
-  Position, Order, Holding, PortfolioSummary
+import { eq } from "drizzle-orm";
+import { db } from "./db";
+import { 
+  strategies, webhooks, webhookLogs, brokerConfigs,
+  type Strategy, type InsertStrategy,
+  type Webhook, type InsertWebhook,
+  type WebhookLog, type InsertWebhookLog,
+  type BrokerConfig, type InsertBrokerConfig,
+  type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
 export interface IStorage {
@@ -26,33 +29,32 @@ export interface IStorage {
   getWebhookLogs(): Promise<WebhookLog[]>;
   createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog>;
 
-  // Broker Configs
+  // Broker Configs - persisted in database
   getBrokerConfigs(): Promise<BrokerConfig[]>;
   getBrokerConfig(id: string): Promise<BrokerConfig | undefined>;
+  getBrokerConfigByUcc(ucc: string): Promise<BrokerConfig | undefined>;
   createBrokerConfig(config: InsertBrokerConfig): Promise<BrokerConfig>;
   updateBrokerConfig(id: string, config: Partial<InsertBrokerConfig>): Promise<BrokerConfig | undefined>;
   deleteBrokerConfig(id: string): Promise<boolean>;
 
-  // Trading Data (mock for now)
+  // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
   getOrders(): Promise<Order[]>;
   getHoldings(): Promise<Holding[]>;
   getPortfolioSummary(): Promise<PortfolioSummary>;
 }
 
-export class MemStorage implements IStorage {
-  private strategies: Map<string, Strategy>;
-  private webhooks: Map<string, Webhook>;
-  private webhookLogs: Map<string, WebhookLog>;
-  private brokerConfigs: Map<string, BrokerConfig>;
+// Database storage for persistent data (broker configs)
+// Memory storage for transient data (strategies, webhooks, etc.)
+export class DatabaseStorage implements IStorage {
+  private strategiesMap: Map<string, Strategy>;
+  private webhooksMap: Map<string, Webhook>;
+  private webhookLogsMap: Map<string, WebhookLog>;
 
   constructor() {
-    this.strategies = new Map();
-    this.webhooks = new Map();
-    this.webhookLogs = new Map();
-    this.brokerConfigs = new Map();
-
-    // Add some sample data
+    this.strategiesMap = new Map();
+    this.webhooksMap = new Map();
+    this.webhookLogsMap = new Map();
     this.initializeSampleData();
   }
 
@@ -75,7 +77,7 @@ export class MemStorage implements IStorage {
       winningTrades: 28,
       profitLoss: 125000,
     };
-    this.strategies.set(strategy1.id, strategy1);
+    this.strategiesMap.set(strategy1.id, strategy1);
 
     const strategy2: Strategy = {
       id: randomUUID(),
@@ -94,7 +96,7 @@ export class MemStorage implements IStorage {
       winningTrades: 85,
       profitLoss: 78500,
     };
-    this.strategies.set(strategy2.id, strategy2);
+    this.strategiesMap.set(strategy2.id, strategy2);
 
     // Sample webhook
     const webhook1: Webhook = {
@@ -108,34 +110,16 @@ export class MemStorage implements IStorage {
       lastTriggered: "2026-01-22 10:30:00",
       totalTriggers: 15,
     };
-    this.webhooks.set(webhook1.id, webhook1);
-
-    // Sample broker config
-    const brokerConfig1: BrokerConfig = {
-      id: randomUUID(),
-      brokerName: "kotak_neo",
-      consumerKey: null,
-      consumerSecret: null,
-      mobileNumber: null,
-      ucc: null,
-      mpin: null,
-      isConnected: false,
-      lastConnected: null,
-      connectionError: null,
-      accessToken: null,
-      sessionId: null,
-      baseUrl: null,
-    };
-    this.brokerConfigs.set(brokerConfig1.id, brokerConfig1);
+    this.webhooksMap.set(webhook1.id, webhook1);
   }
 
-  // Strategies
+  // Strategies (in-memory)
   async getStrategies(): Promise<Strategy[]> {
-    return Array.from(this.strategies.values());
+    return Array.from(this.strategiesMap.values());
   }
 
   async getStrategy(id: string): Promise<Strategy | undefined> {
-    return this.strategies.get(id);
+    return this.strategiesMap.get(id);
   }
 
   async createStrategy(insertStrategy: InsertStrategy): Promise<Strategy> {
@@ -157,29 +141,29 @@ export class MemStorage implements IStorage {
       winningTrades: 0,
       profitLoss: 0,
     };
-    this.strategies.set(id, strategy);
+    this.strategiesMap.set(id, strategy);
     return strategy;
   }
 
   async updateStrategy(id: string, update: Partial<InsertStrategy>): Promise<Strategy | undefined> {
-    const strategy = this.strategies.get(id);
+    const strategy = this.strategiesMap.get(id);
     if (!strategy) return undefined;
     const updated = { ...strategy, ...update };
-    this.strategies.set(id, updated);
+    this.strategiesMap.set(id, updated);
     return updated;
   }
 
   async deleteStrategy(id: string): Promise<boolean> {
-    return this.strategies.delete(id);
+    return this.strategiesMap.delete(id);
   }
 
-  // Webhooks
+  // Webhooks (in-memory)
   async getWebhooks(): Promise<Webhook[]> {
-    return Array.from(this.webhooks.values());
+    return Array.from(this.webhooksMap.values());
   }
 
   async getWebhook(id: string): Promise<Webhook | undefined> {
-    return this.webhooks.get(id);
+    return this.webhooksMap.get(id);
   }
 
   async createWebhook(insertWebhook: InsertWebhook): Promise<Webhook> {
@@ -195,25 +179,25 @@ export class MemStorage implements IStorage {
       lastTriggered: null,
       totalTriggers: 0,
     };
-    this.webhooks.set(id, webhook);
+    this.webhooksMap.set(id, webhook);
     return webhook;
   }
 
   async updateWebhook(id: string, update: Partial<InsertWebhook>): Promise<Webhook | undefined> {
-    const webhook = this.webhooks.get(id);
+    const webhook = this.webhooksMap.get(id);
     if (!webhook) return undefined;
     const updated = { ...webhook, ...update };
-    this.webhooks.set(id, updated);
+    this.webhooksMap.set(id, updated);
     return updated;
   }
 
   async deleteWebhook(id: string): Promise<boolean> {
-    return this.webhooks.delete(id);
+    return this.webhooksMap.delete(id);
   }
 
-  // Webhook Logs
+  // Webhook Logs (in-memory)
   async getWebhookLogs(): Promise<WebhookLog[]> {
-    return Array.from(this.webhookLogs.values()).sort((a, b) => 
+    return Array.from(this.webhookLogsMap.values()).sort((a, b) => 
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
   }
@@ -229,22 +213,28 @@ export class MemStorage implements IStorage {
       response: insertLog.response ?? null,
       executionTime: insertLog.executionTime ?? null,
     };
-    this.webhookLogs.set(id, log);
+    this.webhookLogsMap.set(id, log);
     return log;
   }
 
-  // Broker Configs
+  // Broker Configs - PERSISTENT in PostgreSQL database
   async getBrokerConfigs(): Promise<BrokerConfig[]> {
-    return Array.from(this.brokerConfigs.values());
+    return await db.select().from(brokerConfigs);
   }
 
   async getBrokerConfig(id: string): Promise<BrokerConfig | undefined> {
-    return this.brokerConfigs.get(id);
+    const [config] = await db.select().from(brokerConfigs).where(eq(brokerConfigs.id, id));
+    return config || undefined;
+  }
+
+  async getBrokerConfigByUcc(ucc: string): Promise<BrokerConfig | undefined> {
+    const [config] = await db.select().from(brokerConfigs).where(eq(brokerConfigs.ucc, ucc));
+    return config || undefined;
   }
 
   async createBrokerConfig(insertConfig: InsertBrokerConfig): Promise<BrokerConfig> {
     const id = randomUUID();
-    const config: BrokerConfig = {
+    const [config] = await db.insert(brokerConfigs).values({
       id,
       brokerName: insertConfig.brokerName,
       consumerKey: insertConfig.consumerKey ?? null,
@@ -258,24 +248,25 @@ export class MemStorage implements IStorage {
       accessToken: null,
       sessionId: null,
       baseUrl: null,
-    };
-    this.brokerConfigs.set(id, config);
+    }).returning();
     return config;
   }
 
   async updateBrokerConfig(id: string, update: Partial<InsertBrokerConfig>): Promise<BrokerConfig | undefined> {
-    const config = this.brokerConfigs.get(id);
-    if (!config) return undefined;
-    const updated = { ...config, ...update };
-    this.brokerConfigs.set(id, updated);
-    return updated;
+    const [config] = await db
+      .update(brokerConfigs)
+      .set(update)
+      .where(eq(brokerConfigs.id, id))
+      .returning();
+    return config || undefined;
   }
 
   async deleteBrokerConfig(id: string): Promise<boolean> {
-    return this.brokerConfigs.delete(id);
+    const result = await db.delete(brokerConfigs).where(eq(brokerConfigs.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
-  // Trading Data (mock data for demonstration)
+  // Trading Data (mock data for demonstration - will be replaced by live data)
   async getPositions(): Promise<Position[]> {
     return [
       {
@@ -393,4 +384,4 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
