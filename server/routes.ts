@@ -223,6 +223,8 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Broker config not found" });
       }
 
+      const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
       if (config.brokerName === "kotak_neo") {
         if (!config.consumerKey) {
           return res.status(400).json({ 
@@ -235,8 +237,14 @@ export async function registerRoutes(
         
         const updated = await storage.updateBrokerConfig(req.params.id, {
           isConnected: result.success,
-          lastConnected: result.success ? new Date().toISOString().replace('T', ' ').slice(0, 19) : config.lastConnected,
+          lastConnected: result.success ? now : config.lastConnected,
           connectionError: result.success ? null : result.error,
+          lastTestTime: now,
+          lastTestResult: result.success ? "success" : "failed",
+          lastTestMessage: result.message || result.error || null,
+          totalTests: (config.totalTests || 0) + 1,
+          successfulTests: result.success ? (config.successfulTests || 0) + 1 : (config.successfulTests || 0),
+          updatedAt: now,
         });
 
         return res.json({ 
@@ -250,6 +258,11 @@ export async function registerRoutes(
       const updated = await storage.updateBrokerConfig(req.params.id, {
         isConnected: false,
         connectionError: "Broker not yet supported for live connectivity test",
+        lastTestTime: now,
+        lastTestResult: "failed",
+        lastTestMessage: "Broker not yet supported",
+        totalTests: (config.totalTests || 0) + 1,
+        updatedAt: now,
       });
       res.json({ success: false, message: "Broker not yet supported", config: updated });
     } catch (error) {
@@ -265,6 +278,7 @@ export async function registerRoutes(
       }
 
       const { totp } = req.body;
+      const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
       
       if (config.brokerName !== "kotak_neo") {
         return res.status(400).json({ error: "Authentication only supported for Kotak Neo" });
@@ -290,11 +304,17 @@ export async function registerRoutes(
 
       const updated = await storage.updateBrokerConfig(req.params.id, {
         isConnected: result.success,
-        lastConnected: result.success ? new Date().toISOString().replace('T', ' ').slice(0, 19) : config.lastConnected,
+        lastConnected: result.success ? now : config.lastConnected,
         connectionError: result.success ? null : result.error,
         accessToken: result.accessToken || null,
         sessionId: result.sessionId || null,
         baseUrl: result.baseUrl || null,
+        lastTotpUsed: totp,
+        lastTotpTime: now,
+        totalLogins: (config.totalLogins || 0) + 1,
+        successfulLogins: result.success ? (config.successfulLogins || 0) + 1 : (config.successfulLogins || 0),
+        failedLogins: result.success ? (config.failedLogins || 0) : (config.failedLogins || 0) + 1,
+        updatedAt: now,
       });
 
       res.json({ 

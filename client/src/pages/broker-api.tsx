@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key } from "lucide-react";
+import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -34,10 +34,8 @@ export default function BrokerApi() {
     queryKey: ["/api/broker-configs"],
   });
 
-  // Get the first Kotak Neo config (or undefined)
   const kotakConfig = brokerConfigs.find(c => c.brokerName === "kotak_neo");
 
-  // Pre-fill form when config loads
   useEffect(() => {
     if (kotakConfig) {
       setFormData({
@@ -124,21 +122,13 @@ export default function BrokerApi() {
     }
   };
 
-  const handleLogin = () => {
-    if (kotakConfig && totp.length === 6) {
-      authenticateMutation.mutate({ id: kotakConfig.id, totp });
-    }
-  };
-
   const handleSaveAndLogin = async () => {
-    // First save, then login
     if (totp.length !== 6) {
       toast({ title: "Please enter 6-digit TOTP", variant: "destructive" });
       return;
     }
 
     if (kotakConfig) {
-      // Update existing config then login
       try {
         await apiRequest("PATCH", `/api/broker-configs/${kotakConfig.id}`, formData);
         queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
@@ -147,7 +137,6 @@ export default function BrokerApi() {
         toast({ title: "Failed to save credentials", variant: "destructive" });
       }
     } else {
-      // Create new config then login
       try {
         const response = await apiRequest("POST", "/api/broker-configs", formData);
         const newConfig = await response.json();
@@ -182,7 +171,7 @@ export default function BrokerApi() {
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-6 max-w-2xl">
+      <div className="container mx-auto px-4 py-6 max-w-3xl">
         {testResult && (
           <Alert className={`mb-4 ${testResult.success ? "border-primary" : "border-destructive"}`}>
             {testResult.success ? (
@@ -202,148 +191,241 @@ export default function BrokerApi() {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
         ) : (
-          <Card>
-            <CardHeader>
-              <div className="flex justify-between items-start gap-4 flex-wrap">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Key className="w-5 h-5" />
-                    Kotak Neo Credentials
-                  </CardTitle>
-                  <CardDescription>
-                    {kotakConfig ? (
-                      kotakConfig.isConnected ? (
-                        <span className="flex items-center gap-1 text-primary mt-1">
-                          <CheckCircle className="w-4 h-4" />
-                          Connected - Session Active
-                        </span>
+          <>
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-start gap-4 flex-wrap">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Key className="w-5 h-5" />
+                      Kotak Neo Credentials
+                    </CardTitle>
+                    <CardDescription>
+                      {kotakConfig ? (
+                        kotakConfig.isConnected ? (
+                          <span className="flex items-center gap-1 text-primary mt-1">
+                            <CheckCircle className="w-4 h-4" />
+                            Connected - Session Active
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground mt-1">
+                            Credentials saved - Enter TOTP to login
+                          </span>
+                        )
                       ) : (
-                        <span className="text-muted-foreground mt-1">
-                          Credentials saved - Enter TOTP to login
-                        </span>
-                      )
-                    ) : (
-                      "Enter your credentials to connect"
-                    )}
-                  </CardDescription>
+                        "Enter your credentials to connect"
+                      )}
+                    </CardDescription>
+                  </div>
+                  {kotakConfig && (
+                    <Badge variant={kotakConfig.isConnected ? "default" : "secondary"}>
+                      {kotakConfig.isConnected ? "Active" : "Saved"}
+                    </Badge>
+                  )}
                 </div>
-                {kotakConfig && (
-                  <Badge variant={kotakConfig.isConnected ? "default" : "secondary"}>
-                    {kotakConfig.isConnected ? "Active" : "Saved"}
-                  </Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4">
-                <div>
-                  <Label>Consumer Key (API Token)</Label>
-                  <Input
-                    value={formData.consumerKey || ""}
-                    onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
-                    placeholder="Get this from Neo Dashboard > Invest > Trade API"
-                    data-testid="input-consumer-key"
-                  />
-                </div>
-
-                <div className="grid md:grid-cols-2 gap-4">
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4">
                   <div>
-                    <Label>Mobile Number</Label>
+                    <Label>Consumer Key (API Token)</Label>
                     <Input
-                      value={formData.mobileNumber || ""}
-                      onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
-                      placeholder="+919876543210"
-                      data-testid="input-mobile-number"
+                      value={formData.consumerKey || ""}
+                      onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
+                      placeholder="Get this from Neo Dashboard > Invest > Trade API"
+                      data-testid="input-consumer-key"
                     />
                   </div>
 
-                  <div>
-                    <Label>UCC (Unique Client Code)</Label>
-                    <Input
-                      value={formData.ucc || ""}
-                      onChange={(e) => setFormData({ ...formData, ucc: e.target.value })}
-                      placeholder="Your client code"
-                      data-testid="input-ucc"
-                    />
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <Label>Mobile Number</Label>
+                      <Input
+                        value={formData.mobileNumber || ""}
+                        onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
+                        placeholder="+919876543210"
+                        data-testid="input-mobile-number"
+                      />
+                    </div>
+
+                    <div>
+                      <Label>UCC (Unique Client Code)</Label>
+                      <Input
+                        value={formData.ucc || ""}
+                        onChange={(e) => setFormData({ ...formData, ucc: e.target.value })}
+                        placeholder="Your client code"
+                        data-testid="input-ucc"
+                      />
+                    </div>
                   </div>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <Label>MPIN (6-digit)</Label>
+                      <Input
+                        type="password"
+                        maxLength={6}
+                        value={formData.mpin || ""}
+                        onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
+                        placeholder="Your 6-digit MPIN"
+                        data-testid="input-mpin"
+                      />
+                    </div>
+
+                    <div>
+                      <Label>TOTP (from Authenticator App)</Label>
+                      <Input
+                        type="text"
+                        maxLength={6}
+                        value={totp}
+                        onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
+                        placeholder="123456"
+                        className="font-mono tracking-widest"
+                        data-testid="input-totp"
+                      />
+                    </div>
+                  </div>
+
+                  {kotakConfig?.connectionError && (
+                    <Alert variant="destructive">
+                      <XCircle className="h-4 w-4" />
+                      <AlertDescription>{kotakConfig.connectionError}</AlertDescription>
+                    </Alert>
+                  )}
                 </div>
 
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <Label>MPIN (6-digit)</Label>
-                    <Input
-                      type="password"
-                      maxLength={6}
-                      value={formData.mpin || ""}
-                      onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
-                      placeholder="Your 6-digit MPIN"
-                      data-testid="input-mpin"
-                    />
-                  </div>
-
-                  <div>
-                    <Label>TOTP (from Authenticator App)</Label>
-                    <Input
-                      type="text"
-                      maxLength={6}
-                      value={totp}
-                      onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
-                      placeholder="123456"
-                      className="font-mono tracking-widest"
-                      data-testid="input-totp"
-                    />
-                  </div>
-                </div>
-
-                {kotakConfig?.lastConnected && (
-                  <p className="text-xs text-muted-foreground">
-                    Last connected: {kotakConfig.lastConnected}
-                  </p>
-                )}
-
-                {kotakConfig?.connectionError && (
-                  <Alert variant="destructive">
-                    <XCircle className="h-4 w-4" />
-                    <AlertDescription>{kotakConfig.connectionError}</AlertDescription>
-                  </Alert>
-                )}
-              </div>
-
-              <div className="flex gap-2 pt-4 flex-wrap">
-                <Button
-                  variant="outline"
-                  onClick={handleSaveCredentials}
-                  disabled={!isFormValid || isSaving}
-                  data-testid="button-save"
-                >
-                  <Save className="w-4 h-4 mr-2" />
-                  {isSaving ? "Saving..." : "Save Credentials"}
-                </Button>
-
-                {kotakConfig && (
+                <div className="flex gap-2 pt-4 flex-wrap">
                   <Button
                     variant="outline"
-                    onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
-                    disabled={testConnectionMutation.isPending}
-                    data-testid="button-test"
+                    onClick={handleSaveCredentials}
+                    disabled={!isFormValid || isSaving}
+                    data-testid="button-save"
                   >
-                    <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
-                    Test Connection
+                    <Save className="w-4 h-4 mr-2" />
+                    {isSaving ? "Saving..." : "Save Credentials"}
                   </Button>
-                )}
 
-                <Button
-                  onClick={handleSaveAndLogin}
-                  disabled={!canLogin || authenticateMutation.isPending || isSaving}
-                  className="flex-1 min-w-[200px]"
-                  data-testid="button-save-and-login"
-                >
-                  <LogIn className="w-4 h-4 mr-2" />
-                  {authenticateMutation.isPending ? "Logging in..." : "Save & Login with TOTP"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+                  {kotakConfig && (
+                    <Button
+                      variant="outline"
+                      onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
+                      disabled={testConnectionMutation.isPending}
+                      data-testid="button-test"
+                    >
+                      <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
+                      Test Connection
+                    </Button>
+                  )}
+
+                  <Button
+                    onClick={handleSaveAndLogin}
+                    disabled={!canLogin || authenticateMutation.isPending || isSaving}
+                    className="flex-1 min-w-[200px]"
+                    data-testid="button-save-and-login"
+                  >
+                    <LogIn className="w-4 h-4 mr-2" />
+                    {authenticateMutation.isPending ? "Logging in..." : "Save & Login with TOTP"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {kotakConfig && (
+              <Card className="mt-6">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Database className="w-5 h-5" />
+                    Session & Activity Log
+                  </CardTitle>
+                  <CardDescription>All data is stored permanently in the algo_trading database</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div className="space-y-3">
+                      <h4 className="font-medium flex items-center gap-2 text-sm">
+                        <Activity className="w-4 h-4" />
+                        Login Statistics
+                      </h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Total Logins:</span>
+                          <span className="font-mono">{kotakConfig.totalLogins || 0}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Successful:</span>
+                          <span className="font-mono text-primary">{kotakConfig.successfulLogins || 0}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Failed:</span>
+                          <span className="font-mono text-destructive">{kotakConfig.failedLogins || 0}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Last TOTP Time:</span>
+                          <span className="font-mono text-xs">{kotakConfig.lastTotpTime || "Never"}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Last Connected:</span>
+                          <span className="font-mono text-xs">{kotakConfig.lastConnected || "Never"}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="font-medium flex items-center gap-2 text-sm">
+                        <RefreshCw className="w-4 h-4" />
+                        Test Statistics
+                      </h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Total Tests:</span>
+                          <span className="font-mono">{kotakConfig.totalTests || 0}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Successful:</span>
+                          <span className="font-mono text-primary">{kotakConfig.successfulTests || 0}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Last Test:</span>
+                          <span className="font-mono text-xs">{kotakConfig.lastTestTime || "Never"}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Last Result:</span>
+                          <Badge variant={kotakConfig.lastTestResult === "success" ? "default" : "secondary"} className="text-xs">
+                            {kotakConfig.lastTestResult || "N/A"}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 pt-4 border-t border-border">
+                    <div className="grid md:grid-cols-2 gap-4 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-muted-foreground">Created:</span>
+                        <span className="font-mono text-xs">{kotakConfig.createdAt || "N/A"}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-muted-foreground">Updated:</span>
+                        <span className="font-mono text-xs">{kotakConfig.updatedAt || "N/A"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {kotakConfig.accessToken && (
+                    <div className="mt-4 pt-4 border-t border-border">
+                      <h4 className="font-medium text-sm mb-2">Active Session</h4>
+                      <div className="space-y-1 text-xs text-muted-foreground font-mono">
+                        <p>Token: {kotakConfig.accessToken.slice(0, 20)}...{kotakConfig.accessToken.slice(-10)}</p>
+                        <p>Session ID: {kotakConfig.sessionId?.slice(0, 20)}...</p>
+                        <p>Base URL: {kotakConfig.baseUrl}</p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </>
         )}
 
         <Card className="mt-6">

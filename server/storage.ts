@@ -234,6 +234,7 @@ export class DatabaseStorage implements IStorage {
 
   async createBrokerConfig(insertConfig: InsertBrokerConfig): Promise<BrokerConfig> {
     const id = randomUUID();
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const [config] = await db.insert(brokerConfigs).values({
       id,
       brokerName: insertConfig.brokerName,
@@ -243,11 +244,25 @@ export class DatabaseStorage implements IStorage {
       ucc: insertConfig.ucc ?? null,
       mpin: insertConfig.mpin ?? null,
       isConnected: false,
-      lastConnected: null,
-      connectionError: null,
       accessToken: null,
       sessionId: null,
       baseUrl: null,
+      viewToken: null,
+      sidView: null,
+      lastTotpUsed: null,
+      lastTotpTime: null,
+      lastConnected: null,
+      connectionError: null,
+      totalLogins: 0,
+      successfulLogins: 0,
+      failedLogins: 0,
+      lastTestTime: null,
+      lastTestResult: null,
+      lastTestMessage: null,
+      totalTests: 0,
+      successfulTests: 0,
+      createdAt: now,
+      updatedAt: now,
     }).returning();
     return config;
   }

@@ -95,7 +95,12 @@ The application implements the official Kotak Neo Trade API based on the Postman
 - Background: Slate dark (hsl 222 47% 11%)
 
 ### Data Storage
+- **Database Name**: algo_trading (PostgreSQL)
 - **Broker Credentials**: Stored permanently in PostgreSQL database (persists across restarts)
+  - Stores: Consumer Key, Mobile Number, UCC, MPIN, session tokens
+  - Tracks: TOTP usage (last used, time), login stats (total, successful, failed)
+  - Tracks: Test stats (total, successful, last result, last message)
+  - Timestamps: createdAt, updatedAt, lastConnected, lastTestTime, lastTotpTime
 - **Strategies/Webhooks**: In-memory storage (sample data resets on restart)
 - **Trading Data**: Fetched live from Kotak Neo when authenticated, mock data otherwise
 

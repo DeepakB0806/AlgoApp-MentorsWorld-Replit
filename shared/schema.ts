@@ -57,7 +57,7 @@ export const insertWebhookLogSchema = createInsertSchema(webhookLogs).omit({ id:
 export type InsertWebhookLog = z.infer<typeof insertWebhookLogSchema>;
 export type WebhookLog = typeof webhookLogs.$inferSelect;
 
-// Broker API Configuration
+// Broker API Configuration - stored in "algo_trading" database
 export const brokerConfigs = pgTable("broker_configs", {
   id: varchar("id", { length: 36 }).primaryKey(),
   brokerName: text("broker_name").notNull(), // "kotak_neo", "zerodha", "angel"
@@ -66,12 +66,36 @@ export const brokerConfigs = pgTable("broker_configs", {
   mobileNumber: text("mobile_number"),
   ucc: text("ucc"), // Unique Client Code for Kotak Neo
   mpin: text("mpin"), // 6-digit MPIN for Kotak Neo
+  
+  // Session data
   isConnected: boolean("is_connected").notNull().default(false),
-  lastConnected: text("last_connected"),
-  connectionError: text("connection_error"),
   accessToken: text("access_token"),
   sessionId: text("session_id"),
   baseUrl: text("base_url"), // Dynamic trading API base URL from Kotak Neo
+  viewToken: text("view_token"), // Token from TOTP login step
+  sidView: text("sid_view"), // Session ID from TOTP login step
+  
+  // TOTP tracking
+  lastTotpUsed: text("last_totp_used"), // Last TOTP entered (for logging)
+  lastTotpTime: text("last_totp_time"), // When TOTP was last used
+  
+  // Connection tracking
+  lastConnected: text("last_connected"),
+  connectionError: text("connection_error"),
+  totalLogins: integer("total_logins").default(0),
+  successfulLogins: integer("successful_logins").default(0),
+  failedLogins: integer("failed_logins").default(0),
+  
+  // Test tracking
+  lastTestTime: text("last_test_time"),
+  lastTestResult: text("last_test_result"), // "success" or "failed"
+  lastTestMessage: text("last_test_message"),
+  totalTests: integer("total_tests").default(0),
+  successfulTests: integer("successful_tests").default(0),
+  
+  // Timestamps
+  createdAt: text("created_at"),
+  updatedAt: text("updated_at"),
 });
 
 export const insertBrokerConfigSchema = createInsertSchema(brokerConfigs).omit({ id: true });
