@@ -365,16 +365,39 @@ export async function registerRoutes(
         const result = await getKotakPositions(auth.session);
         if (result.success && result.data) {
           // Transform Kotak Neo response to our format
+          // Kotak Neo API field mappings (from /quick/user/positions):
+          // - trdSym: Trading symbol (e.g., "RELIANCE-EQ", "COFORGE 1900 CALL 27 JAN")
+          // - exSeg: Exchange segment (e.g., "nse_cm", "nse_fo")
+          // - flBuyQty/flSellQty: Buy/Sell quantities
+          // - buyAmt/sellAmt: Buy/Sell amounts for avg price calculation
+          // - mtm: Mark to Market (total P&L)
+          // - ltp: Last Traded Price
+          // - prod: Product type (NRML, MIS, CNC)
+          // - optTp: Option type (CE/PE for CALL/PUT)
+          // - stkPrc: Strike price for options
+          // - exDt: Expiry date
+          // - realisedprofitloss/unrealisedprofitloss: Realised/Unrealised P&L
           const positions = (result.data as unknown[]).map((pos: unknown) => {
             const p = pos as Record<string, unknown>;
+            const buyQty = Number(p.flBuyQty || p.buyQty || 0);
+            const sellQty = Number(p.flSellQty || p.sellQty || 0);
+            const buyAmt = Number(p.buyAmt || 0);
+            const sellAmt = Number(p.sellAmt || 0);
+            
             return {
               trading_symbol: String(p.trdSym || p.tradingSymbol || ""),
               exchange: String(p.exSeg || p.exchange || "NSE"),
-              quantity: Number(p.flBuyQty || p.buyQty || 0) - Number(p.flSellQty || p.sellQty || 0),
-              buy_avg: Number(p.buyAmt || 0) / Math.max(Number(p.flBuyQty || p.buyQty || 1), 1),
-              sell_avg: Number(p.sellAmt || 0) / Math.max(Number(p.flSellQty || p.sellQty || 1), 1),
+              quantity: buyQty - sellQty,
+              buy_avg: buyQty > 0 ? buyAmt / buyQty : 0,
+              sell_avg: sellQty > 0 ? sellAmt / sellQty : 0,
               pnl: Number(p.mtm || p.pnl || 0),
               ltp: Number(p.ltp || 0),
+              product_type: String(p.prod || p.productType || "NRML"),
+              option_type: p.optTp ? String(p.optTp) : undefined,
+              strike_price: p.stkPrc ? Number(p.stkPrc) : undefined,
+              expiry: p.exDt ? String(p.exDt) : undefined,
+              realised_pnl: Number(p.realisedprofitloss || p.realisedPnl || 0),
+              unrealised_pnl: Number(p.unrealisedprofitloss || p.unrealisedPnl || 0),
             };
           });
           return res.json(positions);

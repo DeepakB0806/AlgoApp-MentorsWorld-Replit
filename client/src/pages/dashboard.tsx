@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { TrendingUp, TrendingDown, DollarSign, Activity, PlusCircle, RefreshCw, Home, Wifi, WifiOff } from "lucide-react";
+import { TrendingUp, TrendingDown, RefreshCw, Home, Wifi, WifiOff, Search, BarChart3 } from "lucide-react";
 import { Link } from "wouter";
 import type { Position, Order, Holding, PortfolioSummary, OrderParams } from "@shared/schema";
 
@@ -19,6 +19,8 @@ interface BrokerSessionStatus {
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("positions");
+  const [searchPositions, setSearchPositions] = useState("");
+  const [searchHoldings, setSearchHoldings] = useState("");
   const [orderForm, setOrderForm] = useState<OrderParams>({
     exchange_segment: "nse_cm",
     product: "CNC",
@@ -48,7 +50,7 @@ export default function Dashboard() {
 
   const { data: sessionStatus } = useQuery<BrokerSessionStatus>({
     queryKey: ["/api/broker-session-status"],
-    refetchInterval: 30000, // Check every 30 seconds
+    refetchInterval: 30000,
   });
 
   const isLiveData = sessionStatus?.isAuthenticated ?? false;
@@ -61,18 +63,55 @@ export default function Dashboard() {
 
   const isLoading = positionsLoading || ordersLoading || holdingsLoading || summaryLoading;
 
+  // Filter positions by search
+  const filteredPositions = positions.filter(p => 
+    p.trading_symbol.toLowerCase().includes(searchPositions.toLowerCase())
+  );
+
+  // Filter holdings by search
+  const filteredHoldings = holdings.filter(h => 
+    h.trading_symbol.toLowerCase().includes(searchHoldings.toLowerCase())
+  );
+
+  // Calculate position summaries - use API fields when available, otherwise compute
+  const positionTotals = {
+    totalPnL: positions.reduce((sum, p) => sum + (p.pnl || 0), 0),
+    unrealisedPnL: positions.reduce((sum, p) => {
+      // Use API-provided unrealised P/L if available, otherwise compute
+      if (p.unrealised_pnl !== undefined) return sum + p.unrealised_pnl;
+      return sum + ((p.ltp - p.buy_avg) * p.quantity);
+    }, 0),
+    realisedPnL: positions.reduce((sum, p) => sum + (p.realised_pnl || 0), 0),
+    netTradedValue: positions.reduce((sum, p) => sum + (p.ltp * Math.abs(p.quantity)), 0),
+  };
+
+  // Calculate holdings summaries
+  const holdingTotals = {
+    totalPnL: holdings.reduce((sum, h) => sum + (h.pnl || 0), 0),
+    investedValue: holdings.reduce((sum, h) => sum + (h.average_price * h.quantity), 0),
+    currentValue: holdings.reduce((sum, h) => sum + (h.current_price * h.quantity), 0),
+  };
+
+  const formatCurrency = (value: number) => {
+    const absValue = Math.abs(value);
+    if (absValue >= 100000) {
+      return `${(value / 100000).toFixed(2)}L`;
+    }
+    return value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  };
+
+  const formatPnL = (value: number) => {
+    const formatted = formatCurrency(Math.abs(value));
+    return value >= 0 ? `+${formatted}` : `-${formatted}`;
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
+        <div className="container mx-auto px-4 py-3">
           <div className="flex justify-between items-center gap-4 flex-wrap">
             <div className="flex items-center gap-3">
-              <div>
-                <h1 className="text-2xl font-bold text-foreground" data-testid="text-dashboard-title">Trading Dashboard</h1>
-                <p className="text-muted-foreground text-sm">
-                  {isLiveData ? "Connected to Kotak Neo" : "Demo Mode (Mock Data)"}
-                </p>
-              </div>
+              <h1 className="text-xl font-bold text-foreground" data-testid="text-dashboard-title">Trading Dashboard</h1>
               <Badge 
                 variant={isLiveData ? "default" : "secondary"} 
                 className="flex items-center gap-1"
@@ -113,121 +152,93 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-6">
-        <div className="grid md:grid-cols-4 gap-4 mb-6">
-          <Card data-testid="card-portfolio-value">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Portfolio Value</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                <DollarSign className="w-6 h-6 text-chart-2" />
-                <span className="text-2xl font-bold text-foreground">
-                  ₹{(portfolioSummary?.totalValue ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card data-testid="card-day-pnl">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Day P&L</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                {(portfolioSummary?.dayPnL ?? 0) >= 0 ? (
-                  <TrendingUp className="w-6 h-6 text-primary" />
-                ) : (
-                  <TrendingDown className="w-6 h-6 text-destructive" />
-                )}
-                <span className={`text-2xl font-bold ${(portfolioSummary?.dayPnL ?? 0) >= 0 ? "text-primary" : "text-destructive"}`}>
-                  ₹{Math.abs(portfolioSummary?.dayPnL ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card data-testid="card-total-pnl">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total P&L</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                {(portfolioSummary?.totalPnL ?? 0) >= 0 ? (
-                  <TrendingUp className="w-6 h-6 text-primary" />
-                ) : (
-                  <TrendingDown className="w-6 h-6 text-destructive" />
-                )}
-                <span className={`text-2xl font-bold ${(portfolioSummary?.totalPnL ?? 0) >= 0 ? "text-primary" : "text-destructive"}`}>
-                  ₹{Math.abs(portfolioSummary?.totalPnL ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card data-testid="card-margin">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Available Margin</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                <Activity className="w-6 h-6 text-chart-3" />
-                <span className="text-2xl font-bold text-foreground">
-                  ₹{(portfolioSummary?.availableMargin ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
+      <div className="container mx-auto px-4 py-4">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="bg-card border border-border" data-testid="tabs-dashboard">
-            <TabsTrigger value="positions" data-testid="tab-positions">
-              Positions ({positions.length})
+          <TabsList className="bg-card border border-border h-12" data-testid="tabs-dashboard">
+            <TabsTrigger value="investments" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-investments">
+              INVESTMENTS <Badge variant="secondary" className="ml-2">{holdings.length}</Badge>
             </TabsTrigger>
-            <TabsTrigger value="orders" data-testid="tab-orders">
-              Orders ({orders.length})
+            <TabsTrigger value="positions" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-positions">
+              POSITIONS <Badge variant="secondary" className="ml-2">{positions.length}</Badge>
             </TabsTrigger>
-            <TabsTrigger value="holdings" data-testid="tab-holdings">
-              Holdings ({holdings.length})
+            <TabsTrigger value="orders" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-orders">
+              ORDERS <Badge variant="secondary" className="ml-2">{orders.length}</Badge>
             </TabsTrigger>
-            <TabsTrigger value="place-order" data-testid="tab-place-order">
-              <PlusCircle className="w-4 h-4 mr-1" />
-              Place Order
+            <TabsTrigger value="place-order" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-place-order">
+              PLACE ORDER
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="positions">
+          {/* INVESTMENTS Tab - Holdings */}
+          <TabsContent value="investments">
             <Card>
-              <CardHeader>
-                <CardTitle>Open Positions</CardTitle>
-                <CardDescription>Your current trading positions</CardDescription>
+              <CardHeader className="pb-4">
+                <div className="flex justify-between items-start gap-4 flex-wrap">
+                  <div className="flex gap-8 flex-wrap">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Total P&L</p>
+                      <p className={`text-lg font-semibold ${holdingTotals.totalPnL >= 0 ? "text-primary" : "text-destructive"}`} data-testid="text-holdings-pnl">
+                        {formatPnL(holdingTotals.totalPnL)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Invested Value</p>
+                      <p className="text-lg font-semibold text-foreground" data-testid="text-invested-value">
+                        {formatCurrency(holdingTotals.investedValue)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Current Value</p>
+                      <p className="text-lg font-semibold text-foreground" data-testid="text-current-value">
+                        {formatCurrency(holdingTotals.currentValue)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search in investments"
+                        value={searchHoldings}
+                        onChange={(e) => setSearchHoldings(e.target.value)}
+                        className="pl-9 w-60"
+                        data-testid="input-search-holdings"
+                      />
+                    </div>
+                    <Button variant="outline" size="icon" data-testid="button-analyze-holdings">
+                      <BarChart3 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
-                {positions.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-8" data-testid="text-no-positions">No open positions</p>
+                {filteredHoldings.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-8" data-testid="text-no-holdings">No holdings found</p>
                 ) : (
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead>Symbol</TableHead>
-                        <TableHead>Exchange</TableHead>
-                        <TableHead>Qty</TableHead>
-                        <TableHead>Buy Avg</TableHead>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead>Name</TableHead>
+                        <TableHead>Quantity</TableHead>
+                        <TableHead>Avg.cost</TableHead>
                         <TableHead>LTP</TableHead>
-                        <TableHead>P&L</TableHead>
+                        <TableHead className="text-right">Profit/loss</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {positions.map((position, index) => (
-                        <TableRow key={index} data-testid={`row-position-${index}`}>
-                          <TableCell className="font-medium">{position.trading_symbol}</TableCell>
-                          <TableCell>{position.exchange}</TableCell>
-                          <TableCell>{position.quantity}</TableCell>
-                          <TableCell>₹{position.buy_avg}</TableCell>
-                          <TableCell>₹{position.ltp}</TableCell>
-                          <TableCell className={position.pnl >= 0 ? "text-primary" : "text-destructive"}>
-                            ₹{position.pnl.toFixed(2)}
+                      {filteredHoldings.map((holding, index) => (
+                        <TableRow key={index} data-testid={`row-holding-${index}`}>
+                          <TableCell>
+                            <div className="font-medium" data-testid={`text-holding-symbol-${index}`}>{holding.trading_symbol}</div>
+                          </TableCell>
+                          <TableCell>
+                            <div>{holding.quantity}</div>
+                            <div className="text-xs text-muted-foreground">shares</div>
+                          </TableCell>
+                          <TableCell>{holding.average_price.toFixed(2)}</TableCell>
+                          <TableCell>{holding.current_price.toFixed(2)}</TableCell>
+                          <TableCell className={`text-right font-medium ${holding.pnl >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {holding.pnl >= 0 ? "+" : ""}{holding.pnl.toFixed(2)}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -238,11 +249,109 @@ export default function Dashboard() {
             </Card>
           </TabsContent>
 
+          {/* POSITIONS Tab */}
+          <TabsContent value="positions">
+            <Card>
+              <CardHeader className="pb-4">
+                <div className="flex justify-between items-start gap-4 flex-wrap">
+                  <div className="flex gap-8 flex-wrap">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Profit/Loss</p>
+                      <p className={`text-lg font-semibold ${positionTotals.totalPnL >= 0 ? "text-primary" : "text-destructive"}`} data-testid="text-position-pnl">
+                        {formatPnL(positionTotals.totalPnL)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Unrealised P/L</p>
+                      <p className={`text-lg font-semibold ${positionTotals.unrealisedPnL >= 0 ? "text-primary" : "text-destructive"}`} data-testid="text-unrealised-pnl">
+                        {formatPnL(positionTotals.unrealisedPnL)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Realised P/L</p>
+                      <p className={`text-lg font-semibold ${positionTotals.realisedPnL >= 0 ? "text-primary" : "text-destructive"}`} data-testid="text-realised-pnl">
+                        {formatPnL(positionTotals.realisedPnL)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Net traded value</p>
+                      <p className="text-lg font-semibold text-primary" data-testid="text-net-traded-value">
+                        +{formatCurrency(positionTotals.netTradedValue)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search in positions"
+                        value={searchPositions}
+                        onChange={(e) => setSearchPositions(e.target.value)}
+                        className="pl-9 w-60"
+                        data-testid="input-search-positions"
+                      />
+                    </div>
+                    <Button variant="outline" size="icon" data-testid="button-analyze">
+                      <BarChart3 className="w-4 h-4" />
+                    </Button>
+                    </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {filteredPositions.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-8" data-testid="text-no-positions">No open positions</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead>Name</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Quantity</TableHead>
+                        <TableHead>Avg.cost</TableHead>
+                        <TableHead>LTP</TableHead>
+                        <TableHead className="text-right">Profit/loss</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredPositions.map((position, index) => (
+                        <TableRow key={index} data-testid={`row-position-${index}`}>
+                          <TableCell>
+                            <div className="font-medium" data-testid={`text-position-symbol-${index}`}>
+                              {position.trading_symbol}
+                              {position.option_type && (
+                                <Badge variant="outline" className="ml-2 text-xs" data-testid={`badge-option-${index}`}>
+                                  {position.strike_price} {position.option_type} {position.expiry}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground">{position.exchange}</div>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm" data-testid={`text-product-type-${index}`}>{position.product_type || "NRML"}</span>
+                          </TableCell>
+                          <TableCell>
+                            <div>{Math.abs(position.quantity)}</div>
+                            <div className="text-xs text-muted-foreground">shares</div>
+                          </TableCell>
+                          <TableCell>{position.buy_avg.toFixed(2)}</TableCell>
+                          <TableCell>{position.ltp.toFixed(2)}</TableCell>
+                          <TableCell className={`text-right font-medium ${position.pnl >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {position.pnl >= 0 ? "+" : ""}{position.pnl.toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ORDERS Tab */}
           <TabsContent value="orders">
             <Card>
-              <CardHeader>
-                <CardTitle>Order Book</CardTitle>
-                <CardDescription>Your recent and pending orders</CardDescription>
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg">Order Book</CardTitle>
               </CardHeader>
               <CardContent>
                 {orders.length === 0 ? (
@@ -250,9 +359,10 @@ export default function Dashboard() {
                 ) : (
                   <Table>
                     <TableHeader>
-                      <TableRow>
+                      <TableRow className="hover:bg-transparent">
                         <TableHead>Symbol</TableHead>
                         <TableHead>Type</TableHead>
+                        <TableHead>Product</TableHead>
                         <TableHead>Qty</TableHead>
                         <TableHead>Price</TableHead>
                         <TableHead>Status</TableHead>
@@ -262,20 +372,26 @@ export default function Dashboard() {
                     <TableBody>
                       {orders.map((order) => (
                         <TableRow key={order.order_id} data-testid={`row-order-${order.order_id}`}>
-                          <TableCell className="font-medium">{order.trading_symbol}</TableCell>
+                          <TableCell>
+                            <div className="font-medium">{order.trading_symbol}</div>
+                            <div className="text-xs text-muted-foreground">{order.exchange}</div>
+                          </TableCell>
                           <TableCell>
                             <Badge variant={order.transaction_type === "B" ? "default" : "destructive"}>
                               {order.transaction_type === "B" ? "BUY" : "SELL"}
                             </Badge>
                           </TableCell>
+                          <TableCell className="text-sm">{order.order_type}</TableCell>
                           <TableCell>{order.quantity}</TableCell>
-                          <TableCell>₹{order.price}</TableCell>
+                          <TableCell>{order.price.toFixed(2)}</TableCell>
                           <TableCell>
-                            <Badge variant={order.status === "COMPLETE" ? "default" : "secondary"}>
+                            <Badge 
+                              variant={order.status === "COMPLETE" ? "default" : order.status === "CANCELLED" ? "destructive" : "secondary"}
+                            >
                               {order.status}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-muted-foreground">{order.timestamp}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{order.timestamp}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -285,54 +401,11 @@ export default function Dashboard() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="holdings">
-            <Card>
-              <CardHeader>
-                <CardTitle>Holdings</CardTitle>
-                <CardDescription>Your long-term investments</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {holdings.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-8" data-testid="text-no-holdings">No holdings found</p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Symbol</TableHead>
-                        <TableHead>Quantity</TableHead>
-                        <TableHead>Avg Price</TableHead>
-                        <TableHead>Current Price</TableHead>
-                        <TableHead>P&L</TableHead>
-                        <TableHead>P&L %</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {holdings.map((holding, index) => (
-                        <TableRow key={index} data-testid={`row-holding-${index}`}>
-                          <TableCell className="font-medium">{holding.trading_symbol}</TableCell>
-                          <TableCell>{holding.quantity}</TableCell>
-                          <TableCell>₹{holding.average_price}</TableCell>
-                          <TableCell>₹{holding.current_price}</TableCell>
-                          <TableCell className={holding.pnl >= 0 ? "text-primary" : "text-destructive"}>
-                            ₹{holding.pnl.toFixed(2)}
-                          </TableCell>
-                          <TableCell className={holding.pnl_percent >= 0 ? "text-primary" : "text-destructive"}>
-                            {holding.pnl_percent.toFixed(2)}%
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
+          {/* PLACE ORDER Tab */}
           <TabsContent value="place-order">
             <Card>
               <CardHeader>
                 <CardTitle>Place New Order</CardTitle>
-                <CardDescription>Enter order details to execute a trade</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid md:grid-cols-2 gap-4">

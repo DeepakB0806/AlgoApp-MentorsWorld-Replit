@@ -111,6 +111,12 @@ export interface Position {
   sell_avg: number;
   pnl: number;
   ltp: number;
+  product_type?: string; // NRML, MIS, CNC, PAY LATER
+  option_type?: string; // CALL, PUT
+  strike_price?: number;
+  expiry?: string;
+  realised_pnl?: number;
+  unrealised_pnl?: number;
 }
 
 // Order
