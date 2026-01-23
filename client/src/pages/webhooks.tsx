@@ -11,12 +11,12 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save, Eye, EyeOff, Activity, Timer, Wrench, Upload, Link2, Unlink } from "lucide-react";
+import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, ExternalLink, Save, Eye, EyeOff, Activity, Timer, Wrench, Upload, Link2, Unlink } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Webhook as WebhookType, WebhookLog, InsertWebhook, Strategy, WebhookStatusLog, AppSetting, WebhookData } from "@shared/schema";
+import type { Webhook as WebhookType, InsertWebhook, Strategy, AppSetting, WebhookData } from "@shared/schema";
 
 type WebhookStats = {
   total: number;
@@ -31,7 +31,6 @@ export default function Webhooks() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingWebhook, setEditingWebhook] = useState<WebhookType | null>(null);
   const [selectedWebhook, setSelectedWebhook] = useState<WebhookType | null>(null);
-  const [isLogsSheetOpen, setIsLogsSheetOpen] = useState(false);
   const [isDataSheetOpen, setIsDataSheetOpen] = useState(false);
   const [dataExpandedView, setDataExpandedView] = useState(false);
   const [domainName, setDomainName] = useState("");
@@ -68,17 +67,8 @@ export default function Webhooks() {
     queryKey: ["/api/webhooks"],
   });
 
-  const { data: webhookLogs = [] } = useQuery<WebhookLog[]>({
-    queryKey: ["/api/webhook-logs"],
-  });
-
   const { data: strategies = [] } = useQuery<Strategy[]>({
     queryKey: ["/api/strategies"],
-  });
-
-  const { data: statusLogs = [] } = useQuery<WebhookStatusLog[]>({
-    queryKey: ["/api/webhooks", selectedWebhook?.id, "status-logs"],
-    enabled: !!selectedWebhook,
   });
 
   const { data: webhookDataList = [] } = useQuery<WebhookData[]>({
@@ -166,20 +156,6 @@ export default function Webhooks() {
     },
     onError: () => {
       toast({ title: "Test webhook failed", variant: "destructive" });
-    },
-  });
-
-  const cleanupMutation = useMutation({
-    mutationFn: async ({ id, days }: { id: string; days: number }) => {
-      return apiRequest("DELETE", `/api/webhooks/${id}/logs/cleanup?days=${days}`);
-    },
-    onSuccess: (_data, { id }) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/webhooks", id, "status-logs"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/webhooks", id, "stats"] });
-      toast({ title: "Old logs cleaned up successfully" });
-    },
-    onError: () => {
-      toast({ title: "Failed to cleanup logs", variant: "destructive" });
     },
   });
 
@@ -297,11 +273,6 @@ export default function Webhooks() {
       triggerType: webhook.triggerType,
     });
     setIsDialogOpen(true);
-  };
-
-  const handleViewLogs = (webhook: WebhookType) => {
-    setSelectedWebhook(webhook);
-    setIsLogsSheetOpen(true);
   };
 
   const handleViewData = (webhook: WebhookType) => {
@@ -602,7 +573,6 @@ export default function Webhooks() {
         >
           <TabsList className="bg-card border border-border" data-testid="tabs-webhooks">
             <TabsTrigger value="webhooks">Webhooks ({webhooks.length})</TabsTrigger>
-            <TabsTrigger value="logs">Logs ({webhookLogs.length})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="webhooks">
@@ -674,15 +644,6 @@ export default function Webhooks() {
                           >
                             <Activity className="w-4 h-4 mr-1" />
                             Data ({getWebhookData(webhook.id).length})
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleViewLogs(webhook)}
-                            data-testid={`button-view-logs-${webhook.id}`}
-                          >
-                            <FileText className="w-4 h-4 mr-1" />
-                            Logs
                           </Button>
                           <Button
                             variant="outline"
@@ -790,162 +751,8 @@ export default function Webhooks() {
             )}
           </TabsContent>
 
-          <TabsContent value="logs">
-            <Card>
-              <CardHeader>
-                <CardTitle>Webhook Logs</CardTitle>
-                <CardDescription>Recent webhook trigger history with TradingView data</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {webhookLogs.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-8" data-testid="text-no-logs">No webhook logs yet</p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Timestamp</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Exchange</TableHead>
-                        <TableHead>Indicator</TableHead>
-                        <TableHead>Alert</TableHead>
-                        <TableHead>Price</TableHead>
-                        <TableHead>Action</TableHead>
-                        <TableHead>Execution</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {webhookLogs.map((log) => (
-                        <TableRow key={log.id} data-testid={`row-log-${log.id}`}>
-                          <TableCell className="flex items-center gap-2">
-                            <Clock className="w-4 h-4 text-muted-foreground" />
-                            <span className="text-xs">{new Date(log.timestamp).toLocaleString()}</span>
-                          </TableCell>
-                          <TableCell>
-                            {log.status === "success" ? (
-                              <Badge variant="default" className="flex items-center gap-1 w-fit">
-                                <CheckCircle className="w-3 h-3" />
-                                OK
-                              </Badge>
-                            ) : (
-                              <Badge variant="destructive" className="flex items-center gap-1 w-fit">
-                                <XCircle className="w-3 h-3" />
-                                Fail
-                              </Badge>
-                            )}
-                          </TableCell>
-                          <TableCell>{log.exchange || "-"}</TableCell>
-                          <TableCell>{log.indicator || "-"}</TableCell>
-                          <TableCell className="max-w-xs truncate">{log.alert || "-"}</TableCell>
-                          <TableCell>{log.price ? log.price.toFixed(2) : "-"}</TableCell>
-                          <TableCell>
-                            {log.actionBinary === 1 ? (
-                              <Badge variant="default">BUY</Badge>
-                            ) : log.actionBinary === 0 ? (
-                              <Badge variant="destructive">SELL</Badge>
-                            ) : "-"}
-                          </TableCell>
-                          <TableCell>{log.executionTime}ms</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
         </Tabs>
       </div>
-
-      {/* Status Logs Sheet */}
-      <Sheet open={isLogsSheetOpen} onOpenChange={setIsLogsSheetOpen}>
-        <SheetContent className="w-[500px] sm:w-[600px] overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>Webhook Logs: {selectedWebhook?.name}</SheetTitle>
-            <SheetDescription>
-              Test and status logs for this webhook
-            </SheetDescription>
-          </SheetHeader>
-          <div className="mt-6 space-y-4">
-            {selectedWebhook && (
-              <div className="flex gap-2">
-                <Button
-                  onClick={() => testMutation.mutate(selectedWebhook.id)}
-                  disabled={testMutation.isPending}
-                  data-testid="button-test-webhook-sheet"
-                >
-                  <Play className="w-4 h-4 mr-2" />
-                  {testMutation.isPending ? "Testing..." : "Send Test"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => copyToClipboard(getWebhookUrl(selectedWebhook))}
-                >
-                  <Copy className="w-4 h-4 mr-2" />
-                  Copy URL
-                </Button>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h4 className="font-medium">Status Logs</h4>
-                {statusLogs.length > 0 && selectedWebhook && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => cleanupMutation.mutate({ id: selectedWebhook.id, days: 30 })}
-                    disabled={cleanupMutation.isPending}
-                    data-testid="button-cleanup-logs"
-                  >
-                    <Trash2 className="w-4 h-4 mr-1" />
-                    Clean Old Logs
-                  </Button>
-                )}
-              </div>
-              {statusLogs.length === 0 ? (
-                <p className="text-muted-foreground text-sm">No status logs yet</p>
-              ) : (
-                <div className="space-y-2">
-                  {statusLogs.map((log) => (
-                    <Card key={log.id} className="p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            {log.status === "success" ? (
-                              <CheckCircle className="w-4 h-4 text-primary" />
-                            ) : (
-                              <XCircle className="w-4 h-4 text-destructive" />
-                            )}
-                            <span className="font-medium text-sm">{log.status === "success" ? "Success" : "Failed"}</span>
-                            {log.statusCode && (
-                              <Badge variant="outline" className="text-xs">{log.statusCode}</Badge>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                            <span>{new Date(log.testedAt).toLocaleString()}</span>
-                            {log.responseTime && (
-                              <span className="flex items-center gap-1">
-                                <Timer className="w-3 h-3" />
-                                {log.responseTime}ms
-                              </span>
-                            )}
-                          </div>
-                          {log.responseMessage && (
-                            <p className="text-xs mt-1">{log.responseMessage}</p>
-                          )}
-                          {log.errorMessage && (
-                            <p className="text-xs text-destructive mt-1">{log.errorMessage}</p>
-                          )}
-                        </div>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </SheetContent>
-      </Sheet>
 
       <Sheet open={isDataSheetOpen} onOpenChange={setIsDataSheetOpen}>
         <SheetContent className={dataExpandedView ? "w-full sm:max-w-full" : "w-[600px] sm:w-[800px]"} side="right">
