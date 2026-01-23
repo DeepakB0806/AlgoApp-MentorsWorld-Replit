@@ -8,6 +8,7 @@ import bcrypt from "bcryptjs";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import crypto from "crypto";
+import { sendVerificationEmail, sendTeamInvitationEmail } from "../../services/email";
 
 // Super Admin email - this email will have super admin privileges
 const SUPER_ADMIN_EMAIL = "webadmin@mentorsworld.org";
@@ -292,6 +293,10 @@ export function registerAuthRoutes(app: Express): void {
       // Check if this email should be Super Admin
       const shouldBeSuperAdmin = isSuperAdmin("", email);
       
+      // Generate email verification token
+      const emailVerificationToken = crypto.randomBytes(32).toString("hex");
+      const emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      
       // Create user with customer role (or super_admin if email matches)
       const [newUser] = await db
         .insert(users)
@@ -301,44 +306,30 @@ export function registerAuthRoutes(app: Express): void {
           password: hashedPassword,
           firstName: firstName || null,
           lastName: lastName || null,
-          emailVerified: true, // Skip email verification for now
+          emailVerified: false,
+          emailVerificationToken,
+          emailVerificationExpires,
           isActive: true,
-          totpEnabled: false, // Customers don't require TOTP by default
+          totpEnabled: false,
           totpVerified: false,
         })
         .returning();
       
-      // Create session for the user
-      const sessionToken = crypto.randomBytes(32).toString("hex");
-      const sessionExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      // Send verification email
+      const emailSent = await sendVerificationEmail(
+        email.toLowerCase(),
+        emailVerificationToken,
+        firstName
+      );
       
-      await db.update(users)
-        .set({
-          sessionToken,
-          sessionExpires,
-          lastLoginAt: new Date(),
-        })
-        .where(eq(users.id, newUser.id));
-      
-      // Set session cookie
-      res.cookie("team_session", sessionToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-        path: "/",
-      });
+      if (!emailSent) {
+        console.error("Failed to send verification email to:", email);
+      }
       
       res.status(201).json({
-        message: "Account created successfully",
+        message: "Account created! Please check your email to verify your account.",
         userId: newUser.id,
-        user: {
-          id: newUser.id,
-          email: newUser.email,
-          firstName: newUser.firstName,
-          lastName: newUser.lastName,
-          role: newUser.role,
-        },
+        requiresEmailVerification: true,
       });
     } catch (error: any) {
       console.error("Error in customer signup:", error);
@@ -360,31 +351,97 @@ export function registerAuthRoutes(app: Express): void {
         .where(eq(users.emailVerificationToken, token));
       
       if (!user) {
-        return res.status(400).json({ message: "Invalid verification token" });
+        return res.redirect("/login?error=invalid_token");
       }
       
       if (user.emailVerificationExpires && new Date() > user.emailVerificationExpires) {
-        return res.status(400).json({ message: "Verification token has expired" });
+        return res.redirect("/login?error=token_expired");
       }
       
-      // Mark email as verified
+      // Generate session token for auto-login
+      const sessionToken = crypto.randomBytes(32).toString("hex");
+      const sessionExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      
+      // Mark email as verified and create session
       await db.update(users)
         .set({
           emailVerified: true,
           emailVerificationToken: null,
+          sessionToken,
+          sessionExpires,
+          lastLoginAt: new Date(),
           updatedAt: new Date(),
         })
         .where(eq(users.id, user.id));
+      
+      // Set session cookie
+      res.cookie("team_session", sessionToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        path: "/",
+      });
       
       // Redirect to TOTP setup if it's a team member
       if (user.role === "team_member" && !user.totpVerified) {
         return res.redirect(`/totp-setup?userId=${user.id}`);
       }
       
-      res.redirect("/login?verified=true");
+      // For customers, redirect to user home
+      res.redirect("/user-home?verified=true");
     } catch (error) {
       console.error("Error verifying email:", error);
-      res.status(500).json({ message: "Failed to verify email" });
+      res.redirect("/login?error=verification_failed");
+    }
+  });
+  
+  // Resend verification email
+  app.post("/api/auth/resend-verification", async (req: Request, res: Response) => {
+    try {
+      const { email } = req.body;
+      
+      if (!email) {
+        return res.status(400).json({ message: "Email is required" });
+      }
+      
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, email.toLowerCase()));
+      
+      if (!user) {
+        // Don't reveal if email exists
+        return res.json({ message: "If an account with that email exists, a verification email has been sent." });
+      }
+      
+      if (user.emailVerified) {
+        return res.status(400).json({ message: "Email is already verified" });
+      }
+      
+      // Generate new verification token
+      const emailVerificationToken = crypto.randomBytes(32).toString("hex");
+      const emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      
+      await db.update(users)
+        .set({
+          emailVerificationToken,
+          emailVerificationExpires,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, user.id));
+      
+      // Send verification email
+      await sendVerificationEmail(
+        user.email || email,
+        emailVerificationToken,
+        user.firstName || undefined
+      );
+      
+      res.json({ message: "Verification email sent. Please check your inbox." });
+    } catch (error) {
+      console.error("Error resending verification:", error);
+      res.status(500).json({ message: "Failed to resend verification email" });
     }
   });
   
@@ -588,6 +645,98 @@ export function registerAuthRoutes(app: Express): void {
     } catch (error) {
       console.error("Error verifying TOTP:", error);
       res.status(500).json({ message: "Failed to verify TOTP" });
+    }
+  });
+  
+  // Customer login (Email + Password, requires email verification)
+  app.post("/api/auth/customer/login", async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body;
+      
+      if (!email || !password) {
+        return res.status(400).json({ message: "Email and password are required" });
+      }
+      
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, email.toLowerCase()));
+      
+      if (!user || !user.password) {
+        return res.status(401).json({ message: "Invalid email or password" });
+      }
+      
+      if (!user.isActive) {
+        return res.status(401).json({ message: "Account is deactivated" });
+      }
+      
+      // Verify password
+      const isValidPassword = await bcrypt.compare(password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: "Invalid email or password" });
+      }
+      
+      // Check email verification
+      if (!user.emailVerified) {
+        return res.status(401).json({ 
+          message: "Please verify your email first",
+          requiresEmailVerification: true,
+          email: user.email,
+        });
+      }
+      
+      // For team members, require TOTP
+      if (user.role === "team_member" && user.totpEnabled) {
+        if (!user.totpVerified) {
+          return res.json({
+            requiresTotpSetup: true,
+            userId: user.id,
+            message: "TOTP setup required",
+          });
+        }
+        return res.json({
+          requiresTotp: true,
+          userId: user.id,
+          message: "TOTP verification required",
+        });
+      }
+      
+      // Generate session token
+      const sessionToken = crypto.randomBytes(32).toString("hex");
+      const sessionExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      
+      // Store session token in database
+      await db.update(users)
+        .set({ 
+          sessionToken, 
+          sessionExpires,
+          lastLoginAt: new Date(),
+          updatedAt: new Date() 
+        })
+        .where(eq(users.id, user.id));
+      
+      // Set HTTP-only cookie with session token
+      res.cookie("team_session", sessionToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        path: "/",
+      });
+      
+      res.json({
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          role: user.role,
+        },
+      });
+    } catch (error) {
+      console.error("Error during customer login:", error);
+      res.status(500).json({ message: "Failed to log in" });
     }
   });
   

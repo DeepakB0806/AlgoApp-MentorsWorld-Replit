@@ -126,6 +126,16 @@ The application implements the official Kotak Neo Trade API based on the Postman
 ## Recent Changes
 
 ### 2026-01-23
+- Added email verification for customer signup using Mailjet:
+  - Customers must verify email before logging in
+  - Verification email sent with branded HTML template
+  - 24-hour expiration on verification links
+  - Auto-login after successful verification (redirects to /user-home)
+  - Resend verification email endpoint: POST /api/auth/resend-verification
+  - Customer login endpoint: POST /api/auth/customer/login (requires verified email)
+  - Login page shows verification required state with resend option
+  - Signup page shows "Check Your Email" UI after registration
+  - Email service created at server/services/email.ts
 - Redesigned home page with public/authenticated separation:
   - Public home page (/) now has attractive marketing layout with hero section, gradient effects
   - "How It Works" section with 3 steps (Create Webhooks, Define Strategies, Auto-Execute)
@@ -134,7 +144,7 @@ The application implements the official Kotak Neo Trade API based on the Postman
   - Created new /user-home page for logged-in users with Dashboard, Strategies, Webhooks, Broker API cards
   - Quick Stats and Broker Status cards on user home
 - Implemented complete authentication system with dual auth support:
-  - Super Admin: Auto-detected via REPL_OWNER matching Replit Auth ID
+  - Super Admin: Determined by email match (webadmin@mentorsworld.org)
   - Team Members: Email/Password + mandatory TOTP → HTTP-only session cookie (team_session)
   - Session tokens stored in users table with sessionToken, sessionExpires, lastLoginAt
   - Dual auth priority: Team session checked first, then Replit Auth
