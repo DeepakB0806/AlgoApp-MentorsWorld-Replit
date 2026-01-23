@@ -184,3 +184,16 @@ Command: `npm run dev`
 - Original project used Kotak Neo Python API and Supabase for persistence
 - Current implementation uses mock data for demonstration
 - For production use, would need to integrate actual broker APIs
+
+## Webhook Linking Feature
+
+The platform supports linking development webhooks to production webhook data streams:
+
+- **Link to Production**: Click the chain link icon on any webhook card to link it to a production webhook
+- **Enter ID directly**: Manually enter the production webhook ID if you know it
+- **Select from existing**: Choose from existing webhooks in the dropdown
+- **Visual Indicator**: Linked webhooks show a "Linked" badge in their title
+- **Unlink**: Click the unlink icon (green chain) to remove the link
+- **Data Fetching**: When viewing data for a linked webhook, it shows data from the linked (production) webhook
+
+This feature enables development testing with live production data streams without modifying production webhooks
