@@ -163,23 +163,6 @@ export async function registerRoutes(
     }
   });
 
-  // Update webhook (PATCH)
-  app.patch("/api/webhooks/:id", async (req, res) => {
-    try {
-      const parsed = insertWebhookSchema.partial().safeParse(req.body);
-      if (!parsed.success) {
-        return res.status(400).json({ error: "Invalid webhook data", details: parsed.error });
-      }
-      const webhook = await storage.updateWebhook(req.params.id, parsed.data);
-      if (!webhook) {
-        return res.status(404).json({ error: "Webhook not found" });
-      }
-      res.json(webhook);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to update webhook" });
-    }
-  });
-
   // Configure webhook fields from comma-separated list
   app.post("/api/webhooks/:id/configure-fields", async (req, res) => {
     try {
