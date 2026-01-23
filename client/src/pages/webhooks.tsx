@@ -55,6 +55,12 @@ export default function Webhooks() {
   const [linkWebhookId, setLinkWebhookId] = useState("");
   const [linkMode, setLinkMode] = useState<"code" | "id">("code");
 
+  // Determine if we're in production or development environment
+  // Production: current host matches configured domain name
+  // Development: current host does NOT match configured domain name
+  const isProductionEnv = domainName && window.location.host === domainName;
+  const envPrefix = isProductionEnv ? "P" : "D";
+
   // Fetch domain name setting
   const { data: domainSetting } = useQuery<AppSetting>({
     queryKey: ["/api/settings/domain_name"],
@@ -689,14 +695,14 @@ export default function Webhooks() {
                               className="font-mono text-xs flex items-center gap-1"
                               data-testid={`badge-code-${webhook.id}`}
                             >
-                              <span>D-{webhook.uniqueCode}</span>
+                              <span>{envPrefix}-{webhook.uniqueCode}</span>
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-4 w-4 p-0 hover:bg-transparent"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  navigator.clipboard.writeText(`D-${webhook.uniqueCode}`);
+                                  navigator.clipboard.writeText(`${envPrefix}-${webhook.uniqueCode}`);
                                   toast({ title: "Short code copied!" });
                                 }}
                                 title="Copy short code"
@@ -1166,7 +1172,7 @@ export default function Webhooks() {
             <div>
               <Label className="mb-2 block">Current Webhook: {linkingWebhook?.name}</Label>
               <p className="text-xs text-muted-foreground mb-2">
-                Code: <code className="bg-muted px-1 rounded font-mono">D-{linkingWebhook?.uniqueCode}</code>
+                Code: <code className="bg-muted px-1 rounded font-mono">{envPrefix}-{linkingWebhook?.uniqueCode}</code>
               </p>
             </div>
             
