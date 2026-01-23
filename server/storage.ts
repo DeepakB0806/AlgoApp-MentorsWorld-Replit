@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, lt } from "drizzle-orm";
 import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, appSettings, brokerConfigs,
@@ -35,6 +35,10 @@ export interface IStorage {
   // Webhook Status Logs - persisted in database
   getWebhookStatusLogs(webhookId: string): Promise<WebhookStatusLog[]>;
   createWebhookStatusLog(log: InsertWebhookStatusLog): Promise<WebhookStatusLog>;
+  
+  // Webhook Stats and Cleanup
+  getWebhookLogStats(webhookId: string): Promise<{ total: number; success: number; failed: number; successRate: number; avgResponseTime: number }>;
+  deleteOldWebhookLogs(webhookId: string, daysToKeep: number): Promise<number>;
 
   // App Settings - persisted in database
   getSetting(key: string): Promise<AppSetting | undefined>;
@@ -270,9 +274,44 @@ export class DatabaseStorage implements IStorage {
       statusCode: insertLog.statusCode ?? null,
       responseMessage: insertLog.responseMessage ?? null,
       errorMessage: insertLog.errorMessage ?? null,
+      responseTime: insertLog.responseTime ?? null,
       testedAt: insertLog.testedAt,
     }).returning();
     return log;
+  }
+
+  // Webhook Stats - PERSISTENT in PostgreSQL database
+  async getWebhookLogStats(webhookId: string): Promise<{ total: number; success: number; failed: number; successRate: number; avgResponseTime: number }> {
+    const logs = await db.select().from(webhookStatusLogs)
+      .where(eq(webhookStatusLogs.webhookId, webhookId));
+    
+    const total = logs.length;
+    const success = logs.filter(l => l.status === "success").length;
+    const failed = logs.filter(l => l.status === "failed").length;
+    const successRate = total > 0 ? Math.round((success / total) * 100) : 0;
+    
+    const responseTimes = logs.filter(l => l.responseTime != null).map(l => l.responseTime!);
+    const avgResponseTime = responseTimes.length > 0 
+      ? Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length)
+      : 0;
+    
+    return { total, success, failed, successRate, avgResponseTime };
+  }
+
+  async deleteOldWebhookLogs(webhookId: string, daysToKeep: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+    
+    const result = await db.delete(webhookStatusLogs)
+      .where(
+        and(
+          eq(webhookStatusLogs.webhookId, webhookId),
+          lt(webhookStatusLogs.testedAt, cutoffDate.toISOString())
+        )
+      )
+      .returning();
+    
+    return result.length;
   }
 
   // App Settings - PERSISTENT in PostgreSQL database

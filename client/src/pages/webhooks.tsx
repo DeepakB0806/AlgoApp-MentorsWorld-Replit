@@ -11,11 +11,19 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save } from "lucide-react";
+import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save, Eye, EyeOff, Activity, Timer } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Webhook as WebhookType, WebhookLog, InsertWebhook, Strategy, WebhookStatusLog, AppSetting } from "@shared/schema";
+
+type WebhookStats = {
+  total: number;
+  success: number;
+  failed: number;
+  successRate: number;
+  avgResponseTime: number;
+};
 
 export default function Webhooks() {
   const { toast } = useToast();
@@ -25,6 +33,7 @@ export default function Webhooks() {
   const [isLogsSheetOpen, setIsLogsSheetOpen] = useState(false);
   const [domainName, setDomainName] = useState("");
   const [tempDomainName, setTempDomainName] = useState("");
+  const [showSecretKey, setShowSecretKey] = useState<Record<string, boolean>>({});
   const [formData, setFormData] = useState<Partial<InsertWebhook>>({
     name: "",
     strategyId: "",
@@ -135,8 +144,9 @@ export default function Webhooks() {
     mutationFn: async (id: string) => {
       return apiRequest("POST", `/api/webhooks/${id}/test`);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/webhooks", selectedWebhook?.id, "status-logs"] });
+    onSuccess: (_data, webhookId) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/webhooks", webhookId, "status-logs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/webhooks", webhookId, "stats"] });
       toast({ title: "Test webhook sent successfully" });
     },
     onError: () => {
@@ -470,19 +480,48 @@ export default function Webhooks() {
                       </div>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid md:grid-cols-3 gap-4 text-sm">
+                      <div className="grid md:grid-cols-4 gap-4 text-sm">
                         <div>
                           <p className="text-muted-foreground">Total Triggers</p>
                           <p className="font-medium">{webhook.totalTriggers || 0}</p>
                         </div>
                         <div>
                           <p className="text-muted-foreground">Last Triggered</p>
-                          <p className="font-medium">{webhook.lastTriggered || "Never"}</p>
+                          <p className="font-medium text-xs">{webhook.lastTriggered ? new Date(webhook.lastTriggered).toLocaleString() : "Never"}</p>
                         </div>
                         <div>
                           <p className="text-muted-foreground">Secret Key</p>
-                          <p className="font-medium font-mono text-xs truncate">{webhook.secretKey ? "••••••••" : "Not set"}</p>
+                          <div className="flex items-center gap-1">
+                            <p className="font-medium font-mono text-xs truncate max-w-[120px]">
+                              {webhook.secretKey 
+                                ? (showSecretKey[webhook.id] ? webhook.secretKey : "••••••••••••")
+                                : "Not set"}
+                            </p>
+                            {webhook.secretKey && (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => setShowSecretKey(prev => ({ ...prev, [webhook.id]: !prev[webhook.id] }))}
+                                  data-testid={`button-toggle-secret-${webhook.id}`}
+                                >
+                                  {showSecretKey[webhook.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => copyToClipboard(webhook.secretKey!)}
+                                  data-testid={`button-copy-secret-${webhook.id}`}
+                                >
+                                  <Copy className="w-3 h-3" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </div>
+                        <WebhookStatsDisplay webhookId={webhook.id} />
                       </div>
                     </CardContent>
                   </Card>
@@ -608,9 +647,15 @@ export default function Webhooks() {
                               <Badge variant="outline" className="text-xs">{log.statusCode}</Badge>
                             )}
                           </div>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {new Date(log.testedAt).toLocaleString()}
-                          </p>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                            <span>{new Date(log.testedAt).toLocaleString()}</span>
+                            {log.responseTime && (
+                              <span className="flex items-center gap-1">
+                                <Timer className="w-3 h-3" />
+                                {log.responseTime}ms
+                              </span>
+                            )}
+                          </div>
                           {log.responseMessage && (
                             <p className="text-xs mt-1">{log.responseMessage}</p>
                           )}
@@ -627,6 +672,43 @@ export default function Webhooks() {
           </div>
         </SheetContent>
       </Sheet>
+    </div>
+  );
+}
+
+function WebhookStatsDisplay({ webhookId }: { webhookId: string }) {
+  const { data: stats } = useQuery<WebhookStats>({
+    queryKey: ["/api/webhooks", webhookId, "stats"],
+    queryFn: async () => {
+      const res = await fetch(`/api/webhooks/${webhookId}/stats`);
+      if (!res.ok) throw new Error("Failed to fetch stats");
+      return res.json();
+    },
+  });
+
+  if (!stats || stats.total === 0) {
+    return (
+      <div>
+        <p className="text-muted-foreground">Stats</p>
+        <p className="font-medium text-xs text-muted-foreground">No tests yet</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-muted-foreground">Stats</p>
+      <div className="flex items-center gap-2">
+        <Badge variant={stats.successRate >= 80 ? "default" : stats.successRate >= 50 ? "secondary" : "destructive"} className="text-xs">
+          {stats.successRate}% success
+        </Badge>
+        {stats.avgResponseTime > 0 && (
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Timer className="w-3 h-3" />
+            {stats.avgResponseTime}ms
+          </span>
+        )}
+      </div>
     </div>
   );
 }

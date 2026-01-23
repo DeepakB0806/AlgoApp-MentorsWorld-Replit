@@ -182,6 +182,10 @@ export async function registerRoutes(
       const payload = req.body;
       console.log("Webhook received:", webhookId, JSON.stringify(payload));
 
+      // Get request metadata
+      const ipAddress = (req.headers["x-forwarded-for"] as string)?.split(",")[0] || req.socket.remoteAddress || null;
+      const userAgent = req.headers["user-agent"] || null;
+
       // Extract TradingView fields
       const logData = {
         webhookId,
@@ -190,6 +194,8 @@ export async function registerRoutes(
         status: "success" as const,
         response: "Alert received and processed",
         executionTime: 0,
+        ipAddress,
+        userAgent,
         timeUnix: payload.time_unix || payload.timeUnix,
         exchange: payload.exchange || payload.exchan,
         indices: payload.indices,
@@ -256,6 +262,27 @@ export async function registerRoutes(
     }
   });
 
+  // Webhook Log Statistics
+  app.get("/api/webhooks/:id/stats", async (req, res) => {
+    try {
+      const stats = await storage.getWebhookLogStats(req.params.id);
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch webhook stats" });
+    }
+  });
+
+  // Delete old logs (cleanup)
+  app.delete("/api/webhooks/:id/logs/cleanup", async (req, res) => {
+    try {
+      const daysToKeep = parseInt(req.query.days as string) || 30;
+      const deletedCount = await storage.deleteOldWebhookLogs(req.params.id, daysToKeep);
+      res.json({ success: true, deletedCount, daysToKeep });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to cleanup logs" });
+    }
+  });
+
   // Test Webhook
   app.post("/api/webhooks/:id/test", async (req, res) => {
     const startTime = Date.now();
@@ -282,6 +309,8 @@ export async function registerRoutes(
         lock_state: "unlocked",
       };
 
+      const responseTime = Date.now() - startTime;
+      
       // Log the test
       await storage.createWebhookStatusLog({
         webhookId,
@@ -289,6 +318,7 @@ export async function registerRoutes(
         status: "success",
         statusCode: 200,
         responseMessage: "Test webhook executed successfully",
+        responseTime,
         testedAt: new Date().toISOString(),
       });
 
@@ -296,10 +326,11 @@ export async function registerRoutes(
         success: true, 
         message: "Test webhook sent successfully",
         testPayload,
-        executionTime: Date.now() - startTime,
+        responseTime,
       });
     } catch (error) {
       console.error("Test webhook error:", error);
+      const responseTime = Date.now() - startTime;
       
       await storage.createWebhookStatusLog({
         webhookId,
@@ -308,6 +339,7 @@ export async function registerRoutes(
         statusCode: 500,
         responseMessage: "Test failed",
         errorMessage: String(error),
+        responseTime,
         testedAt: new Date().toISOString(),
       });
 

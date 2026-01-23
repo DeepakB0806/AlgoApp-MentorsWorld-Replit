@@ -52,6 +52,10 @@ export const webhookLogs = pgTable("webhook_logs", {
   response: text("response"),
   executionTime: integer("execution_time"),
   
+  // Request metadata
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  
   // TradingView alert fields
   timeUnix: integer("time_unix"),
   exchange: text("exchange"),
@@ -87,6 +91,7 @@ export const webhookStatusLogs = pgTable("webhook_status_logs", {
   statusCode: integer("status_code"),
   responseMessage: text("response_message"),
   errorMessage: text("error_message"),
+  responseTime: integer("response_time"), // Response time in ms
   testedAt: text("tested_at").notNull(),
 });
 
