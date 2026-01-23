@@ -436,6 +436,15 @@ export default function Webhooks() {
                             <FileText className="w-4 h-4 mr-1" />
                             Logs
                           </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(getWebhookUrl(webhook))}
+                            data-testid={`button-copy-url-${webhook.id}`}
+                          >
+                            <Copy className="w-4 h-4 mr-1" />
+                            Copy URL
+                          </Button>
                           <Switch
                             checked={webhook.isActive}
                             onCheckedChange={(checked) => toggleMutation.mutate({ id: webhook.id, isActive: checked })}
