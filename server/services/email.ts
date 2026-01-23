@@ -1,12 +1,18 @@
-import Mailjet from "node-mailjet";
-
-const mailjet = new Mailjet({
-  apiKey: process.env.MAILJET_API_KEY,
-  apiSecret: process.env.MAILJET_SECRET_KEY,
-});
+import nodemailer from "nodemailer";
 
 const FROM_EMAIL = "webadmin@mentorsworld.org";
 const FROM_NAME = "AlgoTrading Platform";
+
+// Mailjet SMTP configuration
+const transporter = nodemailer.createTransport({
+  host: "in-v3.mailjet.com",
+  port: 587,
+  secure: false,
+  auth: {
+    user: process.env.MAILJET_API_KEY,
+    pass: process.env.MAILJET_SECRET_KEY,
+  },
+});
 
 export interface EmailOptions {
   to: string;
@@ -18,27 +24,15 @@ export interface EmailOptions {
 
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
   try {
-    const result = await mailjet.post("send", { version: "v3.1" }).request({
-      Messages: [
-        {
-          From: {
-            Email: FROM_EMAIL,
-            Name: FROM_NAME,
-          },
-          To: [
-            {
-              Email: options.to,
-              Name: options.toName || options.to,
-            },
-          ],
-          Subject: options.subject,
-          TextPart: options.textContent,
-          HTMLPart: options.htmlContent,
-        },
-      ],
+    const result = await transporter.sendMail({
+      from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
+      to: options.to,
+      subject: options.subject,
+      text: options.textContent,
+      html: options.htmlContent,
     });
 
-    console.log("Email sent successfully:", result.body);
+    console.log("Email sent successfully:", result.messageId);
     return true;
   } catch (error) {
     console.error("Failed to send email:", error);
