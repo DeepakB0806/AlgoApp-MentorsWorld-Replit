@@ -689,14 +689,14 @@ export default function Webhooks() {
                               className="font-mono text-xs flex items-center gap-1"
                               data-testid={`badge-code-${webhook.id}`}
                             >
-                              <span>{webhook.uniqueCode}</span>
+                              <span>D-{webhook.uniqueCode}</span>
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-4 w-4 p-0 hover:bg-transparent"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  navigator.clipboard.writeText(webhook.uniqueCode);
+                                  navigator.clipboard.writeText(`D-${webhook.uniqueCode}`);
                                   toast({ title: "Short code copied!" });
                                 }}
                                 title="Copy short code"
@@ -726,7 +726,7 @@ export default function Webhooks() {
                             {webhook.linkedWebhookId && (
                               <Badge variant="outline" className="flex items-center gap-1 text-primary border-primary">
                                 <Link2 className="w-3 h-3" />
-                                Linked: {getLinkedWebhookInfo(webhook.linkedWebhookId)?.code}
+                                Linked: P-{getLinkedWebhookInfo(webhook.linkedWebhookId)?.code}
                               </Badge>
                             )}
                             {webhook.linkedByWebhooks && webhook.linkedByWebhooks.length > 0 && (
@@ -736,7 +736,7 @@ export default function Webhooks() {
                                 data-testid={`badge-linked-by-${webhook.id}`}
                               >
                                 <Link2 className="w-3 h-3" />
-                                Linked by: {webhook.linkedByWebhooks.join(", ")}
+                                Linked by: {webhook.linkedByWebhooks.map(code => `D-${code}`).join(", ")}
                               </Badge>
                             )}
                           </CardTitle>
@@ -1166,7 +1166,7 @@ export default function Webhooks() {
             <div>
               <Label className="mb-2 block">Current Webhook: {linkingWebhook?.name}</Label>
               <p className="text-xs text-muted-foreground mb-2">
-                Code: <code className="bg-muted px-1 rounded font-mono">{linkingWebhook?.uniqueCode}</code>
+                Code: <code className="bg-muted px-1 rounded font-mono">D-{linkingWebhook?.uniqueCode}</code>
               </p>
             </div>
             
@@ -1191,7 +1191,7 @@ export default function Webhooks() {
             
             {linkMode === "code" ? (
               <div>
-                <Label className="mb-2 block">Enter Production Webhook Code</Label>
+                <Label className="mb-2 block">Enter Production Webhook Code (without P- prefix)</Label>
                 <Input
                   value={linkCode}
                   onChange={(e) => setLinkCode(e.target.value.toUpperCase())}
