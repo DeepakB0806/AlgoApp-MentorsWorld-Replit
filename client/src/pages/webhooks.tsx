@@ -181,6 +181,19 @@ export default function Webhooks() {
     },
   });
 
+  const clearDataMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("DELETE", "/api/webhook-data/cleanup-all");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/webhook-data"] });
+      toast({ title: "All webhook data cleared successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to clear webhook data", variant: "destructive" });
+    },
+  });
+
   // Field configuration mutation
   const configureFieldsMutation = useMutation({
     mutationFn: async ({ id, fields }: { id: string; fields: string[] }) => {
@@ -840,6 +853,16 @@ export default function Webhooks() {
                 >
                   <Wrench className="w-4 h-4 mr-1" />
                   Configure
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => clearDataMutation.mutate()}
+                  disabled={clearDataMutation.isPending || webhookDataList.length === 0}
+                  data-testid="button-clear-webhook-data"
+                >
+                  <Trash2 className="w-4 h-4 mr-1" />
+                  {clearDataMutation.isPending ? "Clearing..." : "Clear All Data"}
                 </Button>
                 <Button
                   variant="outline"

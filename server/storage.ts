@@ -67,6 +67,8 @@ export interface IStorage {
   getLatestWebhookData(webhookId: string): Promise<WebhookData | undefined>;
   createWebhookData(data: InsertWebhookData): Promise<WebhookData>;
   markWebhookDataProcessed(id: string): Promise<WebhookData | undefined>;
+  deleteWebhookData(webhookId: string, daysToKeep: number): Promise<number>;
+  deleteAllWebhookData(): Promise<number>;
 
   // App Settings - persisted in database
   getSetting(key: string): Promise<AppSetting | undefined>;
@@ -441,6 +443,27 @@ export class DatabaseStorage implements IStorage {
       .where(eq(webhookData.id, id))
       .returning();
     return updated || undefined;
+  }
+
+  async deleteWebhookData(webhookId: string, daysToKeep: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+    
+    const result = await db.delete(webhookData)
+      .where(
+        and(
+          eq(webhookData.webhookId, webhookId),
+          lt(webhookData.receivedAt, cutoffDate.toISOString())
+        )
+      )
+      .returning();
+    
+    return result.length;
+  }
+
+  async deleteAllWebhookData(): Promise<number> {
+    const result = await db.delete(webhookData).returning();
+    return result.length;
   }
 
   // App Settings - PERSISTENT in PostgreSQL database

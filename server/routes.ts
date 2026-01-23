@@ -602,6 +602,27 @@ export async function registerRoutes(
     }
   });
 
+  // Delete webhook data logs
+  app.delete("/api/webhook-data/webhook/:webhookId/cleanup", async (req, res) => {
+    try {
+      const daysToKeep = parseInt(req.query.days as string) || 30;
+      const deletedCount = await storage.deleteWebhookData(req.params.webhookId, daysToKeep);
+      res.json({ success: true, deletedCount, daysToKeep });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to cleanup webhook data" });
+    }
+  });
+
+  // Delete all webhook data logs
+  app.delete("/api/webhook-data/cleanup-all", async (req, res) => {
+    try {
+      const deletedCount = await storage.deleteAllWebhookData();
+      res.json({ success: true, deletedCount });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to cleanup all webhook data" });
+    }
+  });
+
   // Test Webhook
   app.post("/api/webhooks/:id/test", async (req, res) => {
     const startTime = Date.now();
