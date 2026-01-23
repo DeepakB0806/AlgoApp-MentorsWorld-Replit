@@ -263,6 +263,92 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
   
+  // Customer self-signup (no invitation required)
+  app.post("/api/auth/customer/signup", async (req: Request, res: Response) => {
+    try {
+      const { email, password, firstName, lastName } = req.body;
+      
+      if (!email || !password) {
+        return res.status(400).json({ message: "Email and password are required" });
+      }
+      
+      if (password.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters" });
+      }
+      
+      // Check if email already exists
+      const [existingUser] = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, email.toLowerCase()));
+      
+      if (existingUser) {
+        return res.status(400).json({ message: "Email already registered" });
+      }
+      
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 12);
+      
+      // Check if this email should be Super Admin
+      const shouldBeSuperAdmin = isSuperAdmin("", email);
+      
+      // Create user with customer role (or super_admin if email matches)
+      const [newUser] = await db
+        .insert(users)
+        .values({
+          email: email.toLowerCase(),
+          role: shouldBeSuperAdmin ? "super_admin" : "customer",
+          password: hashedPassword,
+          firstName: firstName || null,
+          lastName: lastName || null,
+          emailVerified: true, // Skip email verification for now
+          isActive: true,
+          totpEnabled: false, // Customers don't require TOTP by default
+          totpVerified: false,
+        })
+        .returning();
+      
+      // Create session for the user
+      const sessionToken = crypto.randomBytes(32).toString("hex");
+      const sessionExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      
+      await db.update(users)
+        .set({
+          sessionToken,
+          sessionExpires,
+          lastLoginAt: new Date(),
+        })
+        .where(eq(users.id, newUser.id));
+      
+      // Set session cookie
+      res.cookie("team_session", sessionToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        path: "/",
+      });
+      
+      res.status(201).json({
+        message: "Account created successfully",
+        userId: newUser.id,
+        user: {
+          id: newUser.id,
+          email: newUser.email,
+          firstName: newUser.firstName,
+          lastName: newUser.lastName,
+          role: newUser.role,
+        },
+      });
+    } catch (error: any) {
+      console.error("Error in customer signup:", error);
+      if (error.code === "23505") {
+        return res.status(400).json({ message: "Email already registered" });
+      }
+      res.status(500).json({ message: "Failed to create account" });
+    }
+  });
+
   // Verify email
   app.get("/api/auth/verify-email/:token", async (req: Request, res: Response) => {
     try {

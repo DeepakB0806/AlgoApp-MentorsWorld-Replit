@@ -12,6 +12,7 @@ import Webhooks from "@/pages/webhooks";
 import BrokerApi from "@/pages/broker-api";
 import Login from "@/pages/login";
 import Register from "@/pages/register";
+import Signup from "@/pages/signup";
 import TotpSetup from "@/pages/totp-setup";
 import UserManagement from "@/pages/user-management";
 import NotFound from "@/pages/not-found";
@@ -21,6 +22,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/login" component={Login} />
+      <Route path="/signup" component={Signup} />
       <Route path="/register" component={Register} />
       <Route path="/totp-setup" component={TotpSetup} />
       
