@@ -2,6 +2,13 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertStrategySchema, insertWebhookSchema, insertBrokerConfigSchema } from "@shared/schema";
+
+// Helper to parse numeric values, handling empty strings and nulls
+function parseNumeric(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  const num = typeof value === "number" ? value : parseFloat(String(value));
+  return isNaN(num) ? undefined : num;
+}
 import { 
   testKotakNeoConnectivity, 
   authenticateKotakNeo,
@@ -196,25 +203,26 @@ export async function registerRoutes(
         executionTime: 0,
         ipAddress,
         userAgent,
-        timeUnix: payload.time_unix || payload.timeUnix,
-        exchange: payload.exchange || payload.exchan,
-        indices: payload.indices,
-        indicator: payload.indicator,
-        alert: payload.alert,
-        price: payload.price ? parseFloat(payload.price) : undefined,
-        localTime: payload.local_time || payload.localTime,
-        mode: payload.mode,
-        modeDesc: payload.mode_desc || payload.modeDesc,
-        firstLine: payload.first_line ? parseFloat(payload.first_line) : undefined,
-        midLine: payload.mid_line ? parseFloat(payload.mid_line) : undefined,
-        slowLine: payload.slow_line ? parseFloat(payload.slow_line) : undefined,
-        st: payload.st ? parseFloat(payload.st) : undefined,
-        ht: payload.ht ? parseFloat(payload.ht) : undefined,
-        rsi: payload.rsi ? parseFloat(payload.rsi) : undefined,
-        rsiScaled: payload.rsi_scaled ? parseFloat(payload.rsi_scaled) : undefined,
-        alertSystem: payload.alert_system || payload.alertSystem,
-        actionBinary: payload.action_binary !== undefined ? parseInt(payload.action_binary) : undefined,
-        lockState: payload.lock_state || payload.lockState,
+        timeUnix: parseNumeric(payload.time_unix || payload.timeUnix),
+        exchange: payload.exchange || payload.EXCHANGE || payload.exchan,
+        indices: payload.indices || payload.INDICES,
+        indicator: payload.indicator || payload.INDICATOR,
+        alert: payload.alert || payload.ALERT,
+        price: parseNumeric(payload.price || payload.PRICE),
+        localTime: payload.local_time || payload.localTime || payload.LOCAL_TIME,
+        mode: payload.mode || payload.MODE,
+        modeDesc: payload.mode_desc || payload.modeDesc || payload.MODE_DESC,
+        firstLine: parseNumeric(payload.first_line || payload.FIRST_LINE),
+        midLine: parseNumeric(payload.mid_line || payload.MID_LINE),
+        slowLine: parseNumeric(payload.slow_line || payload.SLOW_LINE),
+        st: parseNumeric(payload.st || payload.ST),
+        mt: parseNumeric(payload.mt || payload.MT),
+        ht: parseNumeric(payload.ht || payload.HT),
+        rsi: parseNumeric(payload.rsi || payload.RSI),
+        rsiScaled: parseNumeric(payload.rsi_scaled || payload.RSI_SCALED),
+        alertSystem: payload.alert_system || payload.alertSystem || payload.ALERT_SYSTEM,
+        actionBinary: parseNumeric(payload.action_binary ?? payload.ACTION_BINARY),
+        lockState: payload.lock_state || payload.lockState || payload.LOCK_STATE,
       };
 
       // Log the webhook call
@@ -242,6 +250,7 @@ export async function registerRoutes(
         midLine: logData.midLine,
         slowLine: logData.slowLine,
         st: logData.st,
+        mt: logData.mt,
         ht: logData.ht,
         rsi: logData.rsi,
         rsiScaled: logData.rsiScaled,
