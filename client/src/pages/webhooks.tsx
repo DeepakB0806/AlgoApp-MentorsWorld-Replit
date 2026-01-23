@@ -684,8 +684,17 @@ export default function Webhooks() {
                         <div>
                           <CardTitle className="flex items-center gap-2 flex-wrap">
                             {webhook.name}
-                            <Badge variant="secondary" className="font-mono text-xs">
-                              {webhook.uniqueCode}
+                            <Badge 
+                              variant="secondary" 
+                              className="font-mono text-xs cursor-pointer" 
+                              onClick={() => {
+                                navigator.clipboard.writeText(webhook.id);
+                                toast({ title: "Webhook ID copied!" });
+                              }}
+                              title="Click to copy full ID"
+                              data-testid={`badge-code-${webhook.id}`}
+                            >
+                              {webhook.uniqueCode} ({webhook.id})
                             </Badge>
                             <Badge variant={webhook.isActive ? "default" : "secondary"}>
                               {webhook.isActive ? "Active" : "Inactive"}
