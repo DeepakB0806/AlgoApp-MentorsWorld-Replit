@@ -33,7 +33,7 @@ export default function Home() {
                 <TrendingUp className="w-6 h-6 text-primary" />
               </div>
               <h1 className="text-2xl font-bold text-foreground" data-testid="text-logo">
-                AlgoTrading
+                MentorsWorld AlgoTrading Platform
               </h1>
             </div>
             <div className="flex items-center gap-3">
@@ -63,16 +63,16 @@ export default function Home() {
           <div className="max-w-4xl mx-auto text-center">
             <div className="inline-flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-full px-4 py-2 mb-8">
               <Zap className="w-4 h-4 text-primary" />
-              <span className="text-sm font-medium text-primary">Powered by TradingView Alerts</span>
+              <span className="text-sm font-medium text-primary">Powered by Live Market Alerts</span>
             </div>
             
             <h2 className="text-5xl md:text-7xl font-bold text-foreground mb-6 leading-tight" data-testid="text-hero-title">
-              Automate Your
+              Automated
               <span className="block text-primary">Trading Strategy</span>
             </h2>
             
             <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto mb-10" data-testid="text-hero-description">
-              Connect TradingView alerts to your broker and execute trades automatically. No coding required.
+              Ready Strategies Deployed, You only subscribe.
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -114,7 +114,7 @@ export default function Home() {
               How It Works
             </h3>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Set up automated trading in three simple steps
+              Enrol & Subscribe
             </p>
           </div>
           
@@ -124,9 +124,9 @@ export default function Home() {
                 <Bell className="w-8 h-8 text-primary" />
               </div>
               <div className="text-sm font-medium text-primary mb-2">Step 1</div>
-              <h4 className="text-xl font-semibold text-foreground mb-3">Create Webhooks</h4>
+              <h4 className="text-xl font-semibold text-foreground mb-3">Generate Trade API code from Kotak Neo panel of Yours</h4>
               <p className="text-muted-foreground">
-                Generate webhook URLs to receive alerts from TradingView or any trading signal source
+                Generate Trade API code from Kotak Neo panel of Yours
               </p>
             </div>
             
