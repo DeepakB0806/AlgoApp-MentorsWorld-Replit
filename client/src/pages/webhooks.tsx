@@ -570,42 +570,42 @@ export default function Webhooks() {
                   <p className="text-muted-foreground text-center py-8" data-testid="text-no-data">No webhook data yet. Data will appear when webhooks receive alerts.</p>
                 ) : (
                   <div className="overflow-x-auto">
-                    <Table>
+                    <Table className="text-xs">
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="whitespace-nowrap">1. Time Unix</TableHead>
-                          <TableHead className="whitespace-nowrap">2. Exchange</TableHead>
-                          <TableHead className="whitespace-nowrap">3. Ticker (Indices)</TableHead>
-                          <TableHead className="whitespace-nowrap">4. Indicator</TableHead>
-                          <TableHead className="whitespace-nowrap">5. Action (Alert)</TableHead>
-                          <TableHead className="whitespace-nowrap">6. Price</TableHead>
-                          <TableHead className="whitespace-nowrap">7. Local Time</TableHead>
-                          <TableHead className="whitespace-nowrap">8. Mode</TableHead>
-                          <TableHead className="whitespace-nowrap">9. Mode Desc</TableHead>
-                          <TableHead className="whitespace-nowrap">10. Fast Line</TableHead>
-                          <TableHead className="whitespace-nowrap">11. Mid Line</TableHead>
-                          <TableHead className="whitespace-nowrap">12. Slow Line</TableHead>
-                          <TableHead className="whitespace-nowrap">13. ST</TableHead>
-                          <TableHead className="whitespace-nowrap">14. HT</TableHead>
-                          <TableHead className="whitespace-nowrap">15. RSI</TableHead>
-                          <TableHead className="whitespace-nowrap">16. RSI Scaled</TableHead>
-                          <TableHead className="whitespace-nowrap">17. Alert System</TableHead>
-                          <TableHead className="whitespace-nowrap">18. Action Binary</TableHead>
-                          <TableHead className="whitespace-nowrap">19. Lock State</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Unix</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Exch</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Ticker</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Indicator</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Alert</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Price</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Local Time</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Mode</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">ModeDesc</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Fast</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Mid</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Slow</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">ST</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">HT</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">RSI</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">RSI-S</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">AlertSys</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Bin</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Lock</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {webhookDataList.map((data) => (
                           <TableRow key={data.id} data-testid={`row-data-${data.id}`}>
-                            <TableCell className="text-xs whitespace-nowrap">{data.timeUnix ?? "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.exchange || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.indices || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.indicator || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.timeUnix ?? "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.exchange || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.indices || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.indicator || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">
                               {data.alert ? (
                                 <Badge 
                                   variant="default" 
-                                  className={`font-mono text-sm tracking-wide ${
+                                  className={`font-mono text-xs tracking-wide px-1 py-0 ${
                                     data.alert.toUpperCase().includes("SELL") 
                                       ? "bg-red-600 text-white" 
                                       : data.alert.toUpperCase().includes("BUY") 
@@ -617,20 +617,20 @@ export default function Webhooks() {
                                 </Badge>
                               ) : "-"}
                             </TableCell>
-                            <TableCell className="whitespace-nowrap">{data.price != null ? data.price : "-"}</TableCell>
-                            <TableCell className="text-xs whitespace-nowrap">{data.localTime || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.mode || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.modeDesc || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.firstLine != null ? data.firstLine : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.midLine != null ? data.midLine : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.slowLine != null ? data.slowLine : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.st != null ? data.st : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.ht != null ? data.ht : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.rsi != null ? data.rsi : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.rsiScaled != null ? data.rsiScaled : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.alertSystem || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.actionBinary != null ? data.actionBinary : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.lockState || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.price != null ? data.price : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.localTime || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.mode || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.modeDesc || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.firstLine != null ? data.firstLine : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.midLine != null ? data.midLine : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.slowLine != null ? data.slowLine : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.st != null ? data.st : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.ht != null ? data.ht : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.rsi != null ? data.rsi : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.rsiScaled != null ? data.rsiScaled : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.alertSystem || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.actionBinary != null ? data.actionBinary : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap px-1 py-1">{data.lockState || "-"}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
