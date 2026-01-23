@@ -43,7 +43,7 @@
                         Sign In
                       </Button>
                     </Link>
-                    <Link href="/login">
+                    <Link href="/register">
                       <Button data-testid="button-get-started-header">
                         Get Started
                         <ArrowRight className="w-4 h-4 ml-2" />
@@ -76,7 +76,7 @@
                   </p>
 
                   <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                    <Link href="/login">
+                    <Link href="/register">
                       <Button size="lg" data-testid="button-get-started">
                         Start Trading Automatically
                         <ArrowRight className="ml-2 h-5 w-5" />
@@ -227,7 +227,7 @@
                   <p className="text-lg text-muted-foreground mb-10">
                     Join traders who have automated their TradingView strategies with our platform
                   </p>
-                  <Link href="/login">
+                  <Link href="/register">
                     <Button size="lg" data-testid="button-cta-bottom">
                       Get Started Now
                       <ArrowRight className="ml-2 h-5 w-5" />
