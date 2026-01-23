@@ -2,7 +2,7 @@ import { randomUUID, randomBytes } from "crypto";
 import { eq, desc, and, lt } from "drizzle-orm";
 import { db } from "./db";
 import { 
-  strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs,
+  strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -10,6 +10,7 @@ import {
   type WebhookData, type InsertWebhookData,
   type AppSetting, type InsertAppSetting,
   type BrokerConfig, type InsertBrokerConfig,
+  type WebhookRegistry, type InsertWebhookRegistry,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -36,9 +37,15 @@ export interface IStorage {
   getWebhooks(): Promise<Webhook[]>;
   getWebhook(id: string): Promise<Webhook | undefined>;
   getWebhookByUniqueCode(uniqueCode: string): Promise<Webhook | undefined>;
-  createWebhook(webhook: InsertWebhook): Promise<Webhook>;
+  createWebhook(webhook: InsertWebhook, createdBy?: string): Promise<Webhook>;
   updateWebhook(id: string, webhook: Partial<InsertWebhook>): Promise<Webhook | undefined>;
   deleteWebhook(id: string): Promise<boolean>;
+
+  // Webhook Registry - central table for all webhook codes (past and present)
+  getWebhookRegistry(): Promise<WebhookRegistry[]>;
+  getWebhookRegistryEntry(uniqueCode: string): Promise<WebhookRegistry | undefined>;
+  createWebhookRegistryEntry(entry: InsertWebhookRegistry): Promise<WebhookRegistry>;
+  markWebhookRegistryInactive(webhookId: string): Promise<WebhookRegistry | undefined>;
 
   // Webhook Logs - persisted in database
   getWebhookLogs(): Promise<WebhookLog[]>;
@@ -212,7 +219,7 @@ export class DatabaseStorage implements IStorage {
     return webhook || undefined;
   }
 
-  async createWebhook(insertWebhook: InsertWebhook): Promise<Webhook> {
+  async createWebhook(insertWebhook: InsertWebhook, createdBy?: string): Promise<Webhook> {
     const id = randomUUID();
     const uniqueCode = generateUniqueCode();
     const [webhook] = await db.insert(webhooks).values({
@@ -227,6 +234,18 @@ export class DatabaseStorage implements IStorage {
       lastTriggered: null,
       totalTriggers: 0,
     }).returning();
+    
+    // Also register in webhook registry for historical tracking
+    await this.createWebhookRegistryEntry({
+      uniqueCode,
+      webhookId: id,
+      webhookName: insertWebhook.name,
+      createdBy: createdBy ?? null,
+      isActive: true,
+      deletedAt: null,
+      notes: null,
+    });
+    
     return webhook;
   }
 
@@ -239,8 +258,47 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteWebhook(id: string): Promise<boolean> {
-    const result = await db.delete(webhooks).where(eq(webhooks.id, id));
+    // Mark registry entry as inactive before deleting
+    await this.markWebhookRegistryInactive(id);
+    await db.delete(webhooks).where(eq(webhooks.id, id));
     return true;
+  }
+
+  // Webhook Registry - PERSISTENT in PostgreSQL database
+  async getWebhookRegistry(): Promise<WebhookRegistry[]> {
+    return await db.select().from(webhookRegistry).orderBy(desc(webhookRegistry.createdAt));
+  }
+
+  async getWebhookRegistryEntry(uniqueCode: string): Promise<WebhookRegistry | undefined> {
+    const [entry] = await db.select().from(webhookRegistry).where(eq(webhookRegistry.uniqueCode, uniqueCode.toUpperCase()));
+    return entry || undefined;
+  }
+
+  async createWebhookRegistryEntry(entry: InsertWebhookRegistry): Promise<WebhookRegistry> {
+    const id = randomUUID();
+    const [registryEntry] = await db.insert(webhookRegistry).values({
+      id,
+      uniqueCode: entry.uniqueCode,
+      webhookId: entry.webhookId ?? null,
+      webhookName: entry.webhookName,
+      createdBy: entry.createdBy ?? null,
+      isActive: entry.isActive ?? true,
+      deletedAt: entry.deletedAt ?? null,
+      notes: entry.notes ?? null,
+    }).returning();
+    return registryEntry;
+  }
+
+  async markWebhookRegistryInactive(webhookId: string): Promise<WebhookRegistry | undefined> {
+    const [entry] = await db.update(webhookRegistry)
+      .set({ 
+        isActive: false, 
+        deletedAt: new Date(),
+        webhookId: null 
+      })
+      .where(eq(webhookRegistry.webhookId, webhookId))
+      .returning();
+    return entry || undefined;
   }
 
   // Webhook Logs - PERSISTENT in PostgreSQL database

@@ -222,6 +222,30 @@ export async function registerRoutes(
     res.json(defaultFields);
   });
 
+  // Webhook Registry - for super admin and team access
+  // Get all webhook registry entries (historical data)
+  app.get("/api/webhook-registry", async (req, res) => {
+    try {
+      const registry = await storage.getWebhookRegistry();
+      res.json(registry);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch webhook registry" });
+    }
+  });
+
+  // Lookup webhook by unique code from registry
+  app.get("/api/webhook-registry/:code", async (req, res) => {
+    try {
+      const entry = await storage.getWebhookRegistryEntry(req.params.code);
+      if (!entry) {
+        return res.status(404).json({ error: "Webhook code not found in registry" });
+      }
+      res.json(entry);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to lookup webhook code" });
+    }
+  });
+
   // Webhook Receiver Endpoint - receives TradingView alerts
   app.post("/api/webhook/:id", async (req, res) => {
     const startTime = Date.now();

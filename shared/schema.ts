@@ -1,4 +1,4 @@
-import { pgTable, text, varchar, integer, real, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, real, boolean, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -32,6 +32,24 @@ export type WebhookFieldConfig = {
   type: "text" | "number" | "timestamp"; // Data type
   order: number; // Display order
 };
+
+// Webhook Registry - Central table for all webhook unique codes (past and present)
+// Super admin and team members can access this for tracking and lookup
+export const webhookRegistry = pgTable("webhook_registry", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  uniqueCode: varchar("unique_code", { length: 8 }).notNull().unique(), // Globally unique code
+  webhookId: varchar("webhook_id", { length: 36 }), // Null if webhook deleted
+  webhookName: text("webhook_name").notNull(), // Name at time of creation
+  createdBy: varchar("created_by", { length: 36 }), // User who created it
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  isActive: boolean("is_active").notNull().default(true), // False if webhook deleted
+  deletedAt: timestamp("deleted_at"), // When webhook was deleted (if applicable)
+  notes: text("notes"), // Optional notes/description
+});
+
+export const insertWebhookRegistrySchema = createInsertSchema(webhookRegistry).omit({ id: true, createdAt: true });
+export type InsertWebhookRegistry = z.infer<typeof insertWebhookRegistrySchema>;
+export type WebhookRegistry = typeof webhookRegistry.$inferSelect;
 
 // Webhook Configuration
 export const webhooks = pgTable("webhooks", {

@@ -49,6 +49,8 @@ shared/
 - `POST /api/webhooks/:id/test` - Test a webhook (records response time)
 - `DELETE /api/webhooks/:id/logs/cleanup` - Delete logs older than X days
 - `POST /api/webhook/:id` - Receive TradingView webhook alerts
+- `GET /api/webhook-registry` - Get all webhook registry entries (super admin/team only)
+- `GET /api/webhook-registry/:code` - Lookup webhook by unique code from registry
 - `GET /api/webhook-data` - Get all webhook data for strategies
 - `GET /api/webhook-data/webhook/:webhookId` - Get webhook data by webhook ID
 - `GET /api/webhook-data/strategy/:strategyId` - Get webhook data by strategy ID
@@ -116,6 +118,11 @@ The application implements the official Kotak Neo Trade API based on the Postman
   - TradingView fields: exchange, indicator, alert, price, actionBinary, rsi, mode, etc.
   - Status logs: Test results, status codes, error messages
   - App settings: Domain name for auto-generated webhook URLs
+- **Webhook Registry**: Central table for all webhook unique codes (past and present)
+  - Stores: unique_code, webhook_id, webhook_name, created_by, is_active, deleted_at
+  - Preserves historical record even after webhook deletion
+  - Super admin and team members can access for tracking and lookup
+  - Ensures unique codes are never reused
 - **Webhook Data**: Separate database table for incoming JSON data from webhooks
   - Stores: Raw payload, parsed TradingView fields, signal type (buy/sell/hold)
   - Links to webhooks and strategies for easy data access
