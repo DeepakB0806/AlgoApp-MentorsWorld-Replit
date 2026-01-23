@@ -573,25 +573,25 @@ export default function Webhooks() {
                     <Table className="text-xs">
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Unix</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Exch</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Ticker</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Time Unix</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Exchange</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Ticker (Indices)</TableHead>
                           <TableHead className="whitespace-nowrap px-1 py-1">Indicator</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Alert</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Action (Alert)</TableHead>
                           <TableHead className="whitespace-nowrap px-1 py-1">Price</TableHead>
                           <TableHead className="whitespace-nowrap px-1 py-1">Local Time</TableHead>
                           <TableHead className="whitespace-nowrap px-1 py-1">Mode</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">ModeDesc</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Fast</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Mid</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Slow</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">ST</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">HT</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Mode Desc</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Fast Line</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Mid Line</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Slow Line</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Supertrend (ST)</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Half Trend (HT)</TableHead>
                           <TableHead className="whitespace-nowrap px-1 py-1">RSI</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">RSI-S</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">AlertSys</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Bin</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Lock</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">RSI Scaled</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Alert System</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Action Binary</TableHead>
+                          <TableHead className="whitespace-nowrap px-1 py-1">Lock State</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
