@@ -891,27 +891,26 @@ export default function Webhooks() {
                   {getFieldConfig(selectedWebhook).length} fields from incoming webhook data
                 </SheetDescription>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-1">
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   onClick={() => selectedWebhook && handleConfigureFields(selectedWebhook)}
                   data-testid="button-configure-from-panel"
+                  title="Configure fields"
                 >
-                  <Wrench className="w-4 h-4 mr-1" />
-                  Configure
+                  <Wrench className="w-4 h-4" />
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="outline"
-                      size="sm"
+                      size="icon"
                       disabled={clearDataMutation.isPending || webhookDataList.length === 0}
                       data-testid="button-clear-webhook-data"
+                      title="Clear data"
                     >
-                      <Trash2 className="w-4 h-4 mr-1" />
-                      {clearDataMutation.isPending ? "Clearing..." : "Clear Data"}
-                      <ChevronDown className="w-4 h-4 ml-1" />
+                      <Trash2 className="w-4 h-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
@@ -931,12 +930,12 @@ export default function Webhooks() {
                 </DropdownMenu>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   onClick={() => setDataExpandedView(!dataExpandedView)}
                   data-testid="button-expand-data"
+                  title={dataExpandedView ? "Collapse" : "Expand"}
                 >
-                  <ExternalLink className="w-4 h-4 mr-1" />
-                  {dataExpandedView ? "Collapse" : "Expand"}
+                  <ExternalLink className="w-4 h-4" />
                 </Button>
               </div>
             </div>
