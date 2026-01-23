@@ -1,0 +1,1518 @@
+# Indicator Webhook Management Application - Complete Code
+
+This document contains all the code for your Indicator Webhook Management application built with Next.js, TypeScript, and Supabase.
+
+---
+
+## Table of Contents
+
+1. [Database Schema](#database-schema)
+2. [API Routes](#api-routes)
+3. [Services](#services)
+4. [UI Pages](#ui-pages)
+5. [Usage Examples](#usage-examples)
+
+---
+
+## Database Schema
+
+### Tables Created
+
+#### 1. `webhooks` Table
+Stores webhook configurations and metadata.
+
+```sql
+CREATE TABLE webhooks (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  url TEXT NOT NULL,
+  secret_key TEXT NOT NULL,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- RLS Policies
+ALTER TABLE webhooks ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own webhooks" 
+  ON webhooks FOR SELECT 
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own webhooks" 
+  ON webhooks FOR INSERT 
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own webhooks" 
+  ON webhooks FOR UPDATE 
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own webhooks" 
+  ON webhooks FOR DELETE 
+  USING (auth.uid() = user_id);
+```
+
+#### 2. `webhook_logs` Table
+Stores all webhook execution logs and payloads.
+
+```sql
+CREATE TABLE webhook_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  webhook_id UUID NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  response_data JSONB,
+  error_message TEXT,
+  ip_address TEXT,
+  user_agent TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Index for faster queries
+CREATE INDEX idx_webhook_logs_webhook_id ON webhook_logs(webhook_id);
+CREATE INDEX idx_webhook_logs_created_at ON webhook_logs(created_at DESC);
+CREATE INDEX idx_webhook_logs_status ON webhook_logs(status);
+
+-- RLS Policies
+ALTER TABLE webhook_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view logs for their webhooks" 
+  ON webhook_logs FOR SELECT 
+  USING (
+    EXISTS (
+      SELECT 1 FROM webhooks 
+      WHERE webhooks.id = webhook_logs.webhook_id 
+      AND webhooks.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Allow insert webhook logs" 
+  ON webhook_logs FOR INSERT 
+  WITH CHECK (true);
+```
+
+---
+
+## API Routes
+
+### 1. Webhook Receiver API - `/api/webhook/[id].ts`
+
+This is the main webhook endpoint that receives POST requests from TradingView or other platforms.
+
+```typescript
+import type { NextApiRequest, NextApiResponse } from "next";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+
+type WebhookLog = Database["public"]["Tables"]["webhook_logs"]["Insert"];
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  // Only allow POST requests
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const webhookId = req.query.id as string;
+
+  if (!webhookId) {
+    return res.status(400).json({ error: "Webhook ID is required" });
+  }
+
+  try {
+    console.log(`[Webhook ${webhookId}] Received request`);
+    console.log(`[Webhook ${webhookId}] Headers:`, req.headers);
+    console.log(`[Webhook ${webhookId}] Body:`, req.body);
+
+    // Get webhook configuration
+    const { data: webhook, error: webhookError } = await supabase
+      .from("webhooks")
+      .select("*")
+      .eq("id", webhookId)
+      .single();
+
+    if (webhookError || !webhook) {
+      console.error(`[Webhook ${webhookId}] Not found:`, webhookError);
+      await logWebhookExecution(webhookId, "failed", req.body, null, "Webhook not found", req);
+      return res.status(404).json({ error: "Webhook not found" });
+    }
+
+    // Check if webhook is active
+    if (!webhook.is_active) {
+      console.log(`[Webhook ${webhookId}] Inactive`);
+      await logWebhookExecution(webhookId, "failed", req.body, null, "Webhook is inactive", req);
+      return res.status(403).json({ error: "Webhook is inactive" });
+    }
+
+    // Verify secret key if provided in headers
+    const providedSecret = req.headers["x-webhook-secret"] as string;
+    if (providedSecret && providedSecret !== webhook.secret_key) {
+      console.error(`[Webhook ${webhookId}] Invalid secret key`);
+      await logWebhookExecution(webhookId, "failed", req.body, null, "Invalid secret key", req);
+      return res.status(401).json({ error: "Invalid secret key" });
+    }
+
+    // Process webhook payload
+    const payload = req.body;
+
+    // Here you can add custom logic to process the webhook
+    // For example: place orders, trigger strategies, send notifications, etc.
+    console.log(`[Webhook ${webhookId}] Processing payload:`, payload);
+
+    // Log successful execution
+    await logWebhookExecution(webhookId, "success", payload, { processed: true }, null, req);
+
+    return res.status(200).json({
+      success: true,
+      message: "Webhook received and processed successfully",
+      webhookId,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(`[Webhook ${webhookId}] Error:`, error);
+    await logWebhookExecution(
+      webhookId,
+      "failed",
+      req.body,
+      null,
+      error instanceof Error ? error.message : "Unknown error",
+      req
+    );
+    return res.status(500).json({
+      error: "Internal server error",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+// Helper function to log webhook execution
+async function logWebhookExecution(
+  webhookId: string,
+  status: string,
+  payload: any,
+  responseData: any,
+  errorMessage: string | null,
+  req: NextApiRequest
+) {
+  try {
+    const logEntry: WebhookLog = {
+      webhook_id: webhookId,
+      status,
+      payload,
+      response_data: responseData,
+      error_message: errorMessage,
+      ip_address: (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || null,
+      user_agent: req.headers["user-agent"] || null,
+    };
+
+    const { error } = await supabase.from("webhook_logs").insert(logEntry);
+
+    if (error) {
+      console.error(`[Webhook ${webhookId}] Failed to log execution:`, error);
+    } else {
+      console.log(`[Webhook ${webhookId}] Execution logged successfully`);
+    }
+  } catch (error) {
+    console.error(`[Webhook ${webhookId}] Error logging execution:`, error);
+  }
+}
+```
+
+### 2. Test Webhook API - `/api/webhook/test.ts`
+
+Used to send test webhooks from the UI.
+
+```typescript
+import type { NextApiRequest, NextApiResponse } from "next";
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const { webhookUrl, payload, secretKey } = req.body;
+
+  if (!webhookUrl) {
+    return res.status(400).json({ error: "Webhook URL is required" });
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (secretKey) {
+      headers["x-webhook-secret"] = secretKey;
+    }
+
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload || {}),
+    });
+
+    const responseData = await response.json();
+
+    return res.status(200).json({
+      success: response.ok,
+      status: response.status,
+      data: responseData,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "Failed to send test webhook",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+```
+
+### 3. General Test Webhook API - `/api/test-webhook.ts`
+
+Alternative test endpoint with extended functionality.
+
+```typescript
+import type { NextApiRequest, NextApiResponse } from "next";
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  try {
+    const { webhookUrl, payload, secretKey } = req.body;
+
+    if (!webhookUrl) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Webhook URL is required" 
+      });
+    }
+
+    console.log("[Test Webhook] Sending to:", webhookUrl);
+    console.log("[Test Webhook] Payload:", payload);
+
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+
+    if (secretKey) {
+      headers["x-webhook-secret"] = secretKey;
+    }
+
+    const startTime = Date.now();
+    
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload || {
+        test: true,
+        timestamp: new Date().toISOString(),
+        message: "Test webhook from application"
+      }),
+    });
+
+    const endTime = Date.now();
+    const responseTime = endTime - startTime;
+
+    let responseData;
+    const contentType = response.headers.get("content-type");
+    
+    if (contentType && contentType.includes("application/json")) {
+      responseData = await response.json();
+    } else {
+      responseData = await response.text();
+    }
+
+    console.log("[Test Webhook] Response:", {
+      status: response.status,
+      statusText: response.statusText,
+      data: responseData,
+      responseTime: `${responseTime}ms`
+    });
+
+    return res.status(200).json({
+      success: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      data: responseData,
+      responseTime: `${responseTime}ms`,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error("[Test Webhook] Error:", error);
+    
+    return res.status(500).json({
+      success: false,
+      error: "Failed to send test webhook",
+      details: error instanceof Error ? error.message : "Unknown error",
+      timestamp: new Date().toISOString()
+    });
+  }
+}
+```
+
+---
+
+## Services
+
+### Webhook Log Service - `src/services/webhookLogService.ts`
+
+Service layer for managing webhook logs with type-safe database operations.
+
+```typescript
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+
+type WebhookLog = Database["public"]["Tables"]["webhook_logs"]["Row"];
+type WebhookLogInsert = Database["public"]["Tables"]["webhook_logs"]["Insert"];
+
+export interface WebhookLogWithWebhook extends WebhookLog {
+  webhooks: {
+    id: string;
+    name: string;
+    url: string;
+  } | null;
+}
+
+export interface WebhookLogFilters {
+  webhookId?: string;
+  status?: string;
+  startDate?: string;
+  endDate?: string;
+  search?: string;
+}
+
+export interface WebhookLogStats {
+  total: number;
+  success: number;
+  failed: number;
+  successRate: number;
+}
+
+/**
+ * Fetch webhook logs with optional filters
+ */
+export async function fetchWebhookLogs(
+  userId: string,
+  filters?: WebhookLogFilters,
+  limit: number = 50,
+  offset: number = 0
+): Promise<{ logs: WebhookLogWithWebhook[]; count: number; error: Error | null }> {
+  try {
+    let query = supabase
+      .from("webhook_logs")
+      .select(
+        `
+        *,
+        webhooks!inner (
+          id,
+          name,
+          url,
+          user_id
+        )
+      `,
+        { count: "exact" }
+      )
+      .eq("webhooks.user_id", userId)
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    // Apply filters
+    if (filters?.webhookId) {
+      query = query.eq("webhook_id", filters.webhookId);
+    }
+
+    if (filters?.status) {
+      query = query.eq("status", filters.status);
+    }
+
+    if (filters?.startDate) {
+      query = query.gte("created_at", filters.startDate);
+    }
+
+    if (filters?.endDate) {
+      query = query.lte("created_at", filters.endDate);
+    }
+
+    if (filters?.search) {
+      query = query.or(
+        `payload::text.ilike.%${filters.search}%,error_message.ilike.%${filters.search}%`
+      );
+    }
+
+    const { data, error, count } = await query;
+
+    if (error) {
+      console.error("[WebhookLogService] Error fetching logs:", error);
+      return { logs: [], count: 0, error };
+    }
+
+    return {
+      logs: (data as WebhookLogWithWebhook[]) || [],
+      count: count || 0,
+      error: null,
+    };
+  } catch (error) {
+    console.error("[WebhookLogService] Unexpected error:", error);
+    return {
+      logs: [],
+      count: 0,
+      error: error instanceof Error ? error : new Error("Unknown error"),
+    };
+  }
+}
+
+/**
+ * Fetch a single webhook log by ID
+ */
+export async function fetchWebhookLogById(
+  logId: string,
+  userId: string
+): Promise<{ log: WebhookLogWithWebhook | null; error: Error | null }> {
+  try {
+    const { data, error } = await supabase
+      .from("webhook_logs")
+      .select(
+        `
+        *,
+        webhooks!inner (
+          id,
+          name,
+          url,
+          user_id
+        )
+      `
+      )
+      .eq("id", logId)
+      .eq("webhooks.user_id", userId)
+      .single();
+
+    if (error) {
+      console.error("[WebhookLogService] Error fetching log:", error);
+      return { log: null, error };
+    }
+
+    return { log: data as WebhookLogWithWebhook, error: null };
+  } catch (error) {
+    console.error("[WebhookLogService] Unexpected error:", error);
+    return {
+      log: null,
+      error: error instanceof Error ? error : new Error("Unknown error"),
+    };
+  }
+}
+
+/**
+ * Get webhook log statistics
+ */
+export async function fetchWebhookLogStats(
+  userId: string,
+  webhookId?: string,
+  startDate?: string,
+  endDate?: string
+): Promise<{ stats: WebhookLogStats | null; error: Error | null }> {
+  try {
+    let query = supabase
+      .from("webhook_logs")
+      .select(
+        `
+        status,
+        webhooks!inner (
+          user_id
+        )
+      `
+      )
+      .eq("webhooks.user_id", userId);
+
+    if (webhookId) {
+      query = query.eq("webhook_id", webhookId);
+    }
+
+    if (startDate) {
+      query = query.gte("created_at", startDate);
+    }
+
+    if (endDate) {
+      query = query.lte("created_at", endDate);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("[WebhookLogService] Error fetching stats:", error);
+      return { stats: null, error };
+    }
+
+    const total = data?.length || 0;
+    const success = data?.filter((log) => log.status === "success").length || 0;
+    const failed = data?.filter((log) => log.status === "failed").length || 0;
+    const successRate = total > 0 ? (success / total) * 100 : 0;
+
+    return {
+      stats: {
+        total,
+        success,
+        failed,
+        successRate,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error("[WebhookLogService] Unexpected error:", error);
+    return {
+      stats: null,
+      error: error instanceof Error ? error : new Error("Unknown error"),
+    };
+  }
+}
+
+/**
+ * Delete webhook logs older than specified days
+ */
+export async function deleteOldWebhookLogs(
+  userId: string,
+  daysToKeep: number = 30
+): Promise<{ deletedCount: number; error: Error | null }> {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+    // First get the webhook IDs for this user
+    const { data: webhooks, error: webhooksError } = await supabase
+      .from("webhooks")
+      .select("id")
+      .eq("user_id", userId);
+
+    if (webhooksError) {
+      console.error("[WebhookLogService] Error fetching webhooks:", webhooksError);
+      return { deletedCount: 0, error: webhooksError };
+    }
+
+    const webhookIds = webhooks?.map((w) => w.id) || [];
+
+    if (webhookIds.length === 0) {
+      return { deletedCount: 0, error: null };
+    }
+
+    // Delete old logs for these webhooks
+    const { data, error } = await supabase
+      .from("webhook_logs")
+      .delete()
+      .in("webhook_id", webhookIds)
+      .lt("created_at", cutoffDate.toISOString())
+      .select();
+
+    if (error) {
+      console.error("[WebhookLogService] Error deleting old logs:", error);
+      return { deletedCount: 0, error };
+    }
+
+    return { deletedCount: data?.length || 0, error: null };
+  } catch (error) {
+    console.error("[WebhookLogService] Unexpected error:", error);
+    return {
+      deletedCount: 0,
+      error: error instanceof Error ? error : new Error("Unknown error"),
+    };
+  }
+}
+
+/**
+ * Create a new webhook log entry
+ */
+export async function createWebhookLog(
+  logData: WebhookLogInsert
+): Promise<{ log: WebhookLog | null; error: Error | null }> {
+  try {
+    const { data, error } = await supabase
+      .from("webhook_logs")
+      .insert(logData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("[WebhookLogService] Error creating log:", error);
+      return { log: null, error };
+    }
+
+    return { log: data, error: null };
+  } catch (error) {
+    console.error("[WebhookLogService] Unexpected error:", error);
+    return {
+      log: null,
+      error: error instanceof Error ? error : new Error("Unknown error"),
+    };
+  }
+}
+```
+
+---
+
+## UI Pages
+
+### 1. Webhooks Management Page - `src/pages/webhooks.tsx`
+
+Main page for creating and managing webhooks (898 lines - showing key sections).
+
+```typescript
+import { useState, useEffect } from "react";
+import { useRouter } from "next/router";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
+import { 
+  Plus, 
+  Copy, 
+  Eye, 
+  EyeOff, 
+  Trash2, 
+  Edit, 
+  Activity, 
+  CheckCircle2, 
+  XCircle, 
+  RefreshCw,
+  Send,
+  Code,
+  Terminal
+} from "lucide-react";
+
+type Webhook = Database["public"]["Tables"]["webhooks"]["Row"];
+
+export default function WebhooksPage() {
+  const router = useRouter();
+  const { toast } = useToast();
+
+  const [user, setUser] = useState<any>(null);
+  const [webhooks, setWebhooks] = useState<Webhook[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showSecretKey, setShowSecretKey] = useState<Record<string, boolean>>({});
+  const [testingWebhook, setTestingWebhook] = useState<string | null>(null);
+
+  // Form state
+  const [formData, setFormData] = useState({
+    name: "",
+    description: "",
+    url: "",
+  });
+
+  // Load user and webhooks
+  useEffect(() => {
+    loadUser();
+  }, []);
+
+  const loadUser = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+      setUser(user);
+      await loadWebhooks(user.id);
+    } catch (error) {
+      console.error("Error loading user:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load user data",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadWebhooks = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("webhooks")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      setWebhooks(data || []);
+    } catch (error) {
+      console.error("Error loading webhooks:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load webhooks",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const generateSecretKey = () => {
+    return Array.from({ length: 32 }, () =>
+      Math.random().toString(36).charAt(2)
+    ).join("");
+  };
+
+  const handleCreateWebhook = async () => {
+    if (!user) return;
+
+    try {
+      const secretKey = generateSecretKey();
+      const webhookUrl = `${window.location.origin}/api/webhook`;
+
+      const { data, error } = await supabase
+        .from("webhooks")
+        .insert({
+          user_id: user.id,
+          name: formData.name,
+          description: formData.description,
+          url: webhookUrl,
+          secret_key: secretKey,
+          is_active: true,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Webhook created successfully",
+      });
+
+      setShowCreateDialog(false);
+      setFormData({ name: "", description: "", url: "" });
+      await loadWebhooks(user.id);
+    } catch (error) {
+      console.error("Error creating webhook:", error);
+      toast({
+        title: "Error",
+        description: "Failed to create webhook",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleToggleActive = async (webhookId: string, currentStatus: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("webhooks")
+        .update({ is_active: !currentStatus })
+        .eq("id", webhookId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: `Webhook ${!currentStatus ? "activated" : "deactivated"}`,
+      });
+
+      if (user) await loadWebhooks(user.id);
+    } catch (error) {
+      console.error("Error toggling webhook:", error);
+      toast({
+        title: "Error",
+        description: "Failed to update webhook status",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteWebhook = async (webhookId: string) => {
+    if (!confirm("Are you sure you want to delete this webhook?")) return;
+
+    try {
+      const { error } = await supabase
+        .from("webhooks")
+        .delete()
+        .eq("id", webhookId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Webhook deleted successfully",
+      });
+
+      if (user) await loadWebhooks(user.id);
+    } catch (error) {
+      console.error("Error deleting webhook:", error);
+      toast({
+        title: "Error",
+        description: "Failed to delete webhook",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copied!",
+      description: `${label} copied to clipboard`,
+    });
+  };
+
+  const handleTestWebhook = async (webhook: Webhook) => {
+    setTestingWebhook(webhook.id);
+
+    try {
+      const testPayload = {
+        test: true,
+        timestamp: new Date().toISOString(),
+        message: "Test webhook from application",
+      };
+
+      const response = await fetch("/api/webhook/test", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          webhookUrl: `${webhook.url}/${webhook.id}`,
+          payload: testPayload,
+          secretKey: webhook.secret_key,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast({
+          title: "Test Successful",
+          description: "Webhook is working correctly",
+        });
+      } else {
+        toast({
+          title: "Test Failed",
+          description: result.error || "Webhook test failed",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("Error testing webhook:", error);
+      toast({
+        title: "Error",
+        description: "Failed to test webhook",
+        variant: "destructive",
+      });
+    } finally {
+      setTestingWebhook(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <RefreshCw className="h-8 w-8 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Webhooks</h1>
+            <p className="text-slate-600 mt-1">
+              Manage your indicator webhooks and view execution logs
+            </p>
+          </div>
+          <Button onClick={() => setShowCreateDialog(true)} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Create Webhook
+          </Button>
+        </div>
+
+        {/* Webhooks Grid */}
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {webhooks.map((webhook) => (
+            <Card key={webhook.id} className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <CardTitle className="text-lg">{webhook.name}</CardTitle>
+                    <CardDescription className="mt-1">
+                      {webhook.description || "No description"}
+                    </CardDescription>
+                  </div>
+                  <Badge variant={webhook.is_active ? "default" : "secondary"}>
+                    {webhook.is_active ? "Active" : "Inactive"}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Webhook URL */}
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-500">Webhook URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={`${webhook.url}/${webhook.id}`}
+                      readOnly
+                      className="text-xs font-mono"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => copyToClipboard(`${webhook.url}/${webhook.id}`, "Webhook URL")}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Secret Key */}
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-500">Secret Key</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type={showSecretKey[webhook.id] ? "text" : "password"}
+                      value={webhook.secret_key}
+                      readOnly
+                      className="text-xs font-mono"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setShowSecretKey({
+                          ...showSecretKey,
+                          [webhook.id]: !showSecretKey[webhook.id],
+                        })
+                      }
+                    >
+                      {showSecretKey[webhook.id] ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => copyToClipboard(webhook.secret_key, "Secret Key")}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => handleTestWebhook(webhook)}
+                    disabled={testingWebhook === webhook.id}
+                  >
+                    {testingWebhook === webhook.id ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                    <span className="ml-2">Test</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push(`/webhook-logs/${webhook.id}`)}
+                  >
+                    <Activity className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleToggleActive(webhook.id, webhook.is_active)}
+                  >
+                    {webhook.is_active ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-600" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-slate-400" />
+                    )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDeleteWebhook(webhook.id)}
+                  >
+                    <Trash2 className="h-4 w-4 text-red-600" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {/* Create Dialog */}
+        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Create New Webhook</DialogTitle>
+              <DialogDescription>
+                Create a new webhook to receive indicator signals
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Name</Label>
+                <Input
+                  id="name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="My TradingView Webhook"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="description">Description (Optional)</Label>
+                <Textarea
+                  id="description"
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Description of this webhook..."
+                  rows={3}
+                />
+              </div>
+              <div className="flex gap-2 pt-4">
+                <Button onClick={handleCreateWebhook} className="flex-1">
+                  Create Webhook
+                </Button>
+                <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
+  );
+}
+```
+
+### 2. Webhook Logs Page - `src/pages/webhook-logs/[id].tsx`
+
+Detailed logs page for a specific webhook (225 lines - showing key sections).
+
+```typescript
+import { useState, useEffect } from "react";
+import { useRouter } from "next/router";
+import { supabase } from "@/integrations/supabase/client";
+import { fetchWebhookLogs, fetchWebhookLogStats } from "@/services/webhookLogService";
+import type { WebhookLogWithWebhook, WebhookLogStats } from "@/services/webhookLogService";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
+import { ArrowLeft, RefreshCw, CheckCircle2, XCircle, Activity } from "lucide-react";
+
+export default function WebhookLogsPage() {
+  const router = useRouter();
+  const { id } = router.query;
+  const { toast } = useToast();
+
+  const [user, setUser] = useState<any>(null);
+  const [logs, setLogs] = useState<WebhookLogWithWebhook[]>([]);
+  const [stats, setStats] = useState<WebhookLogStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [webhookName, setWebhookName] = useState("");
+
+  useEffect(() => {
+    loadUser();
+  }, []);
+
+  useEffect(() => {
+    if (user && id) {
+      loadLogsAndStats();
+    }
+  }, [user, id]);
+
+  const loadUser = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+      setUser(user);
+    } catch (error) {
+      console.error("Error loading user:", error);
+    }
+  };
+
+  const loadLogsAndStats = async () => {
+    if (!user || !id) return;
+
+    setLoading(true);
+    try {
+      // Load logs
+      const { logs: fetchedLogs, error: logsError } = await fetchWebhookLogs(
+        user.id,
+        { webhookId: id as string },
+        100,
+        0
+      );
+
+      if (logsError) throw logsError;
+
+      setLogs(fetchedLogs);
+      if (fetchedLogs.length > 0 && fetchedLogs[0].webhooks) {
+        setWebhookName(fetchedLogs[0].webhooks.name);
+      }
+
+      // Load stats
+      const { stats: fetchedStats, error: statsError } = await fetchWebhookLogStats(
+        user.id,
+        id as string
+      );
+
+      if (statsError) throw statsError;
+
+      setStats(fetchedStats);
+    } catch (error) {
+      console.error("Error loading logs:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load webhook logs",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <RefreshCw className="h-8 w-8 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="sm" onClick={() => router.push("/webhooks")}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="flex-1">
+            <h1 className="text-3xl font-bold text-slate-900">Webhook Logs</h1>
+            <p className="text-slate-600 mt-1">{webhookName || "Loading..."}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={loadLogsAndStats}>
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Stats Cards */}
+        {stats && (
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-slate-600">
+                  Total Requests
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats.total}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-slate-600">
+                  Successful
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">{stats.success}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-slate-600">
+                  Failed
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-red-600">{stats.failed}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-slate-600">
+                  Success Rate
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {stats.successRate.toFixed(1)}%
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Logs Table */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Execution Logs</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {logs.length === 0 ? (
+              <div className="text-center py-12 text-slate-500">
+                <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No logs found for this webhook</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {logs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="border rounded-lg p-4 hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        {log.status === "success" ? (
+                          <CheckCircle2 className="h-5 w-5 text-green-600" />
+                        ) : (
+                          <XCircle className="h-5 w-5 text-red-600" />
+                        )}
+                        <Badge variant={log.status === "success" ? "default" : "destructive"}>
+                          {log.status}
+                        </Badge>
+                      </div>
+                      <span className="text-sm text-slate-500">
+                        {new Date(log.created_at).toLocaleString()}
+                      </span>
+                    </div>
+
+                    {/* Payload */}
+                    <div className="mt-2">
+                      <p className="text-xs text-slate-500 mb-1">Payload:</p>
+                      <pre className="text-xs bg-slate-100 p-2 rounded overflow-x-auto">
+                        {JSON.stringify(log.payload, null, 2)}
+                      </pre>
+                    </div>
+
+                    {/* Error Message */}
+                    {log.error_message && (
+                      <div className="mt-2">
+                        <p className="text-xs text-slate-500 mb-1">Error:</p>
+                        <p className="text-xs text-red-600 bg-red-50 p-2 rounded">
+                          {log.error_message}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Meta Info */}
+                    <div className="mt-2 flex gap-4 text-xs text-slate-500">
+                      {log.ip_address && <span>IP: {log.ip_address}</span>}
+                      {log.user_agent && (
+                        <span className="truncate max-w-xs">
+                          Agent: {log.user_agent}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## Usage Examples
+
+### Example 1: TradingView Alert Setup
+
+**1. Create Webhook in Application:**
+- Go to Webhooks page
+- Click "Create Webhook"
+- Enter name: "TradingView BTC Alerts"
+- Click "Create Webhook"
+- Copy the Webhook URL and Secret Key
+
+**2. Configure TradingView Alert:**
+- Open TradingView chart
+- Create alert
+- Set Alert Message to JSON format:
+```json
+{
+  "symbol": "{{ticker}}",
+  "price": "{{close}}",
+  "time": "{{time}}",
+  "interval": "{{interval}}",
+  "action": "{{strategy.order.action}}",
+  "contracts": "{{strategy.order.contracts}}"
+}
+```
+- In Webhook URL field, paste your webhook URL
+- Add header: `x-webhook-secret: YOUR_SECRET_KEY`
+- Save alert
+
+**3. Test the Webhook:**
+- Go back to your application
+- Click "Test" button on the webhook card
+- Check logs to verify it's working
+
+### Example 2: Custom Script Integration
+
+```python
+import requests
+import json
+
+webhook_url = "https://yourapp.com/api/webhook/YOUR_WEBHOOK_ID"
+secret_key = "YOUR_SECRET_KEY"
+
+payload = {
+    "symbol": "BTCUSDT",
+    "action": "BUY",
+    "quantity": 0.1,
+    "price": 45000,
+    "timestamp": "2024-01-20T10:30:00Z"
+}
+
+headers = {
+    "Content-Type": "application/json",
+    "x-webhook-secret": secret_key
+}
+
+response = requests.post(webhook_url, json=payload, headers=headers)
+print(response.json())
+```
+
+### Example 3: Monitoring Webhook Logs
+
+```typescript
+// Fetch logs programmatically using the service
+import { fetchWebhookLogs, fetchWebhookLogStats } from "@/services/webhookLogService";
+
+// Get recent logs
+const { logs, count } = await fetchWebhookLogs(
+  userId,
+  {
+    webhookId: "webhook-uuid",
+    status: "failed", // Filter by status
+    startDate: "2024-01-01",
+    endDate: "2024-01-31"
+  },
+  50, // limit
+  0   // offset
+);
+
+// Get statistics
+const { stats } = await fetchWebhookLogStats(
+  userId,
+  "webhook-uuid",
+  "2024-01-01",
+  "2024-01-31"
+);
+
+console.log(`Success Rate: ${stats.successRate}%`);
+```
+
+---
+
+## Environment Variables
+
+Add these to your `.env.local`:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+---
+
+## Deployment Notes
+
+1. **Vercel Deployment:**
+   - Webhooks will automatically work with your Vercel domain
+   - No additional configuration needed
+
+2. **Custom Domain:**
+   - Update webhook URLs in database if you change domains
+   - Or regenerate webhooks after domain change
+
+3. **Security:**
+   - Always use HTTPS in production
+   - Keep secret keys secure
+   - Implement rate limiting if needed
+   - Consider adding IP whitelisting for sensitive webhooks
+
+---
+
+## Features Summary
+
+✅ **Webhook Management:**
+- Create, update, delete webhooks
+- Toggle active/inactive status
+- Secure secret key generation
+- Copy URLs and keys with one click
+
+✅ **Logging System:**
+- Automatic logging of all webhook executions
+- Store payload, response, errors
+- IP address and user agent tracking
+- Detailed execution history
+
+✅ **Monitoring & Analytics:**
+- Success/failure statistics
+- Success rate calculation
+- Time-series log viewing
+- Filter logs by status, date, webhook
+
+✅ **Testing:**
+- Built-in webhook testing
+- Send test payloads
+- Verify connectivity
+- Debug with detailed logs
+
+✅ **Security:**
+- Secret key authentication
+- Row-level security (RLS)
+- User isolation
+- Secure credential storage
+
+---
+
+## Next Steps
+
+This code provides a complete foundation for your webhook management system. You can extend it with:
+
+1. **Rate Limiting**: Add rate limiting to webhook endpoints
+2. **Retry Logic**: Auto-retry failed webhook executions
+3. **Notifications**: Email/SMS alerts for failed webhooks
+4. **Advanced Filtering**: More sophisticated log filtering and search
+5. **Webhook Templates**: Pre-configured webhook templates for common use cases
+6. **Batch Operations**: Bulk webhook management operations
+
+---
+
+**End of Documentation**
