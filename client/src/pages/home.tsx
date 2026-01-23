@@ -100,7 +100,7 @@
                     </div>
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="w-5 h-5 text-primary" />
-                      <span>Real-time Execution under <50ms </span>
+                      <span>Real-time Execution under 50ms</span>
                     </div>
                   </div>
                 </div>
