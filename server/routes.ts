@@ -203,25 +203,43 @@ export async function registerRoutes(
         executionTime: 0,
         ipAddress,
         userAgent,
+        // 1. TIME AS PER UNIX (TIMESTAMP)
         timeUnix: parseNumeric(payload.time_unix ?? payload.timeUnix ?? payload.TIME_UNIX ?? payload.timestamp ?? payload.TIMESTAMP),
+        // 2. EXCHANGE
         exchange: payload.exchange || payload.EXCHANGE,
+        // 3. TICKER (INDICES)
         indices: payload.indices || payload.INDICES || payload.ticker || payload.TICKER,
+        // 4. INDICATOR
         indicator: payload.indicator || payload.INDICATOR,
+        // 5. ACTION (ALERT)
         alert: payload.alert || payload.ALERT || payload.action || payload.ACTION,
+        // 6. PRICE
         price: parseNumeric(payload.price ?? payload.PRICE),
-        localTime: payload.local_time || payload.localTime || payload.LOCAL_TIME || payload.local_Time,
+        // 7. LOCAL TIME
+        localTime: payload.local_time || payload.localTime || payload.LOCAL_TIME,
+        // 8. MODE
         mode: payload.mode || payload.MODE,
-        modeDesc: payload.mode_desc || payload.modeDesc || payload.MODE_DESC || payload.mode_Desc,
-        firstLine: parseNumeric(payload.first_line ?? payload.FIRST_LINE ?? payload.fast_line ?? payload.FAST_LINE ?? payload.firstLine),
+        // 9. MODE DESC
+        modeDesc: payload.mode_desc || payload.modeDesc || payload.MODE_DESC,
+        // 10. FAST LINE (FIRST LINE)
+        firstLine: parseNumeric(payload.first_line ?? payload.fast_line ?? payload.FIRST_LINE ?? payload.FAST_LINE ?? payload.firstLine ?? payload.fastLine),
+        // 11. MID LINE
         midLine: parseNumeric(payload.mid_line ?? payload.MID_LINE ?? payload.midLine),
+        // 12. SLOW LINE
         slowLine: parseNumeric(payload.slow_line ?? payload.SLOW_LINE ?? payload.slowLine),
+        // 13. SUPERTREND (ST)
         st: parseNumeric(payload.st ?? payload.ST ?? payload.supertrend ?? payload.SUPERTREND),
-        mt: parseNumeric(payload.mt ?? payload.MT),
+        // 14. HALF TREND (HT)
         ht: parseNumeric(payload.ht ?? payload.HT ?? payload.halftrend ?? payload.HALFTREND ?? payload.half_trend ?? payload.HALF_TREND),
+        // 15. RSI
         rsi: parseNumeric(payload.rsi ?? payload.RSI),
+        // 16. RSI SCALED
         rsiScaled: parseNumeric(payload.rsi_scaled ?? payload.RSI_SCALED ?? payload.rsiScaled),
+        // 17. ALERT SYSTEM
         alertSystem: payload.alert_system || payload.alertSystem || payload.ALERT_SYSTEM,
+        // 18. ACTION BINARY (ACTION TYPE)
         actionBinary: parseNumeric(payload.action_binary ?? payload.ACTION_BINARY ?? payload.actionBinary ?? payload.action_type ?? payload.ACTION_TYPE),
+        // 19. LOCK STATE
         lockState: payload.lock_state || payload.lockState || payload.LOCK_STATE,
       };
 
@@ -250,7 +268,6 @@ export async function registerRoutes(
         midLine: logData.midLine,
         slowLine: logData.slowLine,
         st: logData.st,
-        mt: logData.mt,
         ht: logData.ht,
         rsi: logData.rsi,
         rsiScaled: logData.rsiScaled,
