@@ -56,17 +56,25 @@ async function validateTeamSession(req: Request, res: Response, next: any) {
       return next(); // No team session, continue to next middleware
     }
     
+    // Find user by session token
     const [user] = await db
       .select()
       .from(users)
-      .where(and(
-        eq(users.sessionToken, sessionToken),
-        eq(users.isActive, true)
-      ));
+      .where(eq(users.sessionToken, sessionToken));
     
-    if (!user || !user.sessionExpires || new Date() > user.sessionExpires) {
+    if (!user) {
       res.clearCookie("team_session");
-      return next(); // Session expired or invalid
+      return next(); // Session not found
+    }
+    
+    if (!user.isActive) {
+      res.clearCookie("team_session");
+      return next(); // User deactivated
+    }
+    
+    if (!user.sessionExpires || new Date() > user.sessionExpires) {
+      res.clearCookie("team_session");
+      return next(); // Session expired
     }
     
     // Attach team user to request
