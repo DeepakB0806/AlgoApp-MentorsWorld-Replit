@@ -6,12 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save, Eye, EyeOff, Activity, Timer, Wrench, Upload, Link2, Unlink, RefreshCw } from "lucide-react";
+import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save, Eye, EyeOff, Activity, Timer, Wrench, Upload, Link2, Unlink, RefreshCw, ChevronDown } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -182,12 +183,15 @@ export default function Webhooks() {
   });
 
   const clearDataMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest("DELETE", "/api/webhook-data/cleanup-all");
+    mutationFn: async (days: number | "all") => {
+      if (days === "all") {
+        return apiRequest("DELETE", "/api/webhook-data/cleanup-all");
+      }
+      return apiRequest("DELETE", `/api/webhook-data/cleanup?days=${days}`);
     },
-    onSuccess: () => {
+    onSuccess: (_data, days) => {
       queryClient.invalidateQueries({ queryKey: ["/api/webhook-data"] });
-      toast({ title: "All webhook data cleared successfully" });
+      toast({ title: days === "all" ? "All webhook data cleared" : `Data older than ${days} days cleared` });
     },
     onError: () => {
       toast({ title: "Failed to clear webhook data", variant: "destructive" });
@@ -854,16 +858,34 @@ export default function Webhooks() {
                   <Wrench className="w-4 h-4 mr-1" />
                   Configure
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => clearDataMutation.mutate()}
-                  disabled={clearDataMutation.isPending || webhookDataList.length === 0}
-                  data-testid="button-clear-webhook-data"
-                >
-                  <Trash2 className="w-4 h-4 mr-1" />
-                  {clearDataMutation.isPending ? "Clearing..." : "Clear All Data"}
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={clearDataMutation.isPending || webhookDataList.length === 0}
+                      data-testid="button-clear-webhook-data"
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" />
+                      {clearDataMutation.isPending ? "Clearing..." : "Clear Data"}
+                      <ChevronDown className="w-4 h-4 ml-1" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => clearDataMutation.mutate(1)} data-testid="clear-data-1-day">
+                      Older than 1 day
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => clearDataMutation.mutate(7)} data-testid="clear-data-7-days">
+                      Older than 7 days
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => clearDataMutation.mutate(30)} data-testid="clear-data-30-days">
+                      Older than 30 days
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => clearDataMutation.mutate("all")} data-testid="clear-data-all" className="text-destructive">
+                      Clear All Data
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button
                   variant="outline"
                   size="sm"

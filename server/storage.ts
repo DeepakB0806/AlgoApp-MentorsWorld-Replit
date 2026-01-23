@@ -68,6 +68,7 @@ export interface IStorage {
   createWebhookData(data: InsertWebhookData): Promise<WebhookData>;
   markWebhookDataProcessed(id: string): Promise<WebhookData | undefined>;
   deleteWebhookData(webhookId: string, daysToKeep: number): Promise<number>;
+  deleteWebhookDataOlderThan(daysToKeep: number): Promise<number>;
   deleteAllWebhookData(): Promise<number>;
 
   // App Settings - persisted in database
@@ -456,6 +457,17 @@ export class DatabaseStorage implements IStorage {
           lt(webhookData.receivedAt, cutoffDate.toISOString())
         )
       )
+      .returning();
+    
+    return result.length;
+  }
+
+  async deleteWebhookDataOlderThan(daysToKeep: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+    
+    const result = await db.delete(webhookData)
+      .where(lt(webhookData.receivedAt, cutoffDate.toISOString()))
       .returning();
     
     return result.length;

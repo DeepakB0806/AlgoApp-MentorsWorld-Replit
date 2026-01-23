@@ -613,6 +613,17 @@ export async function registerRoutes(
     }
   });
 
+  // Delete webhook data older than X days (all webhooks)
+  app.delete("/api/webhook-data/cleanup", async (req, res) => {
+    try {
+      const daysToKeep = parseInt(req.query.days as string) || 30;
+      const deletedCount = await storage.deleteWebhookDataOlderThan(daysToKeep);
+      res.json({ success: true, deletedCount, daysToKeep });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to cleanup webhook data" });
+    }
+  });
+
   // Delete all webhook data logs
   app.delete("/api/webhook-data/cleanup-all", async (req, res) => {
     try {
