@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, ProtectedRoute } from "@/hooks/use-auth";
 import Home from "@/pages/home";
+import UserHome from "@/pages/user-home";
 import Dashboard from "@/pages/dashboard";
 import Strategies from "@/pages/strategies";
 import Webhooks from "@/pages/webhooks";
@@ -24,6 +25,11 @@ function Router() {
       <Route path="/totp-setup" component={TotpSetup} />
       
       {/* Protected routes - require authentication */}
+      <Route path="/user-home">
+        <ProtectedRoute allowedRoles={["super_admin", "team_member", "customer"]}>
+          <UserHome />
+        </ProtectedRoute>
+      </Route>
       <Route path="/dashboard">
         <ProtectedRoute allowedRoles={["super_admin", "team_member", "customer"]}>
           <Dashboard />
