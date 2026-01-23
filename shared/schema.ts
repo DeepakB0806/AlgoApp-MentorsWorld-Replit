@@ -66,6 +66,7 @@ export const webhooks = pgTable("webhooks", {
   fieldConfig: text("field_config"), // JSON array of WebhookFieldConfig
   dataTableName: text("data_table_name"), // Dynamic table name for this webhook's data
   linkedWebhookId: varchar("linked_webhook_id", { length: 36 }), // Link to production webhook by unique_code
+  linkedByWebhooks: text("linked_by_webhooks").array(), // Array of dev webhook codes that link to this production webhook
 });
 
 export const insertWebhookSchema = createInsertSchema(webhooks).omit({ id: true, uniqueCode: true });
