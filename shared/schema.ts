@@ -36,6 +36,7 @@ export type WebhookFieldConfig = {
 // Webhook Configuration
 export const webhooks = pgTable("webhooks", {
   id: varchar("id", { length: 36 }).primaryKey(),
+  uniqueCode: varchar("unique_code", { length: 8 }).notNull(), // Short unique code for linking (e.g., "WH-A1B2C3")
   name: text("name").notNull(),
   strategyId: varchar("strategy_id", { length: 36 }),
   webhookUrl: text("webhook_url").notNull(),
@@ -46,7 +47,7 @@ export const webhooks = pgTable("webhooks", {
   totalTriggers: integer("total_triggers").default(0),
   fieldConfig: text("field_config"), // JSON array of WebhookFieldConfig
   dataTableName: text("data_table_name"), // Dynamic table name for this webhook's data
-  linkedWebhookId: varchar("linked_webhook_id", { length: 36 }), // Link to production webhook for data stream
+  linkedWebhookId: varchar("linked_webhook_id", { length: 36 }), // Link to production webhook by unique_code
 });
 
 export const insertWebhookSchema = createInsertSchema(webhooks).omit({ id: true });

@@ -50,7 +50,7 @@ export default function Webhooks() {
   const [fieldConfigText, setFieldConfigText] = useState("");
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [linkingWebhook, setLinkingWebhook] = useState<WebhookType | null>(null);
-  const [selectedLinkedWebhookId, setSelectedLinkedWebhookId] = useState("");
+  const [linkCode, setLinkCode] = useState("");
 
   // Fetch domain name setting
   const { data: domainSetting } = useQuery<AppSetting>({
@@ -196,21 +196,22 @@ export default function Webhooks() {
     },
   });
 
-  // Link webhook to production data stream
+  // Link webhook to production data stream by unique code
   const linkMutation = useMutation({
-    mutationFn: async ({ id, linkedWebhookId }: { id: string; linkedWebhookId: string }) => {
-      return apiRequest("POST", `/api/webhooks/${id}/link`, { linkedWebhookId });
+    mutationFn: async ({ id, uniqueCode }: { id: string; uniqueCode: string }) => {
+      return apiRequest("POST", `/api/webhooks/${id}/link`, { uniqueCode });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/webhooks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/webhook-data"] });
       setIsLinkDialogOpen(false);
       setLinkingWebhook(null);
-      setSelectedLinkedWebhookId("");
+      setLinkCode("");
       toast({ title: "Webhook linked successfully" });
     },
-    onError: () => {
-      toast({ title: "Failed to link webhook", variant: "destructive" });
+    onError: (error: any) => {
+      const message = error?.message || "Failed to link webhook";
+      toast({ title: message, variant: "destructive" });
     },
   });
 
@@ -308,7 +309,7 @@ export default function Webhooks() {
 
   const handleLinkWebhook = (webhook: WebhookType) => {
     setLinkingWebhook(webhook);
-    setSelectedLinkedWebhookId(webhook.linkedWebhookId || "");
+    setLinkCode("");
     setIsLinkDialogOpen(true);
   };
 
@@ -319,11 +320,11 @@ export default function Webhooks() {
     return webhookDataList.filter(data => data.webhookId === effectiveWebhookId);
   };
 
-  // Get linked webhook name for display
-  const getLinkedWebhookName = (linkedWebhookId: string | null | undefined) => {
+  // Get linked webhook info for display
+  const getLinkedWebhookInfo = (linkedWebhookId: string | null | undefined) => {
     if (!linkedWebhookId) return null;
     const linked = webhooks.find(w => w.id === linkedWebhookId);
-    return linked?.name || linkedWebhookId;
+    return linked ? { name: linked.name, code: linked.uniqueCode } : { name: "Unknown", code: linkedWebhookId.slice(0, 6) };
   };
 
   // Default field configuration (19 fields)
@@ -624,8 +625,11 @@ export default function Webhooks() {
                     <CardHeader className="pb-2">
                       <div className="flex justify-between items-start gap-4 flex-wrap">
                         <div>
-                          <CardTitle className="flex items-center gap-2">
+                          <CardTitle className="flex items-center gap-2 flex-wrap">
                             {webhook.name}
+                            <Badge variant="secondary" className="font-mono text-xs">
+                              {webhook.uniqueCode}
+                            </Badge>
                             <Badge variant={webhook.isActive ? "default" : "secondary"}>
                               {webhook.isActive ? "Active" : "Inactive"}
                             </Badge>
@@ -1033,38 +1037,23 @@ export default function Webhooks() {
           <div className="grid gap-4 py-4">
             <div>
               <Label className="mb-2 block">Current Webhook: {linkingWebhook?.name}</Label>
-              <p className="text-xs text-muted-foreground mb-4">
-                ID: <code className="bg-muted px-1 rounded">{linkingWebhook?.id}</code>
+              <p className="text-xs text-muted-foreground mb-2">
+                Code: <code className="bg-muted px-1 rounded font-mono">{linkingWebhook?.uniqueCode}</code>
               </p>
             </div>
             <div>
-              <Label className="mb-2 block">Link to Webhook (Enter ID or Select)</Label>
+              <Label className="mb-2 block">Enter Production Webhook Code</Label>
               <Input
-                value={selectedLinkedWebhookId}
-                onChange={(e) => setSelectedLinkedWebhookId(e.target.value)}
-                placeholder="Enter production webhook ID"
-                className="mb-2"
-                data-testid="input-linked-webhook-id"
+                value={linkCode}
+                onChange={(e) => setLinkCode(e.target.value.toUpperCase())}
+                placeholder="e.g., SUN8C1"
+                className="font-mono uppercase"
+                maxLength={8}
+                data-testid="input-link-code"
               />
-              <Select
-                value={selectedLinkedWebhookId}
-                onValueChange={(value) => setSelectedLinkedWebhookId(value)}
-              >
-                <SelectTrigger data-testid="select-linked-webhook">
-                  <SelectValue placeholder="Or select from existing webhooks" />
-                </SelectTrigger>
-                <SelectContent>
-                  {webhooks
-                    .filter(w => w.id !== linkingWebhook?.id)
-                    .map((webhook) => (
-                      <SelectItem key={webhook.id} value={webhook.id}>
-                        {webhook.name} ({webhook.id.slice(0, 8)}...)
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
               <p className="text-xs text-muted-foreground mt-2">
-                Once linked, this webhook's data panel will show data from the linked webhook.
+                Enter the 6-character unique code of the production webhook you want to link to.
+                You can find this code displayed on each webhook card.
               </p>
             </div>
           </div>
@@ -1078,11 +1067,11 @@ export default function Webhooks() {
             </Button>
             <Button 
               onClick={() => {
-                if (linkingWebhook && selectedLinkedWebhookId) {
-                  linkMutation.mutate({ id: linkingWebhook.id, linkedWebhookId: selectedLinkedWebhookId });
+                if (linkingWebhook && linkCode.trim()) {
+                  linkMutation.mutate({ id: linkingWebhook.id, uniqueCode: linkCode.trim() });
                 }
               }}
-              disabled={!selectedLinkedWebhookId || linkMutation.isPending}
+              disabled={!linkCode.trim() || linkMutation.isPending}
               data-testid="button-save-link"
             >
               {linkMutation.isPending ? "Linking..." : "Link Webhook"}

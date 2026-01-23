@@ -422,21 +422,28 @@ export async function registerRoutes(
     }
   });
 
-  // Link webhook to production webhook data stream
+  // Link webhook to production webhook data stream by unique code
   app.post("/api/webhooks/:id/link", async (req, res) => {
     try {
-      const { linkedWebhookId } = req.body;
+      const { uniqueCode } = req.body;
       
-      if (!linkedWebhookId) {
-        return res.status(400).json({ error: "linkedWebhookId is required" });
+      if (!uniqueCode) {
+        return res.status(400).json({ error: "uniqueCode is required" });
       }
       
-      const webhook = await storage.updateWebhook(req.params.id, { linkedWebhookId });
+      // Find the production webhook by its unique code
+      const productionWebhook = await storage.getWebhookByUniqueCode(uniqueCode);
+      if (!productionWebhook) {
+        return res.status(404).json({ error: "No webhook found with that code" });
+      }
+      
+      // Link to the production webhook's ID
+      const webhook = await storage.updateWebhook(req.params.id, { linkedWebhookId: productionWebhook.id });
       if (!webhook) {
         return res.status(404).json({ error: "Webhook not found" });
       }
       
-      res.json({ success: true, webhook });
+      res.json({ success: true, webhook, linkedWebhook: productionWebhook });
     } catch (error) {
       res.status(500).json({ error: "Failed to link webhook" });
     }

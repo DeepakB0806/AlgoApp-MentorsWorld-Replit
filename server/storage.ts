@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomUUID, randomBytes } from "crypto";
 import { eq, desc, and, lt } from "drizzle-orm";
 import { db } from "./db";
 import { 
@@ -13,6 +13,17 @@ import {
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
+// Generate a short unique code for webhooks (6 alphanumeric chars)
+function generateUniqueCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Avoiding similar chars like 0/O, 1/I
+  let code = '';
+  const bytes = randomBytes(6);
+  for (let i = 0; i < 6; i++) {
+    code += chars[bytes[i] % chars.length];
+  }
+  return code;
+}
+
 export interface IStorage {
   // Strategies
   getStrategies(): Promise<Strategy[]>;
@@ -24,6 +35,7 @@ export interface IStorage {
   // Webhooks - persisted in database
   getWebhooks(): Promise<Webhook[]>;
   getWebhook(id: string): Promise<Webhook | undefined>;
+  getWebhookByUniqueCode(uniqueCode: string): Promise<Webhook | undefined>;
   createWebhook(webhook: InsertWebhook): Promise<Webhook>;
   updateWebhook(id: string, webhook: Partial<InsertWebhook>): Promise<Webhook | undefined>;
   deleteWebhook(id: string): Promise<boolean>;
@@ -194,10 +206,17 @@ export class DatabaseStorage implements IStorage {
     return webhook || undefined;
   }
 
+  async getWebhookByUniqueCode(uniqueCode: string): Promise<Webhook | undefined> {
+    const [webhook] = await db.select().from(webhooks).where(eq(webhooks.uniqueCode, uniqueCode.toUpperCase()));
+    return webhook || undefined;
+  }
+
   async createWebhook(insertWebhook: InsertWebhook): Promise<Webhook> {
     const id = randomUUID();
+    const uniqueCode = generateUniqueCode();
     const [webhook] = await db.insert(webhooks).values({
       id,
+      uniqueCode,
       name: insertWebhook.name,
       strategyId: insertWebhook.strategyId ?? null,
       webhookUrl: insertWebhook.webhookUrl,
