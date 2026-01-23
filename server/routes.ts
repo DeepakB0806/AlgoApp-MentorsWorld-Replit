@@ -246,6 +246,64 @@ export async function registerRoutes(
     }
   });
 
+  // Sync webhook registry from production
+  app.post("/api/webhook-registry/sync", async (req, res) => {
+    try {
+      const domainSetting = await storage.getSetting("domain_name");
+      if (!domainSetting || !domainSetting.value) {
+        return res.status(400).json({ error: "Production domain not configured. Please set domain name in settings." });
+      }
+      
+      const productionUrl = `https://${domainSetting.value}/api/webhook-registry`;
+      
+      // Fetch registry from production
+      const response = await fetch(productionUrl, {
+        headers: { "Accept": "application/json" },
+        signal: AbortSignal.timeout(10000), // 10 second timeout
+      });
+      
+      if (!response.ok) {
+        return res.status(502).json({ error: `Failed to fetch from production: ${response.status} ${response.statusText}` });
+      }
+      
+      const productionRegistry = await response.json() as any[];
+      
+      // Merge with local registry (upsert by unique_code)
+      let synced = 0;
+      let skipped = 0;
+      
+      for (const entry of productionRegistry) {
+        // Check if already exists locally
+        const existing = await storage.getWebhookRegistryEntry(entry.uniqueCode || entry.unique_code);
+        if (!existing) {
+          // Add to local registry
+          await storage.createWebhookRegistryEntry({
+            uniqueCode: entry.uniqueCode || entry.unique_code,
+            webhookId: entry.webhookId || entry.webhook_id,
+            webhookName: entry.webhookName || entry.webhook_name,
+            createdBy: entry.createdBy || entry.created_by || "production-sync",
+            isActive: entry.isActive ?? entry.is_active ?? true,
+            notes: `Synced from production on ${new Date().toISOString()}`,
+          });
+          synced++;
+        } else {
+          skipped++;
+        }
+      }
+      
+      res.json({ 
+        success: true, 
+        synced, 
+        skipped, 
+        total: productionRegistry.length,
+        message: `Synced ${synced} new webhooks from production (${skipped} already existed)` 
+      });
+    } catch (error: any) {
+      console.error("Sync error:", error);
+      res.status(500).json({ error: error.message || "Failed to sync webhook registry" });
+    }
+  });
+
   // Webhook Receiver Endpoint - receives TradingView alerts
   app.post("/api/webhook/:id", async (req, res) => {
     const startTime = Date.now();
@@ -457,6 +515,7 @@ export async function registerRoutes(
       
       let linkedId: string;
       let productionWebhook = null;
+      let registryEntry = null;
       
       if (webhookId) {
         // Direct link by webhook ID (for cross-database linking)
@@ -464,12 +523,24 @@ export async function registerRoutes(
         // Try to find the webhook locally for display, but don't fail if not found
         productionWebhook = await storage.getWebhook(webhookId);
       } else {
-        // Find the production webhook by its unique code (same database)
+        // First try to find the webhook locally by unique code
         productionWebhook = await storage.getWebhookByUniqueCode(uniqueCode);
-        if (!productionWebhook) {
-          return res.status(404).json({ error: "No webhook found with that code. If the webhook is in production (separate database), use the webhook ID instead." });
+        
+        if (productionWebhook) {
+          linkedId = productionWebhook.id;
+        } else {
+          // If not found locally, check the synced registry
+          registryEntry = await storage.getWebhookRegistryEntry(uniqueCode);
+          if (registryEntry && registryEntry.webhookId) {
+            // Use the webhook ID from the registry (synced from production)
+            linkedId = registryEntry.webhookId;
+          } else {
+            return res.status(404).json({ 
+              error: "No webhook found with that code. Try syncing from production first, or use the webhook ID directly.",
+              hint: "Click 'Sync from Production' to fetch the latest webhook codes."
+            });
+          }
         }
-        linkedId = productionWebhook.id;
       }
       
       // Link to the production webhook's ID
@@ -478,7 +549,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Webhook not found" });
       }
       
-      res.json({ success: true, webhook, linkedWebhook: productionWebhook });
+      res.json({ success: true, webhook, linkedWebhook: productionWebhook, registryEntry });
     } catch (error) {
       res.status(500).json({ error: "Failed to link webhook" });
     }
