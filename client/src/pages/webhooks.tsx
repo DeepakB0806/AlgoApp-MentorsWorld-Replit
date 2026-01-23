@@ -1197,13 +1197,13 @@ export default function Webhooks() {
             
             {linkMode === "code" ? (
               <div>
-                <Label className="mb-2 block">Enter Production Webhook Code (without P- prefix)</Label>
+                <Label className="mb-2 block">Enter Production Webhook Code (e.g., P-JZGLZS)</Label>
                 <Input
                   value={linkCode}
                   onChange={(e) => setLinkCode(e.target.value.toUpperCase())}
-                  placeholder="e.g., SUN8C1"
+                  placeholder="e.g., P-JZGLZS"
                   className="font-mono uppercase"
-                  maxLength={8}
+                  maxLength={10}
                   data-testid="input-link-code"
                 />
                 <p className="text-xs text-muted-foreground mt-2">

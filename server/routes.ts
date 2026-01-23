@@ -507,10 +507,15 @@ export async function registerRoutes(
   // Link webhook to production webhook data stream by unique code or webhook ID
   app.post("/api/webhooks/:id/link", async (req, res) => {
     try {
-      const { uniqueCode, webhookId } = req.body;
+      let { uniqueCode, webhookId } = req.body;
       
       if (!uniqueCode && !webhookId) {
         return res.status(400).json({ error: "Either uniqueCode or webhookId is required" });
+      }
+      
+      // Strip D- or P- prefix from uniqueCode if present
+      if (uniqueCode && (uniqueCode.startsWith("D-") || uniqueCode.startsWith("P-"))) {
+        uniqueCode = uniqueCode.substring(2);
       }
       
       let linkedId: string;
