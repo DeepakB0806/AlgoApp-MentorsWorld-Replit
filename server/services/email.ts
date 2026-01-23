@@ -5,7 +5,7 @@ const mailjet = new Mailjet({
   apiSecret: process.env.MAILJET_SECRET_KEY,
 });
 
-const FROM_EMAIL = "noreply@mentorsworld.org";
+const FROM_EMAIL = "webadmin@mentorsworld.org";
 const FROM_NAME = "AlgoTrading Platform";
 
 export interface EmailOptions {
