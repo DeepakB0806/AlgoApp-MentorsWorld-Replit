@@ -686,15 +686,38 @@ export default function Webhooks() {
                             {webhook.name}
                             <Badge 
                               variant="secondary" 
-                              className="font-mono text-xs cursor-pointer" 
-                              onClick={() => {
-                                navigator.clipboard.writeText(webhook.id);
-                                toast({ title: "Webhook ID copied!" });
-                              }}
-                              title="Click to copy full ID"
+                              className="font-mono text-xs flex items-center gap-1"
                               data-testid={`badge-code-${webhook.id}`}
                             >
-                              {webhook.uniqueCode} ({webhook.id})
+                              <span>{webhook.uniqueCode}</span>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-4 w-4 p-0 hover:bg-transparent"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigator.clipboard.writeText(webhook.uniqueCode);
+                                  toast({ title: "Short code copied!" });
+                                }}
+                                title="Copy short code"
+                              >
+                                <Copy className="w-3 h-3" />
+                              </Button>
+                              <span className="text-muted-foreground">|</span>
+                              <span className="truncate max-w-[180px]">{webhook.id}</span>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-4 w-4 p-0 hover:bg-transparent"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigator.clipboard.writeText(webhook.id);
+                                  toast({ title: "Webhook ID copied!" });
+                                }}
+                                title="Copy full ID"
+                              >
+                                <Copy className="w-3 h-3" />
+                              </Button>
                             </Badge>
                             <Badge variant={webhook.isActive ? "default" : "secondary"}>
                               {webhook.isActive ? "Active" : "Inactive"}
