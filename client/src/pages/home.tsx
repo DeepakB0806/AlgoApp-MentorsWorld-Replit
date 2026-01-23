@@ -32,7 +32,7 @@
                     <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
                       <TrendingUp className="w-6 h-6 text-primary" />
                     </div>
-                    <h1 className="text-2xl font-bold text-foreground" data-testid="text-logo">
+                    <h1 className="text-lg font-bold text-foreground" data-testid="text-logo">
                       MentorsWorld AlgoTrading Platform
                     </h1>
                   </div>
