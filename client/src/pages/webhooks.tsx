@@ -154,6 +154,20 @@ export default function Webhooks() {
     },
   });
 
+  const cleanupMutation = useMutation({
+    mutationFn: async ({ id, days }: { id: string; days: number }) => {
+      return apiRequest("DELETE", `/api/webhooks/${id}/logs/cleanup?days=${days}`);
+    },
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/webhooks", id, "status-logs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/webhooks", id, "stats"] });
+      toast({ title: "Old logs cleaned up successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to cleanup logs", variant: "destructive" });
+    },
+  });
+
   const resetForm = () => {
     setFormData({
       name: "",
@@ -627,7 +641,21 @@ export default function Webhooks() {
             )}
 
             <div className="space-y-2">
-              <h4 className="font-medium">Status Logs</h4>
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium">Status Logs</h4>
+                {statusLogs.length > 0 && selectedWebhook && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => cleanupMutation.mutate({ id: selectedWebhook.id, days: 30 })}
+                    disabled={cleanupMutation.isPending}
+                    data-testid="button-cleanup-logs"
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    Clean Old Logs
+                  </Button>
+                )}
+              </div>
               {statusLogs.length === 0 ? (
                 <p className="text-muted-foreground text-sm">No status logs yet</p>
               ) : (
