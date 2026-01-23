@@ -298,6 +298,7 @@ export function registerAuthRoutes(app: Express): void {
       const emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
       
       // Create user with customer role (or super_admin if email matches)
+      // Email verification bypassed - set emailVerified to true
       const [newUser] = await db
         .insert(users)
         .values({
@@ -306,7 +307,7 @@ export function registerAuthRoutes(app: Express): void {
           password: hashedPassword,
           firstName: firstName || null,
           lastName: lastName || null,
-          emailVerified: false,
+          emailVerified: true, // Bypassed - auto-verify for now
           emailVerificationToken,
           emailVerificationExpires,
           isActive: true,
@@ -315,21 +316,21 @@ export function registerAuthRoutes(app: Express): void {
         })
         .returning();
       
-      // Send verification email
-      const emailSent = await sendVerificationEmail(
-        email.toLowerCase(),
-        emailVerificationToken,
-        firstName
-      );
-      
-      if (!emailSent) {
-        console.error("Failed to send verification email to:", email);
-      }
+      // Email verification bypassed - skip sending verification email
+      // const emailSent = await sendVerificationEmail(
+      //   email.toLowerCase(),
+      //   emailVerificationToken,
+      //   firstName
+      // );
+      // 
+      // if (!emailSent) {
+      //   console.error("Failed to send verification email to:", email);
+      // }
       
       res.status(201).json({
-        message: "Account created! Please check your email to verify your account.",
+        message: "Account created successfully! You can now log in.",
         userId: newUser.id,
-        requiresEmailVerification: true,
+        requiresEmailVerification: false, // Bypassed
       });
     } catch (error: any) {
       console.error("Error in customer signup:", error);
@@ -676,14 +677,14 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "Invalid email or password" });
       }
       
-      // Check email verification
-      if (!user.emailVerified) {
-        return res.status(401).json({ 
-          message: "Please verify your email first",
-          requiresEmailVerification: true,
-          email: user.email,
-        });
-      }
+      // Email verification bypassed - skip check
+      // if (!user.emailVerified) {
+      //   return res.status(401).json({ 
+      //     message: "Please verify your email first",
+      //     requiresEmailVerification: true,
+      //     email: user.email,
+      //   });
+      // }
       
       // For team members, require TOTP
       if (user.role === "team_member" && user.totpEnabled) {

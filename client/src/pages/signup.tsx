@@ -5,8 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
-import { Lock, Mail, User, UserPlus, TrendingUp, Eye, EyeOff, CheckCircle, RefreshCw } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
+import { Lock, Mail, User, UserPlus, TrendingUp, Eye, EyeOff } from "lucide-react";
 
 export default function Signup() {
   const [firstName, setFirstName] = useState("");
@@ -17,8 +16,6 @@ export default function Signup() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [verificationPending, setVerificationPending] = useState(false);
-  const [resendingEmail, setResendingEmail] = useState(false);
   const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -62,17 +59,12 @@ export default function Signup() {
         throw new Error(data.message || "Signup failed");
       }
 
-      if (data.requiresEmailVerification) {
-        setVerificationPending(true);
-        toast({
-          title: "Check Your Email",
-          description: "We sent you a verification link. Please check your inbox.",
-        });
-      } else if (data.requiresTotpSetup) {
-        window.location.href = `/totp-setup?userId=${data.userId}`;
-      } else {
-        window.location.href = "/user-home";
-      }
+      // Account created successfully - redirect to login
+      toast({
+        title: "Account Created",
+        description: "Your account has been created. Please sign in.",
+      });
+      window.location.href = "/login";
     } catch (error: any) {
       toast({
         title: "Signup Failed",
@@ -83,97 +75,6 @@ export default function Signup() {
       setIsLoading(false);
     }
   };
-
-  const handleResendEmail = async () => {
-    setResendingEmail(true);
-    try {
-      await apiRequest("POST", "/api/auth/resend-verification", { email });
-      
-      toast({
-        title: "Email Sent",
-        description: "A new verification email has been sent. Please check your inbox.",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Failed to Resend",
-        description: error.message || "Could not resend verification email",
-        variant: "destructive",
-      });
-    } finally {
-      setResendingEmail(false);
-    }
-  };
-
-  if (verificationPending) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <Link href="/">
-              <div className="inline-flex items-center gap-3 cursor-pointer">
-                <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
-                  <TrendingUp className="w-6 h-6 text-primary" />
-                </div>
-                <h1 className="text-2xl font-bold text-foreground">
-                  MentorsWorld AlgoTrading
-                </h1>
-              </div>
-            </Link>
-          </div>
-
-          <Card>
-            <CardHeader className="text-center">
-              <div className="mx-auto w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-4">
-                <CheckCircle className="w-8 h-8 text-primary" />
-              </div>
-              <CardTitle data-testid="text-verification-title">Check Your Email</CardTitle>
-              <CardDescription>
-                We sent a verification link to <strong>{email}</strong>
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-6">
-              <div className="text-center text-sm text-muted-foreground">
-                <p>Click the link in your email to verify your account and get started.</p>
-                <p className="mt-2">The link will expire in 24 hours.</p>
-              </div>
-
-              <div className="border-t pt-6">
-                <p className="text-center text-sm text-muted-foreground mb-4">
-                  Did not receive the email? Check your spam folder or
-                </p>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={handleResendEmail}
-                  disabled={resendingEmail}
-                  data-testid="button-resend-email"
-                >
-                  {resendingEmail ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      Sending...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="w-4 h-4 mr-2" />
-                      Resend Verification Email
-                    </>
-                  )}
-                </Button>
-              </div>
-
-              <div className="text-center text-sm">
-                <Link href="/login" className="text-primary hover:underline" data-testid="link-back-to-login">
-                  Back to Sign In
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
