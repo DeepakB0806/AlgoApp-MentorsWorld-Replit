@@ -29,7 +29,10 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const queryKeyStr = typeof queryKey[0] === "string" ? queryKey[0] : queryKey.join("/");
+    // Join array query keys into a URL path (e.g., ["/api/webhooks", id, "status-logs"] -> "/api/webhooks/{id}/status-logs")
+    const queryKeyStr = Array.isArray(queryKey) && queryKey.length > 1 
+      ? queryKey.join("/") 
+      : String(queryKey[0]);
     const res = await fetch(queryKeyStr, {
       credentials: "include",
     });
