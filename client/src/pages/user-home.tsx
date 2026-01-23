@@ -18,8 +18,8 @@ export default function UserHome() {
               <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
                 <TrendingUp className="w-6 h-6 text-primary" />
               </div>
-              <h1 className="text-2xl font-bold text-foreground" data-testid="text-logo">
-                AlgoTrading
+              <h1 className="text-lg font-bold text-foreground" data-testid="text-logo">
+                MentorsWorld Algo Trading Platform
               </h1>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
@@ -182,7 +182,7 @@ export default function UserHome() {
               <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
                 <TrendingUp className="w-4 h-4 text-primary" />
               </div>
-              <span className="font-semibold text-foreground">AlgoTrading</span>
+              <span className="font-semibold text-foreground">MentorsWorld Algo Trading</span>
             </div>
             <p className="text-muted-foreground text-sm" data-testid="text-footer">
               Automated Trading Made Simple

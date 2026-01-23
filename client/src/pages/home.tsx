@@ -33,7 +33,7 @@
                       <TrendingUp className="w-6 h-6 text-primary" />
                     </div>
                     <h1 className="text-lg font-bold text-foreground" data-testid="text-logo">
-                      MentorsWorld AlgoTrading Platform
+                      MentorsWorld Algo Trading Platform
                     </h1>
                   </div>
                   <div className="flex items-center gap-3">
@@ -159,7 +159,7 @@
               <div className="container mx-auto px-4">
                 <div className="text-center mb-16">
                   <h3 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-                    Why Choose AlgoTrading
+                    Why Choose MentorsWorld Algo Trading
                   </h3>
                   <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
                     Built for serious traders who want reliable automation

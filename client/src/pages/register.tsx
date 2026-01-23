@@ -147,8 +147,8 @@ export default function Register() {
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-foreground" data-testid="text-register-title">
-            AlgoTrading Platform
+          <h1 className="text-lg font-bold text-foreground" data-testid="text-register-title">
+            MentorsWorld Algo Trading Platform
           </h1>
           <p className="text-muted-foreground mt-2">Complete Your Registration</p>
         </div>

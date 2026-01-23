@@ -140,8 +140,8 @@ export default function TotpSetup() {
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-foreground" data-testid="text-totp-title">
-            AlgoTrading Platform
+          <h1 className="text-lg font-bold text-foreground" data-testid="text-totp-title">
+            MentorsWorld Algo Trading Platform
           </h1>
           <p className="text-muted-foreground mt-2">Two-Factor Authentication Setup</p>
         </div>
