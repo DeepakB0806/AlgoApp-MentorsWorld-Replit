@@ -126,6 +126,13 @@ The application implements the official Kotak Neo Trade API based on the Postman
 ## Recent Changes
 
 ### 2026-01-23
+- Redesigned home page with public/authenticated separation:
+  - Public home page (/) now has attractive marketing layout with hero section, gradient effects
+  - "How It Works" section with 3 steps (Create Webhooks, Define Strategies, Auto-Execute)
+  - "Why Choose AlgoTrading" section with 6 feature cards
+  - Authenticated users are automatically redirected to /user-home
+  - Created new /user-home page for logged-in users with Dashboard, Strategies, Webhooks, Broker API cards
+  - Quick Stats and Broker Status cards on user home
 - Implemented complete authentication system with dual auth support:
   - Super Admin: Auto-detected via REPL_OWNER matching Replit Auth ID
   - Team Members: Email/Password + mandatory TOTP → HTTP-only session cookie (team_session)
