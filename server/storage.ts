@@ -137,6 +137,7 @@ export class DatabaseStorage implements IStorage {
     // Sample webhook
     const webhook1: Webhook = {
       id: randomUUID(),
+      uniqueCode: generateUniqueCode(),
       name: "TradingView Alert",
       strategyId: strategy1.id,
       webhookUrl: "https://api.example.com/webhook/trade",

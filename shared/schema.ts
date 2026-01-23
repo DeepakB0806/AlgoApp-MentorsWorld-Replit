@@ -50,7 +50,7 @@ export const webhooks = pgTable("webhooks", {
   linkedWebhookId: varchar("linked_webhook_id", { length: 36 }), // Link to production webhook by unique_code
 });
 
-export const insertWebhookSchema = createInsertSchema(webhooks).omit({ id: true });
+export const insertWebhookSchema = createInsertSchema(webhooks).omit({ id: true, uniqueCode: true });
 export type InsertWebhook = z.infer<typeof insertWebhookSchema>;
 export type Webhook = typeof webhooks.$inferSelect;
 
