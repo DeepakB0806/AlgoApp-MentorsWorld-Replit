@@ -11,7 +11,8 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save, Eye, EyeOff, Activity, Timer } from "lucide-react";
+import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save, Eye, EyeOff, Activity, Timer, Wrench, Upload } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -44,6 +45,9 @@ export default function Webhooks() {
     isActive: true,
     triggerType: "both",
   });
+  const [isFieldConfigOpen, setIsFieldConfigOpen] = useState(false);
+  const [configWebhook, setConfigWebhook] = useState<WebhookType | null>(null);
+  const [fieldConfigText, setFieldConfigText] = useState("");
 
   // Fetch domain name setting
   const { data: domainSetting } = useQuery<AppSetting>({
@@ -175,6 +179,50 @@ export default function Webhooks() {
       toast({ title: "Failed to cleanup logs", variant: "destructive" });
     },
   });
+
+  // Field configuration mutation
+  const configureFieldsMutation = useMutation({
+    mutationFn: async ({ id, fields }: { id: string; fields: string[] }) => {
+      return apiRequest("POST", `/api/webhooks/${id}/configure-fields`, { fields });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/webhooks"] });
+      setIsFieldConfigOpen(false);
+      setConfigWebhook(null);
+      setFieldConfigText("");
+      toast({ title: "Field configuration saved successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to configure fields", variant: "destructive" });
+    },
+  });
+
+  const handleConfigureFields = (webhook: WebhookType) => {
+    setConfigWebhook(webhook);
+    // If webhook already has field config, parse and display it
+    if (webhook.fieldConfig) {
+      try {
+        const config = JSON.parse(webhook.fieldConfig);
+        setFieldConfigText(config.map((f: { name: string }) => f.name).join(", "));
+      } catch {
+        setFieldConfigText("");
+      }
+    } else {
+      // Use default 19 fields
+      setFieldConfigText("Time Unix, Exchange, Ticker (Indices), Indicator, Action (Alert), Price, Local Time, Mode, Mode Desc, Fast Line, Mid Line, Slow Line, Supertrend (ST), Half Trend (HT), RSI, RSI Scaled, Alert System, Action Binary, Lock State");
+    }
+    setIsFieldConfigOpen(true);
+  };
+
+  const handleSaveFieldConfig = () => {
+    if (!configWebhook) return;
+    const fields = fieldConfigText.split(",").map(f => f.trim()).filter(f => f.length > 0);
+    if (fields.length === 0) {
+      toast({ title: "Please enter at least one field name", variant: "destructive" });
+      return;
+    }
+    configureFieldsMutation.mutate({ id: configWebhook.id, fields });
+  };
 
   const resetForm = () => {
     setFormData({
@@ -507,6 +555,15 @@ export default function Webhooks() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            onClick={() => handleConfigureFields(webhook)}
+                            title="Configure Fields"
+                            data-testid={`button-configure-fields-${webhook.id}`}
+                          >
+                            <Wrench className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             onClick={() => handleEdit(webhook)}
                             data-testid={`button-edit-webhook-${webhook.id}`}
                           >
@@ -825,6 +882,73 @@ export default function Webhooks() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Field Configuration Dialog */}
+      <Dialog open={isFieldConfigOpen} onOpenChange={(open) => {
+        setIsFieldConfigOpen(open);
+        if (!open) {
+          setConfigWebhook(null);
+          setFieldConfigText("");
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Configure Webhook Fields</DialogTitle>
+            <DialogDescription>
+              Define the field names for webhook data. Enter comma-separated field names in the order they should appear.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div>
+              <Label className="mb-2 block">Webhook: {configWebhook?.name}</Label>
+              <Textarea
+                value={fieldConfigText}
+                onChange={(e) => setFieldConfigText(e.target.value)}
+                placeholder="Time Unix, Exchange, Ticker (Indices), Indicator, Action (Alert), Price..."
+                className="min-h-[120px] font-mono text-sm"
+                data-testid="textarea-field-config"
+              />
+              <p className="text-xs text-muted-foreground mt-2">
+                Enter field names separated by commas. These will be used as column headers in the data table.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setFieldConfigText("Time Unix, Exchange, Ticker (Indices), Indicator, Action (Alert), Price, Local Time, Mode, Mode Desc, Fast Line, Mid Line, Slow Line, Supertrend (ST), Half Trend (HT), RSI, RSI Scaled, Alert System, Action Binary, Lock State")}
+                data-testid="button-use-default-fields"
+              >
+                Use Default 19 Fields
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setFieldConfigText("")}
+                data-testid="button-clear-fields"
+              >
+                Clear
+              </Button>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => setIsFieldConfigOpen(false)}
+              data-testid="button-cancel-field-config"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSaveFieldConfig}
+              disabled={configureFieldsMutation.isPending}
+              data-testid="button-save-field-config"
+            >
+              {configureFieldsMutation.isPending ? "Saving..." : "Save Configuration"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -163,6 +163,82 @@ export async function registerRoutes(
     }
   });
 
+  // Update webhook (PATCH)
+  app.patch("/api/webhooks/:id", async (req, res) => {
+    try {
+      const parsed = insertWebhookSchema.partial().safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid webhook data", details: parsed.error });
+      }
+      const webhook = await storage.updateWebhook(req.params.id, parsed.data);
+      if (!webhook) {
+        return res.status(404).json({ error: "Webhook not found" });
+      }
+      res.json(webhook);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update webhook" });
+    }
+  });
+
+  // Configure webhook fields from comma-separated list
+  app.post("/api/webhooks/:id/configure-fields", async (req, res) => {
+    try {
+      const { fields } = req.body;
+      
+      if (!fields || !Array.isArray(fields)) {
+        return res.status(400).json({ error: "Fields array is required" });
+      }
+      
+      // Convert field names to WebhookFieldConfig array
+      const fieldConfig = fields.map((name: string, index: number) => ({
+        name: name.trim(),
+        key: name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+        type: 'text' as const,
+        order: index
+      }));
+      
+      // Update webhook with field configuration
+      const webhook = await storage.updateWebhook(req.params.id, {
+        fieldConfig: JSON.stringify(fieldConfig)
+      });
+      
+      if (!webhook) {
+        return res.status(404).json({ error: "Webhook not found" });
+      }
+      
+      res.json({ success: true, fieldConfig, webhook });
+    } catch (error) {
+      console.error("Error configuring webhook fields:", error);
+      res.status(500).json({ error: "Failed to configure webhook fields" });
+    }
+  });
+
+  // Get default 19-field configuration for TradingView
+  app.get("/api/webhooks/default-fields", async (req, res) => {
+    const defaultFields = [
+      { name: "Time Unix", key: "time_unix", type: "timestamp", order: 0 },
+      { name: "Exchange", key: "exchange", type: "text", order: 1 },
+      { name: "Ticker (Indices)", key: "indices", type: "text", order: 2 },
+      { name: "Indicator", key: "indicator", type: "text", order: 3 },
+      { name: "Action (Alert)", key: "alert", type: "text", order: 4 },
+      { name: "Price", key: "price", type: "number", order: 5 },
+      { name: "Local Time", key: "local_time", type: "text", order: 6 },
+      { name: "Mode", key: "mode", type: "text", order: 7 },
+      { name: "Mode Desc", key: "mode_desc", type: "text", order: 8 },
+      { name: "Fast Line", key: "first_line", type: "number", order: 9 },
+      { name: "Mid Line", key: "mid_line", type: "number", order: 10 },
+      { name: "Slow Line", key: "slow_line", type: "number", order: 11 },
+      { name: "Supertrend (ST)", key: "st", type: "number", order: 12 },
+      { name: "Half Trend (HT)", key: "ht", type: "number", order: 13 },
+      { name: "RSI", key: "rsi", type: "number", order: 14 },
+      { name: "RSI Scaled", key: "rsi_scaled", type: "number", order: 15 },
+      { name: "Alert System", key: "alert_system", type: "text", order: 16 },
+      { name: "Action Binary", key: "action_binary", type: "number", order: 17 },
+      { name: "Lock State", key: "lock_state", type: "text", order: 18 }
+    ];
+    res.json(defaultFields);
+  });
+
   // Webhook Receiver Endpoint - receives TradingView alerts
   app.post("/api/webhook/:id", async (req, res) => {
     const startTime = Date.now();
