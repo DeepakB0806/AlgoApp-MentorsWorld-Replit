@@ -25,6 +25,14 @@ export const insertStrategySchema = createInsertSchema(strategies).omit({ id: tr
 export type InsertStrategy = z.infer<typeof insertStrategySchema>;
 export type Strategy = typeof strategies.$inferSelect;
 
+// Field configuration type for webhook tables
+export type WebhookFieldConfig = {
+  name: string; // Display name (e.g., "Time Unix")
+  key: string; // Database/JSON key (e.g., "time_unix")
+  type: "text" | "number" | "timestamp"; // Data type
+  order: number; // Display order
+};
+
 // Webhook Configuration
 export const webhooks = pgTable("webhooks", {
   id: varchar("id", { length: 36 }).primaryKey(),
@@ -36,6 +44,8 @@ export const webhooks = pgTable("webhooks", {
   triggerType: text("trigger_type").notNull(), // "entry", "exit", "both"
   lastTriggered: text("last_triggered"),
   totalTriggers: integer("total_triggers").default(0),
+  fieldConfig: text("field_config"), // JSON array of WebhookFieldConfig
+  dataTableName: text("data_table_name"), // Dynamic table name for this webhook's data
 });
 
 export const insertWebhookSchema = createInsertSchema(webhooks).omit({ id: true });
