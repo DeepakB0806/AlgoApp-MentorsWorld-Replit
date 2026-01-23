@@ -53,6 +53,7 @@ export default function Login() {
       const res = await fetch("/api/auth/customer/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ email, password }),
       });
 
@@ -104,6 +105,7 @@ export default function Login() {
       const res = await fetch("/api/auth/team/verify-totp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ userId, code: totpCode }),
       });
 
