@@ -49,6 +49,11 @@ shared/
 - `POST /api/webhooks/:id/test` - Test a webhook (records response time)
 - `DELETE /api/webhooks/:id/logs/cleanup` - Delete logs older than X days
 - `POST /api/webhook/:id` - Receive TradingView webhook alerts
+- `GET /api/webhook-data` - Get all webhook data for strategies
+- `GET /api/webhook-data/webhook/:webhookId` - Get webhook data by webhook ID
+- `GET /api/webhook-data/strategy/:strategyId` - Get webhook data by strategy ID
+- `GET /api/webhook-data/webhook/:webhookId/latest` - Get latest webhook data entry
+- `PATCH /api/webhook-data/:id/processed` - Mark webhook data as processed
 - `GET/POST /api/broker-configs` - Broker configuration CRUD
 - `POST /api/broker-configs/:id/test` - Test broker connectivity
 - `POST /api/broker-configs/:id/authenticate` - Authenticate with TOTP
@@ -111,6 +116,10 @@ The application implements the official Kotak Neo Trade API based on the Postman
   - TradingView fields: exchange, indicator, alert, price, actionBinary, rsi, mode, etc.
   - Status logs: Test results, status codes, error messages
   - App settings: Domain name for auto-generated webhook URLs
+- **Webhook Data**: Separate database table for incoming JSON data from webhooks
+  - Stores: Raw payload, parsed TradingView fields, signal type (buy/sell/hold)
+  - Links to webhooks and strategies for easy data access
+  - Tracks processing status (pending/processed) for automation
 - **Strategies**: In-memory storage (sample data resets on restart)
 - **Trading Data**: Fetched live from Kotak Neo when authenticated, mock data otherwise
 

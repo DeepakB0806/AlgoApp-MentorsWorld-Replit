@@ -15,7 +15,7 @@ import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, P
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Webhook as WebhookType, WebhookLog, InsertWebhook, Strategy, WebhookStatusLog, AppSetting } from "@shared/schema";
+import type { Webhook as WebhookType, WebhookLog, InsertWebhook, Strategy, WebhookStatusLog, AppSetting, WebhookData } from "@shared/schema";
 
 type WebhookStats = {
   total: number;
@@ -70,6 +70,12 @@ export default function Webhooks() {
   const { data: statusLogs = [] } = useQuery<WebhookStatusLog[]>({
     queryKey: ["/api/webhooks", selectedWebhook?.id, "status-logs"],
     enabled: !!selectedWebhook,
+  });
+
+  const { data: webhookDataList = [], refetch: refetchWebhookData } = useQuery<WebhookData[]>({
+    queryKey: ["/api/webhook-data"],
+    refetchInterval: 10000, // Refetch every 10 seconds for real-time data
+    refetchOnWindowFocus: true,
   });
 
   // Save domain name
@@ -390,9 +396,18 @@ export default function Webhooks() {
           </CardContent>
         </Card>
 
-        <Tabs defaultValue="webhooks" className="space-y-4">
+        <Tabs 
+          defaultValue="webhooks" 
+          className="space-y-4"
+          onValueChange={(value) => {
+            if (value === "data") {
+              refetchWebhookData();
+            }
+          }}
+        >
           <TabsList className="bg-card border border-border" data-testid="tabs-webhooks">
             <TabsTrigger value="webhooks">Webhooks ({webhooks.length})</TabsTrigger>
+            <TabsTrigger value="data">Data ({webhookDataList.length})</TabsTrigger>
             <TabsTrigger value="logs">Logs ({webhookLogs.length})</TabsTrigger>
           </TabsList>
 
@@ -542,6 +557,67 @@ export default function Webhooks() {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="data">
+            <Card>
+              <CardHeader>
+                <CardTitle>Webhook Data</CardTitle>
+                <CardDescription>Incoming JSON data from webhooks - accessible by strategies</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {webhookDataList.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-8" data-testid="text-no-data">No webhook data yet. Data will appear when webhooks receive alerts.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Webhook</TableHead>
+                        <TableHead>Exchange</TableHead>
+                        <TableHead>Indicator</TableHead>
+                        <TableHead>Price</TableHead>
+                        <TableHead>RSI</TableHead>
+                        <TableHead>Signal</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {webhookDataList.map((data) => (
+                        <TableRow key={data.id} data-testid={`row-data-${data.id}`}>
+                          <TableCell className="text-xs">
+                            {new Date(data.receivedAt).toLocaleString()}
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-medium">{data.webhookName || "Unknown"}</span>
+                          </TableCell>
+                          <TableCell>{data.exchange || "-"}</TableCell>
+                          <TableCell>{data.indicator || "-"}</TableCell>
+                          <TableCell>{data.price ? `₹${data.price.toFixed(2)}` : "-"}</TableCell>
+                          <TableCell>{data.rsi ? data.rsi.toFixed(2) : "-"}</TableCell>
+                          <TableCell>
+                            {data.signalType === "buy" ? (
+                              <Badge variant="default" className="bg-emerald-600">BUY</Badge>
+                            ) : data.signalType === "sell" ? (
+                              <Badge variant="destructive">SELL</Badge>
+                            ) : (
+                              <Badge variant="secondary">HOLD</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {data.isProcessed ? (
+                              <Badge variant="outline" className="text-muted-foreground">Processed</Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-primary">Pending</Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="logs">
