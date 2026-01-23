@@ -51,6 +51,8 @@ export default function Webhooks() {
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [linkingWebhook, setLinkingWebhook] = useState<WebhookType | null>(null);
   const [linkCode, setLinkCode] = useState("");
+  const [linkWebhookId, setLinkWebhookId] = useState("");
+  const [linkMode, setLinkMode] = useState<"code" | "id">("code");
 
   // Fetch domain name setting
   const { data: domainSetting } = useQuery<AppSetting>({
@@ -196,10 +198,10 @@ export default function Webhooks() {
     },
   });
 
-  // Link webhook to production data stream by unique code
+  // Link webhook to production data stream by unique code or webhook ID
   const linkMutation = useMutation({
-    mutationFn: async ({ id, uniqueCode }: { id: string; uniqueCode: string }) => {
-      return apiRequest("POST", `/api/webhooks/${id}/link`, { uniqueCode });
+    mutationFn: async ({ id, uniqueCode, webhookId }: { id: string; uniqueCode?: string; webhookId?: string }) => {
+      return apiRequest("POST", `/api/webhooks/${id}/link`, { uniqueCode, webhookId });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/webhooks"] });
@@ -1025,6 +1027,8 @@ export default function Webhooks() {
         if (!open) {
           setLinkingWebhook(null);
           setLinkCode("");
+          setLinkWebhookId("");
+          setLinkMode("code");
         }
       }}>
         <DialogContent className="max-w-md">
@@ -1041,21 +1045,58 @@ export default function Webhooks() {
                 Code: <code className="bg-muted px-1 rounded font-mono">{linkingWebhook?.uniqueCode}</code>
               </p>
             </div>
-            <div>
-              <Label className="mb-2 block">Enter Production Webhook Code</Label>
-              <Input
-                value={linkCode}
-                onChange={(e) => setLinkCode(e.target.value.toUpperCase())}
-                placeholder="e.g., SUN8C1"
-                className="font-mono uppercase"
-                maxLength={8}
-                data-testid="input-link-code"
-              />
-              <p className="text-xs text-muted-foreground mt-2">
-                Enter the 6-character unique code of the production webhook you want to link to.
-                You can find this code displayed on each webhook card.
-              </p>
+            
+            <div className="flex gap-2 mb-2">
+              <Button
+                variant={linkMode === "code" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setLinkMode("code")}
+                data-testid="button-link-mode-code"
+              >
+                By Code
+              </Button>
+              <Button
+                variant={linkMode === "id" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setLinkMode("id")}
+                data-testid="button-link-mode-id"
+              >
+                By Webhook ID
+              </Button>
             </div>
+            
+            {linkMode === "code" ? (
+              <div>
+                <Label className="mb-2 block">Enter Production Webhook Code</Label>
+                <Input
+                  value={linkCode}
+                  onChange={(e) => setLinkCode(e.target.value.toUpperCase())}
+                  placeholder="e.g., SUN8C1"
+                  className="font-mono uppercase"
+                  maxLength={8}
+                  data-testid="input-link-code"
+                />
+                <p className="text-xs text-muted-foreground mt-2">
+                  Enter the 6-character unique code of the production webhook.
+                  Use this when both environments share the same database.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <Label className="mb-2 block">Enter Production Webhook ID</Label>
+                <Input
+                  value={linkWebhookId}
+                  onChange={(e) => setLinkWebhookId(e.target.value)}
+                  placeholder="e.g., abc123de-f456-7890-abcd-ef1234567890"
+                  className="font-mono text-xs"
+                  data-testid="input-link-webhook-id"
+                />
+                <p className="text-xs text-muted-foreground mt-2">
+                  Enter the full webhook ID (UUID) from the production webhook URL.
+                  Use this when production has a separate database.
+                </p>
+              </div>
+            )}
           </div>
           <div className="flex justify-end gap-2">
             <Button 
@@ -1067,11 +1108,15 @@ export default function Webhooks() {
             </Button>
             <Button 
               onClick={() => {
-                if (linkingWebhook && linkCode.trim()) {
-                  linkMutation.mutate({ id: linkingWebhook.id, uniqueCode: linkCode.trim() });
+                if (linkingWebhook) {
+                  if (linkMode === "code" && linkCode.trim()) {
+                    linkMutation.mutate({ id: linkingWebhook.id, uniqueCode: linkCode.trim() });
+                  } else if (linkMode === "id" && linkWebhookId.trim()) {
+                    linkMutation.mutate({ id: linkingWebhook.id, webhookId: linkWebhookId.trim() });
+                  }
                 }
               }}
-              disabled={!linkCode.trim() || linkMutation.isPending}
+              disabled={(linkMode === "code" ? !linkCode.trim() : !linkWebhookId.trim()) || linkMutation.isPending}
               data-testid="button-save-link"
             >
               {linkMutation.isPending ? "Linking..." : "Link Webhook"}

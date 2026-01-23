@@ -446,23 +446,34 @@ export async function registerRoutes(
     }
   });
 
-  // Link webhook to production webhook data stream by unique code
+  // Link webhook to production webhook data stream by unique code or webhook ID
   app.post("/api/webhooks/:id/link", async (req, res) => {
     try {
-      const { uniqueCode } = req.body;
+      const { uniqueCode, webhookId } = req.body;
       
-      if (!uniqueCode) {
-        return res.status(400).json({ error: "uniqueCode is required" });
+      if (!uniqueCode && !webhookId) {
+        return res.status(400).json({ error: "Either uniqueCode or webhookId is required" });
       }
       
-      // Find the production webhook by its unique code
-      const productionWebhook = await storage.getWebhookByUniqueCode(uniqueCode);
-      if (!productionWebhook) {
-        return res.status(404).json({ error: "No webhook found with that code" });
+      let linkedId: string;
+      let productionWebhook = null;
+      
+      if (webhookId) {
+        // Direct link by webhook ID (for cross-database linking)
+        linkedId = webhookId;
+        // Try to find the webhook locally for display, but don't fail if not found
+        productionWebhook = await storage.getWebhook(webhookId);
+      } else {
+        // Find the production webhook by its unique code (same database)
+        productionWebhook = await storage.getWebhookByUniqueCode(uniqueCode);
+        if (!productionWebhook) {
+          return res.status(404).json({ error: "No webhook found with that code. If the webhook is in production (separate database), use the webhook ID instead." });
+        }
+        linkedId = productionWebhook.id;
       }
       
       // Link to the production webhook's ID
-      const webhook = await storage.updateWebhook(req.params.id, { linkedWebhookId: productionWebhook.id });
+      const webhook = await storage.updateWebhook(req.params.id, { linkedWebhookId: linkedId });
       if (!webhook) {
         return res.status(404).json({ error: "Webhook not found" });
       }
