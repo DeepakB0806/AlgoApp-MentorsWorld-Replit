@@ -126,6 +126,16 @@ The application implements the official Kotak Neo Trade API based on the Postman
 ## Recent Changes
 
 ### 2026-01-23
+- Implemented complete authentication system with dual auth support:
+  - Super Admin: Auto-detected via REPL_OWNER matching Replit Auth ID
+  - Team Members: Email/Password + mandatory TOTP → HTTP-only session cookie (team_session)
+  - Session tokens stored in users table with sessionToken, sessionExpires, lastLoginAt
+  - Dual auth priority: Team session checked first, then Replit Auth
+  - Protected routes redirect unauthenticated users to /login
+  - Role-based access control: super_admin, team_member, customer roles
+  - User Management page for Super Admin to invite team members
+  - TOTP setup with QR code generation via speakeasy and qrcode packages
+  - Password hashing via bcryptjs with strength 12
 - Integrated webhook functionality from uploaded zip file:
   - Added TradingView alert fields to webhook logs (exchange, indicator, alert, price, RSI, actionBinary, etc.)
   - Created webhook receiver endpoint POST /api/webhook/:id that processes TradingView alerts
