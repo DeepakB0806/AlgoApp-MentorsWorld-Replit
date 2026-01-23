@@ -592,8 +592,6 @@ export default function Webhooks() {
                           <TableHead className="whitespace-nowrap">17. Alert System</TableHead>
                           <TableHead className="whitespace-nowrap">18. Action Binary</TableHead>
                           <TableHead className="whitespace-nowrap">19. Lock State</TableHead>
-                          <TableHead className="whitespace-nowrap">Signal</TableHead>
-                          <TableHead className="whitespace-nowrap">Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -603,7 +601,11 @@ export default function Webhooks() {
                             <TableCell className="whitespace-nowrap">{data.exchange || "-"}</TableCell>
                             <TableCell className="whitespace-nowrap">{data.indices || "-"}</TableCell>
                             <TableCell className="whitespace-nowrap">{data.indicator || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{data.alert || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {data.alert ? (
+                                <Badge variant="default" className="bg-emerald-600 text-white font-semibold">{data.alert}</Badge>
+                              ) : "-"}
+                            </TableCell>
                             <TableCell className="whitespace-nowrap">{data.price != null ? data.price : "-"}</TableCell>
                             <TableCell className="text-xs whitespace-nowrap">{data.localTime || "-"}</TableCell>
                             <TableCell className="whitespace-nowrap">{data.mode || "-"}</TableCell>
@@ -618,22 +620,6 @@ export default function Webhooks() {
                             <TableCell className="whitespace-nowrap">{data.alertSystem || "-"}</TableCell>
                             <TableCell className="whitespace-nowrap">{data.actionBinary != null ? data.actionBinary : "-"}</TableCell>
                             <TableCell className="whitespace-nowrap">{data.lockState || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              {data.signalType === "buy" ? (
-                                <Badge variant="default" className="bg-emerald-600">BUY</Badge>
-                              ) : data.signalType === "sell" ? (
-                                <Badge variant="destructive">SELL</Badge>
-                              ) : (
-                                <Badge variant="secondary">HOLD</Badge>
-                              )}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              {data.isProcessed ? (
-                                <Badge variant="outline" className="text-muted-foreground">Processed</Badge>
-                              ) : (
-                                <Badge variant="outline" className="text-primary">Pending</Badge>
-                              )}
-                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
