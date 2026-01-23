@@ -278,6 +278,94 @@ export default function Webhooks() {
     return webhookDataList.filter(data => data.webhookId === webhookId);
   };
 
+  // Default field configuration (19 fields)
+  const DEFAULT_FIELD_CONFIG = [
+    { name: "Time Unix", key: "timeUnix", type: "timestamp", order: 0 },
+    { name: "Exchange", key: "exchange", type: "text", order: 1 },
+    { name: "Ticker (Indices)", key: "indices", type: "text", order: 2 },
+    { name: "Indicator", key: "indicator", type: "text", order: 3 },
+    { name: "Action (Alert)", key: "alert", type: "text", order: 4 },
+    { name: "Price", key: "price", type: "number", order: 5 },
+    { name: "Local Time", key: "localTime", type: "text", order: 6 },
+    { name: "Mode", key: "mode", type: "text", order: 7 },
+    { name: "Mode Desc", key: "modeDesc", type: "text", order: 8 },
+    { name: "Fast Line", key: "firstLine", type: "number", order: 9 },
+    { name: "Mid Line", key: "midLine", type: "number", order: 10 },
+    { name: "Slow Line", key: "slowLine", type: "number", order: 11 },
+    { name: "Supertrend (ST)", key: "st", type: "number", order: 12 },
+    { name: "Half Trend (HT)", key: "ht", type: "number", order: 13 },
+    { name: "RSI", key: "rsi", type: "number", order: 14 },
+    { name: "RSI Scaled", key: "rsiScaled", type: "number", order: 15 },
+    { name: "Alert System", key: "alertSystem", type: "text", order: 16 },
+    { name: "Action Binary", key: "actionBinary", type: "number", order: 17 },
+    { name: "Lock State", key: "lockState", type: "text", order: 18 }
+  ];
+
+  // Get field config for a webhook (parse from fieldConfig string or use default)
+  const getFieldConfig = (webhook: WebhookType | null) => {
+    if (!webhook?.fieldConfig) return DEFAULT_FIELD_CONFIG;
+    try {
+      return JSON.parse(webhook.fieldConfig);
+    } catch {
+      return DEFAULT_FIELD_CONFIG;
+    }
+  };
+
+  // Get value from data object by key
+  const getDataValue = (data: WebhookData, key: string): string | number | null => {
+    const keyMap: Record<string, keyof WebhookData> = {
+      timeUnix: 'timeUnix', time_unix: 'timeUnix',
+      exchange: 'exchange',
+      indices: 'indices', ticker: 'indices',
+      indicator: 'indicator',
+      alert: 'alert', action: 'alert',
+      price: 'price',
+      localTime: 'localTime', local_time: 'localTime',
+      mode: 'mode',
+      modeDesc: 'modeDesc', mode_desc: 'modeDesc',
+      firstLine: 'firstLine', first_line: 'firstLine', fast_line: 'firstLine',
+      midLine: 'midLine', mid_line: 'midLine',
+      slowLine: 'slowLine', slow_line: 'slowLine',
+      st: 'st', supertrend: 'st',
+      ht: 'ht', halftrend: 'ht', half_trend: 'ht',
+      rsi: 'rsi',
+      rsiScaled: 'rsiScaled', rsi_scaled: 'rsiScaled',
+      alertSystem: 'alertSystem', alert_system: 'alertSystem',
+      actionBinary: 'actionBinary', action_binary: 'actionBinary',
+      lockState: 'lockState', lock_state: 'lockState'
+    };
+    const mappedKey = keyMap[key] || key;
+    const value = data[mappedKey as keyof WebhookData];
+    return value as string | number | null;
+  };
+
+  // Render cell value with special formatting for Action (Alert) field
+  const renderCellValue = (data: WebhookData, field: { key: string; name: string }) => {
+    const value = getDataValue(data, field.key);
+    
+    // Special handling for alert/action field
+    if (field.key === 'alert' || field.name.toLowerCase().includes('alert') || field.name.toLowerCase().includes('action')) {
+      if (value && typeof value === 'string') {
+        return (
+          <Badge 
+            variant="default" 
+            className={`font-mono text-xs tracking-wide px-1 py-0 ${
+              value.toUpperCase().includes("SELL") 
+                ? "bg-red-600 text-white" 
+                : value.toUpperCase().includes("BUY") 
+                  ? "bg-emerald-600 text-white" 
+                  : "bg-slate-600 text-white"
+            }`}
+          >
+            {value}
+          </Badge>
+        );
+      }
+    }
+    
+    return value != null ? String(value) : "-";
+  };
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast({ title: "Copied to clipboard" });
@@ -795,18 +883,29 @@ export default function Webhooks() {
               <div>
                 <SheetTitle>Webhook Data: {selectedWebhook?.name}</SheetTitle>
                 <SheetDescription>
-                  All 19 fields from incoming webhook data
+                  {getFieldConfig(selectedWebhook).length} fields from incoming webhook data
                 </SheetDescription>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setDataExpandedView(!dataExpandedView)}
-                data-testid="button-expand-data"
-              >
-                <ExternalLink className="w-4 h-4 mr-1" />
-                {dataExpandedView ? "Collapse" : "Expand"}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => selectedWebhook && handleConfigureFields(selectedWebhook)}
+                  data-testid="button-configure-from-panel"
+                >
+                  <Wrench className="w-4 h-4 mr-1" />
+                  Configure
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDataExpandedView(!dataExpandedView)}
+                  data-testid="button-expand-data"
+                >
+                  <ExternalLink className="w-4 h-4 mr-1" />
+                  {dataExpandedView ? "Collapse" : "Expand"}
+                </Button>
+              </div>
             </div>
           </SheetHeader>
           <div className="mt-6 overflow-x-auto">
@@ -816,64 +915,27 @@ export default function Webhooks() {
               <Table className="text-xs">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Time Unix</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Exchange</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Ticker (Indices)</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Indicator</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Action (Alert)</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Price</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Local Time</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Mode</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Mode Desc</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Fast Line</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Mid Line</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Slow Line</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Supertrend (ST)</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Half Trend (HT)</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">RSI</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">RSI Scaled</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Alert System</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Action Binary</TableHead>
-                    <TableHead className="whitespace-nowrap px-1 py-1">Lock State</TableHead>
+                    {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
+                      <TableHead 
+                        key={field.key} 
+                        className="whitespace-nowrap px-1 py-1"
+                      >
+                        {field.name}
+                      </TableHead>
+                    ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {selectedWebhook && getWebhookData(selectedWebhook.id).map((data) => (
                     <TableRow key={data.id} data-testid={`row-data-panel-${data.id}`}>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.timeUnix ?? "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.exchange || "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.indices || "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.indicator || "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">
-                        {data.alert ? (
-                          <Badge 
-                            variant="default" 
-                            className={`font-mono text-xs tracking-wide px-1 py-0 ${
-                              data.alert.toUpperCase().includes("SELL") 
-                                ? "bg-red-600 text-white" 
-                                : data.alert.toUpperCase().includes("BUY") 
-                                  ? "bg-emerald-600 text-white" 
-                                  : "bg-slate-600 text-white"
-                            }`}
-                          >
-                            {data.alert}
-                          </Badge>
-                        ) : "-"}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.price != null ? data.price : "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.localTime || "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.mode || "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.modeDesc || "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.firstLine != null ? data.firstLine : "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.midLine != null ? data.midLine : "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.slowLine != null ? data.slowLine : "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.st != null ? data.st : "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.ht != null ? data.ht : "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.rsi != null ? data.rsi : "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.rsiScaled != null ? data.rsiScaled : "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.alertSystem || "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.actionBinary != null ? data.actionBinary : "-"}</TableCell>
-                      <TableCell className="whitespace-nowrap px-1 py-1">{data.lockState || "-"}</TableCell>
+                      {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
+                        <TableCell 
+                          key={field.key} 
+                          className="whitespace-nowrap px-1 py-1"
+                        >
+                          {renderCellValue(data, field)}
+                        </TableCell>
+                      ))}
                     </TableRow>
                   ))}
                 </TableBody>
