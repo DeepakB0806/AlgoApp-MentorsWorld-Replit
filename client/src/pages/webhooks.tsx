@@ -1024,7 +1024,7 @@ export default function Webhooks() {
         setIsLinkDialogOpen(open);
         if (!open) {
           setLinkingWebhook(null);
-          setSelectedLinkedWebhookId("");
+          setLinkCode("");
         }
       }}>
         <DialogContent className="max-w-md">
