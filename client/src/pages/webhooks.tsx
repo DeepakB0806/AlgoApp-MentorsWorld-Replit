@@ -563,58 +563,82 @@ export default function Webhooks() {
             <Card>
               <CardHeader>
                 <CardTitle>Webhook Data</CardTitle>
-                <CardDescription>Incoming JSON data from webhooks - accessible by strategies</CardDescription>
+                <CardDescription>All 19 fields directly from database - accessible by strategies</CardDescription>
               </CardHeader>
               <CardContent>
                 {webhookDataList.length === 0 ? (
                   <p className="text-muted-foreground text-center py-8" data-testid="text-no-data">No webhook data yet. Data will appear when webhooks receive alerts.</p>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Time</TableHead>
-                        <TableHead>Webhook</TableHead>
-                        <TableHead>Exchange</TableHead>
-                        <TableHead>Indicator</TableHead>
-                        <TableHead>Price</TableHead>
-                        <TableHead>RSI</TableHead>
-                        <TableHead>Signal</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {webhookDataList.map((data) => (
-                        <TableRow key={data.id} data-testid={`row-data-${data.id}`}>
-                          <TableCell className="text-xs">
-                            {new Date(data.receivedAt).toLocaleString()}
-                          </TableCell>
-                          <TableCell>
-                            <span className="font-medium">{data.webhookName || "Unknown"}</span>
-                          </TableCell>
-                          <TableCell>{data.exchange || "-"}</TableCell>
-                          <TableCell>{data.indicator || "-"}</TableCell>
-                          <TableCell>{data.price ? `₹${data.price.toFixed(2)}` : "-"}</TableCell>
-                          <TableCell>{data.rsi ? data.rsi.toFixed(2) : "-"}</TableCell>
-                          <TableCell>
-                            {data.signalType === "buy" ? (
-                              <Badge variant="default" className="bg-emerald-600">BUY</Badge>
-                            ) : data.signalType === "sell" ? (
-                              <Badge variant="destructive">SELL</Badge>
-                            ) : (
-                              <Badge variant="secondary">HOLD</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {data.isProcessed ? (
-                              <Badge variant="outline" className="text-muted-foreground">Processed</Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-primary">Pending</Badge>
-                            )}
-                          </TableCell>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="whitespace-nowrap">1. Time Unix</TableHead>
+                          <TableHead className="whitespace-nowrap">2. Exchange</TableHead>
+                          <TableHead className="whitespace-nowrap">3. Ticker (Indices)</TableHead>
+                          <TableHead className="whitespace-nowrap">4. Indicator</TableHead>
+                          <TableHead className="whitespace-nowrap">5. Action (Alert)</TableHead>
+                          <TableHead className="whitespace-nowrap">6. Price</TableHead>
+                          <TableHead className="whitespace-nowrap">7. Local Time</TableHead>
+                          <TableHead className="whitespace-nowrap">8. Mode</TableHead>
+                          <TableHead className="whitespace-nowrap">9. Mode Desc</TableHead>
+                          <TableHead className="whitespace-nowrap">10. Fast Line</TableHead>
+                          <TableHead className="whitespace-nowrap">11. Mid Line</TableHead>
+                          <TableHead className="whitespace-nowrap">12. Slow Line</TableHead>
+                          <TableHead className="whitespace-nowrap">13. ST</TableHead>
+                          <TableHead className="whitespace-nowrap">14. HT</TableHead>
+                          <TableHead className="whitespace-nowrap">15. RSI</TableHead>
+                          <TableHead className="whitespace-nowrap">16. RSI Scaled</TableHead>
+                          <TableHead className="whitespace-nowrap">17. Alert System</TableHead>
+                          <TableHead className="whitespace-nowrap">18. Action Binary</TableHead>
+                          <TableHead className="whitespace-nowrap">19. Lock State</TableHead>
+                          <TableHead className="whitespace-nowrap">Signal</TableHead>
+                          <TableHead className="whitespace-nowrap">Status</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {webhookDataList.map((data) => (
+                          <TableRow key={data.id} data-testid={`row-data-${data.id}`}>
+                            <TableCell className="text-xs whitespace-nowrap">{data.timeUnix ?? "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.exchange || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.indices || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.indicator || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.alert || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.price != null ? data.price : "-"}</TableCell>
+                            <TableCell className="text-xs whitespace-nowrap">{data.localTime || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.mode || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.modeDesc || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.firstLine != null ? data.firstLine : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.midLine != null ? data.midLine : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.slowLine != null ? data.slowLine : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.st != null ? data.st : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.ht != null ? data.ht : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.rsi != null ? data.rsi : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.rsiScaled != null ? data.rsiScaled : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.alertSystem || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.actionBinary != null ? data.actionBinary : "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{data.lockState || "-"}</TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {data.signalType === "buy" ? (
+                                <Badge variant="default" className="bg-emerald-600">BUY</Badge>
+                              ) : data.signalType === "sell" ? (
+                                <Badge variant="destructive">SELL</Badge>
+                              ) : (
+                                <Badge variant="secondary">HOLD</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {data.isProcessed ? (
+                                <Badge variant="outline" className="text-muted-foreground">Processed</Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-primary">Pending</Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
