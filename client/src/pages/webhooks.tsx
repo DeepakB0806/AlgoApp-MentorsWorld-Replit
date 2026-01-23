@@ -31,6 +31,8 @@ export default function Webhooks() {
   const [editingWebhook, setEditingWebhook] = useState<WebhookType | null>(null);
   const [selectedWebhook, setSelectedWebhook] = useState<WebhookType | null>(null);
   const [isLogsSheetOpen, setIsLogsSheetOpen] = useState(false);
+  const [isDataSheetOpen, setIsDataSheetOpen] = useState(false);
+  const [dataExpandedView, setDataExpandedView] = useState(false);
   const [domainName, setDomainName] = useState("");
   const [tempDomainName, setTempDomainName] = useState("");
   const [showSecretKey, setShowSecretKey] = useState<Record<string, boolean>>({});
@@ -72,7 +74,7 @@ export default function Webhooks() {
     enabled: !!selectedWebhook,
   });
 
-  const { data: webhookDataList = [], refetch: refetchWebhookData } = useQuery<WebhookData[]>({
+  const { data: webhookDataList = [] } = useQuery<WebhookData[]>({
     queryKey: ["/api/webhook-data"],
     refetchInterval: 10000, // Refetch every 10 seconds for real-time data
     refetchOnWindowFocus: true,
@@ -216,6 +218,16 @@ export default function Webhooks() {
   const handleViewLogs = (webhook: WebhookType) => {
     setSelectedWebhook(webhook);
     setIsLogsSheetOpen(true);
+  };
+
+  const handleViewData = (webhook: WebhookType) => {
+    setSelectedWebhook(webhook);
+    setIsDataSheetOpen(true);
+    setDataExpandedView(false);
+  };
+
+  const getWebhookData = (webhookId: string) => {
+    return webhookDataList.filter(data => data.webhookId === webhookId);
   };
 
   const copyToClipboard = (text: string) => {
@@ -399,15 +411,9 @@ export default function Webhooks() {
         <Tabs 
           defaultValue="webhooks" 
           className="space-y-4"
-          onValueChange={(value) => {
-            if (value === "data") {
-              refetchWebhookData();
-            }
-          }}
         >
           <TabsList className="bg-card border border-border" data-testid="tabs-webhooks">
             <TabsTrigger value="webhooks">Webhooks ({webhooks.length})</TabsTrigger>
-            <TabsTrigger value="data">Data ({webhookDataList.length})</TabsTrigger>
             <TabsTrigger value="logs">Logs ({webhookLogs.length})</TabsTrigger>
           </TabsList>
 
@@ -465,6 +471,15 @@ export default function Webhooks() {
                           >
                             <Play className="w-4 h-4 mr-1" />
                             Test
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleViewData(webhook)}
+                            data-testid={`button-view-data-${webhook.id}`}
+                          >
+                            <Activity className="w-4 h-4 mr-1" />
+                            Data ({getWebhookData(webhook.id).length})
                           </Button>
                           <Button
                             variant="outline"
@@ -557,88 +572,6 @@ export default function Webhooks() {
                 ))}
               </div>
             )}
-          </TabsContent>
-
-          <TabsContent value="data">
-            <Card>
-              <CardHeader>
-                <CardTitle>Webhook Data</CardTitle>
-                <CardDescription>All 19 fields directly from database - accessible by strategies</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {webhookDataList.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-8" data-testid="text-no-data">No webhook data yet. Data will appear when webhooks receive alerts.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table className="text-xs">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Time Unix</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Exchange</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Ticker (Indices)</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Indicator</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Action (Alert)</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Price</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Local Time</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Mode</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Mode Desc</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Fast Line</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Mid Line</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Slow Line</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Supertrend (ST)</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Half Trend (HT)</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">RSI</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">RSI Scaled</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Alert System</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Action Binary</TableHead>
-                          <TableHead className="whitespace-nowrap px-1 py-1">Lock State</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {webhookDataList.map((data) => (
-                          <TableRow key={data.id} data-testid={`row-data-${data.id}`}>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.timeUnix ?? "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.exchange || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.indices || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.indicator || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">
-                              {data.alert ? (
-                                <Badge 
-                                  variant="default" 
-                                  className={`font-mono text-xs tracking-wide px-1 py-0 ${
-                                    data.alert.toUpperCase().includes("SELL") 
-                                      ? "bg-red-600 text-white" 
-                                      : data.alert.toUpperCase().includes("BUY") 
-                                        ? "bg-emerald-600 text-white" 
-                                        : "bg-slate-600 text-white"
-                                  }`}
-                                >
-                                  {data.alert}
-                                </Badge>
-                              ) : "-"}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.price != null ? data.price : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.localTime || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.mode || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.modeDesc || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.firstLine != null ? data.firstLine : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.midLine != null ? data.midLine : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.slowLine != null ? data.slowLine : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.st != null ? data.st : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.ht != null ? data.ht : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.rsi != null ? data.rsi : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.rsiScaled != null ? data.rsiScaled : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.alertSystem || "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.actionBinary != null ? data.actionBinary : "-"}</TableCell>
-                            <TableCell className="whitespace-nowrap px-1 py-1">{data.lockState || "-"}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
           </TabsContent>
 
           <TabsContent value="logs">
@@ -794,6 +727,101 @@ export default function Webhooks() {
                 </div>
               )}
             </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={isDataSheetOpen} onOpenChange={setIsDataSheetOpen}>
+        <SheetContent className={dataExpandedView ? "w-full sm:max-w-full" : "w-[600px] sm:w-[800px]"} side="right">
+          <SheetHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <SheetTitle>Webhook Data: {selectedWebhook?.name}</SheetTitle>
+                <SheetDescription>
+                  All 19 fields from incoming webhook data
+                </SheetDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDataExpandedView(!dataExpandedView)}
+                data-testid="button-expand-data"
+              >
+                <ExternalLink className="w-4 h-4 mr-1" />
+                {dataExpandedView ? "Collapse" : "Expand"}
+              </Button>
+            </div>
+          </SheetHeader>
+          <div className="mt-6 overflow-x-auto">
+            {selectedWebhook && getWebhookData(selectedWebhook.id).length === 0 ? (
+              <p className="text-muted-foreground text-center py-8">No data received yet for this webhook.</p>
+            ) : (
+              <Table className="text-xs">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Time Unix</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Exchange</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Ticker (Indices)</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Indicator</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Action (Alert)</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Price</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Local Time</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Mode</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Mode Desc</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Fast Line</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Mid Line</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Slow Line</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Supertrend (ST)</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Half Trend (HT)</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">RSI</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">RSI Scaled</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Alert System</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Action Binary</TableHead>
+                    <TableHead className="whitespace-nowrap px-1 py-1">Lock State</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedWebhook && getWebhookData(selectedWebhook.id).map((data) => (
+                    <TableRow key={data.id} data-testid={`row-data-panel-${data.id}`}>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.timeUnix ?? "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.exchange || "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.indices || "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.indicator || "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">
+                        {data.alert ? (
+                          <Badge 
+                            variant="default" 
+                            className={`font-mono text-xs tracking-wide px-1 py-0 ${
+                              data.alert.toUpperCase().includes("SELL") 
+                                ? "bg-red-600 text-white" 
+                                : data.alert.toUpperCase().includes("BUY") 
+                                  ? "bg-emerald-600 text-white" 
+                                  : "bg-slate-600 text-white"
+                            }`}
+                          >
+                            {data.alert}
+                          </Badge>
+                        ) : "-"}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.price != null ? data.price : "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.localTime || "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.mode || "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.modeDesc || "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.firstLine != null ? data.firstLine : "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.midLine != null ? data.midLine : "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.slowLine != null ? data.slowLine : "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.st != null ? data.st : "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.ht != null ? data.ht : "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.rsi != null ? data.rsi : "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.rsiScaled != null ? data.rsiScaled : "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.alertSystem || "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.actionBinary != null ? data.actionBinary : "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-1 py-1">{data.lockState || "-"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </div>
         </SheetContent>
       </Sheet>
