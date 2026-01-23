@@ -603,7 +603,18 @@ export default function Webhooks() {
                             <TableCell className="whitespace-nowrap">{data.indicator || "-"}</TableCell>
                             <TableCell className="whitespace-nowrap">
                               {data.alert ? (
-                                <Badge variant="default" className="bg-emerald-600 text-white font-semibold">{data.alert}</Badge>
+                                <Badge 
+                                  variant="default" 
+                                  className={`font-mono text-sm tracking-wide ${
+                                    data.alert.toUpperCase().includes("SELL") 
+                                      ? "bg-red-600 text-white" 
+                                      : data.alert.toUpperCase().includes("BUY") 
+                                        ? "bg-emerald-600 text-white" 
+                                        : "bg-slate-600 text-white"
+                                  }`}
+                                >
+                                  {data.alert}
+                                </Badge>
                               ) : "-"}
                             </TableCell>
                             <TableCell className="whitespace-nowrap">{data.price != null ? data.price : "-"}</TableCell>
