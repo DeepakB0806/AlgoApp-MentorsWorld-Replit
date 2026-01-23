@@ -1,11 +1,13 @@
 import { randomUUID } from "crypto";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { db } from "./db";
 import { 
-  strategies, webhooks, webhookLogs, brokerConfigs,
+  strategies, webhooks, webhookLogs, webhookStatusLogs, appSettings, brokerConfigs,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
+  type WebhookStatusLog, type InsertWebhookStatusLog,
+  type AppSetting, type InsertAppSetting,
   type BrokerConfig, type InsertBrokerConfig,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
@@ -18,16 +20,25 @@ export interface IStorage {
   updateStrategy(id: string, strategy: Partial<InsertStrategy>): Promise<Strategy | undefined>;
   deleteStrategy(id: string): Promise<boolean>;
 
-  // Webhooks
+  // Webhooks - persisted in database
   getWebhooks(): Promise<Webhook[]>;
   getWebhook(id: string): Promise<Webhook | undefined>;
   createWebhook(webhook: InsertWebhook): Promise<Webhook>;
   updateWebhook(id: string, webhook: Partial<InsertWebhook>): Promise<Webhook | undefined>;
   deleteWebhook(id: string): Promise<boolean>;
 
-  // Webhook Logs
+  // Webhook Logs - persisted in database
   getWebhookLogs(): Promise<WebhookLog[]>;
+  getWebhookLogsByWebhookId(webhookId: string): Promise<WebhookLog[]>;
   createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog>;
+
+  // Webhook Status Logs - persisted in database
+  getWebhookStatusLogs(webhookId: string): Promise<WebhookStatusLog[]>;
+  createWebhookStatusLog(log: InsertWebhookStatusLog): Promise<WebhookStatusLog>;
+
+  // App Settings - persisted in database
+  getSetting(key: string): Promise<AppSetting | undefined>;
+  setSetting(key: string, value: string): Promise<AppSetting>;
 
   // Broker Configs - persisted in database
   getBrokerConfigs(): Promise<BrokerConfig[]>;
@@ -157,18 +168,19 @@ export class DatabaseStorage implements IStorage {
     return this.strategiesMap.delete(id);
   }
 
-  // Webhooks (in-memory)
+  // Webhooks - PERSISTENT in PostgreSQL database
   async getWebhooks(): Promise<Webhook[]> {
-    return Array.from(this.webhooksMap.values());
+    return await db.select().from(webhooks);
   }
 
   async getWebhook(id: string): Promise<Webhook | undefined> {
-    return this.webhooksMap.get(id);
+    const [webhook] = await db.select().from(webhooks).where(eq(webhooks.id, id));
+    return webhook || undefined;
   }
 
   async createWebhook(insertWebhook: InsertWebhook): Promise<Webhook> {
     const id = randomUUID();
-    const webhook: Webhook = {
+    const [webhook] = await db.insert(webhooks).values({
       id,
       name: insertWebhook.name,
       strategyId: insertWebhook.strategyId ?? null,
@@ -178,33 +190,38 @@ export class DatabaseStorage implements IStorage {
       triggerType: insertWebhook.triggerType,
       lastTriggered: null,
       totalTriggers: 0,
-    };
-    this.webhooksMap.set(id, webhook);
+    }).returning();
     return webhook;
   }
 
   async updateWebhook(id: string, update: Partial<InsertWebhook>): Promise<Webhook | undefined> {
-    const webhook = this.webhooksMap.get(id);
-    if (!webhook) return undefined;
-    const updated = { ...webhook, ...update };
-    this.webhooksMap.set(id, updated);
-    return updated;
+    const [webhook] = await db.update(webhooks)
+      .set(update)
+      .where(eq(webhooks.id, id))
+      .returning();
+    return webhook || undefined;
   }
 
   async deleteWebhook(id: string): Promise<boolean> {
-    return this.webhooksMap.delete(id);
+    const result = await db.delete(webhooks).where(eq(webhooks.id, id));
+    return true;
   }
 
-  // Webhook Logs (in-memory)
+  // Webhook Logs - PERSISTENT in PostgreSQL database
   async getWebhookLogs(): Promise<WebhookLog[]> {
-    return Array.from(this.webhookLogsMap.values()).sort((a, b) => 
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
+    return await db.select().from(webhookLogs).orderBy(desc(webhookLogs.timestamp)).limit(100);
+  }
+
+  async getWebhookLogsByWebhookId(webhookId: string): Promise<WebhookLog[]> {
+    return await db.select().from(webhookLogs)
+      .where(eq(webhookLogs.webhookId, webhookId))
+      .orderBy(desc(webhookLogs.timestamp))
+      .limit(100);
   }
 
   async createWebhookLog(insertLog: InsertWebhookLog): Promise<WebhookLog> {
     const id = randomUUID();
-    const log: WebhookLog = {
+    const [log] = await db.insert(webhookLogs).values({
       id,
       webhookId: insertLog.webhookId,
       timestamp: insertLog.timestamp,
@@ -212,9 +229,79 @@ export class DatabaseStorage implements IStorage {
       status: insertLog.status,
       response: insertLog.response ?? null,
       executionTime: insertLog.executionTime ?? null,
-    };
-    this.webhookLogsMap.set(id, log);
+      timeUnix: insertLog.timeUnix ?? null,
+      exchange: insertLog.exchange ?? null,
+      indices: insertLog.indices ?? null,
+      indicator: insertLog.indicator ?? null,
+      alert: insertLog.alert ?? null,
+      price: insertLog.price ?? null,
+      localTime: insertLog.localTime ?? null,
+      mode: insertLog.mode ?? null,
+      modeDesc: insertLog.modeDesc ?? null,
+      firstLine: insertLog.firstLine ?? null,
+      midLine: insertLog.midLine ?? null,
+      slowLine: insertLog.slowLine ?? null,
+      st: insertLog.st ?? null,
+      ht: insertLog.ht ?? null,
+      rsi: insertLog.rsi ?? null,
+      rsiScaled: insertLog.rsiScaled ?? null,
+      alertSystem: insertLog.alertSystem ?? null,
+      actionBinary: insertLog.actionBinary ?? null,
+      lockState: insertLog.lockState ?? null,
+    }).returning();
     return log;
+  }
+
+  // Webhook Status Logs - PERSISTENT in PostgreSQL database
+  async getWebhookStatusLogs(webhookId: string): Promise<WebhookStatusLog[]> {
+    return await db.select().from(webhookStatusLogs)
+      .where(eq(webhookStatusLogs.webhookId, webhookId))
+      .orderBy(desc(webhookStatusLogs.testedAt))
+      .limit(100);
+  }
+
+  async createWebhookStatusLog(insertLog: InsertWebhookStatusLog): Promise<WebhookStatusLog> {
+    const id = randomUUID();
+    const [log] = await db.insert(webhookStatusLogs).values({
+      id,
+      webhookId: insertLog.webhookId,
+      testPayload: insertLog.testPayload ?? null,
+      status: insertLog.status,
+      statusCode: insertLog.statusCode ?? null,
+      responseMessage: insertLog.responseMessage ?? null,
+      errorMessage: insertLog.errorMessage ?? null,
+      testedAt: insertLog.testedAt,
+    }).returning();
+    return log;
+  }
+
+  // App Settings - PERSISTENT in PostgreSQL database
+  async getSetting(key: string): Promise<AppSetting | undefined> {
+    const [setting] = await db.select().from(appSettings).where(eq(appSettings.key, key));
+    return setting || undefined;
+  }
+
+  async setSetting(key: string, value: string): Promise<AppSetting> {
+    const existing = await this.getSetting(key);
+    const now = new Date().toISOString();
+    
+    if (existing) {
+      const [updated] = await db.update(appSettings)
+        .set({ value, updatedAt: now })
+        .where(eq(appSettings.key, key))
+        .returning();
+      return updated;
+    } else {
+      const id = randomUUID();
+      const [setting] = await db.insert(appSettings).values({
+        id,
+        key,
+        value,
+        createdAt: now,
+        updatedAt: now,
+      }).returning();
+      return setting;
+    }
   }
 
   // Broker Configs - PERSISTENT in PostgreSQL database

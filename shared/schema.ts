@@ -42,7 +42,7 @@ export const insertWebhookSchema = createInsertSchema(webhooks).omit({ id: true 
 export type InsertWebhook = z.infer<typeof insertWebhookSchema>;
 export type Webhook = typeof webhooks.$inferSelect;
 
-// Webhook Logs
+// Webhook Logs - TradingView alert data
 export const webhookLogs = pgTable("webhook_logs", {
   id: varchar("id", { length: 36 }).primaryKey(),
   webhookId: varchar("webhook_id", { length: 36 }).notNull(),
@@ -51,11 +51,61 @@ export const webhookLogs = pgTable("webhook_logs", {
   status: text("status").notNull(), // "success", "failed", "pending"
   response: text("response"),
   executionTime: integer("execution_time"),
+  
+  // TradingView alert fields
+  timeUnix: integer("time_unix"),
+  exchange: text("exchange"),
+  indices: text("indices"),
+  indicator: text("indicator"),
+  alert: text("alert"),
+  price: real("price"),
+  localTime: text("local_time"),
+  mode: text("mode"),
+  modeDesc: text("mode_desc"),
+  firstLine: real("first_line"),
+  midLine: real("mid_line"),
+  slowLine: real("slow_line"),
+  st: real("st"),
+  ht: real("ht"),
+  rsi: real("rsi"),
+  rsiScaled: real("rsi_scaled"),
+  alertSystem: text("alert_system"),
+  actionBinary: integer("action_binary"), // 1 = BUY, 0 = SELL
+  lockState: text("lock_state"),
 });
 
 export const insertWebhookLogSchema = createInsertSchema(webhookLogs).omit({ id: true });
 export type InsertWebhookLog = z.infer<typeof insertWebhookLogSchema>;
 export type WebhookLog = typeof webhookLogs.$inferSelect;
+
+// Webhook Test/Status Logs
+export const webhookStatusLogs = pgTable("webhook_status_logs", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  webhookId: varchar("webhook_id", { length: 36 }).notNull(),
+  testPayload: text("test_payload"),
+  status: text("status").notNull(), // "success", "failed"
+  statusCode: integer("status_code"),
+  responseMessage: text("response_message"),
+  errorMessage: text("error_message"),
+  testedAt: text("tested_at").notNull(),
+});
+
+export const insertWebhookStatusLogSchema = createInsertSchema(webhookStatusLogs).omit({ id: true });
+export type InsertWebhookStatusLog = z.infer<typeof insertWebhookStatusLogSchema>;
+export type WebhookStatusLog = typeof webhookStatusLogs.$inferSelect;
+
+// App Settings (for domain name, etc.)
+export const appSettings = pgTable("app_settings", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  key: text("key").notNull(),
+  value: text("value").notNull(),
+  createdAt: text("created_at"),
+  updatedAt: text("updated_at"),
+});
+
+export const insertAppSettingSchema = createInsertSchema(appSettings).omit({ id: true });
+export type InsertAppSetting = z.infer<typeof insertAppSettingSchema>;
+export type AppSetting = typeof appSettings.$inferSelect;
 
 // Broker API Configuration - stored in "algo_trading" database
 export const brokerConfigs = pgTable("broker_configs", {

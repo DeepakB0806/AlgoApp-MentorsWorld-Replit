@@ -108,8 +108,21 @@ export async function registerRoutes(
       if (!parsed.success) {
         return res.status(400).json({ error: "Invalid webhook data", details: parsed.error });
       }
+      
+      // Get domain setting to determine webhook URL
+      const domainSetting = await storage.getSetting("domain_name");
+      
+      // Create webhook with proper URL
       const webhook = await storage.createWebhook(parsed.data);
-      res.status(201).json(webhook);
+      
+      // Generate the proper webhook URL based on domain setting
+      const generatedUrl = domainSetting?.value 
+        ? `https://${domainSetting.value}/api/webhook/${webhook.id}`
+        : `/api/webhook/${webhook.id}`;
+      
+      // Update with the correct URL
+      const updatedWebhook = await storage.updateWebhook(webhook.id, { webhookUrl: generatedUrl });
+      res.status(201).json(updatedWebhook || webhook);
     } catch (error) {
       res.status(500).json({ error: "Failed to create webhook" });
     }
@@ -140,6 +153,188 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete webhook" });
+    }
+  });
+
+  // Webhook Receiver Endpoint - receives TradingView alerts
+  app.post("/api/webhook/:id", async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.params.id;
+    
+    try {
+      // Find the webhook configuration
+      const webhook = await storage.getWebhook(webhookId);
+      if (!webhook) {
+        return res.status(404).json({ error: "Webhook not found" });
+      }
+
+      if (!webhook.isActive) {
+        return res.status(403).json({ error: "Webhook is disabled" });
+      }
+
+      // Verify secret key if configured
+      const providedSecret = req.headers["x-secret-key"] || req.query.secret;
+      if (webhook.secretKey && providedSecret !== webhook.secretKey) {
+        return res.status(401).json({ error: "Invalid secret key" });
+      }
+
+      // Parse the payload (TradingView alert data)
+      const payload = req.body;
+      console.log("Webhook received:", webhookId, JSON.stringify(payload));
+
+      // Extract TradingView fields
+      const logData = {
+        webhookId,
+        timestamp: new Date().toISOString(),
+        payload: JSON.stringify(payload),
+        status: "success" as const,
+        response: "Alert received and processed",
+        executionTime: 0,
+        timeUnix: payload.time_unix || payload.timeUnix,
+        exchange: payload.exchange || payload.exchan,
+        indices: payload.indices,
+        indicator: payload.indicator,
+        alert: payload.alert,
+        price: payload.price ? parseFloat(payload.price) : undefined,
+        localTime: payload.local_time || payload.localTime,
+        mode: payload.mode,
+        modeDesc: payload.mode_desc || payload.modeDesc,
+        firstLine: payload.first_line ? parseFloat(payload.first_line) : undefined,
+        midLine: payload.mid_line ? parseFloat(payload.mid_line) : undefined,
+        slowLine: payload.slow_line ? parseFloat(payload.slow_line) : undefined,
+        st: payload.st ? parseFloat(payload.st) : undefined,
+        ht: payload.ht ? parseFloat(payload.ht) : undefined,
+        rsi: payload.rsi ? parseFloat(payload.rsi) : undefined,
+        rsiScaled: payload.rsi_scaled ? parseFloat(payload.rsi_scaled) : undefined,
+        alertSystem: payload.alert_system || payload.alertSystem,
+        actionBinary: payload.action_binary !== undefined ? parseInt(payload.action_binary) : undefined,
+        lockState: payload.lock_state || payload.lockState,
+      };
+
+      // TODO: Here you would trigger the strategy/order based on the alert
+      // For now, we just log the webhook call
+
+      // Log the webhook call
+      logData.executionTime = Date.now() - startTime;
+      await storage.createWebhookLog(logData);
+
+      // Update webhook trigger count
+      await storage.updateWebhook(webhookId, {
+        lastTriggered: new Date().toISOString(),
+        totalTriggers: (webhook.totalTriggers || 0) + 1,
+      });
+
+      res.json({ 
+        success: true, 
+        message: "Webhook processed successfully",
+        action: logData.actionBinary === 1 ? "BUY" : logData.actionBinary === 0 ? "SELL" : "UNKNOWN",
+      });
+    } catch (error) {
+      console.error("Webhook processing error:", error);
+      
+      // Log the failed webhook
+      await storage.createWebhookLog({
+        webhookId,
+        timestamp: new Date().toISOString(),
+        payload: JSON.stringify(req.body),
+        status: "failed",
+        response: String(error),
+        executionTime: Date.now() - startTime,
+      });
+
+      res.status(500).json({ error: "Webhook processing failed" });
+    }
+  });
+
+  // Webhook Status Logs
+  app.get("/api/webhooks/:id/status-logs", async (req, res) => {
+    try {
+      const logs = await storage.getWebhookStatusLogs(req.params.id);
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch status logs" });
+    }
+  });
+
+  // Test Webhook
+  app.post("/api/webhooks/:id/test", async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.params.id;
+    
+    try {
+      const webhook = await storage.getWebhook(webhookId);
+      if (!webhook) {
+        return res.status(404).json({ error: "Webhook not found" });
+      }
+
+      // Create test payload
+      const testPayload = {
+        time_unix: Math.floor(Date.now() / 1000),
+        exchange: "NSE",
+        indices: "NIFTY50",
+        indicator: "Test Indicator",
+        alert: "Test Alert",
+        price: 19500.50,
+        local_time: new Date().toLocaleString(),
+        mode: "test",
+        mode_desc: "Test mode",
+        action_binary: 1,
+        lock_state: "unlocked",
+      };
+
+      // Log the test
+      await storage.createWebhookStatusLog({
+        webhookId,
+        testPayload: JSON.stringify(testPayload),
+        status: "success",
+        statusCode: 200,
+        responseMessage: "Test webhook executed successfully",
+        testedAt: new Date().toISOString(),
+      });
+
+      res.json({ 
+        success: true, 
+        message: "Test webhook sent successfully",
+        testPayload,
+        executionTime: Date.now() - startTime,
+      });
+    } catch (error) {
+      console.error("Test webhook error:", error);
+      
+      await storage.createWebhookStatusLog({
+        webhookId,
+        testPayload: JSON.stringify(req.body || {}),
+        status: "failed",
+        statusCode: 500,
+        responseMessage: "Test failed",
+        errorMessage: String(error),
+        testedAt: new Date().toISOString(),
+      });
+
+      res.status(500).json({ error: "Test webhook failed" });
+    }
+  });
+
+  // App Settings Routes
+  app.get("/api/settings/:key", async (req, res) => {
+    try {
+      const setting = await storage.getSetting(req.params.key);
+      res.json(setting || { key: req.params.key, value: null });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch setting" });
+    }
+  });
+
+  app.post("/api/settings/:key", async (req, res) => {
+    try {
+      const { value } = req.body;
+      if (typeof value !== "string") {
+        return res.status(400).json({ error: "Value must be a string" });
+      }
+      const setting = await storage.setSetting(req.params.key, value);
+      res.json(setting);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save setting" });
     }
   });
 

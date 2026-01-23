@@ -101,10 +101,29 @@ The application implements the official Kotak Neo Trade API based on the Postman
   - Tracks: TOTP usage (last used, time), login stats (total, successful, failed)
   - Tracks: Test stats (total, successful, last result, last message)
   - Timestamps: createdAt, updatedAt, lastConnected, lastTestTime, lastTotpTime
-- **Strategies/Webhooks**: In-memory storage (sample data resets on restart)
+- **Webhooks & Logs**: Stored permanently in PostgreSQL database
+  - Stores: Webhook config, secret keys, trigger counts
+  - TradingView fields: exchange, indicator, alert, price, actionBinary, rsi, mode, etc.
+  - Status logs: Test results, status codes, error messages
+  - App settings: Domain name for auto-generated webhook URLs
+- **Strategies**: In-memory storage (sample data resets on restart)
 - **Trading Data**: Fetched live from Kotak Neo when authenticated, mock data otherwise
 
 ## Recent Changes
+
+### 2026-01-23
+- Integrated webhook functionality from uploaded zip file:
+  - Added TradingView alert fields to webhook logs (exchange, indicator, alert, price, RSI, actionBinary, etc.)
+  - Created webhook receiver endpoint POST /api/webhook/:id that processes TradingView alerts
+  - Added domain name configuration for auto-generating webhook URLs
+  - Added test webhook functionality with status logging
+  - Added webhook status logs table for tracking test results
+  - Added app_settings table for storing domain name and other settings
+  - Updated webhooks UI with domain configuration, test button, and status logs panel
+- Updated INVESTMENTS tab to match Kotak Neo layout:
+  - Summary cards: Current value, Total invested, Profit/Loss (with %), Today's profit/loss (with %)
+  - Table columns: Name, Quantity, Avg cost, LTP, Current value, Invested, Profit/loss (%), Today's P/L (%)
+  - Fixed P&L percentage calculations
 
 ### 2026-01-22
 - Initial implementation of AlgoTrading Platform

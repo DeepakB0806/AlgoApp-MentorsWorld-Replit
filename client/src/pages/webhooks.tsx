@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,16 +10,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle } from "lucide-react";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Webhook as WebhookType, WebhookLog, InsertWebhook, Strategy } from "@shared/schema";
+import type { Webhook as WebhookType, WebhookLog, InsertWebhook, Strategy, WebhookStatusLog, AppSetting } from "@shared/schema";
 
 export default function Webhooks() {
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingWebhook, setEditingWebhook] = useState<WebhookType | null>(null);
+  const [selectedWebhook, setSelectedWebhook] = useState<WebhookType | null>(null);
+  const [isLogsSheetOpen, setIsLogsSheetOpen] = useState(false);
+  const [domainName, setDomainName] = useState("");
+  const [tempDomainName, setTempDomainName] = useState("");
   const [formData, setFormData] = useState<Partial<InsertWebhook>>({
     name: "",
     strategyId: "",
@@ -28,6 +33,18 @@ export default function Webhooks() {
     isActive: true,
     triggerType: "both",
   });
+
+  // Fetch domain name setting
+  const { data: domainSetting } = useQuery<AppSetting>({
+    queryKey: ["/api/settings/domain_name"],
+  });
+
+  useEffect(() => {
+    if (domainSetting?.value) {
+      setDomainName(domainSetting.value);
+      setTempDomainName(domainSetting.value);
+    }
+  }, [domainSetting]);
 
   const { data: webhooks = [], isLoading } = useQuery<WebhookType[]>({
     queryKey: ["/api/webhooks"],
@@ -39,6 +56,26 @@ export default function Webhooks() {
 
   const { data: strategies = [] } = useQuery<Strategy[]>({
     queryKey: ["/api/strategies"],
+  });
+
+  const { data: statusLogs = [] } = useQuery<WebhookStatusLog[]>({
+    queryKey: ["/api/webhooks", selectedWebhook?.id, "status-logs"],
+    enabled: !!selectedWebhook,
+  });
+
+  // Save domain name
+  const saveDomainMutation = useMutation({
+    mutationFn: async (value: string) => {
+      return apiRequest("POST", "/api/settings/domain_name", { value });
+    },
+    onSuccess: () => {
+      setDomainName(tempDomainName);
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/domain_name"] });
+      toast({ title: "Domain saved successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to save domain", variant: "destructive" });
+    },
   });
 
   const createMutation = useMutation({
@@ -94,6 +131,19 @@ export default function Webhooks() {
     },
   });
 
+  const testMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("POST", `/api/webhooks/${id}/test`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/webhooks", selectedWebhook?.id, "status-logs"] });
+      toast({ title: "Test webhook sent successfully" });
+    },
+    onError: () => {
+      toast({ title: "Test webhook failed", variant: "destructive" });
+    },
+  });
+
   const resetForm = () => {
     setFormData({
       name: "",
@@ -106,10 +156,17 @@ export default function Webhooks() {
   };
 
   const handleSubmit = () => {
+    // Backend auto-generates webhook URL based on domain setting
+    // Provide a placeholder URL that will be replaced on the backend
+    const dataToSubmit = { 
+      ...formData, 
+      webhookUrl: editingWebhook?.webhookUrl || "pending" 
+    };
+    
     if (editingWebhook) {
-      updateMutation.mutate({ id: editingWebhook.id, data: formData });
+      updateMutation.mutate({ id: editingWebhook.id, data: dataToSubmit });
     } else {
-      createMutation.mutate(formData);
+      createMutation.mutate(dataToSubmit);
     }
   };
 
@@ -126,6 +183,11 @@ export default function Webhooks() {
     setIsDialogOpen(true);
   };
 
+  const handleViewLogs = (webhook: WebhookType) => {
+    setSelectedWebhook(webhook);
+    setIsLogsSheetOpen(true);
+  };
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast({ title: "Copied to clipboard" });
@@ -136,6 +198,13 @@ export default function Webhooks() {
       .map(b => b.toString(16).padStart(2, "0"))
       .join("");
     setFormData({ ...formData, secretKey: key });
+  };
+
+  const getWebhookUrl = (webhook: WebhookType) => {
+    if (domainName) {
+      return `https://${domainName}/api/webhook/${webhook.id}`;
+    }
+    return webhook.webhookUrl;
   };
 
   return (
@@ -223,20 +292,10 @@ export default function Webhooks() {
                     </div>
 
                     <div>
-                      <Label>Webhook URL</Label>
-                      <Input
-                        value={formData.webhookUrl}
-                        onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
-                        placeholder="https://your-domain.com/webhook"
-                        data-testid="input-webhook-url"
-                      />
-                    </div>
-
-                    <div>
                       <Label>Secret Key</Label>
                       <div className="flex gap-2">
                         <Input
-                          value={formData.secretKey}
+                          value={formData.secretKey || ""}
                           onChange={(e) => setFormData({ ...formData, secretKey: e.target.value })}
                           placeholder="Your secret key"
                           data-testid="input-secret-key"
@@ -254,7 +313,7 @@ export default function Webhooks() {
 
                     <Button
                       onClick={handleSubmit}
-                      disabled={!formData.name || !formData.webhookUrl || createMutation.isPending || updateMutation.isPending}
+                      disabled={!formData.name || createMutation.isPending || updateMutation.isPending}
                       data-testid="button-save-webhook"
                     >
                       {createMutation.isPending || updateMutation.isPending ? "Saving..." : (editingWebhook ? "Update Webhook" : "Create Webhook")}
@@ -268,6 +327,45 @@ export default function Webhooks() {
       </header>
 
       <div className="container mx-auto px-4 py-6">
+        {/* Domain Configuration */}
+        <Card className="mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Settings className="w-5 h-5" />
+              Domain Configuration
+            </CardTitle>
+            <CardDescription>
+              Set your domain name to auto-generate webhook URLs for TradingView
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <Label>Domain Name</Label>
+                <Input
+                  value={tempDomainName}
+                  onChange={(e) => setTempDomainName(e.target.value)}
+                  placeholder="your-app.replit.app"
+                  data-testid="input-domain-name"
+                />
+              </div>
+              <Button
+                onClick={() => saveDomainMutation.mutate(tempDomainName)}
+                disabled={saveDomainMutation.isPending || !tempDomainName}
+                data-testid="button-save-domain"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {saveDomainMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+            {domainName && (
+              <p className="text-sm text-muted-foreground mt-2">
+                Webhook URLs will be generated as: <code className="bg-muted px-1 rounded">https://{domainName}/api/webhook/[id]</code>
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
         <Tabs defaultValue="webhooks" className="space-y-4">
           <TabsList className="bg-card border border-border" data-testid="tabs-webhooks">
             <TabsTrigger value="webhooks">Webhooks ({webhooks.length})</TabsTrigger>
@@ -306,18 +404,38 @@ export default function Webhooks() {
                             <Badge variant="outline">{webhook.triggerType}</Badge>
                           </CardTitle>
                           <CardDescription className="flex items-center gap-2 mt-1">
-                            <span className="truncate max-w-md">{webhook.webhookUrl}</span>
+                            <span className="truncate max-w-md font-mono text-xs">{getWebhookUrl(webhook)}</span>
                             <Button
                               variant="ghost"
                               size="icon"
                               className="h-6 w-6"
-                              onClick={() => copyToClipboard(webhook.webhookUrl)}
+                              onClick={() => copyToClipboard(getWebhookUrl(webhook))}
+                              data-testid={`button-copy-url-${webhook.id}`}
                             >
                               <Copy className="w-3 h-3" />
                             </Button>
                           </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => testMutation.mutate(webhook.id)}
+                            disabled={testMutation.isPending}
+                            data-testid={`button-test-webhook-${webhook.id}`}
+                          >
+                            <Play className="w-4 h-4 mr-1" />
+                            Test
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleViewLogs(webhook)}
+                            data-testid={`button-view-logs-${webhook.id}`}
+                          >
+                            <FileText className="w-4 h-4 mr-1" />
+                            Logs
+                          </Button>
                           <Switch
                             checked={webhook.isActive}
                             onCheckedChange={(checked) => toggleMutation.mutate({ id: webhook.id, isActive: checked })}
@@ -368,7 +486,7 @@ export default function Webhooks() {
             <Card>
               <CardHeader>
                 <CardTitle>Webhook Logs</CardTitle>
-                <CardDescription>Recent webhook trigger history</CardDescription>
+                <CardDescription>Recent webhook trigger history with TradingView data</CardDescription>
               </CardHeader>
               <CardContent>
                 {webhookLogs.length === 0 ? (
@@ -379,8 +497,12 @@ export default function Webhooks() {
                       <TableRow>
                         <TableHead>Timestamp</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Execution Time</TableHead>
-                        <TableHead>Response</TableHead>
+                        <TableHead>Exchange</TableHead>
+                        <TableHead>Indicator</TableHead>
+                        <TableHead>Alert</TableHead>
+                        <TableHead>Price</TableHead>
+                        <TableHead>Action</TableHead>
+                        <TableHead>Execution</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -388,23 +510,33 @@ export default function Webhooks() {
                         <TableRow key={log.id} data-testid={`row-log-${log.id}`}>
                           <TableCell className="flex items-center gap-2">
                             <Clock className="w-4 h-4 text-muted-foreground" />
-                            {log.timestamp}
+                            <span className="text-xs">{new Date(log.timestamp).toLocaleString()}</span>
                           </TableCell>
                           <TableCell>
                             {log.status === "success" ? (
                               <Badge variant="default" className="flex items-center gap-1 w-fit">
                                 <CheckCircle className="w-3 h-3" />
-                                Success
+                                OK
                               </Badge>
                             ) : (
                               <Badge variant="destructive" className="flex items-center gap-1 w-fit">
                                 <XCircle className="w-3 h-3" />
-                                Failed
+                                Fail
                               </Badge>
                             )}
                           </TableCell>
+                          <TableCell>{log.exchange || "-"}</TableCell>
+                          <TableCell>{log.indicator || "-"}</TableCell>
+                          <TableCell className="max-w-xs truncate">{log.alert || "-"}</TableCell>
+                          <TableCell>{log.price ? log.price.toFixed(2) : "-"}</TableCell>
+                          <TableCell>
+                            {log.actionBinary === 1 ? (
+                              <Badge variant="default">BUY</Badge>
+                            ) : log.actionBinary === 0 ? (
+                              <Badge variant="destructive">SELL</Badge>
+                            ) : "-"}
+                          </TableCell>
                           <TableCell>{log.executionTime}ms</TableCell>
-                          <TableCell className="max-w-xs truncate">{log.response}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -415,6 +547,77 @@ export default function Webhooks() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Status Logs Sheet */}
+      <Sheet open={isLogsSheetOpen} onOpenChange={setIsLogsSheetOpen}>
+        <SheetContent className="w-[500px] sm:w-[600px] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Webhook Logs: {selectedWebhook?.name}</SheetTitle>
+            <SheetDescription>
+              Test and status logs for this webhook
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-6 space-y-4">
+            {selectedWebhook && (
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => testMutation.mutate(selectedWebhook.id)}
+                  disabled={testMutation.isPending}
+                  data-testid="button-test-webhook-sheet"
+                >
+                  <Play className="w-4 h-4 mr-2" />
+                  {testMutation.isPending ? "Testing..." : "Send Test"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => copyToClipboard(getWebhookUrl(selectedWebhook))}
+                >
+                  <Copy className="w-4 h-4 mr-2" />
+                  Copy URL
+                </Button>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <h4 className="font-medium">Status Logs</h4>
+              {statusLogs.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No status logs yet</p>
+              ) : (
+                <div className="space-y-2">
+                  {statusLogs.map((log) => (
+                    <Card key={log.id} className="p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            {log.status === "success" ? (
+                              <CheckCircle className="w-4 h-4 text-primary" />
+                            ) : (
+                              <XCircle className="w-4 h-4 text-destructive" />
+                            )}
+                            <span className="font-medium text-sm">{log.status === "success" ? "Success" : "Failed"}</span>
+                            {log.statusCode && (
+                              <Badge variant="outline" className="text-xs">{log.statusCode}</Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {new Date(log.testedAt).toLocaleString()}
+                          </p>
+                          {log.responseMessage && (
+                            <p className="text-xs mt-1">{log.responseMessage}</p>
+                          )}
+                          {log.errorMessage && (
+                            <p className="text-xs text-destructive mt-1">{log.errorMessage}</p>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
