@@ -86,6 +86,11 @@ export default function Webhooks() {
     refetchOnWindowFocus: true,
   });
 
+  // Fetch webhook registry for looking up production webhook codes
+  const { data: webhookRegistry = [] } = useQuery<{ id: string; uniqueCode: string; webhookId: string; webhookName: string }[]>({
+    queryKey: ["/api/webhook-registry"],
+  });
+
   // Save domain name
   const saveDomainMutation = useMutation({
     mutationFn: async (value: string) => {
@@ -357,11 +362,17 @@ export default function Webhooks() {
     return webhookDataList.filter(data => data.webhookId === effectiveWebhookId);
   };
 
-  // Get linked webhook info for display
+  // Get linked webhook info for display (looks up code from registry)
   const getLinkedWebhookInfo = (linkedWebhookId: string | null | undefined) => {
     if (!linkedWebhookId) return null;
-    const linked = webhooks.find(w => w.id === linkedWebhookId);
-    return linked ? { name: linked.name, code: linked.uniqueCode } : { name: "Unknown", code: linkedWebhookId.slice(0, 6) };
+    // First check local webhooks
+    const localWebhook = webhooks.find(w => w.id === linkedWebhookId);
+    if (localWebhook) return { name: localWebhook.name, code: localWebhook.uniqueCode };
+    // Then check registry (for production webhooks synced from production)
+    const registryEntry = webhookRegistry.find(r => r.webhookId === linkedWebhookId);
+    if (registryEntry) return { name: registryEntry.webhookName, code: registryEntry.uniqueCode };
+    // Fallback
+    return { name: "Production", code: linkedWebhookId.slice(0, 6).toUpperCase() };
   };
 
   // Default field configuration (19 fields)
@@ -683,7 +694,7 @@ export default function Webhooks() {
                             {webhook.linkedWebhookId && (
                               <Badge variant="outline" className="flex items-center gap-1 text-primary border-primary">
                                 <Link2 className="w-3 h-3" />
-                                Linked
+                                Linked: {getLinkedWebhookInfo(webhook.linkedWebhookId)?.code}
                               </Badge>
                             )}
                           </CardTitle>
