@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save, Eye, EyeOff, Activity, Timer, Wrench, Upload } from "lucide-react";
+import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save, Eye, EyeOff, Activity, Timer, Wrench, Upload, Link2, Unlink } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -48,6 +48,9 @@ export default function Webhooks() {
   const [isFieldConfigOpen, setIsFieldConfigOpen] = useState(false);
   const [configWebhook, setConfigWebhook] = useState<WebhookType | null>(null);
   const [fieldConfigText, setFieldConfigText] = useState("");
+  const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
+  const [linkingWebhook, setLinkingWebhook] = useState<WebhookType | null>(null);
+  const [selectedLinkedWebhookId, setSelectedLinkedWebhookId] = useState("");
 
   // Fetch domain name setting
   const { data: domainSetting } = useQuery<AppSetting>({
@@ -197,6 +200,39 @@ export default function Webhooks() {
     },
   });
 
+  // Link webhook to production data stream
+  const linkMutation = useMutation({
+    mutationFn: async ({ id, linkedWebhookId }: { id: string; linkedWebhookId: string }) => {
+      return apiRequest("POST", `/api/webhooks/${id}/link`, { linkedWebhookId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/webhooks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/webhook-data"] });
+      setIsLinkDialogOpen(false);
+      setLinkingWebhook(null);
+      setSelectedLinkedWebhookId("");
+      toast({ title: "Webhook linked successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to link webhook", variant: "destructive" });
+    },
+  });
+
+  // Unlink webhook from production data stream
+  const unlinkMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/webhooks/${id}/link`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/webhooks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/webhook-data"] });
+      toast({ title: "Webhook unlinked successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to unlink webhook", variant: "destructive" });
+    },
+  });
+
   const handleConfigureFields = (webhook: WebhookType) => {
     setConfigWebhook(webhook);
     // If webhook already has field config, parse and display it
@@ -274,8 +310,24 @@ export default function Webhooks() {
     setDataExpandedView(false);
   };
 
+  const handleLinkWebhook = (webhook: WebhookType) => {
+    setLinkingWebhook(webhook);
+    setSelectedLinkedWebhookId(webhook.linkedWebhookId || "");
+    setIsLinkDialogOpen(true);
+  };
+
   const getWebhookData = (webhookId: string) => {
-    return webhookDataList.filter(data => data.webhookId === webhookId);
+    // Check if this webhook is linked to another webhook
+    const webhook = webhooks.find(w => w.id === webhookId);
+    const effectiveWebhookId = webhook?.linkedWebhookId || webhookId;
+    return webhookDataList.filter(data => data.webhookId === effectiveWebhookId);
+  };
+
+  // Get linked webhook name for display
+  const getLinkedWebhookName = (linkedWebhookId: string | null | undefined) => {
+    if (!linkedWebhookId) return null;
+    const linked = webhooks.find(w => w.id === linkedWebhookId);
+    return linked?.name || linkedWebhookId;
   };
 
   // Default field configuration (19 fields)
@@ -583,6 +635,12 @@ export default function Webhooks() {
                               {webhook.isActive ? "Active" : "Inactive"}
                             </Badge>
                             <Badge variant="outline">{webhook.triggerType}</Badge>
+                            {webhook.linkedWebhookId && (
+                              <Badge variant="outline" className="flex items-center gap-1 text-primary border-primary">
+                                <Link2 className="w-3 h-3" />
+                                Linked
+                              </Badge>
+                            )}
                           </CardTitle>
                           <CardDescription className="flex items-center gap-2 mt-1">
                             <span className="truncate max-w-md font-mono text-xs">{getWebhookUrl(webhook)}</span>
@@ -648,6 +706,19 @@ export default function Webhooks() {
                             data-testid={`button-configure-fields-${webhook.id}`}
                           >
                             <Wrench className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => webhook.linkedWebhookId ? unlinkMutation.mutate(webhook.id) : handleLinkWebhook(webhook)}
+                            title={webhook.linkedWebhookId ? "Unlink from Production" : "Link to Production"}
+                            data-testid={`button-link-webhook-${webhook.id}`}
+                          >
+                            {webhook.linkedWebhookId ? (
+                              <Unlink className="w-4 h-4 text-primary" />
+                            ) : (
+                              <Link2 className="w-4 h-4" />
+                            )}
                           </Button>
                           <Button
                             variant="ghost"
@@ -1007,6 +1078,82 @@ export default function Webhooks() {
               data-testid="button-save-field-config"
             >
               {configureFieldsMutation.isPending ? "Saving..." : "Save Configuration"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Link Webhook Dialog */}
+      <Dialog open={isLinkDialogOpen} onOpenChange={(open) => {
+        setIsLinkDialogOpen(open);
+        if (!open) {
+          setLinkingWebhook(null);
+          setSelectedLinkedWebhookId("");
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Link to Production Webhook</DialogTitle>
+            <DialogDescription>
+              Link this webhook to a production webhook to view its data stream. This allows development webhooks to access live production data.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div>
+              <Label className="mb-2 block">Current Webhook: {linkingWebhook?.name}</Label>
+              <p className="text-xs text-muted-foreground mb-4">
+                ID: <code className="bg-muted px-1 rounded">{linkingWebhook?.id}</code>
+              </p>
+            </div>
+            <div>
+              <Label className="mb-2 block">Link to Webhook (Enter ID or Select)</Label>
+              <Input
+                value={selectedLinkedWebhookId}
+                onChange={(e) => setSelectedLinkedWebhookId(e.target.value)}
+                placeholder="Enter production webhook ID"
+                className="mb-2"
+                data-testid="input-linked-webhook-id"
+              />
+              <Select
+                value={selectedLinkedWebhookId}
+                onValueChange={(value) => setSelectedLinkedWebhookId(value)}
+              >
+                <SelectTrigger data-testid="select-linked-webhook">
+                  <SelectValue placeholder="Or select from existing webhooks" />
+                </SelectTrigger>
+                <SelectContent>
+                  {webhooks
+                    .filter(w => w.id !== linkingWebhook?.id)
+                    .map((webhook) => (
+                      <SelectItem key={webhook.id} value={webhook.id}>
+                        {webhook.name} ({webhook.id.slice(0, 8)}...)
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-2">
+                Once linked, this webhook's data panel will show data from the linked webhook.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => setIsLinkDialogOpen(false)}
+              data-testid="button-cancel-link"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={() => {
+                if (linkingWebhook && selectedLinkedWebhookId) {
+                  linkMutation.mutate({ id: linkingWebhook.id, linkedWebhookId: selectedLinkedWebhookId });
+                }
+              }}
+              disabled={!selectedLinkedWebhookId || linkMutation.isPending}
+              data-testid="button-save-link"
+            >
+              {linkMutation.isPending ? "Linking..." : "Link Webhook"}
             </Button>
           </div>
         </DialogContent>

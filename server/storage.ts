@@ -133,6 +133,9 @@ export class DatabaseStorage implements IStorage {
       triggerType: "both",
       lastTriggered: "2026-01-22 10:30:00",
       totalTriggers: 15,
+      fieldConfig: null,
+      dataTableName: null,
+      linkedWebhookId: null,
     };
     this.webhooksMap.set(webhook1.id, webhook1);
   }

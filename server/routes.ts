@@ -409,10 +409,50 @@ export async function registerRoutes(
 
   app.get("/api/webhook-data/webhook/:webhookId", async (req, res) => {
     try {
-      const data = await storage.getWebhookDataByWebhook(req.params.webhookId);
+      const webhookId = req.params.webhookId;
+      
+      // Check if this webhook is linked to another webhook
+      const webhook = await storage.getWebhook(webhookId);
+      const effectiveWebhookId = webhook?.linkedWebhookId || webhookId;
+      
+      const data = await storage.getWebhookDataByWebhook(effectiveWebhookId);
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch webhook data" });
+    }
+  });
+
+  // Link webhook to production webhook data stream
+  app.post("/api/webhooks/:id/link", async (req, res) => {
+    try {
+      const { linkedWebhookId } = req.body;
+      
+      if (!linkedWebhookId) {
+        return res.status(400).json({ error: "linkedWebhookId is required" });
+      }
+      
+      const webhook = await storage.updateWebhook(req.params.id, { linkedWebhookId });
+      if (!webhook) {
+        return res.status(404).json({ error: "Webhook not found" });
+      }
+      
+      res.json({ success: true, webhook });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to link webhook" });
+    }
+  });
+
+  // Unlink webhook from production data stream
+  app.delete("/api/webhooks/:id/link", async (req, res) => {
+    try {
+      const webhook = await storage.updateWebhook(req.params.id, { linkedWebhookId: null });
+      if (!webhook) {
+        return res.status(404).json({ error: "Webhook not found" });
+      }
+      
+      res.json({ success: true, webhook });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to unlink webhook" });
     }
   });
 
