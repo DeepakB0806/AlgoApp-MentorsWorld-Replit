@@ -252,6 +252,12 @@ export default function Login() {
                     Sign Up
                   </Link>
                 </div>
+
+                <div className="text-center text-sm">
+                  <Link href="/" className="text-muted-foreground hover:text-foreground hover:underline" data-testid="link-back-home">
+                    Back to Home
+                  </Link>
+                </div>
               </form>
             )}
 
