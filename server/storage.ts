@@ -2,11 +2,12 @@ import { randomUUID } from "crypto";
 import { eq, desc, and, lt } from "drizzle-orm";
 import { db } from "./db";
 import { 
-  strategies, webhooks, webhookLogs, webhookStatusLogs, appSettings, brokerConfigs,
+  strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
   type WebhookStatusLog, type InsertWebhookStatusLog,
+  type WebhookData, type InsertWebhookData,
   type AppSetting, type InsertAppSetting,
   type BrokerConfig, type InsertBrokerConfig,
   type Position, type Order, type Holding, type PortfolioSummary
@@ -39,6 +40,14 @@ export interface IStorage {
   // Webhook Stats and Cleanup
   getWebhookLogStats(webhookId: string): Promise<{ total: number; success: number; failed: number; successRate: number; avgResponseTime: number }>;
   deleteOldWebhookLogs(webhookId: string, daysToKeep: number): Promise<number>;
+
+  // Webhook Data - stores incoming JSON data for strategy access
+  getWebhookData(): Promise<WebhookData[]>;
+  getWebhookDataByWebhook(webhookId: string): Promise<WebhookData[]>;
+  getWebhookDataByStrategy(strategyId: string): Promise<WebhookData[]>;
+  getLatestWebhookData(webhookId: string): Promise<WebhookData | undefined>;
+  createWebhookData(data: InsertWebhookData): Promise<WebhookData>;
+  markWebhookDataProcessed(id: string): Promise<WebhookData | undefined>;
 
   // App Settings - persisted in database
   getSetting(key: string): Promise<AppSetting | undefined>;
@@ -312,6 +321,45 @@ export class DatabaseStorage implements IStorage {
       .returning();
     
     return result.length;
+  }
+
+  // Webhook Data - PERSISTENT in PostgreSQL database
+  async getWebhookData(): Promise<WebhookData[]> {
+    return await db.select().from(webhookData).orderBy(desc(webhookData.receivedAt));
+  }
+
+  async getWebhookDataByWebhook(webhookId: string): Promise<WebhookData[]> {
+    return await db.select().from(webhookData)
+      .where(eq(webhookData.webhookId, webhookId))
+      .orderBy(desc(webhookData.receivedAt));
+  }
+
+  async getWebhookDataByStrategy(strategyId: string): Promise<WebhookData[]> {
+    return await db.select().from(webhookData)
+      .where(eq(webhookData.strategyId, strategyId))
+      .orderBy(desc(webhookData.receivedAt));
+  }
+
+  async getLatestWebhookData(webhookId: string): Promise<WebhookData | undefined> {
+    const [latest] = await db.select().from(webhookData)
+      .where(eq(webhookData.webhookId, webhookId))
+      .orderBy(desc(webhookData.receivedAt))
+      .limit(1);
+    return latest || undefined;
+  }
+
+  async createWebhookData(data: InsertWebhookData): Promise<WebhookData> {
+    const id = randomUUID();
+    const [created] = await db.insert(webhookData).values({ ...data, id }).returning();
+    return created;
+  }
+
+  async markWebhookDataProcessed(id: string): Promise<WebhookData | undefined> {
+    const [updated] = await db.update(webhookData)
+      .set({ isProcessed: true, processedAt: new Date().toISOString() })
+      .where(eq(webhookData.id, id))
+      .returning();
+    return updated || undefined;
   }
 
   // App Settings - PERSISTENT in PostgreSQL database

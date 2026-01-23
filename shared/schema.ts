@@ -99,6 +99,48 @@ export const insertWebhookStatusLogSchema = createInsertSchema(webhookStatusLogs
 export type InsertWebhookStatusLog = z.infer<typeof insertWebhookStatusLogSchema>;
 export type WebhookStatusLog = typeof webhookStatusLogs.$inferSelect;
 
+// Webhook Data - stores incoming JSON data from webhooks for strategy access
+export const webhookData = pgTable("webhook_data", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  webhookId: varchar("webhook_id", { length: 36 }).notNull(),
+  strategyId: varchar("strategy_id", { length: 36 }),
+  webhookName: text("webhook_name"),
+  receivedAt: text("received_at").notNull(),
+  
+  // Raw JSON data
+  rawPayload: text("raw_payload"),
+  
+  // Parsed TradingView signal fields
+  timeUnix: integer("time_unix"),
+  exchange: text("exchange"),
+  indices: text("indices"),
+  indicator: text("indicator"),
+  alert: text("alert"),
+  price: real("price"),
+  localTime: text("local_time"),
+  mode: text("mode"),
+  modeDesc: text("mode_desc"),
+  firstLine: real("first_line"),
+  midLine: real("mid_line"),
+  slowLine: real("slow_line"),
+  st: real("st"),
+  ht: real("ht"),
+  rsi: real("rsi"),
+  rsiScaled: real("rsi_scaled"),
+  alertSystem: text("alert_system"),
+  actionBinary: integer("action_binary"), // 1 = BUY, 0 = SELL
+  lockState: text("lock_state"),
+  
+  // Additional computed fields
+  signalType: text("signal_type"), // "buy", "sell", "hold"
+  isProcessed: boolean("is_processed").default(false),
+  processedAt: text("processed_at"),
+});
+
+export const insertWebhookDataSchema = createInsertSchema(webhookData).omit({ id: true });
+export type InsertWebhookData = z.infer<typeof insertWebhookDataSchema>;
+export type WebhookData = typeof webhookData.$inferSelect;
+
 // App Settings (for domain name, etc.)
 export const appSettings = pgTable("app_settings", {
   id: varchar("id", { length: 36 }).primaryKey(),
