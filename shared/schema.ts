@@ -299,17 +299,5 @@ export interface OrderParams {
   trigger_price?: string;
 }
 
-// Keep User schema for compatibility
-export const users = pgTable("users", {
-  id: varchar("id", { length: 36 }).primaryKey(),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
-});
-
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
-});
-
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+// Export auth models (users, sessions, invitations)
+export * from "./models/auth";

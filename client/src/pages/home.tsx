@@ -1,9 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, BarChart3, Activity, ArrowRight, Zap, Shield, Globe } from "lucide-react";
+import { TrendingUp, BarChart3, Activity, ArrowRight, Zap, Shield, Globe, LogIn, Users, LogOut } from "lucide-react";
 import { Link } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function Home() {
+  const { user, isAuthenticated, isSuperAdmin, logout } = useAuth();
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
@@ -12,13 +15,47 @@ export default function Home() {
             <h1 className="text-2xl font-bold text-foreground" data-testid="text-logo">
               AlgoTrading Platform
             </h1>
-            <div className="flex items-center gap-3">
-              <Link href="/dashboard">
-                <Button data-testid="button-dashboard">
-                  Dashboard
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
-              </Link>
+            <div className="flex items-center gap-3 flex-wrap">
+              {isAuthenticated ? (
+                <>
+                  {isSuperAdmin && (
+                    <Link href="/user-management">
+                      <Button variant="outline" data-testid="button-user-management">
+                        <Users className="w-4 h-4 mr-2" />
+                        Team
+                      </Button>
+                    </Link>
+                  )}
+                  <span className="text-sm text-muted-foreground" data-testid="text-user-email">
+                    {user?.email}
+                  </span>
+                  <Button variant="outline" onClick={logout} data-testid="button-logout">
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Sign Out
+                  </Button>
+                  <Link href="/dashboard">
+                    <Button data-testid="button-dashboard">
+                      Dashboard
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link href="/login">
+                    <Button variant="outline" data-testid="button-login">
+                      <LogIn className="w-4 h-4 mr-2" />
+                      Sign In
+                    </Button>
+                  </Link>
+                  <Link href="/dashboard">
+                    <Button data-testid="button-dashboard">
+                      Dashboard
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </div>
