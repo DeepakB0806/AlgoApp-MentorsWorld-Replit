@@ -9,15 +9,14 @@ import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import crypto from "crypto";
 
-// Get REPL_OWNER for Super Admin detection
-const REPL_OWNER = process.env.REPL_OWNER || "";
+// Super Admin email - this email will have super admin privileges
+const SUPER_ADMIN_EMAIL = "webadmin@mentorsworld.org";
 
 // Helper to check if user is Super Admin
 function isSuperAdmin(userId: string, email?: string | null): boolean {
-  // Super Admin is the Replit project owner
-  // The owner's user ID starts with their Replit username
-  if (!REPL_OWNER) return false;
-  return userId === REPL_OWNER || Boolean(email && userId.includes(REPL_OWNER));
+  // Super Admin is determined by email match
+  if (!email) return false;
+  return email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
 }
 
 // TOTP helper functions using speakeasy

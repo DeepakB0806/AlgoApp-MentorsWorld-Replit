@@ -135,7 +135,7 @@
                       <LineChart className="w-8 h-8 text-chart-2" />
                     </div>
                     <div className="text-sm font-medium text-chart-2 mb-2">Step 2</div>
-                    <h4 className="text-xl font-semibold text-foreground mb-3">Defined Strategies</h4>
+                    <h4 className="text-xl font-semibold text-foreground mb-3">Subscribe Defined Strategies</h4>
                     <p className="text-muted-foreground">
                       Pre-configured trading rules, position sizes, and risk parameters for every strategy
                     </p>
@@ -242,7 +242,7 @@
                 <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                      <TrendingUp className="w-4 h-4 text-primary" />
+                      <TrendingUp className="w-2 h-2 text-primary" />
                     </div>
                     <span className="font-semibold text-foreground">Copyright @ MentorsWorld Ventures Pvt. Ltd.</span>
                   </div>
