@@ -217,12 +217,40 @@ export async function registerRoutes(
         lockState: payload.lock_state || payload.lockState,
       };
 
-      // TODO: Here you would trigger the strategy/order based on the alert
-      // For now, we just log the webhook call
-
       // Log the webhook call
       logData.executionTime = Date.now() - startTime;
       await storage.createWebhookLog(logData);
+
+      // Store webhook data for strategy access
+      const signalType = logData.actionBinary === 1 ? "buy" : logData.actionBinary === 0 ? "sell" : "hold";
+      await storage.createWebhookData({
+        webhookId,
+        strategyId: webhook.strategyId || undefined,
+        webhookName: webhook.name,
+        receivedAt: new Date().toISOString(),
+        rawPayload: JSON.stringify(payload),
+        timeUnix: logData.timeUnix,
+        exchange: logData.exchange,
+        indices: logData.indices,
+        indicator: logData.indicator,
+        alert: logData.alert,
+        price: logData.price,
+        localTime: logData.localTime,
+        mode: logData.mode,
+        modeDesc: logData.modeDesc,
+        firstLine: logData.firstLine,
+        midLine: logData.midLine,
+        slowLine: logData.slowLine,
+        st: logData.st,
+        ht: logData.ht,
+        rsi: logData.rsi,
+        rsiScaled: logData.rsiScaled,
+        alertSystem: logData.alertSystem,
+        actionBinary: logData.actionBinary,
+        lockState: logData.lockState,
+        signalType,
+        isProcessed: false,
+      });
 
       // Update webhook trigger count
       await storage.updateWebhook(webhookId, {
@@ -234,6 +262,7 @@ export async function registerRoutes(
         success: true, 
         message: "Webhook processed successfully",
         action: logData.actionBinary === 1 ? "BUY" : logData.actionBinary === 0 ? "SELL" : "UNKNOWN",
+        signal: signalType,
       });
     } catch (error) {
       console.error("Webhook processing error:", error);
@@ -280,6 +309,58 @@ export async function registerRoutes(
       res.json({ success: true, deletedCount, daysToKeep });
     } catch (error) {
       res.status(500).json({ error: "Failed to cleanup logs" });
+    }
+  });
+
+  // Webhook Data - stored JSON data for strategy access
+  app.get("/api/webhook-data", async (req, res) => {
+    try {
+      const data = await storage.getWebhookData();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch webhook data" });
+    }
+  });
+
+  app.get("/api/webhook-data/webhook/:webhookId", async (req, res) => {
+    try {
+      const data = await storage.getWebhookDataByWebhook(req.params.webhookId);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch webhook data" });
+    }
+  });
+
+  app.get("/api/webhook-data/strategy/:strategyId", async (req, res) => {
+    try {
+      const data = await storage.getWebhookDataByStrategy(req.params.strategyId);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch webhook data" });
+    }
+  });
+
+  app.get("/api/webhook-data/webhook/:webhookId/latest", async (req, res) => {
+    try {
+      const data = await storage.getLatestWebhookData(req.params.webhookId);
+      if (!data) {
+        return res.status(404).json({ error: "No data found for this webhook" });
+      }
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch webhook data" });
+    }
+  });
+
+  app.patch("/api/webhook-data/:id/processed", async (req, res) => {
+    try {
+      const data = await storage.markWebhookDataProcessed(req.params.id);
+      if (!data) {
+        return res.status(404).json({ error: "Webhook data not found" });
+      }
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update webhook data" });
     }
   });
 
