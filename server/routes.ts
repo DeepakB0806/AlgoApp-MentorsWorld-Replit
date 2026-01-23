@@ -543,10 +543,32 @@ export async function registerRoutes(
         }
       }
       
+      // Get the dev webhook to send its code to production
+      const devWebhook = await storage.getWebhook(req.params.id);
+      if (!devWebhook) {
+        return res.status(404).json({ error: "Webhook not found" });
+      }
+      
       // Link to the production webhook's ID
       const webhook = await storage.updateWebhook(req.params.id, { linkedWebhookId: linkedId });
       if (!webhook) {
         return res.status(404).json({ error: "Webhook not found" });
+      }
+      
+      // Try to register the link on production (non-blocking)
+      const domainSetting = await storage.getSetting('domain_name');
+      if (domainSetting?.value) {
+        try {
+          const productionUrl = `https://${domainSetting.value}/api/webhooks/${linkedId}/register-link`;
+          await fetch(productionUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ devWebhookCode: devWebhook.uniqueCode }),
+          });
+        } catch (err) {
+          // Log but don't fail - production may not be reachable
+          console.log("Could not register link on production (non-blocking):", err);
+        }
       }
       
       res.json({ success: true, webhook, linkedWebhook: productionWebhook, registryEntry });
@@ -558,14 +580,96 @@ export async function registerRoutes(
   // Unlink webhook from production data stream
   app.delete("/api/webhooks/:id/link", async (req, res) => {
     try {
-      const webhook = await storage.updateWebhook(req.params.id, { linkedWebhookId: null });
-      if (!webhook) {
+      // Get the webhook before unlinking to access its linkedWebhookId and uniqueCode
+      const existingWebhook = await storage.getWebhook(req.params.id);
+      if (!existingWebhook) {
         return res.status(404).json({ error: "Webhook not found" });
+      }
+      
+      const linkedId = existingWebhook.linkedWebhookId;
+      const devCode = existingWebhook.uniqueCode;
+      
+      const webhook = await storage.updateWebhook(req.params.id, { linkedWebhookId: null });
+      
+      // Try to unregister the link on production (non-blocking)
+      if (linkedId) {
+        const domainSetting = await storage.getSetting('domain_name');
+        if (domainSetting?.value) {
+          try {
+            const productionUrl = `https://${domainSetting.value}/api/webhooks/${linkedId}/unregister-link`;
+            await fetch(productionUrl, {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ devWebhookCode: devCode }),
+            });
+          } catch (err) {
+            // Log but don't fail - production may not be reachable
+            console.log("Could not unregister link on production (non-blocking):", err);
+          }
+        }
       }
       
       res.json({ success: true, webhook });
     } catch (error) {
       res.status(500).json({ error: "Failed to unlink webhook" });
+    }
+  });
+
+  // Register a dev webhook link (called by dev environment when linking)
+  app.post("/api/webhooks/:id/register-link", async (req, res) => {
+    try {
+      const { devWebhookCode } = req.body;
+      
+      if (!devWebhookCode) {
+        return res.status(400).json({ error: "devWebhookCode is required" });
+      }
+      
+      const webhook = await storage.getWebhook(req.params.id);
+      if (!webhook) {
+        return res.status(404).json({ error: "Webhook not found" });
+      }
+      
+      // Get current linked webhooks array or initialize empty
+      const linkedByWebhooks = webhook.linkedByWebhooks || [];
+      
+      // Add the dev webhook code if not already present
+      if (!linkedByWebhooks.includes(devWebhookCode)) {
+        linkedByWebhooks.push(devWebhookCode);
+        await storage.updateWebhook(req.params.id, { linkedByWebhooks });
+      }
+      
+      res.json({ success: true, linkedByWebhooks });
+    } catch (error) {
+      console.error("Failed to register link:", error);
+      res.status(500).json({ error: "Failed to register link" });
+    }
+  });
+
+  // Unregister a dev webhook link (called by dev environment when unlinking)
+  app.delete("/api/webhooks/:id/unregister-link", async (req, res) => {
+    try {
+      const { devWebhookCode } = req.body;
+      
+      if (!devWebhookCode) {
+        return res.status(400).json({ error: "devWebhookCode is required" });
+      }
+      
+      const webhook = await storage.getWebhook(req.params.id);
+      if (!webhook) {
+        return res.status(404).json({ error: "Webhook not found" });
+      }
+      
+      // Remove the dev webhook code from the array
+      const linkedByWebhooks = (webhook.linkedByWebhooks || []).filter(
+        (code: string) => code !== devWebhookCode
+      );
+      
+      await storage.updateWebhook(req.params.id, { linkedByWebhooks });
+      
+      res.json({ success: true, linkedByWebhooks });
+    } catch (error) {
+      console.error("Failed to unregister link:", error);
+      res.status(500).json({ error: "Failed to unregister link" });
     }
   });
 

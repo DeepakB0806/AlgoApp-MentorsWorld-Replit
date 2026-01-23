@@ -729,6 +729,16 @@ export default function Webhooks() {
                                 Linked: {getLinkedWebhookInfo(webhook.linkedWebhookId)?.code}
                               </Badge>
                             )}
+                            {webhook.linkedByWebhooks && webhook.linkedByWebhooks.length > 0 && (
+                              <Badge 
+                                variant="outline" 
+                                className="flex items-center gap-1 text-emerald-500 border-emerald-500"
+                                data-testid={`badge-linked-by-${webhook.id}`}
+                              >
+                                <Link2 className="w-3 h-3" />
+                                Linked by: {webhook.linkedByWebhooks.join(", ")}
+                              </Badge>
+                            )}
                           </CardTitle>
                           <CardDescription className="flex items-center gap-2 mt-1">
                             <span className="truncate max-w-md font-mono text-xs">{getWebhookUrl(webhook)}</span>
