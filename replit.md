@@ -44,6 +44,11 @@ shared/
 - `GET/POST /api/strategies` - Strategy CRUD
 - `GET/POST /api/webhooks` - Webhook CRUD
 - `GET /api/webhook-logs` - Webhook execution logs
+- `GET /api/webhooks/:id/status-logs` - Get webhook test status logs
+- `GET /api/webhooks/:id/stats` - Get webhook statistics (success rate, avg response time)
+- `POST /api/webhooks/:id/test` - Test a webhook (records response time)
+- `DELETE /api/webhooks/:id/logs/cleanup` - Delete logs older than X days
+- `POST /api/webhook/:id` - Receive TradingView webhook alerts
 - `GET/POST /api/broker-configs` - Broker configuration CRUD
 - `POST /api/broker-configs/:id/test` - Test broker connectivity
 - `POST /api/broker-configs/:id/authenticate` - Authenticate with TOTP
@@ -120,6 +125,14 @@ The application implements the official Kotak Neo Trade API based on the Postman
   - Added webhook status logs table for tracking test results
   - Added app_settings table for storing domain name and other settings
   - Updated webhooks UI with domain configuration, test button, and status logs panel
+- Enhanced webhook logging with best practices from reference implementation:
+  - Added request metadata tracking (IP address, user agent) to webhook_logs
+  - Added response time tracking to webhook_status_logs
+  - Created webhook stats endpoint GET /api/webhooks/:id/stats with success rate and avg response time
+  - Added show/hide toggle for secret keys with eye icon on webhook cards
+  - Added WebhookStatsDisplay component showing success rate badges (color-coded) and response time
+  - Added log cleanup endpoint DELETE /api/webhooks/:id/logs/cleanup (delete logs older than X days)
+  - Fixed React Query cache invalidation to refresh stats immediately after webhook tests
 - Updated INVESTMENTS tab to match Kotak Neo layout:
   - Summary cards: Current value, Total invested, Profit/Loss (with %), Today's profit/loss (with %)
   - Table columns: Name, Quantity, Avg cost, LTP, Current value, Invested, Profit/loss (%), Today's P/L (%)
