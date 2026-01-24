@@ -388,27 +388,27 @@ export default function Webhooks() {
     return { name: "Production", code: linkedWebhookId.slice(0, 6).toUpperCase() };
   };
 
-  // Default field configuration (19 fields) - Human-readable display names
+  // Default field configuration (19 fields) - Title_Case display names to match make.com
   const DEFAULT_FIELD_CONFIG = [
-    { name: "Time Unix", key: "timeUnix", type: "timestamp", order: 0 },
+    { name: "Time_Unix", key: "timeUnix", type: "timestamp", order: 0 },
     { name: "Exchange", key: "exchange", type: "text", order: 1 },
-    { name: "Ticker (Indices)", key: "indices", type: "text", order: 2 },
+    { name: "Ticker_Indices", key: "indices", type: "text", order: 2 },
     { name: "Indicator", key: "indicator", type: "text", order: 3 },
-    { name: "Action (Alert)", key: "alert", type: "text", order: 4 },
+    { name: "Action_Alert", key: "alert", type: "text", order: 4 },
     { name: "Price", key: "price", type: "number", order: 5 },
-    { name: "Local Time", key: "localTime", type: "text", order: 6 },
+    { name: "Local_Time", key: "localTime", type: "text", order: 6 },
     { name: "Mode", key: "mode", type: "text", order: 7 },
-    { name: "Mode Desc", key: "modeDesc", type: "text", order: 8 },
-    { name: "Fast Line", key: "firstLine", type: "number", order: 9 },
-    { name: "Mid Line", key: "midLine", type: "number", order: 10 },
-    { name: "Slow Line", key: "slowLine", type: "number", order: 11 },
-    { name: "Supertrend (ST)", key: "st", type: "number", order: 12 },
-    { name: "Half Trend (HT)", key: "ht", type: "number", order: 13 },
+    { name: "Mode_Desc", key: "modeDesc", type: "text", order: 8 },
+    { name: "Fast_Line", key: "firstLine", type: "number", order: 9 },
+    { name: "Mid_Line", key: "midLine", type: "number", order: 10 },
+    { name: "Slow_Line", key: "slowLine", type: "number", order: 11 },
+    { name: "Supertrend_ST", key: "st", type: "number", order: 12 },
+    { name: "Half_Trend_HT", key: "ht", type: "number", order: 13 },
     { name: "RSI", key: "rsi", type: "number", order: 14 },
-    { name: "RSI Scaled", key: "rsiScaled", type: "number", order: 15 },
-    { name: "Alert System", key: "alertSystem", type: "text", order: 16 },
-    { name: "Action Binary", key: "actionBinary", type: "number", order: 17 },
-    { name: "Lock State", key: "lockState", type: "text", order: 18 }
+    { name: "RSI_Scaled", key: "rsiScaled", type: "number", order: 15 },
+    { name: "Alert_System", key: "alertSystem", type: "text", order: 16 },
+    { name: "Action_Binary", key: "actionBinary", type: "number", order: 17 },
+    { name: "Lock_State", key: "lockState", type: "text", order: 18 }
   ];
 
   // Get field config for a webhook (parse from fieldConfig string or use default)
