@@ -935,9 +935,9 @@ export default function Webhooks() {
                     <Button
                       variant="outline"
                       size="icon"
-                      disabled={clearDataMutation.isPending || selectedWebhookData.length === 0}
+                      disabled={clearDataMutation.isPending || selectedWebhookData.length === 0 || !!selectedWebhook?.linkedWebhookId}
                       data-testid="button-clear-webhook-data"
-                      title="Clear data"
+                      title={selectedWebhook?.linkedWebhookId ? "Cannot clear production data from development" : "Clear data"}
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
@@ -974,6 +974,14 @@ export default function Webhooks() {
               <p className="text-muted-foreground text-center py-8">No data received yet for this webhook.</p>
             ) : (
               <>
+                {/* Info banner for linked (production) data */}
+                {selectedWebhook?.linkedWebhookId && (
+                  <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-md">
+                    <p className="text-sm text-blue-400">
+                      <strong>Production Data:</strong> This webhook is linked to production. Data shown is from the production server and cannot be cleared from development.
+                    </p>
+                  </div>
+                )}
                 {/* Warning banner for empty payloads */}
                 {selectedWebhookData.some(d => d.rawPayload === '{}' || d.rawPayload === '') && (
                   <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-md">
