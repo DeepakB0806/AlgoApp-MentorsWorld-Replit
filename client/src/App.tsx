@@ -15,6 +15,7 @@ import Register from "@/pages/register";
 import Signup from "@/pages/signup";
 import TotpSetup from "@/pages/totp-setup";
 import UserManagement from "@/pages/user-management";
+import Settings from "@/pages/settings";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -57,6 +58,11 @@ function Router() {
       <Route path="/user-management">
         <ProtectedRoute requiredRole="super_admin">
           <UserManagement />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/settings">
+        <ProtectedRoute requiredRole="super_admin">
+          <Settings />
         </ProtectedRoute>
       </Route>
       

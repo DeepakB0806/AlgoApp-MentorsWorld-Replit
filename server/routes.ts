@@ -25,13 +25,37 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
+  // Get Mail Settings (for admin settings page)
+  app.get("/api/settings/mail", async (req, res) => {
+    try {
+      const apiKey = process.env.MAILJET_API_KEY || "";
+      const secretKey = process.env.MAILJET_SECRET_KEY || "";
+      
+      // Clean the keys same way as email service does
+      const cleanApiKey = apiKey.trim().replace(/[^a-f0-9]/gi, '');
+      const cleanSecretKey = secretKey.trim().replace(/[^a-f0-9]/gi, '');
+      
+      res.json({
+        apiKeyConfigured: !!apiKey,
+        apiKeyLength: cleanApiKey.length,
+        apiKeyRawLength: apiKey.length,
+        secretKeyConfigured: !!secretKey,
+        secretKeyLength: cleanSecretKey.length,
+        secretKeyRawLength: secretKey.length,
+        fromEmail: "algoapp@mentorsworld.org",
+        fromName: "AlgoTrading Platform",
+      });
+    } catch (error: any) {
+      console.error("Error getting mail settings:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Test Email Route (for verifying Mailjet SMTP configuration)
   app.post("/api/test-email", async (req, res) => {
     try {
-      const { to } = req.body;
-      if (!to) {
-        return res.status(400).json({ error: "Email address required" });
-      }
+      // Default to super admin email for testing
+      const to = req.body?.to || "webadmin@mentorsworld.org";
       
       console.log(`Testing email to: ${to}`);
       console.log(`MAILJET_API_KEY exists: ${!!process.env.MAILJET_API_KEY}`);
@@ -52,7 +76,7 @@ export async function registerRoutes(
       });
       
       if (success) {
-        res.json({ success: true, message: "Test email sent successfully" });
+        res.json({ success: true, message: `Test email sent successfully to ${to}` });
       } else {
         res.status(500).json({ success: false, message: "Failed to send test email - check server logs" });
       }

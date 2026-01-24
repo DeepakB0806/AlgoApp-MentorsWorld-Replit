@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, BarChart3, Activity, ArrowRight, Webhook, Key, Users, LogOut, LayoutDashboard, Settings } from "lucide-react";
+import { TrendingUp, BarChart3, Activity, ArrowRight, Webhook, Key, Users, LogOut, LayoutDashboard, Settings, Mail, Cog } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import mwLogo from "@/assets/images/mw-logo.png";
@@ -172,6 +172,36 @@ export default function UserHome() {
             </CardContent>
           </Card>
         </div>
+
+        {isSuperAdmin && (
+          <div className="mt-8">
+            <h3 className="text-xl font-semibold text-foreground mb-4">Admin Settings</h3>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <Link href="/settings">
+                <Card className="hover-elevate cursor-pointer h-full" data-testid="card-link-settings">
+                  <CardHeader>
+                    <div className="w-12 h-12 rounded-xl bg-orange-500/20 flex items-center justify-center mb-4">
+                      <Cog className="w-6 h-6 text-orange-500" />
+                    </div>
+                    <CardTitle className="flex items-center justify-between gap-2">
+                      General Settings
+                      <ArrowRight className="w-5 h-5 text-muted-foreground" />
+                    </CardTitle>
+                    <CardDescription>
+                      Configure mail API and platform settings
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Mail className="w-4 h-4" />
+                      Mail API Settings
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            </div>
+          </div>
+        )}
       </div>
 
       <footer className="border-t border-border py-8 mt-auto">
