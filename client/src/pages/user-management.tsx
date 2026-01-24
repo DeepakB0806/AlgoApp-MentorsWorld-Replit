@@ -58,6 +58,7 @@ export default function UserManagement() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("team_member");
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
+  const [resendingId, setResendingId] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const { toast } = useToast();
 
@@ -138,6 +139,7 @@ export default function UserManagement() {
       return res.json();
     },
     onSuccess: () => {
+      setResendingId(null);
       queryClient.invalidateQueries({ queryKey: ["/api/auth/invitations"] });
       toast({
         title: "Email Sent",
@@ -145,6 +147,7 @@ export default function UserManagement() {
       });
     },
     onError: (error: any) => {
+      setResendingId(null);
       toast({
         title: "Failed to Resend Email",
         description: error.message,
@@ -152,6 +155,11 @@ export default function UserManagement() {
       });
     },
   });
+
+  const handleResendInvite = (id: string) => {
+    setResendingId(id);
+    resendInviteMutation.mutate(id);
+  };
 
   const copyInviteUrl = (token: string) => {
     const url = `${window.location.origin}/register?token=${token}`;
@@ -404,12 +412,12 @@ export default function UserManagement() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => resendInviteMutation.mutate(invitation.id)}
-                            disabled={resendInviteMutation.isPending}
+                            onClick={() => handleResendInvite(invitation.id)}
+                            disabled={resendingId === invitation.id}
                             title="Resend invitation email"
                             data-testid={`button-resend-${invitation.id}`}
                           >
-                            {resendInviteMutation.isPending ? (
+                            {resendingId === invitation.id ? (
                               <RefreshCw className="w-4 h-4 animate-spin" />
                             ) : (
                               <Send className="w-4 h-4" />
