@@ -1,13 +1,26 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, BarChart3, Activity, ArrowRight, Webhook, Key, Users, LogOut, LayoutDashboard, Settings, Mail, Cog } from "lucide-react";
+import { TrendingUp, BarChart3, Activity, ArrowRight, Webhook, Key, Users, LogOut, LayoutDashboard, Settings, Mail, Cog, CheckCircle } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { useQuery } from "@tanstack/react-query";
 import mwLogo from "@/assets/images/mw-logo.png";
+
+interface BrokerConfig {
+  id: string;
+  name: string;
+  isConnected: boolean;
+  lastConnected: string | null;
+}
 
 export default function UserHome() {
   const { user, isSuperAdmin, logout } = useAuth();
 
+  const { data: brokerConfigs = [] } = useQuery<BrokerConfig[]>({
+    queryKey: ["/api/broker-configs"],
+  });
+
+  const connectedBroker = brokerConfigs.find(b => b.isConnected);
   const firstName = user?.firstName || user?.email?.split('@')[0] || 'Trader';
 
   return (
@@ -172,16 +185,26 @@ export default function UserHome() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-2">
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
-                <div className="w-2 h-2 rounded-full bg-muted-foreground animate-pulse" />
-                <div>
-                  <div className="text-sm font-medium text-foreground">Not Connected</div>
-                  <div className="text-xs text-muted-foreground">Configure in Broker API</div>
+              {connectedBroker ? (
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/10">
+                  <CheckCircle className="w-4 h-4 text-primary" />
+                  <div>
+                    <div className="text-sm font-medium text-foreground">Connected</div>
+                    <div className="text-xs text-muted-foreground">{connectedBroker.name}</div>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
+                  <div className="w-2 h-2 rounded-full bg-muted-foreground animate-pulse" />
+                  <div>
+                    <div className="text-sm font-medium text-foreground">Not Connected</div>
+                    <div className="text-xs text-muted-foreground">Configure in Broker API</div>
+                  </div>
+                </div>
+              )}
               <Link href="/broker-api">
                 <Button variant="outline" size="sm" className="w-full mt-3" data-testid="button-connect-broker">
-                  Connect Broker
+                  {connectedBroker ? "Manage Broker" : "Connect Broker"}
                   <ArrowRight className="w-3 h-3 ml-2" />
                 </Button>
               </Link>
