@@ -9,7 +9,8 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
   UserPlus, Users, Mail, Shield, CheckCircle, XCircle, 
-  Clock, Copy, Trash2, ToggleLeft, ToggleRight, ArrowLeft, Home 
+  Clock, Copy, Trash2, ToggleLeft, ToggleRight, ArrowLeft, Home,
+  Send, RefreshCw, MailCheck, MailX
 } from "lucide-react";
 import { Link } from "wouter";
 import {
@@ -36,6 +37,9 @@ interface Invitation {
   status: string;
   expiresAt: string;
   createdAt: string;
+  token: string;
+  emailSent: boolean | null;
+  emailSentAt: string | null;
 }
 
 interface TeamMember {
@@ -132,6 +136,27 @@ export default function UserManagement() {
     onError: (error: any) => {
       toast({
         title: "Failed to Update User",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const resendInviteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("POST", `/api/auth/invitations/${id}/resend`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/invitations"] });
+      toast({
+        title: "Email Sent",
+        description: "Invitation email has been resent successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to Resend Email",
         description: error.message,
         variant: "destructive",
       });
@@ -361,21 +386,53 @@ export default function UserManagement() {
                         className="flex items-center justify-between p-4 border rounded-lg"
                         data-testid={`invitation-${invitation.id}`}
                       >
-                        <div>
+                        <div className="flex-1">
                           <p className="font-medium">{invitation.email}</p>
-                          <p className="text-sm text-muted-foreground">
-                            Expires: {new Date(invitation.expiresAt).toLocaleDateString()}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2 mt-1">
+                            <span className="text-sm text-muted-foreground">
+                              Expires: {new Date(invitation.expiresAt).toLocaleDateString()}
+                            </span>
+                            {invitation.emailSent ? (
+                              <Badge variant="secondary" className="text-xs">
+                                <MailCheck className="w-3 h-3 mr-1" />
+                                Email Sent {invitation.emailSentAt && (
+                                  <span className="ml-1 opacity-75">
+                                    ({new Date(invitation.emailSentAt).toLocaleDateString()})
+                                  </span>
+                                )}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-xs">
+                                <MailX className="w-3 h-3 mr-1" />
+                                Email Not Sent
+                              </Badge>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
                           {getStatusBadge(invitation.status)}
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => copyInviteUrl(invitation.id)}
+                            onClick={() => resendInviteMutation.mutate(invitation.id)}
+                            disabled={resendInviteMutation.isPending}
+                            title="Resend invitation email"
+                            data-testid={`button-resend-${invitation.id}`}
+                          >
+                            {resendInviteMutation.isPending ? (
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Send className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => copyInviteUrl(invitation.token)}
+                            title="Copy invitation URL"
                             data-testid={`button-copy-${invitation.id}`}
                           >
-                            {copiedUrl === invitation.id ? (
+                            {copiedUrl === invitation.token ? (
                               <CheckCircle className="w-4 h-4 text-primary" />
                             ) : (
                               <Copy className="w-4 h-4" />
@@ -385,6 +442,7 @@ export default function UserManagement() {
                             variant="ghost"
                             size="icon"
                             onClick={() => revokeInviteMutation.mutate(invitation.id)}
+                            title="Revoke invitation"
                             data-testid={`button-revoke-${invitation.id}`}
                           >
                             <Trash2 className="w-4 h-4 text-destructive" />

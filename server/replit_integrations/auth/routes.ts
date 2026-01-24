@@ -794,6 +794,16 @@ export function registerAuthRoutes(app: Express): void {
       const token = crypto.randomBytes(32).toString("hex");
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
       
+      const inviteUrl = `/register?token=${token}`;
+      
+      // Send invitation email
+      const inviterName = user.firstName && user.lastName 
+        ? `${user.firstName} ${user.lastName}` 
+        : user.email;
+      
+      const emailSent = await sendTeamInvitationEmail(email, token, inviterName);
+      
+      // Create invitation with email status
       const [invitation] = await db
         .insert(invitations)
         .values({
@@ -803,17 +813,10 @@ export function registerAuthRoutes(app: Express): void {
           token,
           expiresAt,
           status: "pending",
+          emailSent,
+          emailSentAt: emailSent ? new Date() : null,
         })
         .returning();
-      
-      const inviteUrl = `/register?token=${token}`;
-      
-      // Send invitation email
-      const inviterName = user.firstName && user.lastName 
-        ? `${user.firstName} ${user.lastName}` 
-        : user.email;
-      
-      const emailSent = await sendTeamInvitationEmail(email, token, inviterName);
       
       if (!emailSent) {
         console.warn(`Failed to send invitation email to ${email}, but invitation was created`);
@@ -827,6 +830,8 @@ export function registerAuthRoutes(app: Express): void {
           email: invitation.email,
           role: invitation.role,
           expiresAt: invitation.expiresAt,
+          emailSent: invitation.emailSent,
+          emailSentAt: invitation.emailSentAt,
           inviteUrl,
         },
       });
@@ -874,6 +879,70 @@ export function registerAuthRoutes(app: Express): void {
     } catch (error) {
       console.error("Error revoking invitation:", error);
       res.status(500).json({ message: "Failed to revoke invitation" });
+    }
+  });
+  
+  // Resend invitation email (Super Admin only)
+  app.post("/api/auth/invitations/:id/resend", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+      
+      if (!user || user.role !== "super_admin") {
+        return res.status(403).json({ message: "Only Super Admin can resend invitations" });
+      }
+      
+      const { id } = req.params;
+      
+      // Get the invitation
+      const [invitation] = await db
+        .select()
+        .from(invitations)
+        .where(eq(invitations.id, id));
+      
+      if (!invitation) {
+        return res.status(404).json({ message: "Invitation not found" });
+      }
+      
+      if (invitation.status !== "pending") {
+        return res.status(400).json({ message: "Can only resend pending invitations" });
+      }
+      
+      // Check if expired
+      if (new Date(invitation.expiresAt) < new Date()) {
+        return res.status(400).json({ message: "Invitation has expired" });
+      }
+      
+      // Send the email
+      const inviterName = user.firstName && user.lastName 
+        ? `${user.firstName} ${user.lastName}` 
+        : user.email;
+      
+      const emailSent = await sendTeamInvitationEmail(invitation.email, invitation.token, inviterName);
+      
+      if (emailSent) {
+        // Update invitation with new email sent timestamp
+        await db.update(invitations)
+          .set({ 
+            emailSent: true, 
+            emailSentAt: new Date() 
+          })
+          .where(eq(invitations.id, id));
+        
+        res.json({ 
+          message: "Invitation email resent successfully",
+          emailSent: true,
+          emailSentAt: new Date()
+        });
+      } else {
+        res.status(500).json({ 
+          message: "Failed to send invitation email",
+          emailSent: false
+        });
+      }
+    } catch (error) {
+      console.error("Error resending invitation:", error);
+      res.status(500).json({ message: "Failed to resend invitation" });
     }
   });
   

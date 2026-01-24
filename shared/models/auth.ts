@@ -76,6 +76,8 @@ export const invitations = pgTable("invitations", {
   expiresAt: timestamp("expires_at").notNull(),
   acceptedAt: timestamp("accepted_at"),
   status: varchar("status", { length: 20 }).notNull().default("pending"), // pending, accepted, expired, revoked
+  emailSent: boolean("email_sent").default(false), // Track if invitation email was sent
+  emailSentAt: timestamp("email_sent_at"), // When the email was last sent
   createdAt: timestamp("created_at").defaultNow(),
 });
 
