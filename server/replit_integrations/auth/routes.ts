@@ -8,7 +8,7 @@ import bcrypt from "bcryptjs";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import crypto from "crypto";
-import { sendVerificationEmail, sendTeamInvitationEmail } from "../../services/email";
+import { sendVerificationEmail, sendTeamInvitationEmail, getBaseUrlFromRequest } from "../../services/email";
 
 // Super Admin email - this email will have super admin privileges
 const SUPER_ADMIN_EMAIL = "webadmin@mentorsworld.org";
@@ -478,11 +478,13 @@ export function registerAuthRoutes(app: Express): void {
         })
         .where(eq(users.id, user.id));
       
-      // Send verification email
+      // Send verification email with request-derived base URL
+      const baseUrl = getBaseUrlFromRequest(req);
       await sendVerificationEmail(
         user.email || email,
         emailVerificationToken,
-        user.firstName || undefined
+        user.firstName || undefined,
+        baseUrl
       );
       
       res.json({ message: "Verification email sent. Please check your inbox." });
@@ -923,12 +925,13 @@ export function registerAuthRoutes(app: Express): void {
       
       const inviteUrl = `/register?token=${token}`;
       
-      // Send invitation email
+      // Send invitation email with request-derived base URL
       const inviterName = user.firstName && user.lastName 
         ? `${user.firstName} ${user.lastName}` 
         : user.email;
+      const baseUrl = getBaseUrlFromRequest(req);
       
-      const emailSent = await sendTeamInvitationEmail(email, token, inviterName);
+      const emailSent = await sendTeamInvitationEmail(email, token, inviterName || undefined, baseUrl);
       
       // Create invitation with email status
       const [invitation] = await db
@@ -1040,12 +1043,13 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ message: "Invitation has expired" });
       }
       
-      // Send the email
+      // Send the email with request-derived base URL
       const inviterName = user.firstName && user.lastName 
         ? `${user.firstName} ${user.lastName}` 
         : user.email;
+      const baseUrl = getBaseUrlFromRequest(req);
       
-      const emailSent = await sendTeamInvitationEmail(invitation.email, invitation.token, inviterName);
+      const emailSent = await sendTeamInvitationEmail(invitation.email, invitation.token, inviterName || undefined, baseUrl);
       
       if (emailSent) {
         // Update invitation with new email sent timestamp

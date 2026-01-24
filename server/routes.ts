@@ -1,8 +1,8 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertStrategySchema, insertWebhookSchema, insertBrokerConfigSchema } from "@shared/schema";
-import { sendEmail } from "./services/email";
+import { sendEmail, getBaseUrlFromRequest } from "./services/email";
 
 // Helper to parse numeric values, handling empty strings and nulls
 function parseNumeric(value: unknown): number | undefined {
@@ -178,16 +178,21 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid webhook data", details: parsed.error });
       }
       
-      // Get domain setting to determine webhook URL
-      const domainSetting = await storage.getSetting("domain_name");
-      
-      // Create webhook with proper URL
+      // Create webhook first
       const webhook = await storage.createWebhook(parsed.data);
       
-      // Generate the proper webhook URL based on domain setting
-      const generatedUrl = domainSetting?.value 
-        ? `https://${domainSetting.value}/api/webhook/${webhook.id}`
-        : `/api/webhook/${webhook.id}`;
+      // Generate webhook URL: prefer request-derived URL, fallback to domain setting
+      const requestBaseUrl = getBaseUrlFromRequest(req);
+      let generatedUrl: string;
+      
+      if (requestBaseUrl && requestBaseUrl.startsWith("http")) {
+        generatedUrl = `${requestBaseUrl}/api/webhook/${webhook.id}`;
+      } else {
+        const domainSetting = await storage.getSetting("domain_name");
+        generatedUrl = domainSetting?.value 
+          ? `https://${domainSetting.value}/api/webhook/${webhook.id}`
+          : `/api/webhook/${webhook.id}`;
+      }
       
       // Update with the correct URL
       const updatedWebhook = await storage.updateWebhook(webhook.id, { webhookUrl: generatedUrl });

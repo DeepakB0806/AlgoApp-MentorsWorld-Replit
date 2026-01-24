@@ -504,6 +504,10 @@ export default function Webhooks() {
   };
 
   const getWebhookUrl = (webhook: WebhookType) => {
+    const origin = window.location.origin;
+    if (origin && origin.startsWith("http")) {
+      return `${origin}/api/webhook/${webhook.id}`;
+    }
     if (domainName) {
       return `https://${domainName}/api/webhook/${webhook.id}`;
     }

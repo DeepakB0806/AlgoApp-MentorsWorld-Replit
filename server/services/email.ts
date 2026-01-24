@@ -1,13 +1,27 @@
 import Mailjet from "node-mailjet";
+import { Request } from "express";
 import { db } from "../db";
 import { appSettings } from "../../shared/schema";
 import { eq } from "drizzle-orm";
+
+// Extract base URL from incoming request headers (works in both dev and prod)
+export function getBaseUrlFromRequest(req: Request): string {
+  const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  
+  if (host) {
+    return `${protocol}://${host}`;
+  }
+  
+  return "";
+}
 
 const FROM_EMAIL = "webadmin@mentorsworld.org";
 const FROM_NAME = "AlgoTrading Platform";
 
 // Get base URL from app_settings (domain_name key) or fallback to env/localhost
-async function getBaseUrl(): Promise<string> {
+// This is kept as internal fallback when no baseUrl is provided
+async function getBaseUrlFromDatabase(): Promise<string> {
   try {
     // First, try to get domain from app_settings table
     const [setting] = await db
@@ -33,6 +47,15 @@ async function getBaseUrl(): Promise<string> {
   }
   
   return "http://localhost:5000";
+}
+
+// Resolve base URL: use provided URL if valid, otherwise fall back to database
+async function resolveBaseUrl(providedBaseUrl?: string): Promise<string> {
+  // Trust the request-derived URL if it has a valid scheme
+  if (providedBaseUrl && providedBaseUrl.startsWith("http")) {
+    return providedBaseUrl;
+  }
+  return getBaseUrlFromDatabase();
 }
 
 // Mailjet API client
@@ -96,9 +119,10 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
 export async function sendVerificationEmail(
   email: string,
   token: string,
-  firstName?: string
+  firstName?: string,
+  providedBaseUrl?: string
 ): Promise<boolean> {
-  const baseUrl = await getBaseUrl();
+  const baseUrl = await resolveBaseUrl(providedBaseUrl);
 
   const verificationUrl = `${baseUrl}/api/auth/verify-email/${token}`;
   const name = firstName || "there";
@@ -174,9 +198,10 @@ The AlgoTrading Team
 export async function sendTeamInvitationEmail(
   email: string,
   inviteToken: string,
-  inviterName?: string
+  inviterName?: string,
+  providedBaseUrl?: string
 ): Promise<boolean> {
-  const baseUrl = await getBaseUrl();
+  const baseUrl = await resolveBaseUrl(providedBaseUrl);
 
   const registerUrl = `${baseUrl}/register?token=${inviteToken}`;
   const inviter = inviterName || "A team administrator";
