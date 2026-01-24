@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import cookieParser from "cookie-parser";
+import { storage } from "./storage";
 
 const app = express();
 const httpServer = createServer(app);
@@ -69,6 +70,16 @@ app.use((req, res, next) => {
   registerAuthRoutes(app);
   
   await registerRoutes(httpServer, app);
+
+  // Auto-cleanup old webhook logs (older than 30 days) on startup
+  try {
+    const deletedCount = await storage.deleteOldLogsGlobally(30);
+    if (deletedCount > 0) {
+      log(`Auto-cleanup: Removed ${deletedCount} webhook logs older than 30 days`);
+    }
+  } catch (error) {
+    log(`Auto-cleanup warning: ${error}`);
+  }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

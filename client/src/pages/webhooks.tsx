@@ -200,6 +200,20 @@ export default function Webhooks() {
     },
   });
 
+  const clearAllLogsMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/webhooks/${id}/logs/clear-all`);
+    },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/webhooks", id, "status-logs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/webhooks", id, "stats"] });
+      toast({ title: "All logs cleared successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to clear logs", variant: "destructive" });
+    },
+  });
+
   const clearDataMutation = useMutation({
     mutationFn: async (days: number | "all") => {
       if (days === "all") {
@@ -1057,16 +1071,27 @@ export default function Webhooks() {
               <div className="flex items-center justify-between">
                 <h4 className="font-medium">Status Logs</h4>
                 {statusLogs.length > 0 && selectedWebhook && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => cleanupMutation.mutate({ id: selectedWebhook.id, days: 30 })}
-                    disabled={cleanupMutation.isPending}
-                    data-testid="button-cleanup-logs"
-                  >
-                    <Trash2 className="w-4 h-4 mr-1" />
-                    Clean Old Logs
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => clearAllLogsMutation.mutate(selectedWebhook.id)}
+                      disabled={clearAllLogsMutation.isPending}
+                      data-testid="button-clear-all-logs"
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" />
+                      {clearAllLogsMutation.isPending ? "Clearing..." : "Clear All"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => cleanupMutation.mutate({ id: selectedWebhook.id, days: 30 })}
+                      disabled={cleanupMutation.isPending}
+                      data-testid="button-cleanup-logs"
+                    >
+                      {cleanupMutation.isPending ? "Cleaning..." : "Clear Old (30+ days)"}
+                    </Button>
+                  </div>
                 )}
               </div>
               {statusLogs.length === 0 ? (

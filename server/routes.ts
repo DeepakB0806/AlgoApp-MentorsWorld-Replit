@@ -530,7 +530,7 @@ export async function registerRoutes(
     }
   });
 
-  // Delete old logs (cleanup)
+  // Delete old logs (cleanup by days)
   app.delete("/api/webhooks/:id/logs/cleanup", async (req, res) => {
     try {
       const daysToKeep = parseInt(req.query.days as string) || 30;
@@ -538,6 +538,16 @@ export async function registerRoutes(
       res.json({ success: true, deletedCount, daysToKeep });
     } catch (error) {
       res.status(500).json({ error: "Failed to cleanup logs" });
+    }
+  });
+
+  // Delete ALL logs for a webhook
+  app.delete("/api/webhooks/:id/logs/clear-all", async (req, res) => {
+    try {
+      const deletedCount = await storage.deleteAllWebhookLogs(req.params.id);
+      res.json({ success: true, deletedCount });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to clear all logs" });
     }
   });
 

@@ -59,6 +59,8 @@ export interface IStorage {
   // Webhook Stats and Cleanup
   getWebhookLogStats(webhookId: string): Promise<{ total: number; success: number; failed: number; successRate: number; avgResponseTime: number }>;
   deleteOldWebhookLogs(webhookId: string, daysToKeep: number): Promise<number>;
+  deleteAllWebhookLogs(webhookId: string): Promise<number>;
+  deleteOldLogsGlobally(daysToKeep: number): Promise<number>;
 
   // Webhook Data - stores incoming JSON data for strategy access
   getWebhookData(): Promise<WebhookData[]>;
@@ -403,6 +405,25 @@ export class DatabaseStorage implements IStorage {
           lt(webhookStatusLogs.testedAt, cutoffDate.toISOString())
         )
       )
+      .returning();
+    
+    return result.length;
+  }
+
+  async deleteAllWebhookLogs(webhookId: string): Promise<number> {
+    const result = await db.delete(webhookStatusLogs)
+      .where(eq(webhookStatusLogs.webhookId, webhookId))
+      .returning();
+    
+    return result.length;
+  }
+
+  async deleteOldLogsGlobally(daysToKeep: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+    
+    const result = await db.delete(webhookStatusLogs)
+      .where(lt(webhookStatusLogs.testedAt, cutoffDate.toISOString()))
       .returning();
     
     return result.length;
