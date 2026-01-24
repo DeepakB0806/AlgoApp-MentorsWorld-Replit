@@ -396,7 +396,7 @@ export async function registerRoutes(
       const ipAddress = (req.headers["x-forwarded-for"] as string)?.split(",")[0] || req.socket.remoteAddress || null;
       const userAgent = req.headers["user-agent"] || null;
 
-      // Extract TradingView fields
+      // Extract TradingView fields (supports snake_case, camelCase, UPPERCASE, and Title_Case)
       const logData = {
         webhookId,
         timestamp: new Date().toISOString(),
@@ -407,43 +407,43 @@ export async function registerRoutes(
         ipAddress,
         userAgent,
         // 1. TIME AS PER UNIX (TIMESTAMP)
-        timeUnix: parseNumeric(payload.time_unix ?? payload.timeUnix ?? payload.TIME_UNIX ?? payload.timestamp ?? payload.TIMESTAMP),
+        timeUnix: parseNumeric(payload.time_unix ?? payload.timeUnix ?? payload.TIME_UNIX ?? payload.Time_Unix ?? payload.timestamp ?? payload.TIMESTAMP ?? payload.Timestamp),
         // 2. EXCHANGE
-        exchange: payload.exchange || payload.EXCHANGE,
+        exchange: payload.exchange || payload.EXCHANGE || payload.Exchange,
         // 3. TICKER (INDICES)
-        indices: payload.indices || payload.INDICES || payload.ticker || payload.TICKER,
+        indices: payload.indices || payload.INDICES || payload.Indices || payload.ticker || payload.TICKER || payload.Ticker,
         // 4. INDICATOR
-        indicator: payload.indicator || payload.INDICATOR,
+        indicator: payload.indicator || payload.INDICATOR || payload.Indicator,
         // 5. ACTION (ALERT)
-        alert: payload.alert || payload.ALERT || payload.action || payload.ACTION,
+        alert: payload.alert || payload.ALERT || payload.Alert || payload.action || payload.ACTION || payload.Action,
         // 6. PRICE
-        price: parseNumeric(payload.price ?? payload.PRICE),
+        price: parseNumeric(payload.price ?? payload.PRICE ?? payload.Price),
         // 7. LOCAL TIME
-        localTime: payload.local_time || payload.localTime || payload.LOCAL_TIME,
+        localTime: payload.local_time || payload.localTime || payload.LOCAL_TIME || payload.Local_Time,
         // 8. MODE
-        mode: payload.mode || payload.MODE,
+        mode: payload.mode || payload.MODE || payload.Mode,
         // 9. MODE DESC
-        modeDesc: payload.mode_desc || payload.modeDesc || payload.MODE_DESC,
+        modeDesc: payload.mode_desc || payload.modeDesc || payload.MODE_DESC || payload.Mode_Desc,
         // 10. FAST LINE (FIRST LINE)
-        firstLine: parseNumeric(payload.first_line ?? payload.fast_line ?? payload.FIRST_LINE ?? payload.FAST_LINE ?? payload.firstLine ?? payload.fastLine),
+        firstLine: parseNumeric(payload.first_line ?? payload.fast_line ?? payload.FIRST_LINE ?? payload.FAST_LINE ?? payload.First_Line ?? payload.Fast_Line ?? payload.firstLine ?? payload.fastLine),
         // 11. MID LINE
-        midLine: parseNumeric(payload.mid_line ?? payload.MID_LINE ?? payload.midLine),
+        midLine: parseNumeric(payload.mid_line ?? payload.MID_LINE ?? payload.Mid_Line ?? payload.midLine),
         // 12. SLOW LINE
-        slowLine: parseNumeric(payload.slow_line ?? payload.SLOW_LINE ?? payload.slowLine),
+        slowLine: parseNumeric(payload.slow_line ?? payload.SLOW_LINE ?? payload.Slow_Line ?? payload.slowLine),
         // 13. SUPERTREND (ST)
-        st: parseNumeric(payload.st ?? payload.ST ?? payload.supertrend ?? payload.SUPERTREND),
+        st: parseNumeric(payload.st ?? payload.ST ?? payload.St ?? payload.supertrend ?? payload.SUPERTREND ?? payload.Supertrend ?? payload.Super_Trend),
         // 14. HALF TREND (HT)
-        ht: parseNumeric(payload.ht ?? payload.HT ?? payload.halftrend ?? payload.HALFTREND ?? payload.half_trend ?? payload.HALF_TREND),
+        ht: parseNumeric(payload.ht ?? payload.HT ?? payload.Ht ?? payload.halftrend ?? payload.HALFTREND ?? payload.Halftrend ?? payload.half_trend ?? payload.HALF_TREND ?? payload.Half_Trend),
         // 15. RSI
-        rsi: parseNumeric(payload.rsi ?? payload.RSI),
+        rsi: parseNumeric(payload.rsi ?? payload.RSI ?? payload.Rsi),
         // 16. RSI SCALED
-        rsiScaled: parseNumeric(payload.rsi_scaled ?? payload.RSI_SCALED ?? payload.rsiScaled),
+        rsiScaled: parseNumeric(payload.rsi_scaled ?? payload.RSI_SCALED ?? payload.Rsi_Scaled ?? payload.rsiScaled),
         // 17. ALERT SYSTEM
-        alertSystem: payload.alert_system || payload.alertSystem || payload.ALERT_SYSTEM,
+        alertSystem: payload.alert_system || payload.alertSystem || payload.ALERT_SYSTEM || payload.Alert_System,
         // 18. ACTION BINARY (ACTION TYPE)
-        actionBinary: parseNumeric(payload.action_binary ?? payload.ACTION_BINARY ?? payload.actionBinary ?? payload.action_type ?? payload.ACTION_TYPE),
+        actionBinary: parseNumeric(payload.action_binary ?? payload.ACTION_BINARY ?? payload.Action_Binary ?? payload.actionBinary ?? payload.action_type ?? payload.ACTION_TYPE ?? payload.Action_Type),
         // 19. LOCK STATE
-        lockState: payload.lock_state || payload.lockState || payload.LOCK_STATE,
+        lockState: payload.lock_state || payload.lockState || payload.LOCK_STATE || payload.Lock_State,
       };
 
       // Log the webhook call
