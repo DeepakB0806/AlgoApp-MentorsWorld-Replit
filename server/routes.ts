@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertStrategySchema, insertWebhookSchema, insertBrokerConfigSchema } from "@shared/schema";
+import { sendEmail } from "./services/email";
 
 // Helper to parse numeric values, handling empty strings and nulls
 function parseNumeric(value: unknown): number | undefined {
@@ -24,6 +25,43 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
+  // Test Email Route (for verifying Mailjet SMTP configuration)
+  app.post("/api/test-email", async (req, res) => {
+    try {
+      const { to } = req.body;
+      if (!to) {
+        return res.status(400).json({ error: "Email address required" });
+      }
+      
+      console.log(`Testing email to: ${to}`);
+      console.log(`MAILJET_API_KEY exists: ${!!process.env.MAILJET_API_KEY}`);
+      console.log(`MAILJET_SECRET_KEY exists: ${!!process.env.MAILJET_SECRET_KEY}`);
+      
+      const success = await sendEmail({
+        to,
+        subject: "AlgoTrading Platform - Email Test",
+        textContent: "This is a test email from AlgoTrading Platform. If you received this, the Mailjet SMTP configuration is working correctly.",
+        htmlContent: `
+          <div style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2 style="color: #10b981;">Email Test Successful!</h2>
+            <p>This is a test email from <strong>AlgoTrading Platform</strong>.</p>
+            <p>If you received this, the Mailjet SMTP configuration is working correctly.</p>
+            <p style="color: #666; font-size: 12px;">Sent at: ${new Date().toISOString()}</p>
+          </div>
+        `,
+      });
+      
+      if (success) {
+        res.json({ success: true, message: "Test email sent successfully" });
+      } else {
+        res.status(500).json({ success: false, message: "Failed to send test email - check server logs" });
+      }
+    } catch (error: any) {
+      console.error("Test email error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // Strategies Routes
   app.get("/api/strategies", async (req, res) => {
     try {
