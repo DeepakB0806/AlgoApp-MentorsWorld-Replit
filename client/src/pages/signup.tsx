@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import { Lock, Mail, User, UserPlus, TrendingUp, Eye, EyeOff } from "lucide-react";
+import mwLogo from "@/assets/images/mw-logo.png";
 
 export default function Signup() {
   const [firstName, setFirstName] = useState("");
@@ -82,11 +83,9 @@ export default function Signup() {
         <div className="text-center mb-8">
           <Link href="/">
             <div className="inline-flex items-center gap-3 cursor-pointer">
-              <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
-                <TrendingUp className="w-6 h-6 text-primary" />
-              </div>
+              <img src={mwLogo} alt="MentorsWorld" className="w-10 h-10 object-contain" />
               <h1 className="text-lg font-bold text-foreground" data-testid="text-signup-logo">
-                MentorsWorld Algo Trading Platform
+                MentorsWorld Algo Trading
               </h1>
             </div>
           </Link>

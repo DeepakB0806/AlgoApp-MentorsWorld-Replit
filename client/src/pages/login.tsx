@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useLocation, Link } from "wouter";
 import { Lock, Mail, Shield, LogIn, ArrowRight, TrendingUp, RefreshCw, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
+import mwLogo from "@/assets/images/mw-logo.png";
 
 type LoginStep = "credentials" | "totp" | "verify-email";
 
@@ -160,11 +161,9 @@ export default function Login() {
         <div className="text-center mb-8">
           <Link href="/">
             <div className="inline-flex items-center gap-3 cursor-pointer">
-              <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
-                <TrendingUp className="w-6 h-6 text-primary" />
-              </div>
+              <img src={mwLogo} alt="MentorsWorld" className="w-10 h-10 object-contain" />
               <h1 className="text-lg font-bold text-foreground" data-testid="text-login-title">
-                MentorsWorld Algo Trading Platform
+                MentorsWorld Algo Trading
               </h1>
             </div>
           </Link>
