@@ -269,13 +269,13 @@ export default function UserManagement() {
             <CardContent>
               {loadingTeamMembers ? (
                 <div className="text-center py-8 text-muted-foreground">Loading...</div>
-              ) : teamMembers.length === 0 ? (
+              ) : (teamMembers ?? []).length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   No team members yet. Send an invitation to get started.
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {teamMembers.map((member) => (
+                  {(teamMembers ?? []).map((member) => (
                     <div
                       key={member.id}
                       className="flex items-center justify-between p-4 border rounded-lg"
@@ -347,13 +347,13 @@ export default function UserManagement() {
             <CardContent>
               {loadingInvitations ? (
                 <div className="text-center py-8 text-muted-foreground">Loading...</div>
-              ) : invitations.filter(i => i.status === "pending").length === 0 ? (
+              ) : (invitations ?? []).filter(i => i.status === "pending").length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   No pending invitations
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {invitations
+                  {(invitations ?? [])
                     .filter((inv) => inv.status === "pending")
                     .map((invitation) => (
                       <div
