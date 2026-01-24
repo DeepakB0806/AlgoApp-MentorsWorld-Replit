@@ -412,11 +412,11 @@ export default function Webhooks() {
   ];
 
   // Get field config for a webhook (parse from fieldConfig string or use default)
-  // For linked webhooks, use default config to match production data field names
+  // For data display, always use default config because data is stored with standard field names
   const getFieldConfig = (webhook: WebhookType | null, forDataDisplay: boolean = false) => {
-    // When displaying data from production (linked webhook), always use default config
-    // because production data uses standard field names (timeUnix, exchange, etc.)
-    if (forDataDisplay && webhook?.linkedWebhookId) {
+    // When displaying data, always use default config for consistency
+    // Data is stored with standard field names (timeUnix, exchange, indices, etc.)
+    if (forDataDisplay) {
       return DEFAULT_FIELD_CONFIG;
     }
     if (!webhook?.fieldConfig) return DEFAULT_FIELD_CONFIG;
