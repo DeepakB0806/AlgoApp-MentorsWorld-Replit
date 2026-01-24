@@ -1,37 +1,26 @@
-import nodemailer from "nodemailer";
+import Mailjet from "node-mailjet";
 
 const FROM_EMAIL = "webadmin@mentorsworld.org";
 const FROM_NAME = "AlgoTrading Platform";
 
-// Mailjet SMTP configuration
-// Using port 587 with STARTTLS (Mailjet's recommended configuration)
-function createTransporter() {
-  const apiKey = process.env.MAILJET_API_KEY;
-  const secretKey = process.env.MAILJET_SECRET_KEY;
+// Mailjet API client (more reliable than SMTP)
+function getMailjetClient() {
+  const apiKey = process.env.MAILJET_API_KEY?.trim().replace(/[^a-f0-9]/gi, '');
+  const secretKey = process.env.MAILJET_SECRET_KEY?.trim().replace(/[^a-f0-9]/gi, '');
   
-  console.log("Creating Mailjet transporter...");
+  console.log("Creating Mailjet API client...");
   console.log(`API Key length: ${apiKey?.length || 0}`);
   console.log(`Secret Key length: ${secretKey?.length || 0}`);
   console.log(`API Key first 8 chars: ${apiKey?.substring(0, 8) || 'N/A'}`);
   
-  return nodemailer.createTransport({
-    host: "in-v3.mailjet.com",
-    port: 587,
-    secure: false,
-    auth: {
-      user: apiKey,
-      pass: secretKey,
-    },
-  });
-}
-
-let transporter: nodemailer.Transporter | null = null;
-
-function getTransporter() {
-  if (!transporter) {
-    transporter = createTransporter();
+  if (!apiKey || !secretKey) {
+    throw new Error("Mailjet credentials not configured");
   }
-  return transporter;
+  
+  return new Mailjet({
+    apiKey: apiKey,
+    apiSecret: secretKey,
+  });
 }
 
 export interface EmailOptions {
@@ -44,19 +33,35 @@ export interface EmailOptions {
 
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
   try {
-    const transport = getTransporter();
-    const result = await transport.sendMail({
-      from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
-      to: options.to,
-      subject: options.subject,
-      text: options.textContent,
-      html: options.htmlContent,
+    const mailjet = getMailjetClient();
+    
+    const result = await mailjet.post("send", { version: "v3.1" }).request({
+      Messages: [
+        {
+          From: {
+            Email: FROM_EMAIL,
+            Name: FROM_NAME,
+          },
+          To: [
+            {
+              Email: options.to,
+              Name: options.toName || options.to,
+            },
+          ],
+          Subject: options.subject,
+          TextPart: options.textContent,
+          HTMLPart: options.htmlContent,
+        },
+      ],
     });
 
-    console.log("Email sent successfully:", result.messageId);
+    console.log("Email sent successfully via Mailjet API:", JSON.stringify(result.body));
     return true;
-  } catch (error) {
-    console.error("Failed to send email:", error);
+  } catch (error: any) {
+    console.error("Failed to send email:", error.message || error);
+    if (error.response) {
+      console.error("Mailjet error response:", JSON.stringify(error.response.body || error.response));
+    }
     return false;
   }
 }
