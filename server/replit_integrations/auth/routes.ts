@@ -806,12 +806,22 @@ export function registerAuthRoutes(app: Express): void {
         })
         .returning();
       
-      // In production, send email here
-      // For now, return the invitation URL
       const inviteUrl = `/register?token=${token}`;
       
+      // Send invitation email
+      const inviterName = user.firstName && user.lastName 
+        ? `${user.firstName} ${user.lastName}` 
+        : user.email;
+      
+      const emailSent = await sendTeamInvitationEmail(email, token, inviterName);
+      
+      if (!emailSent) {
+        console.warn(`Failed to send invitation email to ${email}, but invitation was created`);
+      }
+      
       res.status(201).json({
-        message: "Invitation created",
+        message: emailSent ? "Invitation sent successfully" : "Invitation created (email delivery failed)",
+        emailSent,
         invitation: {
           id: invitation.id,
           email: invitation.email,
