@@ -92,6 +92,13 @@ export default function Webhooks() {
     refetchOnWindowFocus: true,
   });
 
+  // Fetch data specifically for selected webhook (includes production data for linked webhooks)
+  const { data: selectedWebhookData = [] } = useQuery<WebhookData[]>({
+    queryKey: ["/api/webhook-data/webhook", selectedWebhook?.id],
+    enabled: !!selectedWebhook?.id && isDataSheetOpen,
+    refetchInterval: 10000,
+  });
+
   // Fetch webhook registry for looking up production webhook codes
   const { data: webhookRegistry = [] } = useQuery<{ id: string; uniqueCode: string; webhookId: string; webhookName: string }[]>({
     queryKey: ["/api/webhook-registry"],
@@ -922,7 +929,7 @@ export default function Webhooks() {
                     <Button
                       variant="outline"
                       size="icon"
-                      disabled={clearDataMutation.isPending || webhookDataList.length === 0}
+                      disabled={clearDataMutation.isPending || selectedWebhookData.length === 0}
                       data-testid="button-clear-webhook-data"
                       title="Clear data"
                     >
@@ -957,7 +964,7 @@ export default function Webhooks() {
             </div>
           </SheetHeader>
           <div className="mt-6 overflow-x-auto">
-            {selectedWebhook && getWebhookData(selectedWebhook.id).length === 0 ? (
+            {selectedWebhookData.length === 0 ? (
               <p className="text-muted-foreground text-center py-8">No data received yet for this webhook.</p>
             ) : (
               <Table className="text-xs">
@@ -974,7 +981,7 @@ export default function Webhooks() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {selectedWebhook && getWebhookData(selectedWebhook.id).map((data) => (
+                  {selectedWebhookData.map((data) => (
                     <TableRow key={data.id} data-testid={`row-data-panel-${data.id}`}>
                       {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
                         <TableCell 

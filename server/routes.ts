@@ -497,6 +497,26 @@ export async function registerRoutes(
       const webhook = await storage.getWebhook(webhookId);
       const effectiveWebhookId = webhook?.linkedWebhookId || webhookId;
       
+      // If linked to production, fetch from production API
+      if (webhook?.linkedWebhookId) {
+        const domainSetting = await storage.getSetting('domain_name');
+        const domainName = domainSetting?.value;
+        
+        if (domainName) {
+          try {
+            const productionResponse = await fetch(
+              `https://${domainName}/api/webhook-data/webhook/${effectiveWebhookId}`
+            );
+            if (productionResponse.ok) {
+              const productionData = await productionResponse.json();
+              return res.json(productionData);
+            }
+          } catch (fetchError) {
+            console.log("Failed to fetch from production, falling back to local:", fetchError);
+          }
+        }
+      }
+      
       const data = await storage.getWebhookDataByWebhook(effectiveWebhookId);
       res.json(data);
     } catch (error) {
