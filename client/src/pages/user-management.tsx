@@ -77,21 +77,11 @@ export default function UserManagement() {
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/auth/invitations"] });
       toast({
-        title: "Invitation Created",
-        description: `Invitation sent to ${inviteEmail}`,
+        title: "Invitation Sent",
+        description: `Email invitation sent to ${inviteEmail}`,
       });
       setInviteEmail("");
       setIsInviteDialogOpen(false);
-      
-      // Show the invite URL
-      if (data.invitation?.inviteUrl) {
-        const fullUrl = `${window.location.origin}${data.invitation.inviteUrl}`;
-        navigator.clipboard.writeText(fullUrl);
-        toast({
-          title: "Invite URL Copied",
-          description: "The invitation link has been copied to your clipboard",
-        });
-      }
     },
     onError: (error: any) => {
       toast({
