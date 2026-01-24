@@ -4,15 +4,35 @@ const FROM_EMAIL = "webadmin@mentorsworld.org";
 const FROM_NAME = "AlgoTrading Platform";
 
 // Mailjet SMTP configuration
-const transporter = nodemailer.createTransport({
-  host: "in-v3.mailjet.com",
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.MAILJET_API_KEY,
-    pass: process.env.MAILJET_SECRET_KEY,
-  },
-});
+// Using port 587 with STARTTLS (Mailjet's recommended configuration)
+function createTransporter() {
+  const apiKey = process.env.MAILJET_API_KEY;
+  const secretKey = process.env.MAILJET_SECRET_KEY;
+  
+  console.log("Creating Mailjet transporter...");
+  console.log(`API Key length: ${apiKey?.length || 0}`);
+  console.log(`Secret Key length: ${secretKey?.length || 0}`);
+  console.log(`API Key first 8 chars: ${apiKey?.substring(0, 8) || 'N/A'}`);
+  
+  return nodemailer.createTransport({
+    host: "in-v3.mailjet.com",
+    port: 587,
+    secure: false,
+    auth: {
+      user: apiKey,
+      pass: secretKey,
+    },
+  });
+}
+
+let transporter: nodemailer.Transporter | null = null;
+
+function getTransporter() {
+  if (!transporter) {
+    transporter = createTransporter();
+  }
+  return transporter;
+}
 
 export interface EmailOptions {
   to: string;
@@ -24,7 +44,8 @@ export interface EmailOptions {
 
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
   try {
-    const result = await transporter.sendMail({
+    const transport = getTransporter();
+    const result = await transport.sendMail({
       from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
       to: options.to,
       subject: options.subject,
