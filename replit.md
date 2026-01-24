@@ -132,6 +132,15 @@ The application implements the official Kotak Neo Trade API based on the Postman
 
 ## Recent Changes
 
+### 2026-01-24
+- Fixed critical webhook data storage bug:
+  - Changed `time_unix` column from `integer` to `bigint` in webhook_logs and webhook_data tables
+  - Fixes PostgreSQL overflow error for millisecond timestamps (13 digits like 1737547680000)
+  - TradingView/make.com timestamps now store correctly
+- Added warning banner in data panel when empty payloads are detected
+- Added MentorsWorld logo (40x40px) to all page headers (home, user-home, login, signup) and set as favicon
+- Future roadmap: Hybrid trading mode (Simulation + UAT + Production) for strategy testing
+
 ### 2026-01-23
 - Added email verification for customer signup using Mailjet:
   - Customers must verify email before logging in

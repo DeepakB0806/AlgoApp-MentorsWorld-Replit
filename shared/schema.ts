@@ -1,4 +1,4 @@
-import { pgTable, text, varchar, integer, real, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -88,7 +88,7 @@ export const webhookLogs = pgTable("webhook_logs", {
   userAgent: text("user_agent"),
   
   // TradingView alert fields
-  timeUnix: integer("time_unix"),
+  timeUnix: bigint("time_unix", { mode: "number" }),
   exchange: text("exchange"),
   indices: text("indices"),
   indicator: text("indicator"),
@@ -142,7 +142,7 @@ export const webhookData = pgTable("webhook_data", {
   rawPayload: text("raw_payload"),
   
   // Parsed TradingView signal fields
-  timeUnix: integer("time_unix"),
+  timeUnix: bigint("time_unix", { mode: "number" }),
   exchange: text("exchange"),
   indices: text("indices"),
   indicator: text("indicator"),
