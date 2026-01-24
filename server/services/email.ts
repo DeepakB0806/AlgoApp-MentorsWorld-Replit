@@ -1,7 +1,39 @@
 import Mailjet from "node-mailjet";
+import { db } from "../db";
+import { appSettings } from "../../shared/schema";
+import { eq } from "drizzle-orm";
 
 const FROM_EMAIL = "webadmin@mentorsworld.org";
 const FROM_NAME = "AlgoTrading Platform";
+
+// Get base URL from app_settings (domain_name key) or fallback to env/localhost
+async function getBaseUrl(): Promise<string> {
+  try {
+    // First, try to get domain from app_settings table
+    const [setting] = await db
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.key, "domain_name"));
+    
+    if (setting?.value) {
+      // Ensure the domain has https:// prefix
+      const domain = setting.value.trim();
+      if (domain.startsWith("http://") || domain.startsWith("https://")) {
+        return domain;
+      }
+      return `https://${domain}`;
+    }
+  } catch (error) {
+    console.error("Failed to get domain from app_settings:", error);
+  }
+  
+  // Fallback to environment variable or localhost
+  if (process.env.REPLIT_DEV_DOMAIN) {
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  }
+  
+  return "http://localhost:5000";
+}
 
 // Mailjet API client
 function getMailjetClient() {
@@ -66,9 +98,7 @@ export async function sendVerificationEmail(
   token: string,
   firstName?: string
 ): Promise<boolean> {
-  const baseUrl = process.env.REPLIT_DEV_DOMAIN
-    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-    : "http://localhost:5000";
+  const baseUrl = await getBaseUrl();
 
   const verificationUrl = `${baseUrl}/api/auth/verify-email/${token}`;
   const name = firstName || "there";
@@ -146,9 +176,7 @@ export async function sendTeamInvitationEmail(
   inviteToken: string,
   inviterName?: string
 ): Promise<boolean> {
-  const baseUrl = process.env.REPLIT_DEV_DOMAIN
-    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-    : "http://localhost:5000";
+  const baseUrl = await getBaseUrl();
 
   const registerUrl = `${baseUrl}/register?token=${inviteToken}`;
   const inviter = inviterName || "A team administrator";
