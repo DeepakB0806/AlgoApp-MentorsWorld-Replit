@@ -310,8 +310,8 @@ export default function Webhooks() {
         setFieldConfigText("");
       }
     } else {
-      // Use default 19 fields in Title_Case format
-      setFieldConfigText("Time_Unix, Exchange, Ticker_Indices, Indicator, Action_Alert, Price, Local_Time, Mode, Mode_Desc, Fast_Line, Mid_Line, Slow_Line, Supertrend_ST, Half_Trend_HT, RSI, RSI_Scaled, Alert_System, Action_Binary, Lock_State");
+      // Use default 19 fields in snake_case format
+      setFieldConfigText("time_unix, exchange, ticker, indicator, action, price, local_time, mode, mode_desc, first_line, mid_line, slow_line, st, ht, rsi, rsi_scaled, alert_system, action_binary, lock_state");
     }
     setIsFieldConfigOpen(true);
   };
@@ -402,27 +402,27 @@ export default function Webhooks() {
     return { name: "Production", code: linkedWebhookId.slice(0, 6).toUpperCase() };
   };
 
-  // Default field configuration (19 fields) - Title_Case display names to match make.com
+  // Default field configuration (19 fields) - snake_case names for consistency
   const DEFAULT_FIELD_CONFIG = [
-    { name: "Time_Unix", key: "timeUnix", type: "timestamp", order: 0 },
-    { name: "Exchange", key: "exchange", type: "text", order: 1 },
-    { name: "Ticker_Indices", key: "indices", type: "text", order: 2 },
-    { name: "Indicator", key: "indicator", type: "text", order: 3 },
-    { name: "Action_Alert", key: "alert", type: "text", order: 4 },
-    { name: "Price", key: "price", type: "number", order: 5 },
-    { name: "Local_Time", key: "localTime", type: "text", order: 6 },
-    { name: "Mode", key: "mode", type: "text", order: 7 },
-    { name: "Mode_Desc", key: "modeDesc", type: "text", order: 8 },
-    { name: "Fast_Line", key: "firstLine", type: "number", order: 9 },
-    { name: "Mid_Line", key: "midLine", type: "number", order: 10 },
-    { name: "Slow_Line", key: "slowLine", type: "number", order: 11 },
-    { name: "Supertrend_ST", key: "st", type: "number", order: 12 },
-    { name: "Half_Trend_HT", key: "ht", type: "number", order: 13 },
-    { name: "RSI", key: "rsi", type: "number", order: 14 },
-    { name: "RSI_Scaled", key: "rsiScaled", type: "number", order: 15 },
-    { name: "Alert_System", key: "alertSystem", type: "text", order: 16 },
-    { name: "Action_Binary", key: "actionBinary", type: "number", order: 17 },
-    { name: "Lock_State", key: "lockState", type: "text", order: 18 }
+    { name: "time_unix", key: "timeUnix", type: "timestamp", order: 0 },
+    { name: "exchange", key: "exchange", type: "text", order: 1 },
+    { name: "ticker", key: "indices", type: "text", order: 2 },
+    { name: "indicator", key: "indicator", type: "text", order: 3 },
+    { name: "action", key: "alert", type: "text", order: 4 },
+    { name: "price", key: "price", type: "number", order: 5 },
+    { name: "local_time", key: "localTime", type: "text", order: 6 },
+    { name: "mode", key: "mode", type: "text", order: 7 },
+    { name: "mode_desc", key: "modeDesc", type: "text", order: 8 },
+    { name: "first_line", key: "firstLine", type: "number", order: 9 },
+    { name: "mid_line", key: "midLine", type: "number", order: 10 },
+    { name: "slow_line", key: "slowLine", type: "number", order: 11 },
+    { name: "st", key: "st", type: "number", order: 12 },
+    { name: "ht", key: "ht", type: "number", order: 13 },
+    { name: "rsi", key: "rsi", type: "number", order: 14 },
+    { name: "rsi_scaled", key: "rsiScaled", type: "number", order: 15 },
+    { name: "alert_system", key: "alertSystem", type: "text", order: 16 },
+    { name: "action_binary", key: "actionBinary", type: "number", order: 17 },
+    { name: "lock_state", key: "lockState", type: "text", order: 18 }
   ];
 
   // Get field config for a webhook (parse from fieldConfig string or use default)
@@ -1160,7 +1160,7 @@ export default function Webhooks() {
               <Textarea
                 value={fieldConfigText}
                 onChange={(e) => setFieldConfigText(e.target.value)}
-                placeholder="Time Unix, Exchange, Ticker (Indices), Indicator, Action (Alert), Price..."
+                placeholder="time_unix, exchange, ticker, indicator, action, price, local_time, mode..."
                 className="min-h-[120px] font-mono text-sm"
                 data-testid="textarea-field-config"
               />
@@ -1172,7 +1172,7 @@ export default function Webhooks() {
               <Button 
                 variant="outline" 
                 size="sm"
-                onClick={() => setFieldConfigText("Time_Unix, Exchange, Ticker_Indices, Indicator, Action_Alert, Price, Local_Time, Mode, Mode_Desc, Fast_Line, Mid_Line, Slow_Line, Supertrend_ST, Half_Trend_HT, RSI, RSI_Scaled, Alert_System, Action_Binary, Lock_State")}
+                onClick={() => setFieldConfigText("time_unix, exchange, ticker, indicator, action, price, local_time, mode, mode_desc, first_line, mid_line, slow_line, st, ht, rsi, rsi_scaled, alert_system, action_binary, lock_state")}
                 data-testid="button-use-default-fields"
               >
                 Use Default 19 Fields
