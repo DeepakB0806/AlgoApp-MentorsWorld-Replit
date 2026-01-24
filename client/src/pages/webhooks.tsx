@@ -973,7 +973,20 @@ export default function Webhooks() {
             {selectedWebhookData.length === 0 ? (
               <p className="text-muted-foreground text-center py-8">No data received yet for this webhook.</p>
             ) : (
-              <Table className="text-xs">
+              <>
+                {/* Warning banner for empty payloads */}
+                {selectedWebhookData.some(d => d.rawPayload === '{}' || d.rawPayload === '') && (
+                  <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-md">
+                    <p className="text-amber-500 text-sm font-medium flex items-center gap-2">
+                      <XCircle className="w-4 h-4" />
+                      Empty payloads detected - Check your make.com/TradingView configuration
+                    </p>
+                    <p className="text-amber-400/80 text-xs mt-1">
+                      Some webhook calls received empty JSON bodies. Ensure your alert message contains the required fields.
+                    </p>
+                  </div>
+                )}
+                <Table className="text-xs">
                 <TableHeader>
                   <TableRow>
                     {getFieldConfig(selectedWebhook, true).map((field: { name: string; key: string }) => (
@@ -1000,7 +1013,8 @@ export default function Webhooks() {
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+                </Table>
+              </>
             )}
           </div>
         </SheetContent>

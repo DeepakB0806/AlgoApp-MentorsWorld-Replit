@@ -159,6 +159,7 @@ export class DatabaseStorage implements IStorage {
       fieldConfig: null,
       dataTableName: null,
       linkedWebhookId: null,
+      linkedByWebhooks: null,
     };
     this.webhooksMap.set(webhook1.id, webhook1);
   }
