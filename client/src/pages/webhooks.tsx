@@ -412,13 +412,8 @@ export default function Webhooks() {
   ];
 
   // Get field config for a webhook (parse from fieldConfig string or use default)
-  // For data display, always use default config because data is stored with standard field names
-  const getFieldConfig = (webhook: WebhookType | null, forDataDisplay: boolean = false) => {
-    // When displaying data, always use default config for consistency
-    // Data is stored with standard field names (timeUnix, exchange, indices, etc.)
-    if (forDataDisplay) {
-      return DEFAULT_FIELD_CONFIG;
-    }
+  // The saved fieldConfig controls the table headers displayed in the data panel
+  const getFieldConfig = (webhook: WebhookType | null) => {
     if (!webhook?.fieldConfig) return DEFAULT_FIELD_CONFIG;
     try {
       return JSON.parse(webhook.fieldConfig);
@@ -917,7 +912,7 @@ export default function Webhooks() {
               <div>
                 <SheetTitle>Webhook Data: {selectedWebhook?.name}</SheetTitle>
                 <SheetDescription>
-                  {getFieldConfig(selectedWebhook, true).length} fields from incoming webhook data
+                  {getFieldConfig(selectedWebhook).length} fields from incoming webhook data
                 </SheetDescription>
               </div>
               <div className="flex gap-1">
@@ -997,7 +992,7 @@ export default function Webhooks() {
                 <Table className="text-xs">
                 <TableHeader>
                   <TableRow>
-                    {getFieldConfig(selectedWebhook, true).map((field: { name: string; key: string }) => (
+                    {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
                       <TableHead 
                         key={field.key} 
                         className="whitespace-nowrap px-1 py-1"
@@ -1010,7 +1005,7 @@ export default function Webhooks() {
                 <TableBody>
                   {selectedWebhookData.map((data) => (
                     <TableRow key={data.id} data-testid={`row-data-panel-${data.id}`}>
-                      {getFieldConfig(selectedWebhook, true).map((field: { name: string; key: string }) => (
+                      {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
                         <TableCell 
                           key={field.key} 
                           className="whitespace-nowrap px-1 py-1"
