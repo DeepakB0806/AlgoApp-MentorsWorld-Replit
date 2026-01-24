@@ -52,121 +52,137 @@ export default function UserHome() {
           </p>
         </div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <Link href="/dashboard">
             <Card className="hover-elevate cursor-pointer h-full" data-testid="card-link-dashboard">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center mb-4">
-                  <LayoutDashboard className="w-6 h-6 text-primary" />
+              <CardHeader className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-primary/20 flex items-center justify-center">
+                    <LayoutDashboard className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      Dashboard
+                      <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                    </CardTitle>
+                    <CardDescription className="text-xs mt-1">
+                      Positions, orders & trades
+                    </CardDescription>
+                  </div>
                 </div>
-                <CardTitle className="flex items-center justify-between gap-2">
-                  Dashboard
-                  <ArrowRight className="w-5 h-5 text-muted-foreground" />
-                </CardTitle>
-                <CardDescription>
-                  View live positions, orders, holdings, and place trades
-                </CardDescription>
               </CardHeader>
             </Card>
           </Link>
 
           <Link href="/strategies">
             <Card className="hover-elevate cursor-pointer h-full" data-testid="card-link-strategies">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-xl bg-chart-2/20 flex items-center justify-center mb-4">
-                  <BarChart3 className="w-6 h-6 text-chart-2" />
+              <CardHeader className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-chart-2/20 flex items-center justify-center">
+                    <BarChart3 className="w-4 h-4 text-chart-2" />
+                  </div>
+                  <div className="flex-1">
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      Strategies
+                      <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                    </CardTitle>
+                    <CardDescription className="text-xs mt-1">
+                      Manage trading strategies
+                    </CardDescription>
+                  </div>
                 </div>
-                <CardTitle className="flex items-center justify-between gap-2">
-                  Strategies
-                  <ArrowRight className="w-5 h-5 text-muted-foreground" />
-                </CardTitle>
-                <CardDescription>
-                  Create and manage your automated trading strategies
-                </CardDescription>
               </CardHeader>
             </Card>
           </Link>
 
           <Link href="/webhooks">
             <Card className="hover-elevate cursor-pointer h-full" data-testid="card-link-webhooks">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-xl bg-chart-3/20 flex items-center justify-center mb-4">
-                  <Webhook className="w-6 h-6 text-chart-3" />
+              <CardHeader className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-chart-3/20 flex items-center justify-center">
+                    <Webhook className="w-4 h-4 text-chart-3" />
+                  </div>
+                  <div className="flex-1">
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      Webhooks
+                      <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                    </CardTitle>
+                    <CardDescription className="text-xs mt-1">
+                      TradingView alerts config
+                    </CardDescription>
+                  </div>
                 </div>
-                <CardTitle className="flex items-center justify-between gap-2">
-                  Webhooks
-                  <ArrowRight className="w-5 h-5 text-muted-foreground" />
-                </CardTitle>
-                <CardDescription>
-                  Configure webhooks for TradingView alerts
-                </CardDescription>
               </CardHeader>
             </Card>
           </Link>
 
           <Link href="/broker-api">
             <Card className="hover-elevate cursor-pointer h-full" data-testid="card-link-broker">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-xl bg-chart-4/20 flex items-center justify-center mb-4">
-                  <Key className="w-6 h-6 text-chart-4" />
+              <CardHeader className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-chart-4/20 flex items-center justify-center">
+                    <Key className="w-4 h-4 text-chart-4" />
+                  </div>
+                  <div className="flex-1">
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      Broker API
+                      <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                    </CardTitle>
+                    <CardDescription className="text-xs mt-1">
+                      Kotak Neo credentials
+                    </CardDescription>
+                  </div>
                 </div>
-                <CardTitle className="flex items-center justify-between gap-2">
-                  Broker API
-                  <ArrowRight className="w-5 h-5 text-muted-foreground" />
-                </CardTitle>
-                <CardDescription>
-                  Manage Kotak Neo API credentials and connections
-                </CardDescription>
               </CardHeader>
             </Card>
           </Link>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6">
+        <div className="grid md:grid-cols-3 gap-4">
           <Card className="col-span-2" data-testid="card-quick-stats">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Activity className="w-5 h-5 text-primary" />
+            <CardHeader className="p-4 pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Activity className="w-4 h-4 text-primary" />
                 Quick Stats
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="text-center p-4 rounded-lg bg-muted/50">
-                  <div className="text-2xl font-bold text-foreground">--</div>
-                  <div className="text-sm text-muted-foreground">Active Strategies</div>
+            <CardContent className="p-4 pt-2">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <div className="text-xl font-bold text-foreground">--</div>
+                  <div className="text-xs text-muted-foreground">Strategies</div>
                 </div>
-                <div className="text-center p-4 rounded-lg bg-muted/50">
-                  <div className="text-2xl font-bold text-foreground">--</div>
-                  <div className="text-sm text-muted-foreground">Webhooks</div>
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <div className="text-xl font-bold text-foreground">--</div>
+                  <div className="text-xs text-muted-foreground">Webhooks</div>
                 </div>
-                <div className="text-center p-4 rounded-lg bg-muted/50">
-                  <div className="text-2xl font-bold text-foreground">--</div>
-                  <div className="text-sm text-muted-foreground">Today's Alerts</div>
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <div className="text-xl font-bold text-foreground">--</div>
+                  <div className="text-xs text-muted-foreground">Alerts</div>
                 </div>
               </div>
             </CardContent>
           </Card>
 
           <Card data-testid="card-broker-status">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Settings className="w-5 h-5 text-chart-4" />
+            <CardHeader className="p-4 pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Settings className="w-4 h-4 text-chart-4" />
                 Broker Status
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
-                <div className="w-3 h-3 rounded-full bg-muted-foreground animate-pulse" />
+            <CardContent className="p-4 pt-2">
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
+                <div className="w-2 h-2 rounded-full bg-muted-foreground animate-pulse" />
                 <div>
-                  <div className="font-medium text-foreground">Not Connected</div>
-                  <div className="text-sm text-muted-foreground">Configure in Broker API</div>
+                  <div className="text-sm font-medium text-foreground">Not Connected</div>
+                  <div className="text-xs text-muted-foreground">Configure in Broker API</div>
                 </div>
               </div>
               <Link href="/broker-api">
-                <Button variant="outline" className="w-full mt-4" data-testid="button-connect-broker">
+                <Button variant="outline" size="sm" className="w-full mt-3" data-testid="button-connect-broker">
                   Connect Broker
-                  <ArrowRight className="w-4 h-4 ml-2" />
+                  <ArrowRight className="w-3 h-3 ml-2" />
                 </Button>
               </Link>
             </CardContent>
@@ -174,29 +190,47 @@ export default function UserHome() {
         </div>
 
         {isSuperAdmin && (
-          <div className="mt-8">
-            <h3 className="text-xl font-semibold text-foreground mb-4">Admin Settings</h3>
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="mt-6">
+            <h3 className="text-base font-semibold text-foreground mb-3">Admin Settings</h3>
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
               <Link href="/settings">
                 <Card className="hover-elevate cursor-pointer h-full" data-testid="card-link-settings">
-                  <CardHeader>
-                    <div className="w-12 h-12 rounded-xl bg-orange-500/20 flex items-center justify-center mb-4">
-                      <Cog className="w-6 h-6 text-orange-500" />
+                  <CardHeader className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-orange-500/20 flex items-center justify-center">
+                        <Cog className="w-4 h-4 text-orange-500" />
+                      </div>
+                      <div className="flex-1">
+                        <CardTitle className="text-sm flex items-center justify-between">
+                          General Settings
+                          <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                        </CardTitle>
+                        <CardDescription className="text-xs mt-1">
+                          Mail API config
+                        </CardDescription>
+                      </div>
                     </div>
-                    <CardTitle className="flex items-center justify-between gap-2">
-                      General Settings
-                      <ArrowRight className="w-5 h-5 text-muted-foreground" />
-                    </CardTitle>
-                    <CardDescription>
-                      Configure mail API and platform settings
-                    </CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Mail className="w-4 h-4" />
-                      Mail API Settings
+                </Card>
+              </Link>
+              <Link href="/user-management">
+                <Card className="hover-elevate cursor-pointer h-full" data-testid="card-link-user-management">
+                  <CardHeader className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                        <Users className="w-4 h-4 text-blue-500" />
+                      </div>
+                      <div className="flex-1">
+                        <CardTitle className="text-sm flex items-center justify-between">
+                          User Management
+                          <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                        </CardTitle>
+                        <CardDescription className="text-xs mt-1">
+                          Team & invitations
+                        </CardDescription>
+                      </div>
                     </div>
-                  </CardContent>
+                  </CardHeader>
                 </Card>
               </Link>
             </div>
