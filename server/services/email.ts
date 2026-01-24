@@ -3,15 +3,10 @@ import Mailjet from "node-mailjet";
 const FROM_EMAIL = "webadmin@mentorsworld.org";
 const FROM_NAME = "AlgoTrading Platform";
 
-// Mailjet API client (more reliable than SMTP)
+// Mailjet API client
 function getMailjetClient() {
   const apiKey = process.env.MAILJET_API_KEY?.trim().replace(/[^a-f0-9]/gi, '');
   const secretKey = process.env.MAILJET_SECRET_KEY?.trim().replace(/[^a-f0-9]/gi, '');
-  
-  console.log("Creating Mailjet API client...");
-  console.log(`API Key length: ${apiKey?.length || 0}`);
-  console.log(`Secret Key length: ${secretKey?.length || 0}`);
-  console.log(`API Key first 8 chars: ${apiKey?.substring(0, 8) || 'N/A'}`);
   
   if (!apiKey || !secretKey) {
     throw new Error("Mailjet credentials not configured");
