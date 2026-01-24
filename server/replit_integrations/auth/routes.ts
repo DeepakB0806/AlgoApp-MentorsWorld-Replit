@@ -235,7 +235,7 @@ export function registerAuthRoutes(app: Express): void {
       // Generate TOTP secret for the user
       const totpSecret = generateTotpSecret();
       
-      // Create user
+      // Create user - email is verified since they received the invitation email
       const [newUser] = await db
         .insert(users)
         .values({
@@ -248,7 +248,7 @@ export function registerAuthRoutes(app: Express): void {
           totpSecret,
           totpEnabled: true, // TOTP is required for team members
           totpVerified: false,
-          emailVerified: false,
+          emailVerified: true, // Email verified via invitation link
           isActive: true,
         })
         .returning();
