@@ -131,9 +131,22 @@ export async function setupAuth(app: Express) {
 }
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
+  // First check for team member session (set by validateTeamSession middleware)
+  if ((req as any).teamUser) {
+    // Team member is authenticated via HTTP-only session cookie
+    // Set req.user.claims.sub for compatibility with downstream handlers
+    (req as any).user = {
+      claims: {
+        sub: (req as any).teamUser.id,
+      },
+    };
+    return next();
+  }
+  
+  // Then check for Replit Auth session
   const user = req.user as any;
 
-  if (!req.isAuthenticated() || !user.expires_at) {
+  if (!req.isAuthenticated() || !user?.expires_at) {
     return res.status(401).json({ message: "Unauthorized" });
   }
 
