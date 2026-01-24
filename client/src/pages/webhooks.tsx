@@ -1152,7 +1152,7 @@ export default function Webhooks() {
               <Button 
                 variant="outline" 
                 size="sm"
-                onClick={() => setFieldConfigText("Time Unix, Exchange, Ticker (Indices), Indicator, Action (Alert), Price, Local Time, Mode, Mode Desc, Fast Line, Mid Line, Slow Line, Supertrend (ST), Half Trend (HT), RSI, RSI Scaled, Alert System, Action Binary, Lock State")}
+                onClick={() => setFieldConfigText("Time_Unix, Exchange, Ticker_Indices, Indicator, Action_Alert, Price, Local_Time, Mode, Mode_Desc, Fast_Line, Mid_Line, Slow_Line, Supertrend_ST, Half_Trend_HT, RSI, RSI_Scaled, Alert_System, Action_Binary, Lock_State")}
                 data-testid="button-use-default-fields"
               >
                 Use Default 19 Fields
