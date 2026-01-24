@@ -133,6 +133,15 @@ The application implements the official Kotak Neo Trade API based on the Postman
 ## Recent Changes
 
 ### 2026-01-24
+- Implemented backup recovery codes for TOTP authentication:
+  - Generates 8 one-time backup codes (format: XXXX-XXXX) after TOTP setup
+  - Codes stored as bcrypt-hashed JSON array in users.backup_codes column
+  - Backup codes displayed after TOTP verification (shown only once!)
+  - Copy All and Download buttons for saving codes
+  - Login flow supports backup code as alternative to TOTP
+  - Each backup code can only be used once (removed after successful use)
+  - Shows remaining codes count after backup code login
+  - New endpoint: POST /api/auth/team/verify-backup-code
 - Fixed critical webhook data storage bug:
   - Changed `time_unix` column from `integer` to `bigint` in webhook_logs and webhook_data tables
   - Fixes PostgreSQL overflow error for millisecond timestamps (13 digits like 1737547680000)

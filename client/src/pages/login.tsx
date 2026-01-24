@@ -5,11 +5,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, Link } from "wouter";
-import { Lock, Mail, Shield, LogIn, ArrowRight, TrendingUp, RefreshCw, AlertCircle, Eye, EyeOff } from "lucide-react";
+import { Lock, Mail, Shield, LogIn, ArrowRight, TrendingUp, RefreshCw, AlertCircle, Eye, EyeOff, Key } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import mwLogo from "@/assets/images/mw-logo.png";
 
-type LoginStep = "credentials" | "totp" | "verify-email";
+type LoginStep = "credentials" | "totp" | "backup-code" | "verify-email";
 
 export default function Login() {
   const [step, setStep] = useState<LoginStep>("credentials");
@@ -17,6 +17,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [totpCode, setTotpCode] = useState("");
+  const [backupCode, setBackupCode] = useState("");
   const [userId, setUserId] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [resendingEmail, setResendingEmail] = useState(false);
@@ -135,6 +136,44 @@ export default function Login() {
     }
   };
 
+  const handleBackupCodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    try {
+      const res = await fetch("/api/auth/team/verify-backup-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ userId, code: backupCode }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Verification failed");
+      }
+
+      toast({
+        title: "Login Successful",
+        description: data.remainingCodes !== undefined 
+          ? `Welcome back! You have ${data.remainingCodes} backup codes remaining.`
+          : `Welcome back, ${data.user.firstName || data.user.email}!`,
+      });
+      
+      window.location.href = "/user-home";
+    } catch (error: any) {
+      toast({
+        title: "Verification Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+      setBackupCode("");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleResendEmail = async () => {
     setResendingEmail(true);
     try {
@@ -185,6 +224,12 @@ export default function Login() {
                   Two-Factor Authentication
                 </>
               )}
+              {step === "backup-code" && (
+                <>
+                  <Key className="w-5 h-5" />
+                  Use Backup Code
+                </>
+              )}
               {step === "verify-email" && (
                 <>
                   <AlertCircle className="w-5 h-5" />
@@ -195,6 +240,7 @@ export default function Login() {
             <CardDescription>
               {step === "credentials" && "Enter your credentials to access the platform"}
               {step === "totp" && "Enter the 6-digit code from your authenticator app"}
+              {step === "backup-code" && "Enter one of your backup recovery codes"}
               {step === "verify-email" && "Please verify your email to continue"}
             </CardDescription>
           </CardHeader>
@@ -299,6 +345,20 @@ export default function Login() {
                   {isLoading ? "Verifying..." : "Verify & Sign In"}
                 </Button>
 
+                <div className="text-center">
+                  <button
+                    type="button"
+                    className="text-sm text-muted-foreground hover:text-foreground underline"
+                    onClick={() => {
+                      setStep("backup-code");
+                      setTotpCode("");
+                    }}
+                    data-testid="button-use-backup-code"
+                  >
+                    Lost access to authenticator? Use a backup code
+                  </button>
+                </div>
+
                 <Button
                   type="button"
                   variant="ghost"
@@ -308,6 +368,65 @@ export default function Login() {
                     setTotpCode("");
                   }}
                   data-testid="button-back"
+                >
+                  Back to Sign In
+                </Button>
+              </form>
+            )}
+
+            {step === "backup-code" && (
+              <form onSubmit={handleBackupCodeSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="backup">Backup Code</Label>
+                  <Input
+                    id="backup"
+                    type="text"
+                    placeholder="XXXX-XXXX"
+                    value={backupCode}
+                    onChange={(e) => setBackupCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 9))}
+                    className="text-center text-2xl tracking-widest font-mono"
+                    maxLength={9}
+                    required
+                    autoFocus
+                    data-testid="input-backup-code"
+                  />
+                  <p className="text-xs text-muted-foreground text-center">
+                    Enter one of your 8-character backup codes (format: XXXX-XXXX)
+                  </p>
+                </div>
+
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={isLoading || backupCode.length < 8}
+                  data-testid="button-verify-backup"
+                >
+                  {isLoading ? "Verifying..." : "Verify & Sign In"}
+                </Button>
+
+                <div className="text-center">
+                  <button
+                    type="button"
+                    className="text-sm text-muted-foreground hover:text-foreground underline"
+                    onClick={() => {
+                      setStep("totp");
+                      setBackupCode("");
+                    }}
+                    data-testid="button-use-authenticator"
+                  >
+                    Use authenticator app instead
+                  </button>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    setStep("credentials");
+                    setBackupCode("");
+                  }}
+                  data-testid="button-back-from-backup"
                 >
                   Back to Sign In
                 </Button>

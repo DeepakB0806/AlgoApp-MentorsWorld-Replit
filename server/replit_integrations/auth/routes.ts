@@ -20,10 +20,14 @@ function isSuperAdmin(userId: string, email?: string | null): boolean {
   return email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
 }
 
+// MentorsWorld branding for TOTP
+const TOTP_ISSUER = "MentorsWorld AlgoTrading";
+const TOTP_LOGO_URL = "https://algoapp.mentorsworld.org/mw-logo.png";
+
 // TOTP helper functions using speakeasy
 function generateTotpSecret(): string {
   const secret = speakeasy.generateSecret({
-    name: "AlgoTrading Platform",
+    name: TOTP_ISSUER,
     length: 20,
   });
   return secret.base32;
@@ -39,12 +43,46 @@ function verifyTotpCode(token: string, secret: string): boolean {
 }
 
 function generateTotpUri(email: string, secret: string): string {
-  return speakeasy.otpauthURL({
+  // Generate base otpauth URL
+  const baseUri = speakeasy.otpauthURL({
     secret,
     label: email,
-    issuer: "AlgoTrading Platform",
+    issuer: TOTP_ISSUER,
     encoding: "base32",
   });
+  // Add image parameter for authenticator apps that support branding (Authy, Microsoft Authenticator)
+  return `${baseUri}&image=${encodeURIComponent(TOTP_LOGO_URL)}`;
+}
+
+// Backup recovery codes functions
+const BACKUP_CODE_COUNT = 8; // Number of backup codes to generate
+
+function generateBackupCodes(): string[] {
+  const codes: string[] = [];
+  for (let i = 0; i < BACKUP_CODE_COUNT; i++) {
+    // Generate 8-character alphanumeric code (easy to read/type)
+    const code = crypto.randomBytes(4).toString("hex").toUpperCase();
+    // Format as XXXX-XXXX for readability
+    codes.push(`${code.slice(0, 4)}-${code.slice(4)}`);
+  }
+  return codes;
+}
+
+async function hashBackupCodes(codes: string[]): Promise<string[]> {
+  const hashed = await Promise.all(
+    codes.map(code => bcrypt.hash(code.replace("-", ""), 10))
+  );
+  return hashed;
+}
+
+async function verifyBackupCode(inputCode: string, hashedCodes: string[]): Promise<{ valid: boolean; index: number }> {
+  const normalizedInput = inputCode.replace("-", "").toUpperCase();
+  for (let i = 0; i < hashedCodes.length; i++) {
+    if (await bcrypt.compare(normalizedInput, hashedCodes[i])) {
+      return { valid: true, index: i };
+    }
+  }
+  return { valid: false, index: -1 };
 }
 
 // Middleware to validate team member session
@@ -518,12 +556,24 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ message: "Invalid TOTP code" });
       }
       
-      // Mark TOTP as verified
+      // Generate backup recovery codes
+      const backupCodes = generateBackupCodes();
+      const hashedBackupCodes = await hashBackupCodes(backupCodes);
+      
+      // Mark TOTP as verified and store hashed backup codes
       await db.update(users)
-        .set({ totpVerified: true, updatedAt: new Date() })
+        .set({ 
+          totpVerified: true, 
+          backupCodes: JSON.stringify(hashedBackupCodes),
+          updatedAt: new Date() 
+        })
         .where(eq(users.id, userId));
       
-      res.json({ message: "TOTP setup complete. You can now log in." });
+      // Return backup codes to user (show only once!)
+      res.json({ 
+        message: "TOTP setup complete. Save your backup codes securely - they will only be shown once!",
+        backupCodes: backupCodes, // Plain text codes for user to save
+      });
     } catch (error) {
       console.error("Error verifying TOTP setup:", error);
       res.status(500).json({ message: "Failed to verify TOTP" });
@@ -654,6 +704,83 @@ export function registerAuthRoutes(app: Express): void {
     } catch (error) {
       console.error("Error verifying TOTP:", error);
       res.status(500).json({ message: "Failed to verify TOTP" });
+    }
+  });
+  
+  // Verify backup code for login (alternative to TOTP)
+  app.post("/api/auth/team/verify-backup-code", async (req: Request, res: Response) => {
+    try {
+      const { userId, code } = req.body;
+      
+      if (!userId || !code) {
+        return res.status(400).json({ message: "User ID and backup code are required" });
+      }
+      
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId));
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      if (!user.backupCodes) {
+        return res.status(400).json({ message: "No backup codes configured" });
+      }
+      
+      // Parse stored hashed backup codes
+      const hashedCodes: string[] = JSON.parse(user.backupCodes);
+      
+      // Verify the backup code
+      const result = await verifyBackupCode(code, hashedCodes);
+      
+      if (!result.valid) {
+        return res.status(401).json({ message: "Invalid backup code" });
+      }
+      
+      // Remove used backup code (one-time use)
+      hashedCodes.splice(result.index, 1);
+      
+      // Generate a session token and store it in a cookie
+      const sessionToken = crypto.randomBytes(32).toString("hex");
+      const sessionExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      
+      // Store session token and updated backup codes in database
+      await db.update(users)
+        .set({ 
+          sessionToken, 
+          sessionExpires,
+          backupCodes: JSON.stringify(hashedCodes), // Update with remaining codes
+          lastLoginAt: new Date(),
+          updatedAt: new Date() 
+        })
+        .where(eq(users.id, userId));
+      
+      // Set HTTP-only cookie with session token
+      res.cookie("team_session", sessionToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        path: "/",
+      });
+      
+      res.json({
+        success: true,
+        message: `Login successful. You have ${hashedCodes.length} backup codes remaining.`,
+        remainingCodes: hashedCodes.length,
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          role: user.role,
+        },
+      });
+    } catch (error) {
+      console.error("Error verifying backup code:", error);
+      res.status(500).json({ message: "Failed to verify backup code" });
     }
   });
   

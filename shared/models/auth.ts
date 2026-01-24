@@ -43,6 +43,9 @@ export const users = pgTable("users", {
   totpSecret: varchar("totp_secret"), // Base32 encoded secret
   totpVerified: boolean("totp_verified").default(false), // True after first successful TOTP entry
   
+  // Backup recovery codes (stored as JSON array of hashed codes)
+  backupCodes: text("backup_codes"), // JSON array of bcrypt-hashed backup codes
+  
   // Status and metadata
   isActive: boolean("is_active").default(true),
   invitedBy: varchar("invited_by"), // User ID who invited this team member
