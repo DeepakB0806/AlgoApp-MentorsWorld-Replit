@@ -104,6 +104,17 @@ export default function Webhooks() {
     queryKey: ["/api/webhook-registry"],
   });
 
+  // Check if a webhook has inbound links (dev webhooks linking TO this production webhook)
+  // Uses the linkedByWebhooks field which is synced across environments
+  const hasInboundLinks = (webhook: WebhookType) => {
+    return (webhook.linkedByWebhooks?.length ?? 0) > 0;
+  };
+
+  // Get inbound links count for a webhook
+  const getInboundLinksCount = (webhook: WebhookType) => {
+    return webhook.linkedByWebhooks?.length ?? 0;
+  };
+
   // Save domain name
   const saveDomainMutation = useMutation({
     mutationFn: async (value: string) => {
@@ -841,11 +852,19 @@ export default function Webhooks() {
                             variant="ghost"
                             size="icon"
                             onClick={() => webhook.linkedWebhookId ? unlinkMutation.mutate(webhook.id) : handleLinkWebhook(webhook)}
-                            title={webhook.linkedWebhookId ? "Unlink from Production" : "Link to Production"}
+                            title={
+                              webhook.linkedWebhookId 
+                                ? "Unlink from Production" 
+                                : hasInboundLinks(webhook)
+                                  ? `Linked from ${getInboundLinksCount(webhook)} Development webhook(s)`
+                                  : "Link to Production"
+                            }
                             data-testid={`button-link-webhook-${webhook.id}`}
                           >
                             {webhook.linkedWebhookId ? (
                               <Unlink className="w-4 h-4 text-primary" />
+                            ) : hasInboundLinks(webhook) ? (
+                              <Link2 className="w-4 h-4 text-primary" />
                             ) : (
                               <Link2 className="w-4 h-4" />
                             )}
