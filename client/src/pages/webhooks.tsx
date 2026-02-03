@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save, Eye, EyeOff, Activity, Timer, Wrench, Upload, Link2, Unlink, RefreshCw, ChevronDown } from "lucide-react";
+import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save, Eye, EyeOff, Activity, Timer, Wrench, Upload, Link2, RefreshCw, ChevronDown } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -861,9 +861,7 @@ export default function Webhooks() {
                             }
                             data-testid={`button-link-webhook-${webhook.id}`}
                           >
-                            {webhook.linkedWebhookId ? (
-                              <Unlink className="w-4 h-4 text-primary" />
-                            ) : hasInboundLinks(webhook) ? (
+                            {(webhook.linkedWebhookId || hasInboundLinks(webhook)) ? (
                               <Link2 className="w-4 h-4 text-primary" />
                             ) : (
                               <Link2 className="w-4 h-4" />
