@@ -37,6 +37,7 @@ export interface IStorage {
   getWebhooks(): Promise<Webhook[]>;
   getWebhook(id: string): Promise<Webhook | undefined>;
   getWebhookByUniqueCode(uniqueCode: string): Promise<Webhook | undefined>;
+  getWebhooksLinkingTo(webhookId: string): Promise<Webhook[]>; // Find webhooks that link to this webhook
   createWebhook(webhook: InsertWebhook, createdBy?: string): Promise<Webhook>;
   updateWebhook(id: string, webhook: Partial<InsertWebhook>): Promise<Webhook | undefined>;
   deleteWebhook(id: string): Promise<boolean>;
@@ -223,6 +224,10 @@ export class DatabaseStorage implements IStorage {
   async getWebhookByUniqueCode(uniqueCode: string): Promise<Webhook | undefined> {
     const [webhook] = await db.select().from(webhooks).where(eq(webhooks.uniqueCode, uniqueCode.toUpperCase()));
     return webhook || undefined;
+  }
+
+  async getWebhooksLinkingTo(webhookId: string): Promise<Webhook[]> {
+    return await db.select().from(webhooks).where(eq(webhooks.linkedWebhookId, webhookId));
   }
 
   async createWebhook(insertWebhook: InsertWebhook, createdBy?: string): Promise<Webhook> {

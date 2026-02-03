@@ -171,6 +171,16 @@ export async function registerRoutes(
     }
   });
 
+  // Get webhooks that link TO this webhook (inbound links)
+  app.get("/api/webhooks/:id/inbound-links", async (req, res) => {
+    try {
+      const inboundLinks = await storage.getWebhooksLinkingTo(req.params.id);
+      res.json(inboundLinks);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch inbound links" });
+    }
+  });
+
   app.post("/api/webhooks", async (req, res) => {
     try {
       const parsed = insertWebhookSchema.safeParse(req.body);
