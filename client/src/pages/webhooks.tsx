@@ -1080,12 +1080,12 @@ export default function Webhooks() {
                   data-testid="data-logs-scroll-container"
                 >
                   <Table className="text-xs">
-                  <TableHeader className="sticky top-0 bg-background z-10">
-                    <TableRow>
+                  <TableHeader className="sticky top-0 z-20 bg-card">
+                    <TableRow className="sticky top-0 z-20 bg-card border-b">
                       {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
                         <TableHead 
                           key={field.key} 
-                          className="whitespace-nowrap px-1 py-1"
+                          className="sticky top-0 z-20 bg-card whitespace-nowrap px-1 py-1"
                         >
                           {field.name}
                         </TableHead>
