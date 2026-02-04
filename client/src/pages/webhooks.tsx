@@ -447,8 +447,9 @@ export default function Webhooks() {
     }
   };
 
-  // Get value from data object by key
+  // Get value from data object by key - supports dynamic field lookup
   const getDataValue = (data: WebhookData, key: string): string | number | null => {
+    // Known field mappings (snake_case to camelCase for typed columns)
     const keyMap: Record<string, keyof WebhookData> = {
       timeUnix: 'timeUnix', time_unix: 'timeUnix',
       exchange: 'exchange',
@@ -470,9 +471,59 @@ export default function Webhooks() {
       actionBinary: 'actionBinary', action_binary: 'actionBinary',
       lockState: 'lockState', lock_state: 'lockState'
     };
-    const mappedKey = keyMap[key] || key;
-    const value = data[mappedKey as keyof WebhookData];
-    return value as string | number | null;
+    
+    // First, try to get value from typed columns
+    const mappedKey = keyMap[key];
+    if (mappedKey) {
+      const value = data[mappedKey];
+      if (value != null) {
+        return value as string | number | null;
+      }
+    }
+    
+    // Try direct access on typed columns (for exact matches like 'exchange')
+    if (key in data) {
+      const value = data[key as keyof WebhookData];
+      if (value != null) {
+        return value as string | number | null;
+      }
+    }
+    
+    // If not found in typed columns, look in rawPayload JSON
+    if (data.rawPayload) {
+      try {
+        const payload = JSON.parse(data.rawPayload);
+        
+        // Try exact key match first
+        if (key in payload) {
+          return payload[key];
+        }
+        
+        // Try snake_case version
+        const snakeKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+        if (snakeKey in payload) {
+          return payload[snakeKey];
+        }
+        
+        // Try camelCase version
+        const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+        if (camelKey in payload) {
+          return payload[camelKey];
+        }
+        
+        // Try lowercase match (case-insensitive)
+        const lowerKey = key.toLowerCase();
+        for (const [payloadKey, value] of Object.entries(payload)) {
+          if (payloadKey.toLowerCase() === lowerKey) {
+            return value as string | number | null;
+          }
+        }
+      } catch {
+        // Invalid JSON, skip
+      }
+    }
+    
+    return null;
   };
 
   // Render cell value with special formatting for Action (Alert) field
