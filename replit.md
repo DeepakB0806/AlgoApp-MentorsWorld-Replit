@@ -6,6 +6,12 @@ This project is an algorithmic trading platform that enables automated trading s
 ## User Preferences
 I prefer iterative development, where features are built and reviewed in small, manageable steps. I also prefer detailed explanations of the code and architectural decisions. Please ask before making major changes or refactoring large portions of the codebase. I value clear, concise communication and prefer using functional programming paradigms where appropriate.
 
+### Testing Credentials
+Always use the Super Admin credentials for testing authenticated features unless specified otherwise:
+- **Email**: webadmin@mentorsworld.org
+- **Password**: H2so4#Hcl
+- **Production Domain**: algoapp.mentorsworld.org
+
 ## System Architecture
 
 ### UI/UX Decisions
