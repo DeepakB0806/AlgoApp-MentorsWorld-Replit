@@ -3,15 +3,6 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertStrategySchema, insertWebhookSchema, insertBrokerConfigSchema } from "@shared/schema";
 import { sendEmail, getBaseUrlFromRequest } from "./services/email";
-import { z } from "zod";
-
-const webhookTemplateUpdateSchema = z.object({
-  name: z.string().min(1).optional(),
-  description: z.string().nullable().optional(),
-  fieldConfig: z.string().optional(),
-  defaultTriggerType: z.enum(["buy", "sell", "both"]).optional(),
-  defaultIsActive: z.boolean().optional(),
-});
 
 // Helper to parse numeric values, handling empty strings and nulls
 function parseNumeric(value: unknown): number | undefined {
@@ -92,77 +83,6 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Test email error:", error);
       res.status(500).json({ success: false, error: error.message });
-    }
-  });
-
-  // Webhook Template Routes
-  app.get("/api/webhook-template", async (req, res) => {
-    try {
-      let template = await storage.getWebhookTemplate();
-      
-      // If no template exists, create a default one with all 20 fields
-      if (!template) {
-        const defaultFieldConfig = [
-          { name: "time_unix", key: "time_unix", type: "text", order: 0 },
-          { name: "exchange", key: "exchange", type: "text", order: 1 },
-          { name: "ticker", key: "ticker", type: "text", order: 2 },
-          { name: "indicator", key: "indicator", type: "text", order: 3 },
-          { name: "action", key: "action", type: "text", order: 4 },
-          { name: "price", key: "price", type: "text", order: 5 },
-          { name: "local_time", key: "local_time", type: "text", order: 6 },
-          { name: "mode", key: "mode", type: "text", order: 7 },
-          { name: "mode_desc", key: "mode_desc", type: "text", order: 8 },
-          { name: "first_line", key: "first_line", type: "text", order: 9 },
-          { name: "mid_line", key: "mid_line", type: "text", order: 10 },
-          { name: "slow_line", key: "slow_line", type: "text", order: 11 },
-          { name: "st", key: "st", type: "text", order: 12 },
-          { name: "ht", key: "ht", type: "text", order: 13 },
-          { name: "rsi", key: "rsi", type: "text", order: 14 },
-          { name: "rsi_scaled", key: "rsi_scaled", type: "text", order: 15 },
-          { name: "alert_system", key: "alert_system", type: "text", order: 16 },
-          { name: "action_binary", key: "action_binary", type: "text", order: 17 },
-          { name: "lock_state", key: "lock_state", type: "text", order: 18 },
-          { name: "3ctl", key: "3ctl", type: "text", order: 19 },
-        ];
-        
-        template = await storage.createWebhookTemplate({
-          name: "Default Webhook Template",
-          description: "Master template for all webhooks. Changes here apply to all webhooks.",
-          fieldConfig: JSON.stringify(defaultFieldConfig),
-          defaultTriggerType: "both",
-          defaultIsActive: true,
-        });
-      }
-      
-      res.json(template);
-    } catch (error: any) {
-      console.error("Error getting webhook template:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.patch("/api/webhook-template/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      
-      const parseResult = webhookTemplateUpdateSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        return res.status(400).json({ 
-          error: "Invalid template data", 
-          details: parseResult.error.errors 
-        });
-      }
-      
-      const updates = parseResult.data;
-      const template = await storage.updateWebhookTemplate(id, updates);
-      if (!template) {
-        return res.status(404).json({ error: "Template not found" });
-      }
-      
-      res.json(template);
-    } catch (error: any) {
-      console.error("Error updating webhook template:", error);
-      res.status(500).json({ error: error.message });
     }
   });
 

@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Webhook as WebhookType, InsertWebhook, Strategy, WebhookStatusLog, AppSetting, WebhookData, WebhookTemplate } from "@shared/schema";
+import type { Webhook as WebhookType, InsertWebhook, Strategy, WebhookStatusLog, AppSetting, WebhookData } from "@shared/schema";
 
 type WebhookStats = {
   total: number;
@@ -102,11 +102,6 @@ export default function Webhooks() {
   // Fetch webhook registry for looking up production webhook codes
   const { data: webhookRegistry = [] } = useQuery<{ id: string; uniqueCode: string; webhookId: string; webhookName: string }[]>({
     queryKey: ["/api/webhook-registry"],
-  });
-
-  // Fetch master webhook template for field configuration
-  const { data: webhookTemplate } = useQuery<WebhookTemplate>({
-    queryKey: ["/api/webhook-template"],
   });
 
   // Check if a webhook has inbound links (dev webhooks linking TO this production webhook)
@@ -441,12 +436,12 @@ export default function Webhooks() {
     { name: "lock_state", key: "lockState", type: "text", order: 18 }
   ];
 
-  // Get field config from master template (not individual webhook)
-  // The master template controls table headers for all webhooks
-  const getFieldConfig = () => {
-    if (!webhookTemplate?.fieldConfig) return DEFAULT_FIELD_CONFIG;
+  // Get field config for a webhook (parse from fieldConfig string or use default)
+  // The saved fieldConfig controls the table headers displayed in the data panel
+  const getFieldConfig = (webhook: WebhookType | null) => {
+    if (!webhook?.fieldConfig) return DEFAULT_FIELD_CONFIG;
     try {
-      return JSON.parse(webhookTemplate.fieldConfig);
+      return JSON.parse(webhook.fieldConfig);
     } catch {
       return DEFAULT_FIELD_CONFIG;
     }
@@ -1003,7 +998,7 @@ export default function Webhooks() {
               <div>
                 <SheetTitle>Webhook Data: {selectedWebhook?.name}</SheetTitle>
                 <SheetDescription>
-                  {getFieldConfig().length} fields from incoming webhook data
+                  {getFieldConfig(selectedWebhook).length} fields from incoming webhook data
                 </SheetDescription>
               </div>
               <div className="flex gap-1">
@@ -1087,7 +1082,7 @@ export default function Webhooks() {
                   <table className="w-full text-xs border-collapse">
                     <thead className="sticky top-0 z-20 bg-card">
                       <tr className="border-b">
-                        {getFieldConfig().map((field: { name: string; key: string }) => (
+                        {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
                           <th 
                             key={field.key} 
                             className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground"
@@ -1104,7 +1099,7 @@ export default function Webhooks() {
                           data-testid={`row-data-panel-${data.id}`}
                           className="border-b hover:bg-muted/50"
                         >
-                          {getFieldConfig().map((field: { name: string; key: string }) => (
+                          {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
                             <td 
                               key={field.key} 
                               className="whitespace-nowrap px-2 py-2"
