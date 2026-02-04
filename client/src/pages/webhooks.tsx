@@ -1079,34 +1079,38 @@ export default function Webhooks() {
                   className="overflow-auto flex-1 min-h-0"
                   data-testid="data-logs-scroll-container"
                 >
-                  <Table className="text-xs">
-                  <TableHeader className="sticky top-0 z-20 bg-card">
-                    <TableRow className="sticky top-0 z-20 bg-card border-b">
-                      {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
-                        <TableHead 
-                          key={field.key} 
-                          className="sticky top-0 z-20 bg-card whitespace-nowrap px-1 py-1"
-                        >
-                          {field.name}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selectedWebhookData.map((data) => (
-                      <TableRow key={data.id} data-testid={`row-data-panel-${data.id}`}>
+                  <table className="w-full text-xs border-collapse">
+                    <thead className="sticky top-0 z-20 bg-card">
+                      <tr className="border-b">
                         {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
-                          <TableCell 
+                          <th 
                             key={field.key} 
-                            className="whitespace-nowrap px-1 py-1"
+                            className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground"
                           >
-                            {renderCellValue(data, field)}
-                          </TableCell>
+                            {field.name}
+                          </th>
                         ))}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                  </Table>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedWebhookData.map((data) => (
+                        <tr 
+                          key={data.id} 
+                          data-testid={`row-data-panel-${data.id}`}
+                          className="border-b hover:bg-muted/50"
+                        >
+                          {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
+                            <td 
+                              key={field.key} 
+                              className="whitespace-nowrap px-2 py-2"
+                            >
+                              {renderCellValue(data, field)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </>
             )}
