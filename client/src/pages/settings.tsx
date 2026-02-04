@@ -9,7 +9,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
   ArrowLeft, Mail, Key, CheckCircle, XCircle, 
-  Eye, EyeOff, AlertTriangle, FileText, ChevronDown, ChevronRight
+  Eye, EyeOff, AlertTriangle
 } from "lucide-react";
 import { Link } from "wouter";
 import mwLogo from "@/assets/images/mw-logo.png";
@@ -242,24 +242,12 @@ function MailApiSettings() {
 }
 export default function Settings() {
   const [activeSection, setActiveSection] = useState<SettingsSection>("mail");
-  const [templatesExpanded, setTemplatesExpanded] = useState(false);
 
   const navItems = [
     {
       id: "mail" as const,
       label: "Mail API Settings",
       icon: Mail,
-      isSubItem: false,
-    },
-    {
-      id: "templates" as const,
-      label: "Template Settings",
-      icon: FileText,
-      isSubItem: false,
-      isExpandable: true,
-      expanded: templatesExpanded,
-      onToggle: () => setTemplatesExpanded(!templatesExpanded),
-      children: [] as { id: SettingsSection; label: string; icon: React.FC<any> }[],
     },
   ];
 
@@ -292,59 +280,19 @@ export default function Settings() {
         <nav className="w-64 min-h-[calc(100vh-73px)] border-r border-border bg-card/30 p-4">
           <div className="space-y-1">
             {navItems.map((item) => (
-              <div key={item.id}>
-                {item.isExpandable ? (
-                  <>
-                    <button
-                      onClick={item.onToggle}
-                      className="w-full flex items-center justify-between gap-3 px-3 py-2 text-sm rounded-md hover-elevate transition-colors text-muted-foreground hover:text-foreground"
-                      data-testid={`nav-${item.id}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <item.icon className="w-4 h-4" />
-                        <span>{item.label}</span>
-                      </div>
-                      {item.expanded ? (
-                        <ChevronDown className="w-4 h-4" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4" />
-                      )}
-                    </button>
-                    {item.expanded && item.children && (
-                      <div className="ml-4 mt-1 space-y-1">
-                        {item.children.map((child) => (
-                          <button
-                            key={child.id}
-                            onClick={() => setActiveSection(child.id)}
-                            className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors ${
-                              activeSection === child.id
-                                ? "bg-primary/10 text-primary font-medium"
-                                : "text-muted-foreground hover:text-foreground hover-elevate"
-                            }`}
-                            data-testid={`nav-${child.id}`}
-                          >
-                            <child.icon className="w-4 h-4" />
-                            <span>{child.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <button
-                    onClick={() => setActiveSection(item.id as SettingsSection)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors ${
-                      activeSection === item.id
-                        ? "bg-primary/10 text-primary font-medium"
-                        : "text-muted-foreground hover:text-foreground hover-elevate"
-                    }`}
-                    data-testid={`nav-${item.id}`}
-                  >
-                    <item.icon className="w-4 h-4" />
-                    <span>{item.label}</span>
-                  </button>
-                )}
-              </div>
+              <button
+                key={item.id}
+                onClick={() => setActiveSection(item.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors ${
+                  activeSection === item.id
+                    ? "bg-primary/10 text-primary font-medium"
+                    : "text-muted-foreground hover:text-foreground hover-elevate"
+                }`}
+                data-testid={`nav-${item.id}`}
+              >
+                <item.icon className="w-4 h-4" />
+                <span>{item.label}</span>
+              </button>
             ))}
           </div>
         </nav>

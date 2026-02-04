@@ -185,22 +185,6 @@ export const insertAppSettingSchema = createInsertSchema(appSettings).omit({ id:
 export type InsertAppSetting = z.infer<typeof insertAppSettingSchema>;
 export type AppSetting = typeof appSettings.$inferSelect;
 
-// Webhook Template - Master template that all webhooks inherit from
-export const webhookTemplates = pgTable("webhook_templates", {
-  id: varchar("id", { length: 36 }).primaryKey(),
-  name: text("name").notNull().default("Default Webhook Template"),
-  description: text("description"),
-  fieldConfig: text("field_config").notNull(), // JSON array of WebhookFieldConfig
-  defaultTriggerType: text("default_trigger_type").notNull().default("both"), // "entry", "exit", "both"
-  defaultIsActive: boolean("default_is_active").notNull().default(true),
-  createdAt: text("created_at"),
-  updatedAt: text("updated_at"),
-});
-
-export const insertWebhookTemplateSchema = createInsertSchema(webhookTemplates).omit({ id: true });
-export type InsertWebhookTemplate = z.infer<typeof insertWebhookTemplateSchema>;
-export type WebhookTemplate = typeof webhookTemplates.$inferSelect;
-
 // Broker API Configuration - stored in "algo_trading" database
 export const brokerConfigs = pgTable("broker_configs", {
   id: varchar("id", { length: 36 }).primaryKey(),
