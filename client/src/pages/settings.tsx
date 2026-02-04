@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -264,10 +264,24 @@ function WebhookTemplateSettings() {
   const { toast } = useToast();
   const [localFields, setLocalFields] = useState<FieldConfig[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
   const { data: template, isLoading } = useQuery<WebhookTemplate>({
     queryKey: ["/api/webhook-template"],
   });
+
+  useEffect(() => {
+    if (template?.fieldConfig && !initialized) {
+      try {
+        const parsed = JSON.parse(template.fieldConfig);
+        setLocalFields(parsed);
+        setInitialized(true);
+      } catch {
+        setLocalFields([]);
+        setInitialized(true);
+      }
+    }
+  }, [template, initialized]);
 
   const updateTemplateMutation = useMutation({
     mutationFn: async (data: { fieldConfig: string }) => {
@@ -291,21 +305,17 @@ function WebhookTemplateSettings() {
     },
   });
 
-  const fields: FieldConfig[] = template?.fieldConfig 
-    ? JSON.parse(template.fieldConfig)
-    : [];
-
-  const displayFields = hasChanges ? localFields : fields;
+  const displayFields = localFields;
 
   const handleFieldChange = (index: number, field: string, value: string) => {
-    const newFields = hasChanges ? [...localFields] : [...fields];
+    const newFields = [...localFields];
     (newFields[index] as any)[field] = value;
     setLocalFields(newFields);
     setHasChanges(true);
   };
 
   const handleRemoveField = (index: number) => {
-    const newFields = hasChanges ? [...localFields] : [...fields];
+    const newFields = [...localFields];
     newFields.splice(index, 1);
     newFields.forEach((f, i) => f.order = i);
     setLocalFields(newFields);
@@ -313,7 +323,7 @@ function WebhookTemplateSettings() {
   };
 
   const handleAddField = () => {
-    const newFields = hasChanges ? [...localFields] : [...fields];
+    const newFields = [...localFields];
     const newField: FieldConfig = {
       name: "new_field",
       key: "new_field",
@@ -326,13 +336,21 @@ function WebhookTemplateSettings() {
   };
 
   const handleSave = () => {
+    if (localFields.length === 0) {
+      toast({
+        title: "Cannot Save Empty Template",
+        description: "Template must have at least one field configured.",
+        variant: "destructive",
+      });
+      return;
+    }
     updateTemplateMutation.mutate({
       fieldConfig: JSON.stringify(localFields),
     });
   };
 
   const handleMoveField = (index: number, direction: "up" | "down") => {
-    const newFields = hasChanges ? [...localFields] : [...fields];
+    const newFields = [...localFields];
     const newIndex = direction === "up" ? index - 1 : index + 1;
     if (newIndex < 0 || newIndex >= newFields.length) return;
     

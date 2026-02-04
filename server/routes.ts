@@ -3,6 +3,15 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertStrategySchema, insertWebhookSchema, insertBrokerConfigSchema } from "@shared/schema";
 import { sendEmail, getBaseUrlFromRequest } from "./services/email";
+import { z } from "zod";
+
+const webhookTemplateUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+  fieldConfig: z.string().optional(),
+  defaultTriggerType: z.enum(["buy", "sell", "both"]).optional(),
+  defaultIsActive: z.boolean().optional(),
+});
 
 // Helper to parse numeric values, handling empty strings and nulls
 function parseNumeric(value: unknown): number | undefined {
@@ -135,8 +144,16 @@ export async function registerRoutes(
   app.patch("/api/webhook-template/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const updates = req.body;
       
+      const parseResult = webhookTemplateUpdateSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ 
+          error: "Invalid template data", 
+          details: parseResult.error.errors 
+        });
+      }
+      
+      const updates = parseResult.data;
       const template = await storage.updateWebhookTemplate(id, updates);
       if (!template) {
         return res.status(404).json({ error: "Template not found" });
