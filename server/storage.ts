@@ -2,7 +2,7 @@ import { randomUUID, randomBytes } from "crypto";
 import { eq, desc, and, lt } from "drizzle-orm";
 import { db } from "./db";
 import { 
-  strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
+  strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry, webhookTemplates,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -11,6 +11,7 @@ import {
   type AppSetting, type InsertAppSetting,
   type BrokerConfig, type InsertBrokerConfig,
   type WebhookRegistry, type InsertWebhookRegistry,
+  type WebhookTemplate, type InsertWebhookTemplate,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -77,6 +78,11 @@ export interface IStorage {
   // App Settings - persisted in database
   getSetting(key: string): Promise<AppSetting | undefined>;
   setSetting(key: string, value: string): Promise<AppSetting>;
+  
+  // Webhook Templates - master templates for webhook configurations
+  getWebhookTemplate(): Promise<WebhookTemplate | undefined>;
+  createWebhookTemplate(template: InsertWebhookTemplate): Promise<WebhookTemplate>;
+  updateWebhookTemplate(id: string, template: Partial<InsertWebhookTemplate>): Promise<WebhookTemplate | undefined>;
 
   // Broker Configs - persisted in database
   getBrokerConfigs(): Promise<BrokerConfig[]>;
@@ -532,6 +538,33 @@ export class DatabaseStorage implements IStorage {
       }).returning();
       return setting;
     }
+  }
+
+  // Webhook Templates - PERSISTENT in PostgreSQL database
+  async getWebhookTemplate(): Promise<WebhookTemplate | undefined> {
+    const [template] = await db.select().from(webhookTemplates).limit(1);
+    return template || undefined;
+  }
+
+  async createWebhookTemplate(template: InsertWebhookTemplate): Promise<WebhookTemplate> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    const [newTemplate] = await db.insert(webhookTemplates).values({
+      ...template,
+      id,
+      createdAt: now,
+      updatedAt: now,
+    }).returning();
+    return newTemplate;
+  }
+
+  async updateWebhookTemplate(id: string, template: Partial<InsertWebhookTemplate>): Promise<WebhookTemplate | undefined> {
+    const now = new Date().toISOString();
+    const [updated] = await db.update(webhookTemplates)
+      .set({ ...template, updatedAt: now })
+      .where(eq(webhookTemplates.id, id))
+      .returning();
+    return updated || undefined;
   }
 
   // Broker Configs - PERSISTENT in PostgreSQL database
