@@ -1119,10 +1119,10 @@ export default function Webhooks() {
                 <p className="text-muted-foreground text-sm">No status logs yet</p>
               ) : (
                 <div 
-                  className="flex-1 overflow-auto min-h-0"
+                  className="overflow-auto max-h-[calc(100vh-280px)]"
                   data-testid="logs-scroll-container"
                 >
-                  <div className="space-y-2">
+                  <div className="space-y-2 pr-2">
                     {statusLogs.map((log) => (
                       <Card key={log.id} className="p-3">
                         <div className="flex items-start justify-between gap-2">
