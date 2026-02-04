@@ -941,7 +941,7 @@ export default function Webhooks() {
       </div>
 
       <Sheet open={isDataSheetOpen} onOpenChange={setIsDataSheetOpen}>
-        <SheetContent className={dataExpandedView ? "w-full sm:max-w-full" : "w-[600px] sm:w-[800px]"} side="right">
+        <SheetContent className={`${dataExpandedView ? "w-full sm:max-w-full" : "w-full max-w-[800px]"} h-full max-h-screen overflow-hidden flex flex-col`} side="right">
           <SheetHeader>
             <div className="flex items-center justify-between">
               <div>
@@ -999,14 +999,14 @@ export default function Webhooks() {
               </div>
             </div>
           </SheetHeader>
-          <div className="mt-6 overflow-x-auto">
+          <div className="mt-6 flex-1 min-h-0 flex flex-col">
             {selectedWebhookData.length === 0 ? (
               <p className="text-muted-foreground text-center py-8">No data received yet for this webhook.</p>
             ) : (
               <>
                 {/* Info banner for linked (production) data */}
                 {selectedWebhook?.linkedWebhookId && (
-                  <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-md">
+                  <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-md flex-shrink-0">
                     <p className="text-sm text-blue-400">
                       <strong>Production Data:</strong> This webhook is linked to production. Data shown is from the production server and cannot be cleared from development.
                     </p>
@@ -1014,7 +1014,7 @@ export default function Webhooks() {
                 )}
                 {/* Warning banner for empty payloads */}
                 {selectedWebhookData.some(d => d.rawPayload === '{}' || d.rawPayload === '') && (
-                  <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-md">
+                  <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-md flex-shrink-0">
                     <p className="text-amber-500 text-sm font-medium flex items-center gap-2">
                       <XCircle className="w-4 h-4" />
                       Empty payloads detected - Check your make.com/TradingView configuration
@@ -1024,34 +1024,39 @@ export default function Webhooks() {
                     </p>
                   </div>
                 )}
-                <Table className="text-xs">
-                <TableHeader>
-                  <TableRow>
-                    {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
-                      <TableHead 
-                        key={field.key} 
-                        className="whitespace-nowrap px-1 py-1"
-                      >
-                        {field.name}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedWebhookData.map((data) => (
-                    <TableRow key={data.id} data-testid={`row-data-panel-${data.id}`}>
+                <div 
+                  className="overflow-auto flex-1 min-h-0"
+                  data-testid="data-logs-scroll-container"
+                >
+                  <Table className="text-xs">
+                  <TableHeader className="sticky top-0 bg-background z-10">
+                    <TableRow>
                       {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
-                        <TableCell 
+                        <TableHead 
                           key={field.key} 
                           className="whitespace-nowrap px-1 py-1"
                         >
-                          {renderCellValue(data, field)}
-                        </TableCell>
+                          {field.name}
+                        </TableHead>
                       ))}
                     </TableRow>
-                  ))}
-                </TableBody>
-                </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedWebhookData.map((data) => (
+                      <TableRow key={data.id} data-testid={`row-data-panel-${data.id}`}>
+                        {getFieldConfig(selectedWebhook).map((field: { name: string; key: string }) => (
+                          <TableCell 
+                            key={field.key} 
+                            className="whitespace-nowrap px-1 py-1"
+                          >
+                            {renderCellValue(data, field)}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                  </Table>
+                </div>
               </>
             )}
           </div>
