@@ -1118,41 +1118,46 @@ export default function Webhooks() {
               {statusLogs.length === 0 ? (
                 <p className="text-muted-foreground text-sm">No status logs yet</p>
               ) : (
-                <div className="space-y-2">
-                  {statusLogs.map((log) => (
-                    <Card key={log.id} className="p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            {log.status === "success" ? (
-                              <CheckCircle className="w-4 h-4 text-primary" />
-                            ) : (
-                              <XCircle className="w-4 h-4 text-destructive" />
+                <div 
+                  className="overflow-x-auto overflow-y-auto max-h-[60vh]"
+                  data-testid="logs-scroll-container"
+                >
+                  <div className="space-y-2">
+                    {statusLogs.map((log) => (
+                      <Card key={log.id} className="p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2 flex-nowrap">
+                              {log.status === "success" ? (
+                                <CheckCircle className="w-4 h-4 text-primary flex-shrink-0" />
+                              ) : (
+                                <XCircle className="w-4 h-4 text-destructive flex-shrink-0" />
+                              )}
+                              <span className="font-medium text-sm">{log.status === "success" ? "Success" : "Failed"}</span>
+                              {log.statusCode && (
+                                <Badge variant="outline" className="text-xs flex-shrink-0">{log.statusCode}</Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-nowrap">
+                              <span className="flex-shrink-0">{new Date(log.testedAt).toLocaleString()}</span>
+                              {log.responseTime && (
+                                <span className="flex items-center gap-1 flex-shrink-0">
+                                  <Timer className="w-3 h-3" />
+                                  {log.responseTime}ms
+                                </span>
+                              )}
+                            </div>
+                            {log.responseMessage && (
+                              <p className="text-xs mt-1 text-muted-foreground">{log.responseMessage}</p>
                             )}
-                            <span className="font-medium text-sm">{log.status === "success" ? "Success" : "Failed"}</span>
-                            {log.statusCode && (
-                              <Badge variant="outline" className="text-xs">{log.statusCode}</Badge>
+                            {log.errorMessage && (
+                              <p className="text-xs text-destructive mt-1">{log.errorMessage}</p>
                             )}
                           </div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                            <span>{new Date(log.testedAt).toLocaleString()}</span>
-                            {log.responseTime && (
-                              <span className="flex items-center gap-1">
-                                <Timer className="w-3 h-3" />
-                                {log.responseTime}ms
-                              </span>
-                            )}
-                          </div>
-                          {log.responseMessage && (
-                            <p className="text-xs mt-1">{log.responseMessage}</p>
-                          )}
-                          {log.errorMessage && (
-                            <p className="text-xs text-destructive mt-1">{log.errorMessage}</p>
-                          )}
                         </div>
-                      </div>
-                    </Card>
-                  ))}
+                      </Card>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
