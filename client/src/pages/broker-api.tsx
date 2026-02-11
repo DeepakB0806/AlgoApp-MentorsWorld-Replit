@@ -741,17 +741,28 @@ export default function BrokerApi() {
 
                   {(!kotakConfig || showCredentials) && (
                     <>
-                      <div>
-                        <Label>Consumer Key (API Token)</Label>
-                        <Input
-                          value={formData.consumerKey || ""}
-                          onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
-                          placeholder="Get this from Neo Dashboard > Invest > Trade API"
-                          data-testid="input-consumer-key"
-                        />
+                      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+                        <div>
+                          <Label>Consumer Key (API Token)</Label>
+                          <Input
+                            value={formData.consumerKey || ""}
+                            onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
+                            placeholder="From Neo Dashboard > Invest > Trade API"
+                            data-testid="input-consumer-key"
+                          />
+                        </div>
+                        <Button
+                          variant="outline"
+                          onClick={handleSaveCredentials}
+                          disabled={!isFormValid || isSaving}
+                          data-testid="button-save"
+                        >
+                          <Save className="w-4 h-4 mr-2" />
+                          {isSaving ? "Saving..." : "Save Credentials"}
+                        </Button>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
                           <div className="flex items-center gap-1 mb-1">
                             <Label className="mb-0">Mobile #</Label>
@@ -793,7 +804,17 @@ export default function BrokerApi() {
                         </div>
 
                         <div>
-                          <Label>MPIN</Label>
+                          <div className="flex items-center gap-1 mb-1">
+                            <Label className="mb-0">MPIN</Label>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-mpin-info" />
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-xs text-xs">
+                                The Mobile PIN you use to log in to the mobile app of the broker
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
                           <Input
                             type="password"
                             maxLength={6}
@@ -803,17 +824,6 @@ export default function BrokerApi() {
                             data-testid="input-mpin"
                           />
                         </div>
-
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleSaveCredentials}
-                          disabled={!isFormValid || isSaving}
-                          data-testid="button-save"
-                        >
-                          <Save className="w-3.5 h-3.5 mr-1.5" />
-                          {isSaving ? "Saving..." : "Save"}
-                        </Button>
                       </div>
                     </>
                   )}
