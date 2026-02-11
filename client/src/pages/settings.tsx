@@ -9,7 +9,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
   ArrowLeft, Mail, Key, CheckCircle, XCircle, 
-  Eye, EyeOff, AlertTriangle
+  Eye, EyeOff, AlertTriangle, FileText
 } from "lucide-react";
 import { Link } from "wouter";
 import mwLogo from "@/assets/images/mw-logo.png";
@@ -23,7 +23,7 @@ interface MailSettings {
   fromName: string;
 }
 
-type SettingsSection = "mail";
+type SettingsSection = "mail" | "templates";
 
 function MailApiSettings() {
   const [showApiKey, setShowApiKey] = useState(false);
@@ -240,6 +240,132 @@ function MailApiSettings() {
     </Card>
   );
 }
+function EmailTemplates() {
+  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
+
+  const templates = [
+    {
+      id: "verification",
+      name: "Email Verification",
+      description: "Sent to new customers during sign-up to verify their email address",
+      subject: "Verify your email - AlgoTrading Platform",
+      variables: ["{{name}}", "{{verificationUrl}}"],
+      htmlPreview: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 30px; border-radius: 8px 8px 0 0; text-align: center;">
+          <h1 style="color: white; margin: 0; font-size: 24px;">AlgoTrading Platform</h1>
+        </div>
+        <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
+          <h2 style="color: #1e293b; margin-top: 0;">Verify Your Email</h2>
+          <p>Hi {{name}},</p>
+          <p>Welcome to AlgoTrading Platform! To complete your registration, please verify your email address by clicking the button below:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="#" style="background: #10b981; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">Verify Email Address</a>
+          </div>
+          <p style="color: #64748b; font-size: 14px;">This link will expire in 24 hours.</p>
+          <p style="color: #64748b; font-size: 14px;">If you did not create an account, please ignore this email.</p>
+        </div>
+      </div>`,
+    },
+    {
+      id: "team-invitation",
+      name: "Team Invitation",
+      description: "Sent when a team member is invited to join the platform",
+      subject: "You are invited to AlgoTrading Platform",
+      variables: ["{{inviterName}}", "{{registerUrl}}"],
+      htmlPreview: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 30px; border-radius: 8px 8px 0 0; text-align: center;">
+          <h1 style="color: white; margin: 0; font-size: 24px;">AlgoTrading Platform</h1>
+        </div>
+        <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
+          <h2 style="color: #1e293b; margin-top: 0;">You are Invited!</h2>
+          <p><strong>{{inviterName}}</strong> has invited you to join AlgoTrading Platform as a team member.</p>
+          <p>As a team member, you will be able to:</p>
+          <ul style="color: #475569;"><li>Access trading strategies and webhooks</li><li>Monitor trading positions and orders</li><li>Configure broker API connections</li></ul>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="#" style="background: #10b981; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">Accept Invitation</a>
+          </div>
+          <p style="color: #64748b; font-size: 14px;">This invitation will expire in 7 days.</p>
+        </div>
+      </div>`,
+    },
+    {
+      id: "test-email",
+      name: "Test Email",
+      description: "Sent from Mail API Settings to verify Mailjet configuration is working",
+      subject: "AlgoTrading Platform - Test Email",
+      variables: [],
+      htmlPreview: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 30px; border-radius: 8px 8px 0 0; text-align: center;">
+          <h1 style="color: white; margin: 0; font-size: 24px;">AlgoTrading Platform</h1>
+        </div>
+        <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
+          <h2 style="color: #1e293b; margin-top: 0;">Test Email</h2>
+          <p>This is a test email from AlgoTrading Platform.</p>
+          <p>If you received this, the Mailjet SMTP configuration is working correctly.</p>
+        </div>
+      </div>`,
+    },
+  ];
+
+  return (
+    <Card data-testid="card-templates">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <FileText className="w-5 h-5" />
+          Email Templates
+        </CardTitle>
+        <CardDescription>
+          Preview all email templates used by the platform. These templates are sent via Mailjet.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {templates.map((template) => (
+          <div key={template.id} className="border border-border rounded-md" data-testid={`template-${template.id}`}>
+            <button
+              type="button"
+              onClick={() => setExpandedTemplate(expandedTemplate === template.id ? null : template.id)}
+              className="w-full flex items-center justify-between p-4 text-left hover-elevate rounded-md"
+              data-testid={`button-toggle-template-${template.id}`}
+            >
+              <div className="space-y-0.5">
+                <div className="text-sm font-medium text-foreground">{template.name}</div>
+                <div className="text-xs text-muted-foreground">{template.description}</div>
+              </div>
+              <Badge variant="outline" className="ml-3 shrink-0">{expandedTemplate === template.id ? "Collapse" : "Preview"}</Badge>
+            </button>
+            {expandedTemplate === template.id && (
+              <div className="border-t border-border p-4 space-y-3">
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Subject</div>
+                  <div className="text-sm font-medium text-foreground" data-testid={`text-template-subject-${template.id}`}>{template.subject}</div>
+                </div>
+                {template.variables.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Variables</div>
+                    <div className="flex gap-2 flex-wrap">
+                      {template.variables.map((v) => (
+                        <Badge key={v} variant="secondary" className="text-xs font-mono">{v}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Preview</div>
+                  <div
+                    className="border border-border rounded-md overflow-hidden bg-white p-4"
+                    dangerouslySetInnerHTML={{ __html: template.htmlPreview }}
+                    data-testid={`preview-template-${template.id}`}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Settings() {
   const [activeSection, setActiveSection] = useState<SettingsSection>("mail");
 
@@ -248,6 +374,11 @@ export default function Settings() {
       id: "mail" as const,
       label: "Mail API Settings",
       icon: Mail,
+    },
+    {
+      id: "templates" as const,
+      label: "Templates",
+      icon: FileText,
     },
   ];
 
@@ -300,6 +431,7 @@ export default function Settings() {
         <main className="flex-1 p-8">
           <div className="max-w-3xl">
             {activeSection === "mail" && <MailApiSettings />}
+            {activeSection === "templates" && <EmailTemplates />}
           </div>
         </main>
       </div>
