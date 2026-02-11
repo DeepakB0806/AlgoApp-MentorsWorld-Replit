@@ -740,17 +740,18 @@ export default function BrokerApi() {
                   )}
 
                   {(!kotakConfig || showCredentials) && (
-                    <>
-                      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
-                        <div>
-                          <Label>Consumer Key (API Token)</Label>
-                          <Input
-                            value={formData.consumerKey || ""}
-                            onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
-                            placeholder="From Neo Dashboard > Invest > Trade API"
-                            data-testid="input-consumer-key"
-                          />
-                        </div>
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-x-3 gap-y-3">
+                      <div>
+                        <Label>Consumer Key (API Token)</Label>
+                        <Input
+                          value={formData.consumerKey || ""}
+                          onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
+                          placeholder="From Neo Dashboard > Invest > Trade API"
+                          data-testid="input-consumer-key"
+                        />
+                      </div>
+
+                      <div className="flex flex-col items-stretch gap-1.5">
                         <Button
                           variant="outline"
                           onClick={handleSaveCredentials}
@@ -760,6 +761,11 @@ export default function BrokerApi() {
                           <Save className="w-4 h-4 mr-2" />
                           {isSaving ? "Saving..." : "Save Credentials"}
                         </Button>
+                        {kotakConfig && (
+                          <div className="flex justify-center">
+                            <ArrowDown className="w-4 h-4 text-muted-foreground" />
+                          </div>
+                        )}
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -825,31 +831,21 @@ export default function BrokerApi() {
                           />
                         </div>
                       </div>
-                    </>
-                  )}
 
-                  {kotakConfig && showCredentials && (
-                    <div className="flex items-center justify-center py-1">
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>Save Credentials</span>
-                        <ArrowDown className="w-3.5 h-3.5" />
-                        <span>Test Connection</span>
-                      </div>
+                      {kotakConfig && (
+                        <div className="flex items-start">
+                          <Button
+                            variant="outline"
+                            onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
+                            disabled={testConnectionMutation.isPending}
+                            data-testid="button-test"
+                          >
+                            <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
+                            Test Connection
+                          </Button>
+                        </div>
+                      )}
                     </div>
-                  )}
-
-                  {kotakConfig && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
-                      disabled={testConnectionMutation.isPending}
-                      className="w-fit"
-                      data-testid="button-test"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
-                      Test Connection
-                    </Button>
                   )}
 
                   <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
