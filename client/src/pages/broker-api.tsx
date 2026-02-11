@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database } from "lucide-react";
+import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -16,6 +16,359 @@ interface TestResult {
   success: boolean;
   message: string;
   error?: string;
+}
+
+function ApiFieldsReference() {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+
+  const toggleSection = (key: string) => {
+    setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const sections = [
+    {
+      key: "auth",
+      title: "Authentication",
+      icon: ShieldCheck,
+      subsections: [
+        {
+          title: "TOTP Login (Step 1)",
+          endpoint: "POST /login/1.0/tradeApiLogin",
+          fields: [
+            { field: "mobileNumber", type: "string", desc: "Registered mobile number" },
+            { field: "ucc", type: "string", desc: "Unique Client Code" },
+            { field: "totp", type: "string", desc: "6-digit TOTP from authenticator app" },
+          ],
+          returns: "token (viewToken), sid (sidView)",
+        },
+        {
+          title: "MPIN Validate (Step 2)",
+          endpoint: "POST /login/1.0/tradeApiValidate",
+          fields: [
+            { field: "mpin", type: "string", desc: "6-digit MPIN" },
+          ],
+          returns: "token (sessionToken), sid (sidSession), baseUrl",
+        },
+      ],
+    },
+    {
+      key: "order_place",
+      title: "Order Placement",
+      icon: Send,
+      subsections: [
+        {
+          title: "Place Order",
+          endpoint: "POST {baseUrl}/quick/order/rule/ms/place",
+          fields: [
+            { field: "ts", type: "string", desc: "Trading Symbol (e.g., TCS-EQ)" },
+            { field: "es", type: "string", desc: "Exchange (nse_cm, bse_cm, nse_fo)" },
+            { field: "tt", type: "B | S", desc: "Transaction Type - Buy or Sell" },
+            { field: "qt", type: "number", desc: "Order quantity" },
+            { field: "pr", type: "number", desc: "Order price" },
+            { field: "pt", type: "string", desc: "Order Type (L, MKT, SL, SL-M)" },
+            { field: "pc", type: "string", desc: "Product (CNC, NRML, MIS, CO, BO)" },
+            { field: "rt", type: "string", desc: "Validity (DAY, IOC, GTD)" },
+            { field: "tp", type: "number", desc: "Trigger Price (for SL orders)" },
+            { field: "dq", type: "number", desc: "Disclosed Quantity" },
+            { field: "am", type: "YES | NO", desc: "After Market Order flag" },
+            { field: "mp", type: "string", desc: "Market Protection (default: 0)" },
+            { field: "pf", type: "string", desc: "Price Fill (default: N)" },
+          ],
+          returns: "nOrdNo (Order Number)",
+        },
+      ],
+    },
+    {
+      key: "order_modify",
+      title: "Order Modify",
+      icon: ArrowRightLeft,
+      subsections: [
+        {
+          title: "Modify Order",
+          endpoint: "POST {baseUrl}/quick/order/vr/modify",
+          fields: [
+            { field: "no", type: "string", desc: "Order Number to modify" },
+            { field: "ts", type: "string", desc: "Trading Symbol" },
+            { field: "es", type: "string", desc: "Exchange" },
+            { field: "tt", type: "B | S", desc: "Transaction Type" },
+            { field: "qt", type: "number", desc: "Quantity" },
+            { field: "pr", type: "number", desc: "Price" },
+            { field: "pt", type: "string", desc: "Order Type" },
+            { field: "pc", type: "string", desc: "Product Type" },
+            { field: "vd", type: "string", desc: "Validity (uses vd instead of rt)" },
+            { field: "tp", type: "number", desc: "Trigger Price" },
+            { field: "dq", type: "number", desc: "Disclosed Quantity" },
+            { field: "am", type: "YES | NO", desc: "After Market Order" },
+          ],
+          returns: "nOrdNo (Modified Order Number)",
+        },
+      ],
+    },
+    {
+      key: "order_cancel",
+      title: "Order Cancel & Exit",
+      icon: XCircle,
+      subsections: [
+        {
+          title: "Cancel Order",
+          endpoint: "POST {baseUrl}/quick/order/cancel",
+          fields: [
+            { field: "on", type: "string", desc: "Order Number to cancel" },
+            { field: "am", type: "YES | NO", desc: "After Market Order" },
+          ],
+        },
+        {
+          title: "Exit Cover Order",
+          endpoint: "POST {baseUrl}/quick/order/co/exit",
+          fields: [
+            { field: "on", type: "string", desc: "Cover Order Number" },
+          ],
+        },
+        {
+          title: "Exit Bracket Order",
+          endpoint: "POST {baseUrl}/quick/order/bo/exit",
+          fields: [
+            { field: "on", type: "string", desc: "Bracket Order Number" },
+          ],
+        },
+      ],
+    },
+    {
+      key: "data_get",
+      title: "Data Endpoints (GET)",
+      icon: BarChart3,
+      subsections: [
+        {
+          title: "Order Book",
+          endpoint: "GET {baseUrl}/quick/user/orders",
+          fields: [
+            { field: "order_id", type: "string", desc: "Order ID" },
+            { field: "trading_symbol", type: "string", desc: "Trading Symbol" },
+            { field: "transaction_type", type: "B | S", desc: "Buy or Sell" },
+            { field: "quantity", type: "number", desc: "Order quantity" },
+            { field: "price", type: "number", desc: "Order price" },
+            { field: "status", type: "string", desc: "PENDING, COMPLETE, REJECTED, CANCELLED" },
+            { field: "order_type", type: "string", desc: "Order type" },
+            { field: "exchange", type: "string", desc: "Exchange" },
+            { field: "timestamp", type: "string", desc: "Order timestamp" },
+          ],
+        },
+        {
+          title: "Trade Book",
+          endpoint: "GET {baseUrl}/quick/user/trades",
+          fields: [],
+          returns: "Array of executed trades",
+        },
+        {
+          title: "Positions",
+          endpoint: "GET {baseUrl}/quick/user/positions",
+          fields: [
+            { field: "trading_symbol", type: "string", desc: "Trading Symbol" },
+            { field: "exchange", type: "string", desc: "Exchange" },
+            { field: "quantity", type: "number", desc: "Net quantity" },
+            { field: "buy_avg", type: "number", desc: "Buy average price" },
+            { field: "sell_avg", type: "number", desc: "Sell average price" },
+            { field: "pnl", type: "number", desc: "Profit/Loss" },
+            { field: "ltp", type: "number", desc: "Last Traded Price" },
+            { field: "product_type", type: "string", desc: "NRML, MIS, CNC" },
+            { field: "option_type", type: "string", desc: "CALL, PUT (optional)" },
+            { field: "strike_price", type: "number", desc: "Strike price (optional)" },
+            { field: "expiry", type: "string", desc: "Expiry date (optional)" },
+            { field: "realised_pnl", type: "number", desc: "Realised P&L (optional)" },
+            { field: "unrealised_pnl", type: "number", desc: "Unrealised P&L (optional)" },
+          ],
+        },
+        {
+          title: "Holdings",
+          endpoint: "GET {baseUrl}/portfolio/v1/holdings",
+          fields: [
+            { field: "trading_symbol", type: "string", desc: "Trading Symbol" },
+            { field: "quantity", type: "number", desc: "Holding quantity" },
+            { field: "average_price", type: "number", desc: "Average cost" },
+            { field: "current_price", type: "number", desc: "LTP (Last Traded Price)" },
+            { field: "invested_value", type: "number", desc: "qty x average_price" },
+            { field: "current_value", type: "number", desc: "qty x current_price" },
+            { field: "pnl", type: "number", desc: "Profit/Loss amount" },
+            { field: "pnl_percent", type: "number", desc: "Profit/Loss %" },
+            { field: "today_pnl", type: "number", desc: "Today's P&L amount" },
+            { field: "today_pnl_percent", type: "number", desc: "Today's P&L %" },
+            { field: "prev_close", type: "number", desc: "Previous close (optional)" },
+          ],
+        },
+      ],
+    },
+    {
+      key: "margin",
+      title: "Check Margin",
+      icon: DollarSign,
+      subsections: [
+        {
+          title: "Check Margin",
+          endpoint: "POST {baseUrl}/quick/user/check-margin",
+          fields: [
+            { field: "exSeg", type: "string", desc: "Exchange segment (e.g., nse_cm)" },
+            { field: "prc", type: "number", desc: "Price" },
+            { field: "prcTp", type: "string", desc: "Price Type (L or MKT)" },
+            { field: "prod", type: "string", desc: "Product type" },
+            { field: "qty", type: "number", desc: "Quantity" },
+            { field: "tok", type: "string", desc: "Symbol/Token ID" },
+            { field: "trnsTp", type: "B | S", desc: "Transaction Type" },
+          ],
+        },
+      ],
+    },
+    {
+      key: "limits",
+      title: "Limits & Funds",
+      icon: DollarSign,
+      subsections: [
+        {
+          title: "Get Limits (Available Funds)",
+          endpoint: "POST {baseUrl}/quick/user/limits",
+          fields: [
+            { field: "exch", type: "string", desc: "Exchange (default: ALL)" },
+            { field: "seg", type: "string", desc: "Segment (default: ALL)" },
+            { field: "prod", type: "string", desc: "Product (default: ALL)" },
+          ],
+        },
+      ],
+    },
+    {
+      key: "quotes",
+      title: "Quotes & Scrip Master",
+      icon: Search,
+      subsections: [
+        {
+          title: "Get Quotes",
+          endpoint: "GET {baseUrl}/script-details/1.0/quotes/neosymbol/{exchange}|{token}/all",
+          fields: [
+            { field: "exchange", type: "string", desc: "Exchange code (URL param)" },
+            { field: "token", type: "string", desc: "Symbol/Token ID (URL param)" },
+          ],
+        },
+        {
+          title: "Get Scrip Master File Paths",
+          endpoint: "GET /script-details/1.0/masterscrip/file-paths",
+          fields: [],
+          returns: "Scrip master file download URLs",
+        },
+      ],
+    },
+    {
+      key: "order_history",
+      title: "Order History",
+      icon: FileText,
+      subsections: [
+        {
+          title: "Get Order History",
+          endpoint: "POST {baseUrl}/quick/order/history",
+          fields: [
+            { field: "nOrdNo", type: "string", desc: "Order Number to look up" },
+          ],
+          returns: "Array of order state changes",
+        },
+      ],
+    },
+  ];
+
+  return (
+    <Card data-testid="card-api-fields-reference">
+      <CardHeader
+        className="cursor-pointer select-none"
+        onClick={() => setIsExpanded(!isExpanded)}
+        data-testid="button-toggle-api-reference"
+      >
+        <CardTitle className="flex items-center justify-between">
+          <span className="flex items-center gap-2 text-lg">
+            <BookOpen className="w-5 h-5" />
+            API Fields Reference
+          </span>
+          {isExpanded ? (
+            <ChevronDown className="w-5 h-5 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="w-5 h-5 text-muted-foreground" />
+          )}
+        </CardTitle>
+        <CardDescription>
+          Complete list of all Kotak Neo API fields supported by this platform
+        </CardDescription>
+      </CardHeader>
+      {isExpanded && (
+        <CardContent className="space-y-2" data-testid="content-api-reference">
+          {sections.map((section) => (
+            <div key={section.key} className="border border-border rounded-md overflow-hidden">
+              <button
+                onClick={() => toggleSection(section.key)}
+                className="w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium hover-elevate transition-colors"
+                data-testid={`button-section-${section.key}`}
+              >
+                <span className="flex items-center gap-2">
+                  <section.icon className="w-4 h-4 text-primary" />
+                  {section.title}
+                  <Badge variant="secondary" className="text-xs ml-1">
+                    {section.subsections.reduce((acc, s) => acc + s.fields.length, 0)} fields
+                  </Badge>
+                </span>
+                {expandedSections[section.key] ? (
+                  <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                )}
+              </button>
+              {expandedSections[section.key] && (
+                <div className="px-4 pb-4 space-y-4">
+                  {section.subsections.map((sub, idx) => (
+                    <div key={idx} className="space-y-2">
+                      <div className="flex flex-col gap-1">
+                        <span className="font-medium text-sm">{sub.title}</span>
+                        <code className="text-xs text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded-md w-fit">
+                          {sub.endpoint}
+                        </code>
+                      </div>
+                      {sub.fields.length > 0 && (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-border">
+                                <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs w-[120px]">Field</th>
+                                <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs w-[100px]">Type</th>
+                                <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs">Description</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sub.fields.map((f, fIdx) => (
+                                <tr key={fIdx} className="border-b border-border/50 last:border-0">
+                                  <td className="py-1.5 px-2 font-mono text-xs text-primary">{f.field}</td>
+                                  <td className="py-1.5 px-2">
+                                    <Badge variant="outline" className="text-xs font-mono">{f.type}</Badge>
+                                  </td>
+                                  <td className="py-1.5 px-2 text-xs text-muted-foreground">{f.desc}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {sub.returns && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-muted-foreground">Returns:</span>
+                          <code className="font-mono bg-muted/50 px-2 py-0.5 rounded text-primary">{sub.returns}</code>
+                        </div>
+                      )}
+                      {idx < section.subsections.length - 1 && (
+                        <div className="border-t border-border/30 mt-2" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </CardContent>
+      )}
+    </Card>
+  );
 }
 
 export default function BrokerApi() {
@@ -425,6 +778,10 @@ export default function BrokerApi() {
                 </CardContent>
               </Card>
             )}
+
+            <div className="mt-6">
+              <ApiFieldsReference />
+            </div>
           </>
         )}
 
