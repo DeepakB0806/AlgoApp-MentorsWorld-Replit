@@ -1018,6 +1018,7 @@ export async function registerRoutes(
       }
 
       const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      const startTime = Date.now();
 
       if (config.brokerName === "kotak_neo") {
         if (!config.consumerKey) {
@@ -1028,6 +1029,7 @@ export async function registerRoutes(
         }
 
         const result = await testKotakNeoConnectivity(config.consumerKey);
+        const responseTime = Date.now() - startTime;
         
         const updated = await storage.updateBrokerConfig(req.params.id, {
           isConnected: result.success,
@@ -1041,6 +1043,15 @@ export async function registerRoutes(
           updatedAt: now,
         });
 
+        await storage.createBrokerTestLog({
+          brokerConfigId: req.params.id,
+          status: result.success ? "success" : "failed",
+          message: result.message || null,
+          errorMessage: result.error || null,
+          responseTime,
+          testedAt: now,
+        });
+
         return res.json({ 
           success: result.success, 
           message: result.message,
@@ -1049,6 +1060,7 @@ export async function registerRoutes(
         });
       }
 
+      const responseTime = Date.now() - startTime;
       const updated = await storage.updateBrokerConfig(req.params.id, {
         isConnected: false,
         connectionError: "Broker not yet supported for live connectivity test",
@@ -1058,6 +1070,16 @@ export async function registerRoutes(
         totalTests: (config.totalTests || 0) + 1,
         updatedAt: now,
       });
+
+      await storage.createBrokerTestLog({
+        brokerConfigId: req.params.id,
+        status: "failed",
+        message: "Broker not yet supported",
+        errorMessage: null,
+        responseTime,
+        testedAt: now,
+      });
+
       res.json({ success: false, message: "Broker not yet supported", config: updated });
     } catch (error) {
       res.status(500).json({ error: "Connection test failed", details: error instanceof Error ? error.message : "Unknown error" });
@@ -1096,6 +1118,22 @@ export async function registerRoutes(
         totp: totp,
       });
 
+      // Extract session expiry from JWT token
+      let sessionExpiry: string | null = null;
+      if (result.accessToken) {
+        try {
+          const parts = result.accessToken.split('.');
+          if (parts.length === 3) {
+            const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+            if (payload.exp) {
+              sessionExpiry = new Date(payload.exp * 1000).toISOString().replace('T', ' ').slice(0, 19);
+            }
+          }
+        } catch {
+          // JWT parsing failed, expiry will be null
+        }
+      }
+
       const updated = await storage.updateBrokerConfig(req.params.id, {
         isConnected: result.success,
         lastConnected: result.success ? now : config.lastConnected,
@@ -1111,10 +1149,24 @@ export async function registerRoutes(
         updatedAt: now,
       });
 
+      await storage.createBrokerSessionLog({
+        brokerConfigId: req.params.id,
+        status: result.success ? "success" : "failed",
+        message: result.message || null,
+        errorMessage: result.error || null,
+        totpUsed: totp,
+        accessToken: result.accessToken || null,
+        sessionId: result.sessionId || null,
+        baseUrl: result.baseUrl || null,
+        sessionExpiry,
+        loginAt: now,
+      });
+
       res.json({ 
         success: result.success, 
         message: result.message,
         error: result.error,
+        sessionExpiry,
         config: updated 
       });
     } catch (error) {
@@ -1380,6 +1432,26 @@ export async function registerRoutes(
       res.json(summary);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch portfolio summary" });
+    }
+  });
+
+  // Broker Test Logs
+  app.get("/api/broker-configs/:id/test-logs", async (req, res) => {
+    try {
+      const logs = await storage.getBrokerTestLogs(req.params.id);
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch test logs" });
+    }
+  });
+
+  // Broker Session Logs
+  app.get("/api/broker-configs/:id/session-logs", async (req, res) => {
+    try {
+      const logs = await storage.getBrokerSessionLogs(req.params.id);
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch session logs" });
     }
   });
 

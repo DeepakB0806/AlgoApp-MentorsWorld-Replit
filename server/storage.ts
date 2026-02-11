@@ -3,6 +3,7 @@ import { eq, desc, and, lt } from "drizzle-orm";
 import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
+  brokerTestLogs, brokerSessionLogs,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -11,6 +12,8 @@ import {
   type AppSetting, type InsertAppSetting,
   type BrokerConfig, type InsertBrokerConfig,
   type WebhookRegistry, type InsertWebhookRegistry,
+  type BrokerTestLog, type InsertBrokerTestLog,
+  type BrokerSessionLog, type InsertBrokerSessionLog,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -85,6 +88,14 @@ export interface IStorage {
   createBrokerConfig(config: InsertBrokerConfig): Promise<BrokerConfig>;
   updateBrokerConfig(id: string, config: Partial<InsertBrokerConfig>): Promise<BrokerConfig | undefined>;
   deleteBrokerConfig(id: string): Promise<boolean>;
+
+  // Broker Test Logs
+  getBrokerTestLogs(brokerConfigId: string): Promise<BrokerTestLog[]>;
+  createBrokerTestLog(log: InsertBrokerTestLog): Promise<BrokerTestLog>;
+
+  // Broker Session Logs
+  getBrokerSessionLogs(brokerConfigId: string): Promise<BrokerSessionLog[]>;
+  createBrokerSessionLog(log: InsertBrokerSessionLog): Promise<BrokerSessionLog>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -596,6 +607,32 @@ export class DatabaseStorage implements IStorage {
   async deleteBrokerConfig(id: string): Promise<boolean> {
     const result = await db.delete(brokerConfigs).where(eq(brokerConfigs.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // Broker Test Logs
+  async getBrokerTestLogs(brokerConfigId: string): Promise<BrokerTestLog[]> {
+    return await db.select().from(brokerTestLogs)
+      .where(eq(brokerTestLogs.brokerConfigId, brokerConfigId))
+      .orderBy(desc(brokerTestLogs.testedAt));
+  }
+
+  async createBrokerTestLog(log: InsertBrokerTestLog): Promise<BrokerTestLog> {
+    const id = randomUUID();
+    const [result] = await db.insert(brokerTestLogs).values({ ...log, id }).returning();
+    return result;
+  }
+
+  // Broker Session Logs
+  async getBrokerSessionLogs(brokerConfigId: string): Promise<BrokerSessionLog[]> {
+    return await db.select().from(brokerSessionLogs)
+      .where(eq(brokerSessionLogs.brokerConfigId, brokerConfigId))
+      .orderBy(desc(brokerSessionLogs.loginAt));
+  }
+
+  async createBrokerSessionLog(log: InsertBrokerSessionLog): Promise<BrokerSessionLog> {
+    const id = randomUUID();
+    const [result] = await db.insert(brokerSessionLogs).values({ ...log, id }).returning();
+    return result;
   }
 
   // Trading Data (mock data for demonstration - will be replaced by live data)

@@ -230,6 +230,40 @@ export const insertBrokerConfigSchema = createInsertSchema(brokerConfigs).omit({
 export type InsertBrokerConfig = z.infer<typeof insertBrokerConfigSchema>;
 export type BrokerConfig = typeof brokerConfigs.$inferSelect;
 
+// Broker Test Connection Logs
+export const brokerTestLogs = pgTable("broker_test_logs", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  brokerConfigId: varchar("broker_config_id", { length: 36 }).notNull(),
+  status: text("status").notNull(), // "success", "failed"
+  message: text("message"),
+  errorMessage: text("error_message"),
+  responseTime: integer("response_time"), // ms
+  testedAt: text("tested_at").notNull(),
+});
+
+export const insertBrokerTestLogSchema = createInsertSchema(brokerTestLogs).omit({ id: true });
+export type InsertBrokerTestLog = z.infer<typeof insertBrokerTestLogSchema>;
+export type BrokerTestLog = typeof brokerTestLogs.$inferSelect;
+
+// Broker Session Logs - one entry per TOTP login
+export const brokerSessionLogs = pgTable("broker_session_logs", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  brokerConfigId: varchar("broker_config_id", { length: 36 }).notNull(),
+  status: text("status").notNull(), // "success", "failed"
+  message: text("message"),
+  errorMessage: text("error_message"),
+  totpUsed: text("totp_used"),
+  accessToken: text("access_token"),
+  sessionId: text("session_id"),
+  baseUrl: text("base_url"),
+  sessionExpiry: text("session_expiry"), // ISO datetime when session expires (from JWT exp)
+  loginAt: text("login_at").notNull(),
+});
+
+export const insertBrokerSessionLogSchema = createInsertSchema(brokerSessionLogs).omit({ id: true });
+export type InsertBrokerSessionLog = z.infer<typeof insertBrokerSessionLogSchema>;
+export type BrokerSessionLog = typeof brokerSessionLogs.$inferSelect;
+
 // Position
 export interface Position {
   trading_symbol: string;
