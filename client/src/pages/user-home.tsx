@@ -69,14 +69,6 @@ export default function UserHome() {
               </h1>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
-              {isSuperAdmin && (
-                <Link href="/user-management">
-                  <Button variant="outline" size="sm" data-testid="button-user-management">
-                    <Users className="w-4 h-4 mr-2" />
-                    Team
-                  </Button>
-                </Link>
-              )}
               <span className="text-sm text-muted-foreground hidden sm:inline" data-testid="text-user-email">
                 {user?.email}
               </span>
