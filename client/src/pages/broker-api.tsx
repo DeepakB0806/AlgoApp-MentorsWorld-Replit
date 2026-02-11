@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink, Trash2, Info } from "lucide-react";
+import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink, Trash2, Info, ArrowDown } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Link } from "wouter";
@@ -725,8 +725,8 @@ export default function BrokerApi() {
                   )}
                 </div>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4">
+              <CardContent className="space-y-3">
+                <div className="grid gap-3">
                   {kotakConfig && (
                     <button
                       type="button"
@@ -828,27 +828,61 @@ export default function BrokerApi() {
                     </>
                   )}
 
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <Label className="mb-0">TOTP (from Authenticator App)</Label>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-totp-info" />
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-xs text-xs">
-                          Your credentials are stored securely in the database and never shared. TOTP codes expire every 30 seconds and must be entered fresh each login.
-                        </TooltipContent>
-                      </Tooltip>
+                  {kotakConfig && showCredentials && (
+                    <div className="flex items-center justify-center py-1">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>Save Credentials</span>
+                        <ArrowDown className="w-3.5 h-3.5" />
+                        <span>Test Connection</span>
+                      </div>
                     </div>
-                    <Input
-                      type="text"
-                      maxLength={6}
-                      value={totp}
-                      onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
-                      placeholder="123456"
-                      className="font-mono tracking-widest"
-                      data-testid="input-totp"
-                    />
+                  )}
+
+                  {kotakConfig && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
+                      disabled={testConnectionMutation.isPending}
+                      className="w-fit"
+                      data-testid="button-test"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
+                      Test Connection
+                    </Button>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Label className="mb-0">TOTP (from Authenticator App)</Label>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-totp-info" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs text-xs">
+                            Your credentials are stored securely in the database and never shared. TOTP codes expire every 30 seconds and must be entered fresh each login.
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                      <Input
+                        type="text"
+                        maxLength={6}
+                        value={totp}
+                        onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
+                        placeholder="123456"
+                        className="font-mono tracking-widest"
+                        data-testid="input-totp"
+                      />
+                    </div>
+                    <Button
+                      onClick={handleSaveAndLogin}
+                      disabled={!canLogin || authenticateMutation.isPending || isSaving}
+                      data-testid="button-save-and-login"
+                    >
+                      <LogIn className="w-4 h-4 mr-2" />
+                      {authenticateMutation.isPending ? "Logging in..." : "Save & Login with TOTP"}
+                    </Button>
                   </div>
 
                   {kotakConfig?.connectionError && (
@@ -857,30 +891,6 @@ export default function BrokerApi() {
                       <AlertDescription>{kotakConfig.connectionError}</AlertDescription>
                     </Alert>
                   )}
-                </div>
-
-                <div className="flex gap-2 pt-4 flex-wrap">
-                  {kotakConfig && (
-                    <Button
-                      variant="outline"
-                      onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
-                      disabled={testConnectionMutation.isPending}
-                      data-testid="button-test"
-                    >
-                      <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
-                      Test Connection
-                    </Button>
-                  )}
-
-                  <Button
-                    onClick={handleSaveAndLogin}
-                    disabled={!canLogin || authenticateMutation.isPending || isSaving}
-                    className="flex-1 min-w-[200px]"
-                    data-testid="button-save-and-login"
-                  >
-                    <LogIn className="w-4 h-4 mr-2" />
-                    {authenticateMutation.isPending ? "Logging in..." : "Save & Login with TOTP"}
-                  </Button>
                 </div>
               </CardContent>
             </Card>
