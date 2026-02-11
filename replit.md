@@ -31,6 +31,24 @@ The frontend is developed using React with Vite, TypeScript, and TailwindCSS, au
 ### System Design Choices
 The application is structured into `client/`, `server/`, and `shared/` directories for clear separation of concerns. `shared/` contains common Zod schemas and TypeScript types. Authentication includes robust security features like bcrypt hashing for passwords, TOTP for team members, and session management using HTTP-only cookies. Environment detection for URLs is automated, using request headers for dynamic URL generation, with a database-stored domain name as a fallback. Critical timestamp fields in the database use `bigint` to prevent overflow errors with millisecond timestamps.
 
+## Future Development Plans
+
+### Tradetron Alike Development Plan
+Inspired by Tradetron (tradetron.tech), a popular Indian algo trading marketplace platform. The following enhancements are planned for future implementation to bring the platform closer to a Tradetron-style experience:
+
+1. **Dashboard Redesign** - Tradetron-style overview with consolidated P&L summary, open positions, order book, and notification log in organized cards/widgets with customizable layout
+2. **Strategy Management UI Overhaul** - Cleaner strategy cards with status indicators, one-click deploy/toggle, performance metrics, and deployed strategies real-time monitoring panel
+3. **Visual Strategy Builder** - Drag-and-drop no-code interface with 150+ keywords (technical indicators, option Greeks, price actions), multi-legged strategy support, and advanced execution logic
+4. **Strategy Marketplace** - Browse, subscribe to, and publish trading strategies with community ratings, performance transparency (returns, drawdowns, Sharpe ratios), and monetization tools
+5. **Backtesting Engine** - Comprehensive backtesting with historical data, visual results, and validation of entry/exit rules before going live
+6. **Paper Trading Mode** - Free deployment for testing strategies without risking real capital
+7. **Multi-Broker Support** - Expand beyond Kotak Neo to support additional Indian brokers (Zerodha, Angel One, Fyers, etc.)
+8. **Navigation Restructure** - Sidebar-driven layout with clear sections mirroring Tradetron's professional navigation
+9. **Mobile-Responsive Redesign** - Full functionality on phones/tablets with sleek, fast interface
+10. **Advanced Execution Features** - Position sequencing, order tranching, auto-reverse for unfilled legs, and built-in execution algorithms
+
+**Priority**: Items 1-2 (UI refresh) are lower effort and can be tackled first. Items 3-6 (core features) are major undertakings requiring significant backend work. Items 7-10 are longer-term enhancements.
+
 ## External Dependencies
 
 - **Kotak Neo Trade API**: Integrated for broker services, including authentication, order management, and fetching trading data (positions, orders, holdings, quotes).
