@@ -740,8 +740,8 @@ export default function BrokerApi() {
                   )}
 
                   {(!kotakConfig || showCredentials) && (
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+                      <div className="space-y-3">
                         <div>
                           <Label>Consumer Key (API Token)</Label>
                           <Input
@@ -751,27 +751,6 @@ export default function BrokerApi() {
                             data-testid="input-consumer-key"
                           />
                         </div>
-                        <Button
-                          variant="outline"
-                          onClick={handleSaveCredentials}
-                          disabled={!isFormValid || isSaving}
-                          data-testid="button-save"
-                        >
-                          <Save className="w-4 h-4 mr-2" />
-                          {isSaving ? "Saving..." : "Save Credentials"}
-                        </Button>
-                      </div>
-
-                      {kotakConfig && (
-                        <div className="hidden md:grid grid-cols-[1fr_auto] -my-1">
-                          <div />
-                          <div className="flex justify-center">
-                            <ArrowDown className="w-4 h-4 text-muted-foreground" />
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
                             <div className="flex items-center gap-1 mb-1">
@@ -835,13 +814,52 @@ export default function BrokerApi() {
                             />
                           </div>
                         </div>
+                      </div>
 
+                      <div className="hidden md:flex flex-col items-center justify-end gap-1">
+                        <Button
+                          variant="outline"
+                          onClick={handleSaveCredentials}
+                          disabled={!isFormValid || isSaving}
+                          className="w-full"
+                          data-testid="button-save"
+                        >
+                          <Save className="w-4 h-4 mr-2" />
+                          {isSaving ? "Saving..." : "Save Credentials"}
+                        </Button>
+                        {kotakConfig && (
+                          <>
+                            <ArrowDown className="w-4 h-4 text-muted-foreground" />
+                            <Button
+                              variant="outline"
+                              onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
+                              disabled={testConnectionMutation.isPending}
+                              className="w-full"
+                              data-testid="button-test"
+                            >
+                              <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
+                              Test Connection
+                            </Button>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col gap-2 md:hidden">
+                        <Button
+                          variant="outline"
+                          onClick={handleSaveCredentials}
+                          disabled={!isFormValid || isSaving}
+                          data-testid="button-save-mobile"
+                        >
+                          <Save className="w-4 h-4 mr-2" />
+                          {isSaving ? "Saving..." : "Save Credentials"}
+                        </Button>
                         {kotakConfig && (
                           <Button
                             variant="outline"
                             onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
                             disabled={testConnectionMutation.isPending}
-                            data-testid="button-test"
+                            data-testid="button-test-mobile"
                           >
                             <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
                             Test Connection
