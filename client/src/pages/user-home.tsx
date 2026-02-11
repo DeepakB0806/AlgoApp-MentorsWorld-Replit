@@ -240,7 +240,7 @@ export default function UserHome() {
                       </div>
                       <div className="flex-1">
                         <CardTitle className="text-sm flex items-center justify-between">
-                          General Settings
+                          Other General Settings
                           <ArrowRight className="w-4 h-4 text-muted-foreground" />
                         </CardTitle>
                         <CardDescription className="text-xs mt-1">
