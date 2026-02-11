@@ -7,8 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink, Trash2 } from "lucide-react";
+import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink, Trash2, Info } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -787,7 +788,17 @@ export default function BrokerApi() {
                   )}
 
                   <div>
-                    <Label>TOTP (from Authenticator App)</Label>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Label className="mb-0">TOTP (from Authenticator App)</Label>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-totp-info" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs text-xs">
+                          Your credentials are stored securely in the database and never shared. TOTP codes expire every 30 seconds and must be entered fresh each login.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
                     <Input
                       type="text"
                       maxLength={6}
