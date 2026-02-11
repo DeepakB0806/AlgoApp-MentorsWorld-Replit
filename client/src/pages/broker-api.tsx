@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign } from "lucide-react";
+import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -160,8 +160,15 @@ function ApiFieldsReference() {
           fields: [],
           returns: "Array of executed trades",
         },
+      ],
+    },
+    {
+      key: "positions",
+      title: "Positions",
+      icon: TrendingUp,
+      subsections: [
         {
-          title: "Positions",
+          title: "Get Positions",
           endpoint: "GET {baseUrl}/quick/user/positions",
           fields: [
             { field: "trading_symbol", type: "string", desc: "Trading Symbol" },
@@ -179,8 +186,15 @@ function ApiFieldsReference() {
             { field: "unrealised_pnl", type: "number", desc: "Unrealised P&L (optional)" },
           ],
         },
+      ],
+    },
+    {
+      key: "holdings",
+      title: "Holdings",
+      icon: Briefcase,
+      subsections: [
         {
-          title: "Holdings",
+          title: "Get Holdings",
           endpoint: "GET {baseUrl}/portfolio/v1/holdings",
           fields: [
             { field: "trading_symbol", type: "string", desc: "Trading Symbol" },
