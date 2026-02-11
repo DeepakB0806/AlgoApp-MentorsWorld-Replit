@@ -740,18 +740,17 @@ export default function BrokerApi() {
                   )}
 
                   {(!kotakConfig || showCredentials) && (
-                    <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-x-3 gap-y-3">
-                      <div>
-                        <Label>Consumer Key (API Token)</Label>
-                        <Input
-                          value={formData.consumerKey || ""}
-                          onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
-                          placeholder="From Neo Dashboard > Invest > Trade API"
-                          data-testid="input-consumer-key"
-                        />
-                      </div>
-
-                      <div className="flex flex-col items-stretch gap-1.5">
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+                        <div>
+                          <Label>Consumer Key (API Token)</Label>
+                          <Input
+                            value={formData.consumerKey || ""}
+                            onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
+                            placeholder="From Neo Dashboard > Invest > Trade API"
+                            data-testid="input-consumer-key"
+                          />
+                        </div>
                         <Button
                           variant="outline"
                           onClick={handleSaveCredentials}
@@ -761,79 +760,80 @@ export default function BrokerApi() {
                           <Save className="w-4 h-4 mr-2" />
                           {isSaving ? "Saving..." : "Save Credentials"}
                         </Button>
-                        {kotakConfig && (
-                          <div className="flex justify-center">
-                            <ArrowDown className="w-4 h-4 text-muted-foreground" />
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div>
-                          <div className="flex items-center gap-1 mb-1">
-                            <Label className="mb-0">Mobile #</Label>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-mobile-info" />
-                              </TooltipTrigger>
-                              <TooltipContent side="top" className="max-w-xs text-xs">
-                                Add mobile number with country code. Eg. +91
-                              </TooltipContent>
-                            </Tooltip>
-                          </div>
-                          <Input
-                            value={formData.mobileNumber || ""}
-                            onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
-                            placeholder="+919876543210"
-                            data-testid="input-mobile-number"
-                          />
-                        </div>
-
-                        <div>
-                          <div className="flex items-center gap-1 mb-1">
-                            <Label className="mb-0">UCC</Label>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-ucc-info" />
-                              </TooltipTrigger>
-                              <TooltipContent side="top" className="max-w-xs text-xs">
-                                Unique Client Code — Your trading account identifier provided by the broker
-                              </TooltipContent>
-                            </Tooltip>
-                          </div>
-                          <Input
-                            value={formData.ucc || ""}
-                            onChange={(e) => setFormData({ ...formData, ucc: e.target.value })}
-                            placeholder="Client code"
-                            data-testid="input-ucc"
-                          />
-                        </div>
-
-                        <div>
-                          <div className="flex items-center gap-1 mb-1">
-                            <Label className="mb-0">MPIN</Label>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-mpin-info" />
-                              </TooltipTrigger>
-                              <TooltipContent side="top" className="max-w-xs text-xs">
-                                The Mobile PIN you use to log in to the mobile app of the broker
-                              </TooltipContent>
-                            </Tooltip>
-                          </div>
-                          <Input
-                            type="password"
-                            maxLength={6}
-                            value={formData.mpin || ""}
-                            onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
-                            placeholder="6-digit"
-                            data-testid="input-mpin"
-                          />
-                        </div>
                       </div>
 
                       {kotakConfig && (
-                        <div className="flex items-start">
+                        <div className="flex justify-end">
+                          <ArrowDown className="w-4 h-4 text-muted-foreground" />
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <div className="flex items-center gap-1 mb-1">
+                              <Label className="mb-0">Mobile #</Label>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-mobile-info" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-xs text-xs">
+                                  Add mobile number with country code. Eg. +91
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                            <Input
+                              value={formData.mobileNumber || ""}
+                              onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
+                              placeholder="+919876543210"
+                              data-testid="input-mobile-number"
+                            />
+                          </div>
+
+                          <div>
+                            <div className="flex items-center gap-1 mb-1">
+                              <Label className="mb-0">UCC</Label>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-ucc-info" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-xs text-xs">
+                                  Unique Client Code — Your trading account identifier provided by the broker
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                            <Input
+                              value={formData.ucc || ""}
+                              onChange={(e) => setFormData({ ...formData, ucc: e.target.value })}
+                              placeholder="Client code"
+                              data-testid="input-ucc"
+                            />
+                          </div>
+
+                          <div>
+                            <div className="flex items-center gap-1 mb-1">
+                              <Label className="mb-0">MPIN</Label>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-mpin-info" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-xs text-xs">
+                                  The Mobile PIN you use to log in to the mobile app of the broker
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                            <Input
+                              type="password"
+                              maxLength={6}
+                              value={formData.mpin || ""}
+                              onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
+                              placeholder="6-digit"
+                              data-testid="input-mpin"
+                            />
+                          </div>
+                        </div>
+
+                        {kotakConfig && (
                           <Button
                             variant="outline"
                             onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
@@ -843,8 +843,8 @@ export default function BrokerApi() {
                             <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
                             Test Connection
                           </Button>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   )}
 
