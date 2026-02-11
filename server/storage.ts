@@ -96,6 +96,7 @@ export interface IStorage {
   // Broker Session Logs
   getBrokerSessionLogs(brokerConfigId: string): Promise<BrokerSessionLog[]>;
   createBrokerSessionLog(log: InsertBrokerSessionLog): Promise<BrokerSessionLog>;
+  deleteBrokerSessionLogs(brokerConfigId: string): Promise<number>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -633,6 +634,13 @@ export class DatabaseStorage implements IStorage {
     const id = randomUUID();
     const [result] = await db.insert(brokerSessionLogs).values({ ...log, id }).returning();
     return result;
+  }
+
+  async deleteBrokerSessionLogs(brokerConfigId: string): Promise<number> {
+    const deleted = await db.delete(brokerSessionLogs)
+      .where(eq(brokerSessionLogs.brokerConfigId, brokerConfigId))
+      .returning();
+    return deleted.length;
   }
 
   // Trading Data (mock data for demonstration - will be replaced by live data)

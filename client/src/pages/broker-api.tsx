@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink } from "lucide-react";
+import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink, Trash2 } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -475,6 +476,21 @@ export default function BrokerApi() {
     onError: (error: Error) => {
       setTestResult({ success: false, message: "Connection test failed", error: error.message });
       toast({ title: "Connection test failed", variant: "destructive" });
+    },
+  });
+
+  const clearSessionLogsMutation = useMutation({
+    mutationFn: async (brokerConfigId: string) => {
+      return apiRequest("DELETE", `/api/broker-configs/${brokerConfigId}/session-logs`);
+    },
+    onSuccess: () => {
+      if (kotakConfig) {
+        queryClient.invalidateQueries({ queryKey: [`/api/broker-configs/${kotakConfig.id}/session-logs`] });
+      }
+      toast({ title: "All session data cleared" });
+    },
+    onError: () => {
+      toast({ title: "Failed to clear session data", variant: "destructive" });
     },
   });
 
@@ -975,6 +991,36 @@ export default function BrokerApi() {
             </div>
           </SheetHeader>
           <div className="mt-6 flex-1 min-h-0 flex flex-col">
+            <div className="flex items-center justify-between flex-shrink-0 gap-2 flex-wrap mb-3">
+              <div className="flex items-center gap-2">
+                <h4 className="font-medium text-sm">Session Logs</h4>
+                <Badge variant="secondary" className="text-xs">{sessionLogs.length} entries</Badge>
+              </div>
+              {kotakConfig && sessionLogs.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      data-testid="button-clear-session-data"
+                      disabled={clearSessionLogsMutation.isPending}
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" />
+                      Clear
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => clearSessionLogsMutation.mutate(kotakConfig.id)}
+                      data-testid="clear-session-data-all"
+                      className="text-destructive"
+                    >
+                      Clear all session data
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
             {isLoadingSessionLogs ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -983,79 +1029,27 @@ export default function BrokerApi() {
             ) : sessionLogs.length === 0 ? (
               <p className="text-muted-foreground text-center py-8">No session data yet. Use "Save & Login with TOTP" to start your first session.</p>
             ) : (
-              <>
-                {kotakConfig && (
-                  <div className="flex-shrink-0 mb-4 border border-border rounded-md p-3 space-y-3">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                      <div>
-                        <span className="text-muted-foreground block">Total Logins</span>
-                        <span className="font-mono font-medium" data-testid="text-total-logins">{kotakConfig.totalLogins || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground block">Successful</span>
-                        <span className="font-mono font-medium text-primary" data-testid="text-successful-logins">{kotakConfig.successfulLogins || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground block">Failed</span>
-                        <span className="font-mono font-medium text-destructive" data-testid="text-failed-logins">{kotakConfig.failedLogins || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground block">Last TOTP Time</span>
-                        <span className="font-mono font-medium" data-testid="text-last-totp-time">{kotakConfig.lastTotpTime || "Never"}</span>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                      <div>
-                        <span className="text-muted-foreground block">Last Connected</span>
-                        <span className="font-mono font-medium" data-testid="text-last-connected">{kotakConfig.lastConnected || "Never"}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground block">Created</span>
-                        <span className="font-mono font-medium" data-testid="text-created-at">{kotakConfig.createdAt || "N/A"}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground block">Updated</span>
-                        <span className="font-mono font-medium" data-testid="text-updated-at">{kotakConfig.updatedAt || "N/A"}</span>
-                      </div>
-                      {kotakConfig.accessToken ? (
-                        <div>
-                          <span className="text-muted-foreground block">Active Session</span>
-                          <span className="font-mono font-medium text-primary" data-testid="text-active-session">
-                            {kotakConfig.sessionId?.slice(0, 8)}...
-                          </span>
-                          {kotakConfig.baseUrl && (
-                            <span className="font-mono text-muted-foreground block" data-testid="text-base-url">
-                              {kotakConfig.baseUrl}
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <div>
-                          <span className="text-muted-foreground block">Active Session</span>
-                          <span className="font-mono font-medium" data-testid="text-active-session">None</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-                <div
-                  className="overflow-auto flex-1 min-h-0"
-                  data-testid="session-logs-scroll-container"
-                >
+              <div
+                className="overflow-auto flex-1 min-h-0"
+                data-testid="session-logs-scroll-container"
+              >
                 <table className="w-full text-xs border-collapse">
                   <thead className="sticky top-0 z-20 bg-card">
                     <tr className="border-b">
+                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">#</th>
                       <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Login Status</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Login Time</th>
+                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Last TOTP Time</th>
                       <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">TOTP Used</th>
                       <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Session Status</th>
                       <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Session Expiry</th>
+                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Active Session ID</th>
+                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Server URL</th>
                       <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Message</th>
                       <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Error</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sessionLogs.map((log) => {
+                    {sessionLogs.map((log, index) => {
                       const isExpired = log.sessionExpiry ? new Date(log.sessionExpiry) <= new Date() : true;
                       return (
                         <tr
@@ -1063,6 +1057,7 @@ export default function BrokerApi() {
                           data-testid={`row-session-log-${log.id}`}
                           className="border-b hover:bg-muted/50"
                         >
+                          <td className="whitespace-nowrap px-2 py-2 font-mono text-muted-foreground">{sessionLogs.length - index}</td>
                           <td className="whitespace-nowrap px-2 py-2">
                             <div className="flex items-center gap-1">
                               {log.status === "success" ? (
@@ -1091,6 +1086,8 @@ export default function BrokerApi() {
                             )}
                           </td>
                           <td className="whitespace-nowrap px-2 py-2 font-mono">{log.sessionExpiry || "—"}</td>
+                          <td className="whitespace-nowrap px-2 py-2 font-mono" title={log.sessionId || ""}>{log.sessionId ? `${log.sessionId.slice(0, 12)}...` : "—"}</td>
+                          <td className="whitespace-nowrap px-2 py-2 font-mono">{log.baseUrl || "—"}</td>
                           <td className="px-2 py-2 max-w-[200px] truncate" title={log.message || ""}>{log.message || "—"}</td>
                           <td className="px-2 py-2 max-w-[200px] truncate text-destructive" title={log.errorMessage || ""}>{log.errorMessage || "—"}</td>
                         </tr>
@@ -1099,7 +1096,6 @@ export default function BrokerApi() {
                   </tbody>
                 </table>
               </div>
-              </>
             )}
           </div>
         </SheetContent>

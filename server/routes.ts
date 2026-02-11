@@ -1455,6 +1455,15 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/broker-configs/:id/session-logs", async (req, res) => {
+    try {
+      const deletedCount = await storage.deleteBrokerSessionLogs(req.params.id);
+      res.json({ success: true, deletedCount });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to clear session logs" });
+    }
+  });
+
   // API to check broker session status
   app.get("/api/broker-session-status", async (req, res) => {
     try {
