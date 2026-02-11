@@ -92,12 +92,12 @@ export interface IStorage {
   // Broker Test Logs
   getBrokerTestLogs(brokerConfigId: string): Promise<BrokerTestLog[]>;
   createBrokerTestLog(log: InsertBrokerTestLog): Promise<BrokerTestLog>;
-  deleteBrokerTestLogs(brokerConfigId: string): Promise<number>;
+  deleteBrokerTestLogs(brokerConfigId: string, days?: number): Promise<number>;
 
   // Broker Session Logs
   getBrokerSessionLogs(brokerConfigId: string): Promise<BrokerSessionLog[]>;
   createBrokerSessionLog(log: InsertBrokerSessionLog): Promise<BrokerSessionLog>;
-  deleteBrokerSessionLogs(brokerConfigId: string): Promise<number>;
+  deleteBrokerSessionLogs(brokerConfigId: string, days?: number): Promise<number>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -624,7 +624,16 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async deleteBrokerTestLogs(brokerConfigId: string): Promise<number> {
+  async deleteBrokerTestLogs(brokerConfigId: string, days?: number): Promise<number> {
+    if (days) {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - days);
+      const cutoffStr = cutoffDate.toISOString();
+      const deleted = await db.delete(brokerTestLogs)
+        .where(and(eq(brokerTestLogs.brokerConfigId, brokerConfigId), lt(brokerTestLogs.testedAt, cutoffStr)))
+        .returning();
+      return deleted.length;
+    }
     const deleted = await db.delete(brokerTestLogs)
       .where(eq(brokerTestLogs.brokerConfigId, brokerConfigId))
       .returning();
@@ -644,7 +653,16 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async deleteBrokerSessionLogs(brokerConfigId: string): Promise<number> {
+  async deleteBrokerSessionLogs(brokerConfigId: string, days?: number): Promise<number> {
+    if (days) {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - days);
+      const cutoffStr = cutoffDate.toISOString();
+      const deleted = await db.delete(brokerSessionLogs)
+        .where(and(eq(brokerSessionLogs.brokerConfigId, brokerConfigId), lt(brokerSessionLogs.loginAt, cutoffStr)))
+        .returning();
+      return deleted.length;
+    }
     const deleted = await db.delete(brokerSessionLogs)
       .where(eq(brokerSessionLogs.brokerConfigId, brokerConfigId))
       .returning();

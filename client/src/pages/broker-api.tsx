@@ -395,6 +395,7 @@ export default function BrokerApi() {
   const [testExpandedView, setTestExpandedView] = useState(false);
   const [isSessionLogSheetOpen, setIsSessionLogSheetOpen] = useState(false);
   const [sessionExpandedView, setSessionExpandedView] = useState(false);
+  const [showCredentials, setShowCredentials] = useState(false);
   const [formData, setFormData] = useState<Partial<InsertBrokerConfig>>({
     brokerName: "kotak_neo",
     consumerKey: "",
@@ -428,6 +429,7 @@ export default function BrokerApi() {
         ucc: kotakConfig.ucc || "",
         mpin: kotakConfig.mpin || "",
       });
+      setShowCredentials(false);
     }
   }, [kotakConfig]);
 
@@ -481,29 +483,37 @@ export default function BrokerApi() {
   });
 
   const clearTestLogsMutation = useMutation({
-    mutationFn: async (brokerConfigId: string) => {
-      return apiRequest("DELETE", `/api/broker-configs/${brokerConfigId}/test-logs`);
+    mutationFn: async (days: number | "all") => {
+      if (!kotakConfig) return;
+      if (days === "all") {
+        return apiRequest("DELETE", `/api/broker-configs/${kotakConfig.id}/test-logs`);
+      }
+      return apiRequest("DELETE", `/api/broker-configs/${kotakConfig.id}/test-logs?days=${days}`);
     },
-    onSuccess: () => {
+    onSuccess: (_data, days) => {
       if (kotakConfig) {
         queryClient.invalidateQueries({ queryKey: [`/api/broker-configs/${kotakConfig.id}/test-logs`] });
       }
-      toast({ title: "All test log data cleared" });
+      toast({ title: days === "all" ? "All test data cleared" : `Test data older than ${days} days cleared` });
     },
     onError: () => {
-      toast({ title: "Failed to clear test log data", variant: "destructive" });
+      toast({ title: "Failed to clear test data", variant: "destructive" });
     },
   });
 
   const clearSessionLogsMutation = useMutation({
-    mutationFn: async (brokerConfigId: string) => {
-      return apiRequest("DELETE", `/api/broker-configs/${brokerConfigId}/session-logs`);
+    mutationFn: async (days: number | "all") => {
+      if (!kotakConfig) return;
+      if (days === "all") {
+        return apiRequest("DELETE", `/api/broker-configs/${kotakConfig.id}/session-logs`);
+      }
+      return apiRequest("DELETE", `/api/broker-configs/${kotakConfig.id}/session-logs?days=${days}`);
     },
-    onSuccess: () => {
+    onSuccess: (_data, days) => {
       if (kotakConfig) {
         queryClient.invalidateQueries({ queryKey: [`/api/broker-configs/${kotakConfig.id}/session-logs`] });
       }
-      toast({ title: "All session data cleared" });
+      toast({ title: days === "all" ? "All session data cleared" : `Session data older than ${days} days cleared` });
     },
     onError: () => {
       toast({ title: "Failed to clear session data", variant: "destructive" });
@@ -715,63 +725,77 @@ export default function BrokerApi() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4">
+                  {kotakConfig && (
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 text-sm text-muted-foreground hover-elevate rounded-md px-2 py-1.5 -mx-2 w-fit"
+                      onClick={() => setShowCredentials(!showCredentials)}
+                      data-testid="button-toggle-credentials"
+                    >
+                      {showCredentials ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      {showCredentials ? "Hide Credentials" : "Show / Edit Credentials"}
+                    </button>
+                  )}
+
+                  {(!kotakConfig || showCredentials) && (
+                    <>
+                      <div>
+                        <Label>Consumer Key (API Token)</Label>
+                        <Input
+                          value={formData.consumerKey || ""}
+                          onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
+                          placeholder="Get this from Neo Dashboard > Invest > Trade API"
+                          data-testid="input-consumer-key"
+                        />
+                      </div>
+
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div>
+                          <Label>Mobile Number</Label>
+                          <Input
+                            value={formData.mobileNumber || ""}
+                            onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
+                            placeholder="+919876543210"
+                            data-testid="input-mobile-number"
+                          />
+                        </div>
+
+                        <div>
+                          <Label>UCC (Unique Client Code)</Label>
+                          <Input
+                            value={formData.ucc || ""}
+                            onChange={(e) => setFormData({ ...formData, ucc: e.target.value })}
+                            placeholder="Your client code"
+                            data-testid="input-ucc"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label>MPIN (6-digit)</Label>
+                        <Input
+                          type="password"
+                          maxLength={6}
+                          value={formData.mpin || ""}
+                          onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
+                          placeholder="Your 6-digit MPIN"
+                          data-testid="input-mpin"
+                        />
+                      </div>
+                    </>
+                  )}
+
                   <div>
-                    <Label>Consumer Key (API Token)</Label>
+                    <Label>TOTP (from Authenticator App)</Label>
                     <Input
-                      value={formData.consumerKey || ""}
-                      onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
-                      placeholder="Get this from Neo Dashboard > Invest > Trade API"
-                      data-testid="input-consumer-key"
+                      type="text"
+                      maxLength={6}
+                      value={totp}
+                      onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
+                      placeholder="123456"
+                      className="font-mono tracking-widest"
+                      data-testid="input-totp"
                     />
-                  </div>
-
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <Label>Mobile Number</Label>
-                      <Input
-                        value={formData.mobileNumber || ""}
-                        onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
-                        placeholder="+919876543210"
-                        data-testid="input-mobile-number"
-                      />
-                    </div>
-
-                    <div>
-                      <Label>UCC (Unique Client Code)</Label>
-                      <Input
-                        value={formData.ucc || ""}
-                        onChange={(e) => setFormData({ ...formData, ucc: e.target.value })}
-                        placeholder="Your client code"
-                        data-testid="input-ucc"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <Label>MPIN (6-digit)</Label>
-                      <Input
-                        type="password"
-                        maxLength={6}
-                        value={formData.mpin || ""}
-                        onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
-                        placeholder="Your 6-digit MPIN"
-                        data-testid="input-mpin"
-                      />
-                    </div>
-
-                    <div>
-                      <Label>TOTP (from Authenticator App)</Label>
-                      <Input
-                        type="text"
-                        maxLength={6}
-                        value={totp}
-                        onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
-                        placeholder="123456"
-                        className="font-mono tracking-widest"
-                        data-testid="input-totp"
-                      />
-                    </div>
                   </div>
 
                   {kotakConfig?.connectionError && (
@@ -935,12 +959,17 @@ export default function BrokerApi() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() => clearTestLogsMutation.mutate(kotakConfig.id)}
-                      data-testid="clear-test-data-all"
-                      className="text-destructive"
-                    >
-                      Clear all test data
+                    <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate(1)} data-testid="clear-test-data-1-day">
+                      Older than 1 day
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate(7)} data-testid="clear-test-data-7-days">
+                      Older than 7 days
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate(30)} data-testid="clear-test-data-30-days">
+                      Older than 30 days
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate("all")} data-testid="clear-test-data-all" className="text-destructive">
+                      Clear All Data
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -1046,12 +1075,17 @@ export default function BrokerApi() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() => clearSessionLogsMutation.mutate(kotakConfig.id)}
-                      data-testid="clear-session-data-all"
-                      className="text-destructive"
-                    >
-                      Clear all session data
+                    <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate(1)} data-testid="clear-session-data-1-day">
+                      Older than 1 day
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate(7)} data-testid="clear-session-data-7-days">
+                      Older than 7 days
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate(30)} data-testid="clear-session-data-30-days">
+                      Older than 30 days
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate("all")} data-testid="clear-session-data-all" className="text-destructive">
+                      Clear All Data
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

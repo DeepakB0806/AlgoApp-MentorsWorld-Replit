@@ -1447,7 +1447,14 @@ export async function registerRoutes(
 
   app.delete("/api/broker-configs/:id/test-logs", async (req, res) => {
     try {
-      const deletedCount = await storage.deleteBrokerTestLogs(req.params.id);
+      let days: number | undefined;
+      if (req.query.days) {
+        days = parseInt(req.query.days as string);
+        if (!Number.isFinite(days) || days <= 0) {
+          return res.status(400).json({ error: "Invalid days parameter" });
+        }
+      }
+      const deletedCount = await storage.deleteBrokerTestLogs(req.params.id, days);
       res.json({ success: true, deletedCount });
     } catch (error) {
       res.status(500).json({ error: "Failed to clear test logs" });
@@ -1466,7 +1473,14 @@ export async function registerRoutes(
 
   app.delete("/api/broker-configs/:id/session-logs", async (req, res) => {
     try {
-      const deletedCount = await storage.deleteBrokerSessionLogs(req.params.id);
+      let days: number | undefined;
+      if (req.query.days) {
+        days = parseInt(req.query.days as string);
+        if (!Number.isFinite(days) || days <= 0) {
+          return res.status(400).json({ error: "Invalid days parameter" });
+        }
+      }
+      const deletedCount = await storage.deleteBrokerSessionLogs(req.params.id, days);
       res.json({ success: true, deletedCount });
     } catch (error) {
       res.status(500).json({ error: "Failed to clear session logs" });
