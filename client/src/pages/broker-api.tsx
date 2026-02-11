@@ -392,6 +392,7 @@ export default function BrokerApi() {
   const [totp, setTotp] = useState("");
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [isTestLogSheetOpen, setIsTestLogSheetOpen] = useState(false);
+  const [testExpandedView, setTestExpandedView] = useState(false);
   const [isSessionLogSheetOpen, setIsSessionLogSheetOpen] = useState(false);
   const [sessionExpandedView, setSessionExpandedView] = useState(false);
   const [formData, setFormData] = useState<Partial<InsertBrokerConfig>>({
@@ -476,6 +477,21 @@ export default function BrokerApi() {
     onError: (error: Error) => {
       setTestResult({ success: false, message: "Connection test failed", error: error.message });
       toast({ title: "Connection test failed", variant: "destructive" });
+    },
+  });
+
+  const clearTestLogsMutation = useMutation({
+    mutationFn: async (brokerConfigId: string) => {
+      return apiRequest("DELETE", `/api/broker-configs/${brokerConfigId}/test-logs`);
+    },
+    onSuccess: () => {
+      if (kotakConfig) {
+        queryClient.invalidateQueries({ queryKey: [`/api/broker-configs/${kotakConfig.id}/test-logs`] });
+      }
+      toast({ title: "All test log data cleared" });
+    },
+    onError: () => {
+      toast({ title: "Failed to clear test log data", variant: "destructive" });
     },
   });
 
@@ -866,103 +882,123 @@ export default function BrokerApi() {
       </div>
 
       <Sheet open={isTestLogSheetOpen} onOpenChange={setIsTestLogSheetOpen}>
-        <SheetContent className="w-full max-w-[600px] h-full max-h-screen overflow-hidden flex flex-col">
+        <SheetContent className={`${testExpandedView ? "w-full sm:max-w-full" : "w-full max-w-[800px]"} h-full max-h-screen overflow-hidden flex flex-col`} side="right">
           <SheetHeader>
-            <SheetTitle>Test Connection Log</SheetTitle>
-            <SheetDescription>
-              History of all API connectivity test results
-            </SheetDescription>
-          </SheetHeader>
-          <div className="mt-6 space-y-4 flex-1 overflow-hidden flex flex-col">
-            {kotakConfig && (
-              <div className="flex gap-2">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <SheetTitle>Test Connection Data: Kotak Neo</SheetTitle>
+                <SheetDescription>
+                  History of all API connectivity test results
+                </SheetDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                {kotakConfig && (
+                  <Button
+                    onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
+                    disabled={testConnectionMutation.isPending}
+                    size="sm"
+                    data-testid="button-test-connection-sheet"
+                  >
+                    <RefreshCw className={`w-4 h-4 mr-1 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
+                    {testConnectionMutation.isPending ? "Testing..." : "Test Connection"}
+                  </Button>
+                )}
                 <Button
-                  onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
-                  disabled={testConnectionMutation.isPending}
-                  data-testid="button-test-connection-sheet"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setTestExpandedView(!testExpandedView)}
+                  data-testid="button-expand-test-data"
+                  title={testExpandedView ? "Collapse" : "Expand"}
                 >
-                  <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
-                  {testConnectionMutation.isPending ? "Testing..." : "Test Connection"}
+                  <ExternalLink className="w-4 h-4" />
                 </Button>
               </div>
-            )}
-            {kotakConfig && (
-              <div className="flex-shrink-0 border border-border rounded-md p-3">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                  <div>
-                    <span className="text-muted-foreground block">Total Tests</span>
-                    <span className="font-mono font-medium" data-testid="text-total-tests">{kotakConfig.totalTests || 0}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground block">Successful</span>
-                    <span className="font-mono font-medium text-primary" data-testid="text-successful-tests">{kotakConfig.successfulTests || 0}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground block">Last Test</span>
-                    <span className="font-mono font-medium" data-testid="text-last-test-time">{kotakConfig.lastTestTime || "Never"}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground block">Last Result</span>
-                    <Badge variant={kotakConfig.lastTestResult === "success" ? "default" : "secondary"} className="text-xs" data-testid="badge-last-test-result">
-                      {kotakConfig.lastTestResult || "N/A"}
-                    </Badge>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-              <div className="flex items-center justify-between flex-shrink-0 gap-2 flex-wrap">
-                <h4 className="font-medium">Test Results</h4>
+            </div>
+          </SheetHeader>
+          <div className="mt-6 flex-1 min-h-0 flex flex-col">
+            <div className="flex items-center justify-between flex-shrink-0 gap-2 flex-wrap mb-3">
+              <div className="flex items-center gap-2">
+                <h4 className="font-medium text-sm">Test Logs</h4>
                 <Badge variant="secondary" className="text-xs">{testLogs.length} entries</Badge>
               </div>
-              {isLoadingTestLogs ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-                  <span className="ml-2 text-sm text-muted-foreground">Loading test logs...</span>
-                </div>
-              ) : testLogs.length === 0 ? (
-                <p className="text-muted-foreground text-sm mt-2">No test logs yet. Click "Test Connection" to run your first test.</p>
-              ) : (
-                <div
-                  className="overflow-auto max-h-[calc(100vh-280px)] mt-2"
-                  data-testid="test-logs-scroll-container"
-                >
-                  <div className="space-y-2 pr-2">
-                    {testLogs.map((log) => (
-                      <Card key={log.id} className="p-3" data-testid={`card-test-log-${log.id}`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-2 flex-nowrap">
-                              {log.status === "success" ? (
-                                <CheckCircle className="w-4 h-4 text-primary flex-shrink-0" />
-                              ) : (
-                                <XCircle className="w-4 h-4 text-destructive flex-shrink-0" />
-                              )}
-                              <span className="font-medium text-sm">{log.status === "success" ? "Success" : "Failed"}</span>
-                              {log.responseTime && (
-                                <Badge variant="outline" className="text-xs flex-shrink-0">
-                                  <Timer className="w-3 h-3 mr-1" />
-                                  {log.responseTime}ms
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-nowrap">
-                              <span className="flex-shrink-0">{log.testedAt}</span>
-                            </div>
-                            {log.message && (
-                              <p className="text-xs mt-1 text-muted-foreground">{log.message}</p>
-                            )}
-                            {log.errorMessage && (
-                              <p className="text-xs text-destructive mt-1">{log.errorMessage}</p>
-                            )}
-                          </div>
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
-                </div>
+              {kotakConfig && testLogs.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      data-testid="button-clear-test-data"
+                      disabled={clearTestLogsMutation.isPending}
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" />
+                      Clear
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => clearTestLogsMutation.mutate(kotakConfig.id)}
+                      data-testid="clear-test-data-all"
+                      className="text-destructive"
+                    >
+                      Clear all test data
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
             </div>
+            {isLoadingTestLogs ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-sm text-muted-foreground">Loading test logs...</span>
+              </div>
+            ) : testLogs.length === 0 ? (
+              <p className="text-muted-foreground text-center py-8">No test logs yet. Click "Test Connection" to run your first test.</p>
+            ) : (
+              <div
+                className="overflow-auto flex-1 min-h-0"
+                data-testid="test-logs-scroll-container"
+              >
+                <table className="w-full text-xs border-collapse">
+                  <thead className="sticky top-0 z-20 bg-card">
+                    <tr className="border-b">
+                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">#</th>
+                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Status</th>
+                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Tested At</th>
+                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Response Time</th>
+                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Message</th>
+                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {testLogs.map((log, index) => (
+                      <tr
+                        key={log.id}
+                        data-testid={`row-test-log-${log.id}`}
+                        className="border-b hover:bg-muted/50"
+                      >
+                        <td className="whitespace-nowrap px-2 py-2 font-mono text-muted-foreground">{testLogs.length - index}</td>
+                        <td className="whitespace-nowrap px-2 py-2">
+                          <div className="flex items-center gap-1">
+                            {log.status === "success" ? (
+                              <CheckCircle className="w-3 h-3 text-primary flex-shrink-0" />
+                            ) : (
+                              <XCircle className="w-3 h-3 text-destructive flex-shrink-0" />
+                            )}
+                            <span className={log.status === "success" ? "text-primary font-medium" : "text-destructive font-medium"}>
+                              {log.status === "success" ? "Success" : "Failed"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 font-mono">{log.testedAt}</td>
+                        <td className="whitespace-nowrap px-2 py-2 font-mono">{log.responseTime ? `${log.responseTime}ms` : "—"}</td>
+                        <td className="px-2 py-2 max-w-[200px] truncate" title={log.message || ""}>{log.message || "—"}</td>
+                        <td className="px-2 py-2 max-w-[200px] truncate text-destructive" title={log.errorMessage || ""}>{log.errorMessage || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </SheetContent>
       </Sheet>

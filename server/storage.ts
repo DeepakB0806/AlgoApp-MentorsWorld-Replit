@@ -92,6 +92,7 @@ export interface IStorage {
   // Broker Test Logs
   getBrokerTestLogs(brokerConfigId: string): Promise<BrokerTestLog[]>;
   createBrokerTestLog(log: InsertBrokerTestLog): Promise<BrokerTestLog>;
+  deleteBrokerTestLogs(brokerConfigId: string): Promise<number>;
 
   // Broker Session Logs
   getBrokerSessionLogs(brokerConfigId: string): Promise<BrokerSessionLog[]>;
@@ -621,6 +622,13 @@ export class DatabaseStorage implements IStorage {
     const id = randomUUID();
     const [result] = await db.insert(brokerTestLogs).values({ ...log, id }).returning();
     return result;
+  }
+
+  async deleteBrokerTestLogs(brokerConfigId: string): Promise<number> {
+    const deleted = await db.delete(brokerTestLogs)
+      .where(eq(brokerTestLogs.brokerConfigId, brokerConfigId))
+      .returning();
+    return deleted.length;
   }
 
   // Broker Session Logs
