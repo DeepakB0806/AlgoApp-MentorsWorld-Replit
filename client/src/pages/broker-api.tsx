@@ -870,6 +870,30 @@ export default function BrokerApi() {
                 </Button>
               </div>
             )}
+            {kotakConfig && (
+              <div className="flex-shrink-0 border border-border rounded-md p-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <span className="text-muted-foreground block">Total Tests</span>
+                    <span className="font-mono font-medium" data-testid="text-total-tests">{kotakConfig.totalTests || 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Successful</span>
+                    <span className="font-mono font-medium text-primary" data-testid="text-successful-tests">{kotakConfig.successfulTests || 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Last Test</span>
+                    <span className="font-mono font-medium" data-testid="text-last-test-time">{kotakConfig.lastTestTime || "Never"}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Last Result</span>
+                    <Badge variant={kotakConfig.lastTestResult === "success" ? "default" : "secondary"} className="text-xs" data-testid="badge-last-test-result">
+                      {kotakConfig.lastTestResult || "N/A"}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="flex-1 overflow-hidden flex flex-col min-h-0">
               <div className="flex items-center justify-between flex-shrink-0 gap-2 flex-wrap">
                 <h4 className="font-medium">Test Results</h4>
@@ -959,10 +983,65 @@ export default function BrokerApi() {
             ) : sessionLogs.length === 0 ? (
               <p className="text-muted-foreground text-center py-8">No session data yet. Use "Save & Login with TOTP" to start your first session.</p>
             ) : (
-              <div
-                className="overflow-auto flex-1 min-h-0"
-                data-testid="session-logs-scroll-container"
-              >
+              <>
+                {kotakConfig && (
+                  <div className="flex-shrink-0 mb-4 border border-border rounded-md p-3 space-y-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div>
+                        <span className="text-muted-foreground block">Total Logins</span>
+                        <span className="font-mono font-medium" data-testid="text-total-logins">{kotakConfig.totalLogins || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block">Successful</span>
+                        <span className="font-mono font-medium text-primary" data-testid="text-successful-logins">{kotakConfig.successfulLogins || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block">Failed</span>
+                        <span className="font-mono font-medium text-destructive" data-testid="text-failed-logins">{kotakConfig.failedLogins || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block">Last TOTP Time</span>
+                        <span className="font-mono font-medium" data-testid="text-last-totp-time">{kotakConfig.lastTotpTime || "Never"}</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div>
+                        <span className="text-muted-foreground block">Last Connected</span>
+                        <span className="font-mono font-medium" data-testid="text-last-connected">{kotakConfig.lastConnected || "Never"}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block">Created</span>
+                        <span className="font-mono font-medium" data-testid="text-created-at">{kotakConfig.createdAt || "N/A"}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block">Updated</span>
+                        <span className="font-mono font-medium" data-testid="text-updated-at">{kotakConfig.updatedAt || "N/A"}</span>
+                      </div>
+                      {kotakConfig.accessToken ? (
+                        <div>
+                          <span className="text-muted-foreground block">Active Session</span>
+                          <span className="font-mono font-medium text-primary" data-testid="text-active-session">
+                            {kotakConfig.sessionId?.slice(0, 8)}...
+                          </span>
+                          {kotakConfig.baseUrl && (
+                            <span className="font-mono text-muted-foreground block" data-testid="text-base-url">
+                              {kotakConfig.baseUrl}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          <span className="text-muted-foreground block">Active Session</span>
+                          <span className="font-mono font-medium" data-testid="text-active-session">None</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div
+                  className="overflow-auto flex-1 min-h-0"
+                  data-testid="session-logs-scroll-container"
+                >
                 <table className="w-full text-xs border-collapse">
                   <thead className="sticky top-0 z-20 bg-card">
                     <tr className="border-b">
@@ -1020,6 +1099,7 @@ export default function BrokerApi() {
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </div>
         </SheetContent>
