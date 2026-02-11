@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2 } from "lucide-react";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -389,6 +390,8 @@ export default function BrokerApi() {
   const { toast } = useToast();
   const [totp, setTotp] = useState("");
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+  const [isTestLogSheetOpen, setIsTestLogSheetOpen] = useState(false);
+  const [isSessionLogSheetOpen, setIsSessionLogSheetOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<InsertBrokerConfig>>({
     brokerName: "kotak_neo",
     consumerKey: "",
@@ -576,19 +579,72 @@ export default function BrokerApi() {
         ) : (
           <>
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-2">
                 <div className="flex justify-between items-start gap-4 flex-wrap">
                   <div>
-                    <CardTitle className="flex items-center gap-2">
+                    <CardTitle className="flex items-center gap-2 flex-wrap">
                       <Key className="w-5 h-5" />
                       Kotak Neo Credentials
+                      {kotakConfig && (
+                        <Badge variant={kotakConfig.isConnected ? "default" : "secondary"}>
+                          {kotakConfig.isConnected ? "Active" : "Saved"}
+                        </Badge>
+                      )}
+                      {kotakConfig?.accessToken && (() => {
+                        try {
+                          const parts = kotakConfig.accessToken!.split('.');
+                          if (parts.length === 3) {
+                            const payload = JSON.parse(atob(parts[1]));
+                            if (payload.exp) {
+                              const expiryDate = new Date(payload.exp * 1000);
+                              const now = new Date();
+                              const isExpired = expiryDate <= now;
+                              const diffMs = expiryDate.getTime() - now.getTime();
+                              const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+                              const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                              return (
+                                <Badge
+                                  variant={isExpired ? "destructive" : "default"}
+                                  className="text-xs font-bold"
+                                  data-testid="badge-session-expiry-header"
+                                >
+                                  <Clock className="w-3 h-3 mr-1" />
+                                  {isExpired
+                                    ? "SESSION EXPIRED"
+                                    : `Expires in ${diffHrs}h ${diffMins}m`}
+                                </Badge>
+                              );
+                            }
+                          }
+                        } catch { /* JWT parsing failed */ }
+                        return null;
+                      })()}
                     </CardTitle>
                     <CardDescription>
                       {kotakConfig ? (
                         kotakConfig.isConnected ? (
-                          <span className="flex items-center gap-1 text-primary mt-1">
-                            <CheckCircle className="w-4 h-4" />
-                            Connected - Session Active
+                          <span className="flex flex-col gap-0.5 mt-1">
+                            <span className="flex items-center gap-1 text-primary">
+                              <CheckCircle className="w-4 h-4" />
+                              Connected - Session Active
+                            </span>
+                            {kotakConfig.accessToken && (() => {
+                              try {
+                                const parts = kotakConfig.accessToken!.split('.');
+                                if (parts.length === 3) {
+                                  const payload = JSON.parse(atob(parts[1]));
+                                  if (payload.exp) {
+                                    const expiryDate = new Date(payload.exp * 1000);
+                                    return (
+                                      <span className="text-xs font-mono text-muted-foreground">
+                                        Expires: {expiryDate.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "medium" })} IST
+                                      </span>
+                                    );
+                                  }
+                                }
+                              } catch { /* JWT parsing failed */ }
+                              return null;
+                            })()}
                           </span>
                         ) : (
                           <span className="text-muted-foreground mt-1">
@@ -601,9 +657,26 @@ export default function BrokerApi() {
                     </CardDescription>
                   </div>
                   {kotakConfig && (
-                    <Badge variant={kotakConfig.isConnected ? "default" : "secondary"}>
-                      {kotakConfig.isConnected ? "Active" : "Saved"}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsTestLogSheetOpen(true)}
+                        data-testid="button-view-test-logs"
+                      >
+                        <RefreshCw className="w-4 h-4 mr-1" />
+                        Tests ({testLogs.length})
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsSessionLogSheetOpen(true)}
+                        data-testid="button-view-session-logs"
+                      >
+                        <LogIn className="w-4 h-4 mr-1" />
+                        Sessions ({sessionLogs.length})
+                      </Button>
+                    </div>
                   )}
                 </div>
               </CardHeader>
@@ -804,215 +877,11 @@ export default function BrokerApi() {
                         <p>Session ID: {kotakConfig.sessionId?.slice(0, 20)}...</p>
                         <p>Base URL: {kotakConfig.baseUrl}</p>
                       </div>
-                      {(() => {
-                        try {
-                          const parts = kotakConfig.accessToken!.split('.');
-                          if (parts.length === 3) {
-                            const payload = JSON.parse(atob(parts[1]));
-                            if (payload.exp) {
-                              const expiryDate = new Date(payload.exp * 1000);
-                              const now = new Date();
-                              const isExpired = expiryDate <= now;
-                              const diffMs = expiryDate.getTime() - now.getTime();
-                              const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
-                              const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-                              return (
-                                <div className="mt-3 p-3 rounded-md border border-border bg-muted/30">
-                                  <div className="flex items-center justify-between gap-4 flex-wrap">
-                                    <span className="text-sm font-medium text-foreground">Session Expiry</span>
-                                    <Badge
-                                      variant={isExpired ? "destructive" : "default"}
-                                      className="text-xs font-bold"
-                                      data-testid="badge-session-expiry"
-                                    >
-                                      {isExpired
-                                        ? "EXPIRED"
-                                        : `Expires in ${diffHrs}h ${diffMins}m`}
-                                    </Badge>
-                                  </div>
-                                  <p className="text-xs font-mono mt-1 text-muted-foreground">
-                                    {expiryDate.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "medium" })} IST
-                                  </p>
-                                </div>
-                              );
-                            }
-                          }
-                        } catch {
-                          // JWT parsing failed
-                        }
-                        return null;
-                      })()}
                     </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Test Connection Data Log */}
-              <Card className="mt-6" data-testid="card-test-logs">
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between gap-4 flex-wrap">
-                    <span className="flex items-center gap-2 text-lg">
-                      <RefreshCw className="w-5 h-5" />
-                      Test Connection Log
-                    </span>
-                    <Badge variant="secondary" className="text-xs">
-                      {testLogs.length} entries
-                    </Badge>
-                  </CardTitle>
-                  <CardDescription>History of all API connectivity test results</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {isLoadingTestLogs ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-                      <span className="ml-2 text-sm text-muted-foreground">Loading test logs...</span>
-                    </div>
-                  ) : testLogs.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-4">
-                      No test logs yet. Click "Test Connection" to run your first test.
-                    </p>
-                  ) : (
-                    <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
-                      <table className="w-full text-sm" data-testid="table-test-logs">
-                        <thead className="sticky top-0 bg-card z-10">
-                          <tr className="border-b border-border">
-                            <th className="text-left py-2 px-3 text-muted-foreground font-medium text-xs">#</th>
-                            <th className="text-left py-2 px-3 text-muted-foreground font-medium text-xs">Status</th>
-                            <th className="text-left py-2 px-3 text-muted-foreground font-medium text-xs">Message</th>
-                            <th className="text-left py-2 px-3 text-muted-foreground font-medium text-xs">Response Time</th>
-                            <th className="text-left py-2 px-3 text-muted-foreground font-medium text-xs">Tested At</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {testLogs.map((log, idx) => (
-                            <tr key={log.id} className="border-b border-border/50 last:border-0" data-testid={`row-test-log-${idx}`}>
-                              <td className="py-2 px-3 font-mono text-xs text-muted-foreground">{testLogs.length - idx}</td>
-                              <td className="py-2 px-3">
-                                <Badge
-                                  variant={log.status === "success" ? "default" : "destructive"}
-                                  className="text-xs"
-                                >
-                                  {log.status === "success" ? (
-                                    <CheckCircle className="w-3 h-3 mr-1" />
-                                  ) : (
-                                    <XCircle className="w-3 h-3 mr-1" />
-                                  )}
-                                  {log.status}
-                                </Badge>
-                              </td>
-                              <td className="py-2 px-3 text-xs max-w-[200px] truncate">
-                                {log.errorMessage || log.message || "-"}
-                              </td>
-                              <td className="py-2 px-3 font-mono text-xs">
-                                {log.responseTime ? `${log.responseTime}ms` : "-"}
-                              </td>
-                              <td className="py-2 px-3 font-mono text-xs text-muted-foreground">
-                                {log.testedAt}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Session Data Log */}
-              <Card className="mt-6" data-testid="card-session-logs">
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between gap-4 flex-wrap">
-                    <span className="flex items-center gap-2 text-lg">
-                      <LogIn className="w-5 h-5" />
-                      Session Log
-                    </span>
-                    <Badge variant="secondary" className="text-xs">
-                      {sessionLogs.length} sessions
-                    </Badge>
-                  </CardTitle>
-                  <CardDescription>History of all TOTP login sessions with expiry tracking</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {isLoadingSessionLogs ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-                      <span className="ml-2 text-sm text-muted-foreground">Loading session logs...</span>
-                    </div>
-                  ) : sessionLogs.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-4">
-                      No session logs yet. Use "Save & Login with TOTP" to start your first session.
-                    </p>
-                  ) : (
-                    <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
-                      <table className="w-full text-sm" data-testid="table-session-logs">
-                        <thead className="sticky top-0 bg-card z-10">
-                          <tr className="border-b border-border">
-                            <th className="text-left py-2 px-3 text-muted-foreground font-medium text-xs">#</th>
-                            <th className="text-left py-2 px-3 text-muted-foreground font-medium text-xs">Status</th>
-                            <th className="text-left py-2 px-3 text-muted-foreground font-medium text-xs">TOTP</th>
-                            <th className="text-left py-2 px-3 text-muted-foreground font-medium text-xs">Session Expiry</th>
-                            <th className="text-left py-2 px-3 text-muted-foreground font-medium text-xs">Message</th>
-                            <th className="text-left py-2 px-3 text-muted-foreground font-medium text-xs">Login At</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sessionLogs.map((log, idx) => {
-                            const isExpired = log.sessionExpiry ? new Date(log.sessionExpiry) <= new Date() : true;
-                            const isLatest = idx === 0 && log.status === "success";
-                            return (
-                              <tr
-                                key={log.id}
-                                className={`border-b border-border/50 last:border-0 ${isLatest && !isExpired ? "bg-primary/5" : ""}`}
-                                data-testid={`row-session-log-${idx}`}
-                              >
-                                <td className="py-2 px-3 font-mono text-xs text-muted-foreground">{sessionLogs.length - idx}</td>
-                                <td className="py-2 px-3">
-                                  <Badge
-                                    variant={log.status === "success" ? "default" : "destructive"}
-                                    className="text-xs"
-                                  >
-                                    {log.status === "success" ? (
-                                      <CheckCircle className="w-3 h-3 mr-1" />
-                                    ) : (
-                                      <XCircle className="w-3 h-3 mr-1" />
-                                    )}
-                                    {log.status}
-                                  </Badge>
-                                </td>
-                                <td className="py-2 px-3 font-mono text-xs">{log.totpUsed || "-"}</td>
-                                <td className="py-2 px-3">
-                                  {log.sessionExpiry ? (
-                                    <div className="flex flex-col gap-1">
-                                      <Badge
-                                        variant={isExpired ? "destructive" : "default"}
-                                        className="text-xs font-bold w-fit"
-                                        data-testid={`badge-session-expiry-${idx}`}
-                                      >
-                                        {isExpired ? "EXPIRED" : "ACTIVE"}
-                                      </Badge>
-                                      <span className="font-mono text-xs text-muted-foreground">
-                                        {log.sessionExpiry}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground">-</span>
-                                  )}
-                                </td>
-                                <td className="py-2 px-3 text-xs max-w-[200px] truncate">
-                                  {log.errorMessage || log.message || "-"}
-                                </td>
-                                <td className="py-2 px-3 font-mono text-xs text-muted-foreground">
-                                  {log.loginAt}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
               </>
             )}
 
@@ -1077,6 +946,167 @@ export default function BrokerApi() {
           </AlertDescription>
         </Alert>
       </div>
+
+      <Sheet open={isTestLogSheetOpen} onOpenChange={setIsTestLogSheetOpen}>
+        <SheetContent className="w-full max-w-[600px] h-full max-h-screen overflow-hidden flex flex-col">
+          <SheetHeader>
+            <SheetTitle>Test Connection Log</SheetTitle>
+            <SheetDescription>
+              History of all API connectivity test results
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-6 space-y-4 flex-1 overflow-hidden flex flex-col">
+            {kotakConfig && (
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
+                  disabled={testConnectionMutation.isPending}
+                  data-testid="button-test-connection-sheet"
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
+                  {testConnectionMutation.isPending ? "Testing..." : "Test Connection"}
+                </Button>
+              </div>
+            )}
+            <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+              <div className="flex items-center justify-between flex-shrink-0 gap-2 flex-wrap">
+                <h4 className="font-medium">Test Results</h4>
+                <Badge variant="secondary" className="text-xs">{testLogs.length} entries</Badge>
+              </div>
+              {isLoadingTestLogs ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  <span className="ml-2 text-sm text-muted-foreground">Loading test logs...</span>
+                </div>
+              ) : testLogs.length === 0 ? (
+                <p className="text-muted-foreground text-sm mt-2">No test logs yet. Click "Test Connection" to run your first test.</p>
+              ) : (
+                <div
+                  className="overflow-auto max-h-[calc(100vh-280px)] mt-2"
+                  data-testid="test-logs-scroll-container"
+                >
+                  <div className="space-y-2 pr-2">
+                    {testLogs.map((log) => (
+                      <Card key={log.id} className="p-3" data-testid={`card-test-log-${log.id}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2 flex-nowrap">
+                              {log.status === "success" ? (
+                                <CheckCircle className="w-4 h-4 text-primary flex-shrink-0" />
+                              ) : (
+                                <XCircle className="w-4 h-4 text-destructive flex-shrink-0" />
+                              )}
+                              <span className="font-medium text-sm">{log.status === "success" ? "Success" : "Failed"}</span>
+                              {log.responseTime && (
+                                <Badge variant="outline" className="text-xs flex-shrink-0">
+                                  <Timer className="w-3 h-3 mr-1" />
+                                  {log.responseTime}ms
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-nowrap">
+                              <span className="flex-shrink-0">{log.testedAt}</span>
+                            </div>
+                            {log.message && (
+                              <p className="text-xs mt-1 text-muted-foreground">{log.message}</p>
+                            )}
+                            {log.errorMessage && (
+                              <p className="text-xs text-destructive mt-1">{log.errorMessage}</p>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={isSessionLogSheetOpen} onOpenChange={setIsSessionLogSheetOpen}>
+        <SheetContent className="w-full max-w-[600px] h-full max-h-screen overflow-hidden flex flex-col">
+          <SheetHeader>
+            <SheetTitle>Session Log</SheetTitle>
+            <SheetDescription>
+              History of all TOTP login sessions with expiry tracking
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-6 space-y-4 flex-1 overflow-hidden flex flex-col">
+            <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+              <div className="flex items-center justify-between flex-shrink-0 gap-2 flex-wrap">
+                <h4 className="font-medium">Login Sessions</h4>
+                <Badge variant="secondary" className="text-xs">{sessionLogs.length} sessions</Badge>
+              </div>
+              {isLoadingSessionLogs ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  <span className="ml-2 text-sm text-muted-foreground">Loading session logs...</span>
+                </div>
+              ) : sessionLogs.length === 0 ? (
+                <p className="text-muted-foreground text-sm mt-2">No session logs yet. Use "Save & Login with TOTP" to start your first session.</p>
+              ) : (
+                <div
+                  className="overflow-auto max-h-[calc(100vh-240px)] mt-2"
+                  data-testid="session-logs-scroll-container"
+                >
+                  <div className="space-y-2 pr-2">
+                    {sessionLogs.map((log) => {
+                      const isExpired = log.sessionExpiry ? new Date(log.sessionExpiry) <= new Date() : true;
+                      return (
+                        <Card key={log.id} className="p-3" data-testid={`card-session-log-${log.id}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {log.status === "success" ? (
+                                  <CheckCircle className="w-4 h-4 text-primary flex-shrink-0" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 text-destructive flex-shrink-0" />
+                                )}
+                                <span className="font-medium text-sm">{log.status === "success" ? "Success" : "Failed"}</span>
+                                {log.totpUsed && (
+                                  <Badge variant="outline" className="text-xs flex-shrink-0 font-mono">
+                                    TOTP: {log.totpUsed}
+                                  </Badge>
+                                )}
+                                {log.sessionExpiry && (
+                                  <Badge
+                                    variant={isExpired ? "destructive" : "default"}
+                                    className="text-xs font-bold flex-shrink-0"
+                                    data-testid={`badge-session-expiry-${log.id}`}
+                                  >
+                                    {isExpired ? "EXPIRED" : "ACTIVE"}
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-nowrap">
+                                <span className="flex-shrink-0">{log.loginAt}</span>
+                              </div>
+                              {log.sessionExpiry && (
+                                <p className="text-xs mt-1 text-muted-foreground">
+                                  <Clock className="w-3 h-3 inline mr-1" />
+                                  Session expires: {log.sessionExpiry}
+                                </p>
+                              )}
+                              {log.message && (
+                                <p className="text-xs mt-1 text-muted-foreground">{log.message}</p>
+                              )}
+                              {log.errorMessage && (
+                                <p className="text-xs text-destructive mt-1">{log.errorMessage}</p>
+                              )}
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
