@@ -396,6 +396,7 @@ export default function BrokerApi() {
   const [isSessionLogSheetOpen, setIsSessionLogSheetOpen] = useState(false);
   const [sessionExpandedView, setSessionExpandedView] = useState(false);
   const [showCredentials, setShowCredentials] = useState(false);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [formData, setFormData] = useState<Partial<InsertBrokerConfig>>({
     brokerName: "kotak_neo",
     consumerKey: "",
@@ -850,50 +851,61 @@ export default function BrokerApi() {
         )}
 
         <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Setup Guide</CardTitle>
-            <CardDescription>How to get your Kotak Neo API credentials</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4 text-sm">
-              <div className="flex gap-3">
-                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">1</div>
-                <div>
-                  <strong>Get API Token</strong>
-                  <p className="text-muted-foreground">
-                    Login to <a href="https://neo.kotaksecurities.com" target="_blank" rel="noopener" className="text-primary underline">neo.kotaksecurities.com</a> → Invest → Trade API → Create Application
-                  </p>
-                </div>
+          <CardHeader
+            className="cursor-pointer select-none"
+            onClick={() => setShowSetupGuide(!showSetupGuide)}
+            data-testid="button-toggle-setup-guide"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <CardTitle>Setup Guide</CardTitle>
+                <CardDescription>How to get your Kotak Neo API credentials</CardDescription>
               </div>
-              <div className="flex gap-3">
-                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">2</div>
-                <div>
-                  <strong>Register TOTP</strong>
-                  <p className="text-muted-foreground">
-                    Visit <a href="https://www.kotaksecurities.com/platform/kotak-neo-trade-api/totp-registration/" target="_blank" rel="noopener" className="text-primary underline">TOTP Registration</a> and scan QR with Google/Microsoft Authenticator
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">3</div>
-                <div>
-                  <strong>Set MPIN</strong>
-                  <p className="text-muted-foreground">
-                    In Neo web → Click initials (top-right) → Account Details → MPIN section
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">4</div>
-                <div>
-                  <strong>Login Daily</strong>
-                  <p className="text-muted-foreground">
-                    Your credentials are saved permanently. Just enter your TOTP each day to start a trading session.
-                  </p>
-                </div>
-              </div>
+              {showSetupGuide ? <ChevronDown className="w-5 h-5 text-muted-foreground" /> : <ChevronRight className="w-5 h-5 text-muted-foreground" />}
             </div>
-          </CardContent>
+          </CardHeader>
+          {showSetupGuide && (
+            <CardContent>
+              <div className="space-y-4 text-sm">
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">1</div>
+                  <div>
+                    <strong>Get API Token</strong>
+                    <p className="text-muted-foreground">
+                      Login to <a href="https://neo.kotaksecurities.com" target="_blank" rel="noopener" className="text-primary underline">neo.kotaksecurities.com</a> → Invest → Trade API → Create Application
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">2</div>
+                  <div>
+                    <strong>Register TOTP</strong>
+                    <p className="text-muted-foreground">
+                      Visit <a href="https://www.kotaksecurities.com/platform/kotak-neo-trade-api/totp-registration/" target="_blank" rel="noopener" className="text-primary underline">TOTP Registration</a> and scan QR with Google/Microsoft Authenticator
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">3</div>
+                  <div>
+                    <strong>Set MPIN</strong>
+                    <p className="text-muted-foreground">
+                      In Neo web → Click initials (top-right) → Account Details → MPIN section
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">4</div>
+                  <div>
+                    <strong>Login Daily</strong>
+                    <p className="text-muted-foreground">
+                      Your credentials are saved permanently. Just enter your TOTP each day to start a trading session.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          )}
         </Card>
 
         <Alert className="mt-6">
