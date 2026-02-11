@@ -763,8 +763,11 @@ export default function BrokerApi() {
                       </div>
 
                       {kotakConfig && (
-                        <div className="flex justify-end">
-                          <ArrowDown className="w-4 h-4 text-muted-foreground" />
+                        <div className="hidden md:grid grid-cols-[1fr_auto] -my-1">
+                          <div />
+                          <div className="flex justify-center">
+                            <ArrowDown className="w-4 h-4 text-muted-foreground" />
+                          </div>
                         </div>
                       )}
 
