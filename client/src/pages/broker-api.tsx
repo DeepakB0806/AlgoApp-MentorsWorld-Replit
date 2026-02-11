@@ -751,9 +751,19 @@ export default function BrokerApi() {
                         />
                       </div>
 
-                      <div className="grid md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
                         <div>
-                          <Label>Mobile Number</Label>
+                          <div className="flex items-center gap-1 mb-1">
+                            <Label className="mb-0">Mobile #</Label>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-mobile-info" />
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-xs text-xs">
+                                Add mobile number with country code. Eg. +91
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
                           <Input
                             value={formData.mobileNumber || ""}
                             onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
@@ -763,26 +773,47 @@ export default function BrokerApi() {
                         </div>
 
                         <div>
-                          <Label>UCC (Unique Client Code)</Label>
+                          <div className="flex items-center gap-1 mb-1">
+                            <Label className="mb-0">UCC</Label>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-ucc-info" />
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-xs text-xs">
+                                Unique Client Code — Your trading account identifier provided by the broker
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
                           <Input
                             value={formData.ucc || ""}
                             onChange={(e) => setFormData({ ...formData, ucc: e.target.value })}
-                            placeholder="Your client code"
+                            placeholder="Client code"
                             data-testid="input-ucc"
                           />
                         </div>
-                      </div>
 
-                      <div>
-                        <Label>MPIN (6-digit)</Label>
-                        <Input
-                          type="password"
-                          maxLength={6}
-                          value={formData.mpin || ""}
-                          onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
-                          placeholder="Your 6-digit MPIN"
-                          data-testid="input-mpin"
-                        />
+                        <div>
+                          <Label>MPIN</Label>
+                          <Input
+                            type="password"
+                            maxLength={6}
+                            value={formData.mpin || ""}
+                            onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
+                            placeholder="6-digit"
+                            data-testid="input-mpin"
+                          />
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleSaveCredentials}
+                          disabled={!isFormValid || isSaving}
+                          data-testid="button-save"
+                        >
+                          <Save className="w-3.5 h-3.5 mr-1.5" />
+                          {isSaving ? "Saving..." : "Save"}
+                        </Button>
                       </div>
                     </>
                   )}
@@ -819,16 +850,6 @@ export default function BrokerApi() {
                 </div>
 
                 <div className="flex gap-2 pt-4 flex-wrap">
-                  <Button
-                    variant="outline"
-                    onClick={handleSaveCredentials}
-                    disabled={!isFormValid || isSaving}
-                    data-testid="button-save"
-                  >
-                    <Save className="w-4 h-4 mr-2" />
-                    {isSaving ? "Saving..." : "Save Credentials"}
-                  </Button>
-
                   {kotakConfig && (
                     <Button
                       variant="outline"
