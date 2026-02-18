@@ -1,14 +1,103 @@
-import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Trading Strategy
+// ====== PREDEFINED INDICATORS ======
+export const PREDEFINED_INDICATORS = [
+  "RSI",
+  "Supertrend",
+  "Half Trend",
+  "EMA",
+  "SMA",
+  "MACD",
+  "Bollinger Bands",
+  "VWAP",
+  "Stochastic",
+  "ADX",
+  "ATR",
+  "Ichimoku",
+  "Pivot Points",
+  "Fibonacci",
+  "CCI",
+  "Williams %R",
+  "Parabolic SAR",
+  "Donchian Channel",
+  "Keltner Channel",
+  "OBV",
+] as const;
+
+export type PredefinedIndicator = typeof PREDEFINED_INDICATORS[number];
+
+// ====== STRATEGY TYPES ======
+
+export type ActionMapperEntry = {
+  signalValue: string;
+  uptrend: "ENTRY" | "EXIT" | "HOLD" | "--";
+  downtrend: "ENTRY" | "EXIT" | "HOLD" | "--";
+  neutral: "ENTRY" | "EXIT" | "HOLD" | "--";
+};
+
+export type TradeLeg = {
+  type: "CE" | "PE" | "FUT";
+  action: "BUY" | "SELL";
+  strike: string;
+  lots: number;
+};
+
+export type ExecutionBlock = {
+  legs: TradeLeg[];
+};
+
+// ====== STRATEGY MOTHER CONFIGURATOR ======
+// Created by Super Admin only - defines the master template
+export const strategyConfigs = pgTable("strategy_configs", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  webhookId: varchar("webhook_id", { length: 36 }),
+  indicators: text("indicators").array(),
+  actionMapper: text("action_mapper"),
+  uptrendBlock: text("uptrend_block"),
+  downtrendBlock: text("downtrend_block"),
+  neutralBlock: text("neutral_block"),
+  status: text("status").notNull().default("draft"),
+  createdBy: varchar("created_by", { length: 36 }),
+  createdAt: text("created_at"),
+  updatedAt: text("updated_at"),
+});
+
+export const insertStrategyConfigSchema = createInsertSchema(strategyConfigs).omit({ id: true });
+export type InsertStrategyConfig = z.infer<typeof insertStrategyConfigSchema>;
+export type StrategyConfig = typeof strategyConfigs.$inferSelect;
+
+// ====== STRATEGY TRADE PLANS ======
+// Created by Team Members + Super Admin based on a Mother Config
+export const strategyPlans = pgTable("strategy_plans", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  configId: varchar("config_id", { length: 36 }).notNull(),
+  selectedIndicators: text("selected_indicators").array(),
+  tradeParams: text("trade_params"),
+  status: text("status").notNull().default("draft"),
+  brokerConfigId: varchar("broker_config_id", { length: 36 }),
+  isProxyMode: boolean("is_proxy_mode").default(false),
+  createdBy: varchar("created_by", { length: 36 }),
+  createdAt: text("created_at"),
+  updatedAt: text("updated_at"),
+});
+
+export const insertStrategyPlanSchema = createInsertSchema(strategyPlans).omit({ id: true });
+export type InsertStrategyPlan = z.infer<typeof insertStrategyPlanSchema>;
+export type StrategyPlan = typeof strategyPlans.$inferSelect;
+
+// Legacy strategy table kept for backward compatibility
 export const strategies = pgTable("strategies", {
   id: varchar("id", { length: 36 }).primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
-  type: text("type").notNull(), // "scalping", "swing", "positional", "intraday"
-  status: text("status").notNull().default("inactive"), // "active", "inactive", "paused"
+  type: text("type").notNull(),
+  status: text("status").notNull().default("inactive"),
   symbol: text("symbol").notNull(),
   exchange: text("exchange").notNull().default("NSE"),
   quantity: integer("quantity").notNull().default(1),

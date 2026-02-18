@@ -3,7 +3,7 @@ import { eq, desc, and, lt } from "drizzle-orm";
 import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
-  brokerTestLogs, brokerSessionLogs,
+  brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -14,6 +14,8 @@ import {
   type WebhookRegistry, type InsertWebhookRegistry,
   type BrokerTestLog, type InsertBrokerTestLog,
   type BrokerSessionLog, type InsertBrokerSessionLog,
+  type StrategyConfig, type InsertStrategyConfig,
+  type StrategyPlan, type InsertStrategyPlan,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -98,6 +100,21 @@ export interface IStorage {
   getBrokerSessionLogs(brokerConfigId: string): Promise<BrokerSessionLog[]>;
   createBrokerSessionLog(log: InsertBrokerSessionLog): Promise<BrokerSessionLog>;
   deleteBrokerSessionLogs(brokerConfigId: string, days?: number): Promise<number>;
+
+  // Strategy Configs (Mother Configurator) - persisted in database
+  getStrategyConfigs(): Promise<StrategyConfig[]>;
+  getStrategyConfig(id: string): Promise<StrategyConfig | undefined>;
+  createStrategyConfig(config: InsertStrategyConfig): Promise<StrategyConfig>;
+  updateStrategyConfig(id: string, config: Partial<InsertStrategyConfig>): Promise<StrategyConfig | undefined>;
+  deleteStrategyConfig(id: string): Promise<boolean>;
+
+  // Strategy Plans (Trade Planning) - persisted in database
+  getStrategyPlans(): Promise<StrategyPlan[]>;
+  getStrategyPlansByConfig(configId: string): Promise<StrategyPlan[]>;
+  getStrategyPlan(id: string): Promise<StrategyPlan | undefined>;
+  createStrategyPlan(plan: InsertStrategyPlan): Promise<StrategyPlan>;
+  updateStrategyPlan(id: string, plan: Partial<InsertStrategyPlan>): Promise<StrategyPlan | undefined>;
+  deleteStrategyPlan(id: string): Promise<boolean>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -667,6 +684,101 @@ export class DatabaseStorage implements IStorage {
       .where(eq(brokerSessionLogs.brokerConfigId, brokerConfigId))
       .returning();
     return deleted.length;
+  }
+
+  // Strategy Configs (Mother Configurator) - PERSISTENT in PostgreSQL
+  async getStrategyConfigs(): Promise<StrategyConfig[]> {
+    return await db.select().from(strategyConfigs).orderBy(desc(strategyConfigs.createdAt));
+  }
+
+  async getStrategyConfig(id: string): Promise<StrategyConfig | undefined> {
+    const [config] = await db.select().from(strategyConfigs).where(eq(strategyConfigs.id, id));
+    return config || undefined;
+  }
+
+  async createStrategyConfig(insertConfig: InsertStrategyConfig): Promise<StrategyConfig> {
+    const id = randomUUID();
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const [config] = await db.insert(strategyConfigs).values({
+      id,
+      name: insertConfig.name,
+      description: insertConfig.description ?? null,
+      webhookId: insertConfig.webhookId ?? null,
+      indicators: insertConfig.indicators ?? null,
+      actionMapper: insertConfig.actionMapper ?? null,
+      uptrendBlock: insertConfig.uptrendBlock ?? null,
+      downtrendBlock: insertConfig.downtrendBlock ?? null,
+      neutralBlock: insertConfig.neutralBlock ?? null,
+      status: insertConfig.status ?? "draft",
+      createdBy: insertConfig.createdBy ?? null,
+      createdAt: now,
+      updatedAt: now,
+    }).returning();
+    return config;
+  }
+
+  async updateStrategyConfig(id: string, update: Partial<InsertStrategyConfig>): Promise<StrategyConfig | undefined> {
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const [config] = await db.update(strategyConfigs)
+      .set({ ...update, updatedAt: now })
+      .where(eq(strategyConfigs.id, id))
+      .returning();
+    return config || undefined;
+  }
+
+  async deleteStrategyConfig(id: string): Promise<boolean> {
+    const result = await db.delete(strategyConfigs).where(eq(strategyConfigs.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Strategy Plans (Trade Planning) - PERSISTENT in PostgreSQL
+  async getStrategyPlans(): Promise<StrategyPlan[]> {
+    return await db.select().from(strategyPlans).orderBy(desc(strategyPlans.createdAt));
+  }
+
+  async getStrategyPlansByConfig(configId: string): Promise<StrategyPlan[]> {
+    return await db.select().from(strategyPlans)
+      .where(eq(strategyPlans.configId, configId))
+      .orderBy(desc(strategyPlans.createdAt));
+  }
+
+  async getStrategyPlan(id: string): Promise<StrategyPlan | undefined> {
+    const [plan] = await db.select().from(strategyPlans).where(eq(strategyPlans.id, id));
+    return plan || undefined;
+  }
+
+  async createStrategyPlan(insertPlan: InsertStrategyPlan): Promise<StrategyPlan> {
+    const id = randomUUID();
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const [plan] = await db.insert(strategyPlans).values({
+      id,
+      name: insertPlan.name,
+      description: insertPlan.description ?? null,
+      configId: insertPlan.configId,
+      selectedIndicators: insertPlan.selectedIndicators ?? null,
+      tradeParams: insertPlan.tradeParams ?? null,
+      status: insertPlan.status ?? "draft",
+      brokerConfigId: insertPlan.brokerConfigId ?? null,
+      isProxyMode: insertPlan.isProxyMode ?? false,
+      createdBy: insertPlan.createdBy ?? null,
+      createdAt: now,
+      updatedAt: now,
+    }).returning();
+    return plan;
+  }
+
+  async updateStrategyPlan(id: string, update: Partial<InsertStrategyPlan>): Promise<StrategyPlan | undefined> {
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const [plan] = await db.update(strategyPlans)
+      .set({ ...update, updatedAt: now })
+      .where(eq(strategyPlans.id, id))
+      .returning();
+    return plan || undefined;
+  }
+
+  async deleteStrategyPlan(id: string): Promise<boolean> {
+    const result = await db.delete(strategyPlans).where(eq(strategyPlans.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Trading Data (mock data for demonstration - will be replaced by live data)

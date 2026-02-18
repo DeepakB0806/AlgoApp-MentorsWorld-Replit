@@ -1,7 +1,7 @@
 import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertStrategySchema, insertWebhookSchema, insertBrokerConfigSchema } from "@shared/schema";
+import { insertStrategySchema, insertWebhookSchema, insertBrokerConfigSchema, insertStrategyConfigSchema, insertStrategyPlanSchema, PREDEFINED_INDICATORS } from "@shared/schema";
 import { sendEmail, getBaseUrlFromRequest } from "./services/email";
 
 // Helper to parse numeric values, handling empty strings and nulls
@@ -146,6 +146,213 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete strategy" });
+    }
+  });
+
+  function getUserFromRequest(req: any): { id: string; role: string } | null {
+    if (req.teamUser) {
+      return { id: req.teamUser.id, role: req.teamUser.role };
+    }
+    if (req.user?.claims?.sub) {
+      return { id: req.user.claims.sub, role: "super_admin" };
+    }
+    return null;
+  }
+
+  function requireSuperAdmin(req: any, res: any): { id: string; role: string } | null {
+    const user = getUserFromRequest(req);
+    if (!user) {
+      res.status(401).json({ error: "Authentication required" });
+      return null;
+    }
+    if (user.role !== "super_admin") {
+      res.status(403).json({ error: "Super Admin access required" });
+      return null;
+    }
+    return user;
+  }
+
+  function requireTeamOrSuperAdmin(req: any, res: any): { id: string; role: string } | null {
+    const user = getUserFromRequest(req);
+    if (!user) {
+      res.status(401).json({ error: "Authentication required" });
+      return null;
+    }
+    if (user.role !== "super_admin" && user.role !== "team_member") {
+      res.status(403).json({ error: "Team Member or Super Admin access required" });
+      return null;
+    }
+    return user;
+  }
+
+  // ====== Strategy Configs (Mother Configurator) Routes - Super Admin Only ======
+  app.get("/api/strategy-configs", async (req: any, res) => {
+    try {
+      const user = requireTeamOrSuperAdmin(req, res);
+      if (!user) return;
+      const configs = await storage.getStrategyConfigs();
+      res.json(configs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch strategy configs" });
+    }
+  });
+
+  app.get("/api/strategy-configs/:id", async (req: any, res) => {
+    try {
+      const user = requireTeamOrSuperAdmin(req, res);
+      if (!user) return;
+      const config = await storage.getStrategyConfig(req.params.id);
+      if (!config) {
+        return res.status(404).json({ error: "Strategy config not found" });
+      }
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch strategy config" });
+    }
+  });
+
+  app.post("/api/strategy-configs", async (req: any, res) => {
+    try {
+      const user = requireSuperAdmin(req, res);
+      if (!user) return;
+      const parsed = insertStrategyConfigSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid strategy config data", details: parsed.error });
+      }
+      const config = await storage.createStrategyConfig({ ...parsed.data, createdBy: user.id });
+      res.status(201).json(config);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create strategy config" });
+    }
+  });
+
+  app.patch("/api/strategy-configs/:id", async (req: any, res) => {
+    try {
+      const user = requireSuperAdmin(req, res);
+      if (!user) return;
+      const parsed = insertStrategyConfigSchema.partial().safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid strategy config data", details: parsed.error });
+      }
+      const config = await storage.updateStrategyConfig(req.params.id, parsed.data);
+      if (!config) {
+        return res.status(404).json({ error: "Strategy config not found" });
+      }
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update strategy config" });
+    }
+  });
+
+  app.delete("/api/strategy-configs/:id", async (req: any, res) => {
+    try {
+      const user = requireSuperAdmin(req, res);
+      if (!user) return;
+      const deleted = await storage.deleteStrategyConfig(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Strategy config not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete strategy config" });
+    }
+  });
+
+  app.get("/api/predefined-indicators", (req, res) => {
+    res.json(PREDEFINED_INDICATORS);
+  });
+
+  app.get("/api/webhook-signals/:webhookId", async (req, res) => {
+    try {
+      const data = await storage.getWebhookDataByWebhook(req.params.webhookId);
+      const uniqueAlerts = Array.from(new Set(data.map(d => d.alert).filter(Boolean)));
+      res.json(uniqueAlerts);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch webhook signals" });
+    }
+  });
+
+  // ====== Strategy Plans (Trade Planning) Routes - Team + Super Admin ======
+  app.get("/api/strategy-plans", async (req: any, res) => {
+    try {
+      const user = requireTeamOrSuperAdmin(req, res);
+      if (!user) return;
+      const plans = await storage.getStrategyPlans();
+      res.json(plans);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch strategy plans" });
+    }
+  });
+
+  app.get("/api/strategy-plans/config/:configId", async (req: any, res) => {
+    try {
+      const user = requireTeamOrSuperAdmin(req, res);
+      if (!user) return;
+      const plans = await storage.getStrategyPlansByConfig(req.params.configId);
+      res.json(plans);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch strategy plans" });
+    }
+  });
+
+  app.get("/api/strategy-plans/:id", async (req: any, res) => {
+    try {
+      const user = requireTeamOrSuperAdmin(req, res);
+      if (!user) return;
+      const plan = await storage.getStrategyPlan(req.params.id);
+      if (!plan) {
+        return res.status(404).json({ error: "Strategy plan not found" });
+      }
+      res.json(plan);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch strategy plan" });
+    }
+  });
+
+  app.post("/api/strategy-plans", async (req: any, res) => {
+    try {
+      const user = requireTeamOrSuperAdmin(req, res);
+      if (!user) return;
+      const parsed = insertStrategyPlanSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid strategy plan data", details: parsed.error });
+      }
+      const plan = await storage.createStrategyPlan({ ...parsed.data, createdBy: user.id });
+      res.status(201).json(plan);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create strategy plan" });
+    }
+  });
+
+  app.patch("/api/strategy-plans/:id", async (req: any, res) => {
+    try {
+      const user = requireTeamOrSuperAdmin(req, res);
+      if (!user) return;
+      const parsed = insertStrategyPlanSchema.partial().safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid strategy plan data", details: parsed.error });
+      }
+      const plan = await storage.updateStrategyPlan(req.params.id, parsed.data);
+      if (!plan) {
+        return res.status(404).json({ error: "Strategy plan not found" });
+      }
+      res.json(plan);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update strategy plan" });
+    }
+  });
+
+  app.delete("/api/strategy-plans/:id", async (req: any, res) => {
+    try {
+      const user = requireTeamOrSuperAdmin(req, res);
+      if (!user) return;
+      const deleted = await storage.deleteStrategyPlan(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Strategy plan not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete strategy plan" });
     }
   });
 
