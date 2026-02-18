@@ -51,8 +51,9 @@ function MotherConfigurator() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [webhookId, setWebhookId] = useState("");
-  const [selectedIndicators, setSelectedIndicators] = useState<string[]>([]);
   const [actionMapper, setActionMapper] = useState<ActionMapperEntry[]>([]);
+  const [signalsFetched, setSignalsFetched] = useState(false);
+  const [fetchRequested, setFetchRequested] = useState(false);
   const [uptrendLegs, setUptrendLegs] = useState<TradeLeg[]>([]);
   const [downtrendLegs, setDowntrendLegs] = useState<TradeLeg[]>([]);
   const [neutralLegs, setNeutralLegs] = useState<TradeLeg[]>([]);
@@ -71,13 +72,22 @@ function MotherConfigurator() {
     enabled: !!webhookId,
   });
 
+  const fetchSignals = () => {
+    if (!webhookId || webhookId === "none") return;
+    setFetchRequested(true);
+    setSignalsFetched(false);
+    queryClient.invalidateQueries({ queryKey: ["/api/webhook-signals", webhookId] });
+  };
+
   useEffect(() => {
-    if (signals && signals.length > 0 && actionMapper.length === 0 && webhookId) {
+    if (fetchRequested && signals && signals.length > 0 && webhookId) {
       setActionMapper(
         signals.map((s) => ({ signalValue: s, uptrend: "--" as const, downtrend: "--" as const, neutral: "--" as const }))
       );
+      setSignalsFetched(true);
+      setFetchRequested(false);
     }
-  }, [signals, webhookId]);
+  }, [signals, webhookId, fetchRequested]);
 
   const createMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -126,8 +136,9 @@ function MotherConfigurator() {
     setName("");
     setDescription("");
     setWebhookId("");
-    setSelectedIndicators([]);
     setActionMapper([]);
+    setSignalsFetched(false);
+    setFetchRequested(false);
     setUptrendLegs([]);
     setDowntrendLegs([]);
     setNeutralLegs([]);
@@ -139,8 +150,9 @@ function MotherConfigurator() {
     setName(config.name);
     setDescription(config.description || "");
     setWebhookId(config.webhookId || "");
-    setSelectedIndicators(config.indicators || []);
-    setActionMapper(parseJsonSafe<ActionMapperEntry[]>(config.actionMapper, []));
+    const parsedMapper = parseJsonSafe<ActionMapperEntry[]>(config.actionMapper, []);
+    setActionMapper(parsedMapper);
+    setSignalsFetched(parsedMapper.length > 0);
     const upBlock = parseJsonSafe<ExecutionBlock>(config.uptrendBlock, { legs: [] });
     const downBlock = parseJsonSafe<ExecutionBlock>(config.downtrendBlock, { legs: [] });
     const neutralBlock = parseJsonSafe<ExecutionBlock>(config.neutralBlock, { legs: [] });
@@ -160,7 +172,6 @@ function MotherConfigurator() {
       name: name.trim(),
       description: description.trim() || null,
       webhookId: webhookId || null,
-      indicators: selectedIndicators,
       actionMapper: JSON.stringify(actionMapper),
       uptrendBlock: JSON.stringify({ legs: uptrendLegs }),
       downtrendBlock: JSON.stringify({ legs: downtrendLegs }),
@@ -172,12 +183,6 @@ function MotherConfigurator() {
     } else {
       createMutation.mutate(payload);
     }
-  };
-
-  const toggleIndicator = (indicator: string) => {
-    setSelectedIndicators((prev) =>
-      prev.includes(indicator) ? prev.filter((i) => i !== indicator) : [...prev, indicator]
-    );
   };
 
   const updateMapperEntry = (index: number, field: keyof ActionMapperEntry, value: string) => {
@@ -261,38 +266,29 @@ function MotherConfigurator() {
         </div>
 
         <div>
-          <Label>Webhook Source</Label>
-          <Select value={webhookId} onValueChange={(val) => { setWebhookId(val); setActionMapper([]); }}>
-            <SelectTrigger data-testid="select-config-webhook">
-              <SelectValue placeholder="Select webhook" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">None</SelectItem>
-              {webhooks.map((wh) => (
-                <SelectItem key={wh.id} value={wh.id}>
-                  {wh.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div>
-          <Label className="mb-2 block">Indicators</Label>
-          <div className="flex flex-wrap gap-2" data-testid="container-indicators">
-            {PREDEFINED_INDICATORS.map((ind) => (
-              <Badge
-                key={ind}
-                className={`cursor-pointer select-none toggle-elevate ${
-                  selectedIndicators.includes(ind) ? "toggle-elevated bg-emerald-600 text-white" : ""
-                }`}
-                variant={selectedIndicators.includes(ind) ? "default" : "outline"}
-                onClick={() => toggleIndicator(ind)}
-                data-testid={`badge-indicator-${ind.replace(/\s+/g, "-").toLowerCase()}`}
-              >
-                {ind}
-              </Badge>
-            ))}
+          <Label className="mb-2 block">Indicator Source (Webhook)</Label>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={webhookId} onValueChange={(val) => { setWebhookId(val); setActionMapper([]); setSignalsFetched(false); }}>
+              <SelectTrigger className="flex-1 min-w-[200px]" data-testid="select-config-webhook">
+                <SelectValue placeholder="Select indicator webhook..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                {webhooks.map((wh) => (
+                  <SelectItem key={wh.id} value={wh.id}>
+                    {wh.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant={signalsFetched ? "default" : "outline"}
+              onClick={fetchSignals}
+              disabled={!webhookId || webhookId === "none"}
+              data-testid="button-fetch-signals"
+            >
+              {signalsFetched ? "Signals Loaded" : "Fetch Signals"}
+            </Button>
           </div>
         </div>
 
@@ -358,57 +354,42 @@ function MotherConfigurator() {
         )}
 
         <div>
-          <Label className="mb-2 block">Execution Blocks</Label>
           <div className="grid gap-4 md:grid-cols-3">
             {(
               [
-                { key: "uptrend" as const, label: "Uptrend Block", legs: uptrendLegs, borderColor: "border-emerald-500", textColor: "text-emerald-400" },
-                { key: "downtrend" as const, label: "Downtrend Block", legs: downtrendLegs, borderColor: "border-red-500", textColor: "text-red-400" },
-                { key: "neutral" as const, label: "Neutral Block", legs: neutralLegs, borderColor: "border-blue-500", textColor: "text-blue-400" },
+                { key: "uptrend" as const, label: "UPTREND BLOCK", legs: uptrendLegs, borderColor: "border-emerald-500", textColor: "text-emerald-400", btnLabel: "+ Add Uptrend Leg" },
+                { key: "downtrend" as const, label: "DOWNTREND BLOCK", legs: downtrendLegs, borderColor: "border-red-500", textColor: "text-red-400", btnLabel: "+ Add Downtrend Leg" },
+                { key: "neutral" as const, label: "NEUTRAL BLOCK", legs: neutralLegs, borderColor: "border-blue-500", textColor: "text-blue-400", btnLabel: "+ Add Neutral Leg" },
               ] as const
             ).map((block) => (
-              <Card key={block.key} className={`border-2 ${block.borderColor}`} data-testid={`card-block-${block.key}`}>
-                <CardHeader className="pb-2">
-                  <CardTitle className={`text-sm ${block.textColor}`}>{block.label}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
+              <div key={block.key} className={`border-2 ${block.borderColor} rounded-md p-3 space-y-3`} data-testid={`card-block-${block.key}`}>
+                <h3 className={`font-bold text-sm ${block.textColor}`}>{block.label}</h3>
+                <div className="space-y-2">
                   {block.legs.map((leg, idx) => (
-                    <div key={idx} className="space-y-2 p-2 border border-border rounded-md" data-testid={`leg-${block.key}-${idx}`}>
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="text-xs font-medium text-muted-foreground">Leg {idx + 1}</span>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeLeg(block.key, idx)}
-                          data-testid={`button-remove-leg-${block.key}-${idx}`}
-                        >
-                          <X className="w-3 h-3" />
-                        </Button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Select value={leg.type} onValueChange={(v) => updateLeg(block.key, idx, "type", v)}>
-                          <SelectTrigger data-testid={`select-leg-type-${block.key}-${idx}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {LEG_TYPES.map((t) => (
-                              <SelectItem key={t} value={t}>{t}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <Select value={leg.action} onValueChange={(v) => updateLeg(block.key, idx, "action", v)}>
-                          <SelectTrigger data-testid={`select-leg-action-${block.key}-${idx}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {LEG_ACTIONS.map((a) => (
-                              <SelectItem key={a} value={a}>{a}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                    <div key={idx} className="flex items-center gap-2 flex-wrap" data-testid={`leg-${block.key}-${idx}`}>
+                      <span className="text-xs font-medium text-muted-foreground w-12 shrink-0">Leg {idx + 1}:</span>
+                      <Select value={leg.type} onValueChange={(v) => updateLeg(block.key, idx, "type", v)}>
+                        <SelectTrigger className="w-[70px]" data-testid={`select-leg-type-${block.key}-${idx}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {LEG_TYPES.map((t) => (
+                            <SelectItem key={t} value={t}>{t}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select value={leg.action} onValueChange={(v) => updateLeg(block.key, idx, "action", v)}>
+                        <SelectTrigger className="w-[80px]" data-testid={`select-leg-action-${block.key}-${idx}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {LEG_ACTIONS.map((a) => (
+                            <SelectItem key={a} value={a}>{a}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <Select value={leg.strike} onValueChange={(v) => updateLeg(block.key, idx, "strike", v)}>
-                        <SelectTrigger data-testid={`select-leg-strike-${block.key}-${idx}`}>
+                        <SelectTrigger className="w-[100px]" data-testid={`select-leg-strike-${block.key}-${idx}`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -417,35 +398,40 @@ function MotherConfigurator() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <div>
-                        <Label className="text-xs">Lots</Label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={leg.lots}
-                          onChange={(e) => updateLeg(block.key, idx, "lots", Math.max(1, parseInt(e.target.value) || 1))}
-                          data-testid={`input-leg-lots-${block.key}-${idx}`}
-                        />
-                      </div>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={leg.lots}
+                        onChange={(e) => updateLeg(block.key, idx, "lots", Math.max(1, parseInt(e.target.value) || 1))}
+                        className="w-[60px]"
+                        data-testid={`input-leg-lots-${block.key}-${idx}`}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeLeg(block.key, idx)}
+                        data-testid={`button-remove-leg-${block.key}-${idx}`}
+                      >
+                        <X className="w-3 h-3 text-destructive" />
+                      </Button>
                     </div>
                   ))}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => addLeg(block.key)}
-                    data-testid={`button-add-leg-${block.key}`}
-                  >
-                    <Plus className="w-3 h-3 mr-1" />
-                    Add Leg
-                  </Button>
-                </CardContent>
-              </Card>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => addLeg(block.key)}
+                  data-testid={`button-add-leg-${block.key}`}
+                >
+                  {block.btnLabel}
+                </Button>
+              </div>
             ))}
           </div>
         </div>
 
         <Button
+          className="w-full"
           onClick={handleSave}
           disabled={!name.trim() || createMutation.isPending || updateMutation.isPending}
           data-testid="button-save-config"
@@ -455,7 +441,7 @@ function MotherConfigurator() {
           ) : (
             <Save className="w-4 h-4 mr-2" />
           )}
-          {editingId ? "Update Configuration" : "Create Configuration"}
+          {editingId ? "UPDATE STRATEGY CONFIGURATION" : "SAVE STRATEGY CONFIGURATION"}
         </Button>
       </div>
     );
