@@ -3,8 +3,9 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertStrategySchema, insertWebhookSchema, insertBrokerConfigSchema, insertStrategyConfigSchema, insertStrategyPlanSchema, PREDEFINED_INDICATORS } from "@shared/schema";
 import { sendEmail, getBaseUrlFromRequest } from "./services/email";
+import { tradingCache } from "./cache";
+import { resolveSignalFromActionMapper, processTradeSignal, type SignalContext } from "./trade-engine";
 
-// Helper to parse numeric values, handling empty strings and nulls
 function parseNumeric(value: unknown): number | undefined {
   if (value === null || value === undefined || value === "") return undefined;
   const num = typeof value === "number" ? value : parseFloat(String(value));
@@ -253,6 +254,7 @@ export async function registerRoutes(
       if (!config) {
         return res.status(404).json({ error: "Strategy config not found" });
       }
+      tradingCache.invalidateConfig(req.params.id);
       res.json(config);
     } catch (error) {
       res.status(500).json({ error: "Failed to update strategy config" });
@@ -426,6 +428,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid strategy plan data", details: parsed.error });
       }
       const plan = await storage.createStrategyPlan({ ...parsed.data, createdBy: user.id });
+      if (plan.configId) tradingCache.invalidatePlans(plan.configId);
       res.status(201).json(plan);
     } catch (error) {
       res.status(500).json({ error: "Failed to create strategy plan" });
@@ -444,6 +447,7 @@ export async function registerRoutes(
       if (!plan) {
         return res.status(404).json({ error: "Strategy plan not found" });
       }
+      if (plan.configId) tradingCache.invalidatePlans(plan.configId);
       res.json(plan);
     } catch (error) {
       res.status(500).json({ error: "Failed to update strategy plan" });
@@ -454,10 +458,12 @@ export async function registerRoutes(
     try {
       const user = requireTeamOrSuperAdmin(req, res);
       if (!user) return;
+      const existing = await storage.getStrategyPlan(req.params.id);
       const deleted = await storage.deleteStrategyPlan(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Strategy plan not found" });
       }
+      if (existing?.configId) tradingCache.invalidatePlans(existing.configId);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete strategy plan" });
@@ -697,174 +703,178 @@ export async function registerRoutes(
   });
 
   // Webhook Receiver Endpoint - receives TradingView alerts
+  // Optimized: hot path (validate → resolve → execute → respond) then cold path (log, store, counters)
   app.post("/api/webhook/:id", async (req, res) => {
-    const startTime = Date.now();
+    const t0 = Date.now();
     const webhookId = req.params.id;
+    const timing: Record<string, number> = {};
     
     try {
-      // Find the webhook configuration
-      const webhook = await storage.getWebhook(webhookId);
+      // === HOT PATH: Validate + Resolve + Execute ===
+
+      // 1. Webhook lookup (cache-first)
+      let webhook = tradingCache.getWebhook(webhookId);
       if (!webhook) {
-        return res.status(404).json({ error: "Webhook not found" });
+        webhook = await storage.getWebhook(webhookId) || undefined;
+        if (webhook) tradingCache.setWebhook(webhookId, webhook);
       }
+      timing.webhook_lookup_ms = Date.now() - t0;
 
-      if (!webhook.isActive) {
-        return res.status(403).json({ error: "Webhook is disabled" });
-      }
+      if (!webhook) return res.status(404).json({ error: "Webhook not found" });
+      if (!webhook.isActive) return res.status(403).json({ error: "Webhook is disabled" });
 
-      // Verify secret key if configured
       const providedSecret = req.headers["x-secret-key"] || req.query.secret;
       if (webhook.secretKey && providedSecret !== webhook.secretKey) {
         return res.status(401).json({ error: "Invalid secret key" });
       }
 
-      // Parse the payload (TradingView alert data)
+      // 2. Parse payload (CPU-only, ~0ms)
       const payload = req.body;
-      console.log("Webhook received:", webhookId, JSON.stringify(payload));
+      const t1 = Date.now();
 
-      // Get request metadata
-      const ipAddress = (req.headers["x-forwarded-for"] as string)?.split(",")[0] || req.socket.remoteAddress || null;
-      const userAgent = req.headers["user-agent"] || null;
-
-      // Extract TradingView fields (supports snake_case, camelCase, UPPERCASE, Title_Case, and make.com formats)
-      const logData = {
-        webhookId,
-        timestamp: new Date().toISOString(),
-        payload: JSON.stringify(payload),
-        status: "success" as const,
-        response: "Alert received and processed",
-        executionTime: 0,
-        ipAddress,
-        userAgent,
-        // 1. TIME AS PER UNIX (TIMESTAMP) - make.com uses "TimeStamp"
+      const parsedData = {
         timeUnix: parseNumeric(payload.TimeStamp ?? payload.time_unix ?? payload.timeUnix ?? payload.TIME_UNIX ?? payload.Time_Unix ?? payload.timestamp ?? payload.TIMESTAMP ?? payload.Timestamp),
-        // 2. EXCHANGE
         exchange: payload.exchange || payload.EXCHANGE || payload.Exchange,
-        // 3. TICKER (INDICES)
         indices: payload.indices || payload.INDICES || payload.Indices || payload.ticker || payload.TICKER || payload.Ticker,
-        // 4. INDICATOR
         indicator: payload.indicator || payload.INDICATOR || payload.Indicator,
-        // 5. ACTION (ALERT)
         alert: payload.alert || payload.ALERT || payload.Alert || payload.action || payload.ACTION || payload.Action,
-        // 6. PRICE
         price: parseNumeric(payload.price ?? payload.PRICE ?? payload.Price),
-        // 7. LOCAL TIME - make.com uses "LocalTime"
         localTime: payload.LocalTime || payload.local_time || payload.localTime || payload.LOCAL_TIME || payload.Local_Time,
-        // 8. MODE
         mode: payload.mode || payload.MODE || payload.Mode,
-        // 9. MODE DESC - make.com uses "Mode_Description"
         modeDesc: payload.Mode_Description || payload.mode_desc || payload.modeDesc || payload.MODE_DESC || payload.Mode_Desc || payload["Mode Description"],
-        // 10. FAST LINE (FIRST LINE) - make.com uses "Fast_Line"
         firstLine: parseNumeric(payload.Fast_Line ?? payload.first_line ?? payload.fast_line ?? payload.FIRST_LINE ?? payload.FAST_LINE ?? payload.First_Line ?? payload.firstLine ?? payload.fastLine ?? payload["Fast Line"]),
-        // 11. MID LINE - make.com uses "Mid_Line"
         midLine: parseNumeric(payload.Mid_Line ?? payload.mid_line ?? payload.MID_LINE ?? payload.midLine ?? payload["Mid Line"]),
-        // 12. SLOW LINE - make.com uses "Slow_Line"
         slowLine: parseNumeric(payload.Slow_Line ?? payload.slow_line ?? payload.SLOW_LINE ?? payload.slowLine ?? payload["Slow Line"]),
-        // 13. SUPERTREND (ST) - make.com uses "SuperTrend_ST"
         st: parseNumeric(payload.SuperTrend_ST ?? payload.st ?? payload.ST ?? payload.St ?? payload.supertrend ?? payload.SUPERTREND ?? payload.Supertrend ?? payload.Super_Trend ?? payload["SuperTrend ST"]),
-        // 14. HALF TREND (HT) - make.com uses "Half_Trend_HT"
         ht: parseNumeric(payload.Half_Trend_HT ?? payload.ht ?? payload.HT ?? payload.Ht ?? payload.halftrend ?? payload.HALFTREND ?? payload.Halftrend ?? payload.half_trend ?? payload.HALF_TREND ?? payload.Half_Trend ?? payload["Half Trend HT"]),
-        // 15. RSI
         rsi: parseNumeric(payload.rsi ?? payload.RSI ?? payload.Rsi),
-        // 16. RSI SCALED - make.com uses "RSI_Scaled"
         rsiScaled: parseNumeric(payload.RSI_Scaled ?? payload.rsi_scaled ?? payload.RSI_SCALED ?? payload.Rsi_Scaled ?? payload.rsiScaled ?? payload["RSI Scaled"]),
-        // 17. ALERT SYSTEM
         alertSystem: payload.alert_system || payload.alertSystem || payload.ALERT_SYSTEM || payload.Alert_System,
-        // 18. ACTION BINARY (ACTION TYPE)
         actionBinary: parseNumeric(payload.action_binary ?? payload.ACTION_BINARY ?? payload.Action_Binary ?? payload.actionBinary ?? payload.action_type ?? payload.ACTION_TYPE ?? payload.Action_Type),
-        // 19. LOCK STATE - make.com uses "Lock State" (with space!)
         lockState: payload["Lock State"] || payload.lock_state || payload.lockState || payload.LOCK_STATE || payload.Lock_State,
       };
+      timing.parse_ms = Date.now() - t1;
 
-      // Log the webhook call
-      logData.executionTime = Date.now() - startTime;
-      await storage.createWebhookLog(logData);
-
-      // Resolve signal via actionMapper from linked strategy config
-      const linkedConfigForMapper = await (async () => {
-        const allConfigs = await storage.getStrategyConfigs();
-        return allConfigs.find((c) => c.webhookId === webhookId) || null;
-      })();
-
-      const { resolveSignalFromActionMapper } = await import("./paper-trade-engine");
-      const { signalType, blockType: directBlockType } = resolveSignalFromActionMapper(logData, linkedConfigForMapper?.actionMapper);
-
-      // Store webhook data for strategy access
-      await storage.createWebhookData({
-        webhookId,
-        strategyId: webhook.strategyId || undefined,
-        webhookName: webhook.name,
-        receivedAt: new Date().toISOString(),
-        rawPayload: JSON.stringify(payload),
-        timeUnix: logData.timeUnix,
-        exchange: logData.exchange,
-        indices: logData.indices,
-        indicator: logData.indicator,
-        alert: logData.alert,
-        price: logData.price,
-        localTime: logData.localTime,
-        mode: logData.mode,
-        modeDesc: logData.modeDesc,
-        firstLine: logData.firstLine,
-        midLine: logData.midLine,
-        slowLine: logData.slowLine,
-        st: logData.st,
-        ht: logData.ht,
-        rsi: logData.rsi,
-        rsiScaled: logData.rsiScaled,
-        alertSystem: logData.alertSystem,
-        actionBinary: logData.actionBinary,
-        lockState: logData.lockState,
-        signalType,
-        isProcessed: false,
-      });
-
-      // Update webhook trigger count
-      await storage.updateWebhook(webhookId, {
-        lastTriggered: new Date().toISOString(),
-        totalTriggers: (webhook.totalTriggers || 0) + 1,
-      });
-
-      let paperTradeResults: any[] = [];
-      const strategyConfigId = linkedConfigForMapper?.id || webhook.strategyId || null;
-      if (strategyConfigId && (signalType === "buy" || signalType === "sell")) {
-        try {
-          const { processPaperTrade } = await import("./paper-trade-engine");
-          const latestData = await storage.getLatestWebhookData(webhookId);
-          if (latestData) {
-            paperTradeResults = await processPaperTrade(storage, latestData, strategyConfigId, {
-              blockType: directBlockType,
-              parentExchange: linkedConfigForMapper?.exchange,
-              parentTicker: linkedConfigForMapper?.ticker,
-            });
-            console.log("Paper trade results:", JSON.stringify(paperTradeResults));
-          }
-        } catch (ptError) {
-          console.error("Paper trade processing error:", ptError);
-        }
+      // 3. Resolve signal via actionMapper (cache-first config lookup)
+      const t2 = Date.now();
+      let linkedConfig = tradingCache.getConfigByWebhookId(webhookId);
+      if (linkedConfig === undefined) {
+        linkedConfig = (await storage.getStrategyConfigByWebhookId(webhookId)) || null;
+        tradingCache.setConfigByWebhookId(webhookId, linkedConfig);
       }
 
+      const { signalType, blockType: directBlockType } = resolveSignalFromActionMapper(parsedData, linkedConfig?.actionMapper);
+      timing.signal_resolve_ms = Date.now() - t2;
+
+      // 4. Execute trade (the critical path - all brokers: Paper Trade, Kotak Neo, Binance)
+      const t3 = Date.now();
+      let tradeResults: any[] = [];
+      const strategyConfigId = linkedConfig?.id || webhook.strategyId || null;
+
+      if (strategyConfigId && (signalType === "buy" || signalType === "sell")) {
+        const webhookDataForTrade = {
+          id: "",
+          webhookId,
+          strategyId: webhook.strategyId || null,
+          webhookName: webhook.name,
+          receivedAt: new Date().toISOString(),
+          rawPayload: JSON.stringify(payload),
+          ...parsedData,
+          signalType,
+          isProcessed: false,
+          processedAt: null,
+        };
+
+        try {
+          tradeResults = await processTradeSignal(storage, webhookDataForTrade as any, strategyConfigId, {
+            blockType: directBlockType,
+            parentExchange: linkedConfig?.exchange,
+            parentTicker: linkedConfig?.ticker,
+          });
+        } catch (ptError) {
+          console.error("Trade execution error:", ptError);
+          tradeResults = [{ success: false, action: "error", message: String(ptError) }];
+        }
+      }
+      timing.trade_execute_ms = Date.now() - t3;
+      timing.total_hot_path_ms = Date.now() - t0;
+
+      // === RESPOND IMMEDIATELY ===
       res.json({ 
         success: true, 
         message: "Webhook processed successfully",
-        action: logData.actionBinary === 1 ? "BUY" : logData.actionBinary === 0 ? "SELL" : "UNKNOWN",
+        action: parsedData.actionBinary === 1 ? "BUY" : parsedData.actionBinary === 0 ? "SELL" : "UNKNOWN",
         signal: signalType,
-        paperTrades: paperTradeResults.length > 0 ? paperTradeResults : undefined,
-      });
-    } catch (error) {
-      console.error("Webhook processing error:", error);
-      
-      // Log the failed webhook
-      await storage.createWebhookLog({
-        webhookId,
-        timestamp: new Date().toISOString(),
-        payload: JSON.stringify(req.body),
-        status: "failed",
-        response: String(error),
-        executionTime: Date.now() - startTime,
+        trades: tradeResults.length > 0 ? tradeResults : undefined,
+        timing,
       });
 
-      res.status(500).json({ error: "Webhook processing failed" });
+      // === COLD PATH: Fire-and-forget after response (logging, data storage, counters) ===
+      const ipAddress = (req.headers["x-forwarded-for"] as string)?.split(",")[0] || req.socket.remoteAddress || null;
+      const userAgent = req.headers["user-agent"] || null;
+
+      setImmediate(async () => {
+        try {
+          const coldStart = Date.now();
+
+          await Promise.all([
+            storage.createWebhookLog({
+              webhookId,
+              timestamp: new Date().toISOString(),
+              payload: JSON.stringify(payload),
+              status: "success",
+              response: "Alert received and processed",
+              executionTime: timing.total_hot_path_ms,
+              ipAddress,
+              userAgent,
+              ...parsedData,
+            }),
+
+            storage.createWebhookData({
+              webhookId,
+              strategyId: webhook.strategyId || undefined,
+              webhookName: webhook.name,
+              receivedAt: new Date().toISOString(),
+              rawPayload: JSON.stringify(payload),
+              ...parsedData,
+              signalType,
+              isProcessed: tradeResults.some(r => r.success),
+            }),
+
+            storage.updateWebhook(webhookId, {
+              lastTriggered: new Date().toISOString(),
+              totalTriggers: (webhook.totalTriggers || 0) + 1,
+            }),
+          ]);
+
+          tradingCache.invalidateWebhook(webhookId);
+
+          console.log(`[WEBHOOK ${webhookId}] HOT: ${timing.total_hot_path_ms}ms | COLD: ${Date.now() - coldStart}ms | Signal: ${signalType} | Trades: ${tradeResults.length} | Timing: ${JSON.stringify(timing)}`);
+        } catch (coldErr) {
+          console.error("Cold path error (non-blocking):", coldErr);
+        }
+      });
+
+    } catch (error) {
+      console.error("Webhook processing error:", error);
+      timing.total_ms = Date.now() - t0;
+      
+      setImmediate(async () => {
+        try {
+          await storage.createWebhookLog({
+            webhookId,
+            timestamp: new Date().toISOString(),
+            payload: JSON.stringify(req.body),
+            status: "failed",
+            response: String(error),
+            executionTime: timing.total_ms,
+          });
+        } catch (logErr) {
+          console.error("Failed to log webhook error:", logErr);
+        }
+      });
+
+      res.status(500).json({ error: "Webhook processing failed", timing });
     }
   });
 
@@ -993,8 +1003,7 @@ export async function registerRoutes(
         processedProdIds.add(`${d.timeUnix || 0}_${d.price || 0}_${d.alert || ""}`);
       });
 
-      const allConfigs = await storage.getStrategyConfigs();
-      const strategyConfig = allConfigs.find((c) => c.webhookId === webhookId);
+      const strategyConfig = await storage.getStrategyConfigByWebhookId(webhookId);
       if (!strategyConfig) {
         return res.json({ processed: 0, message: "No strategy config linked to this webhook" });
       }
@@ -1020,7 +1029,6 @@ export async function registerRoutes(
       }
 
       const results: any[] = [];
-      const { processPaperTrade, resolveSignalFromActionMapper } = await import("./paper-trade-engine");
 
       for (const signal of newSignals) {
         const { signalType, blockType } = resolveSignalFromActionMapper(signal, strategyConfig.actionMapper);
@@ -1065,10 +1073,10 @@ export async function registerRoutes(
         });
 
         try {
-          const ptResults = await processPaperTrade(storage, localEntry, strategyConfig.id, { blockType, parentExchange: strategyConfig.exchange, parentTicker: strategyConfig.ticker });
-          results.push({ signal: signalType, blockType, price: signal.price, time: signal.localTime, trades: ptResults });
+          const tradeResults = await processTradeSignal(storage, localEntry, strategyConfig.id, { blockType, parentExchange: strategyConfig.exchange, parentTicker: strategyConfig.ticker });
+          results.push({ signal: signalType, blockType, price: signal.price, time: signal.localTime, trades: tradeResults });
         } catch (ptErr) {
-          console.error("Paper trade error for signal:", ptErr);
+          console.error("Trade execution error for signal:", ptErr);
           results.push({ signal: signalType, price: signal.price, error: String(ptErr) });
         }
       }
@@ -1465,6 +1473,7 @@ export async function registerRoutes(
       if (!config) {
         return res.status(404).json({ error: "Broker config not found" });
       }
+      tradingCache.invalidateBrokerConfig(req.params.id);
       res.json(config);
     } catch (error) {
       res.status(500).json({ error: "Failed to update broker config" });
@@ -1895,6 +1904,7 @@ export async function registerRoutes(
         if (!isNaN(pt) && pt >= 0) updateData.deployProfitTarget = pt;
       }
       const updated = await storage.updateStrategyPlan(id, updateData as any);
+      if (updated?.configId) tradingCache.invalidatePlans(updated.configId);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: "Failed to update deployment status" });

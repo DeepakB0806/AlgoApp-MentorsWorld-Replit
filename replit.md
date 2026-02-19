@@ -59,11 +59,19 @@ Inspired by Tradetron (tradetron.tech), a popular Indian algo trading marketplac
 **Priority**: Items 1-2 (UI refresh) are lower effort and can be tackled first. Items 3-6 (core features) are major undertakings requiring significant backend work. Items 7-10 are longer-term enhancements.
 
 ### Signal Processing Pipeline (Feb 2026)
-- **ActionMapper Resolution**: Mother Config's `actionMapper` is now actively consulted during signal processing. The shared `resolveSignalFromActionMapper()` function in `paper-trade-engine.ts` maps webhook field values (e.g., `alert` field) against configured ENTRY/EXIT/HOLD actions to determine correct `signalType` (buy/sell/hold) and `blockType` (uptrendLegs/downtrendLegs/neutralLegs). Falls back to `actionBinary` (1=buy, 0=sell) when no mapper match found.
-- **Both Processing Paths**: Both the direct webhook receiver (`POST /api/webhook/:id`) and production signal processor (`POST /api/process-production-signals/:webhookId`) use the same shared resolver.
-- **Exchange/Ticker Inheritance Chain**: Paper trade engine fallback order: webhook data → plan fields → Mother Config fields → defaults ("PAPER"/"UNKNOWN"). Passed via `SignalContext` interface.
+- **ActionMapper Resolution**: Mother Config's `actionMapper` is now actively consulted during signal processing. The shared `resolveSignalFromActionMapper()` function in `trade-engine.ts` maps webhook field values (e.g., `alert` field) against configured ENTRY/EXIT/HOLD actions to determine correct `signalType` (buy/sell/hold) and `blockType` (uptrendLegs/downtrendLegs/neutralLegs). Falls back to `actionBinary` (1=buy, 0=sell) when no mapper match found.
+- **Both Processing Paths**: Both the direct webhook receiver (`POST /api/webhook/:id`) and production signal processor (`POST /api/process-production-signals/:webhookId`) use the same shared resolver from `trade-engine.ts`.
+- **Exchange/Ticker Inheritance Chain**: Trade engine fallback order: webhook data → plan fields → Mother Config fields → defaults ("PAPER"/"UNKNOWN"). Passed via `SignalContext` interface.
 - **BlockType Propagation**: Trade records now store the correct `blockType` from the actionMapper instead of hardcoding uptrendLegs/downtrendLegs.
 - **Daily P&L Panel Controls**: Refresh, clear data (1/7/30 days or all), and expand/collapse buttons added to the Daily P&L Log sheet, matching webhook data log and trade tracker patterns.
+
+### Performance Optimization Pipeline (Feb 2026)
+- **Unified Trade Engine** (`server/trade-engine.ts`): Single execution engine routing signals to Paper Trade, Kotak Neo, or Binance brokers with parallel execution via `Promise.allSettled`. Replaces fragmented paper-trade-engine approach. Exchange mapping: NSE→nse_cm, BSE→bse_cm, NFO→nse_fo, BFO→bse_fo, MCX→mcx_fo, CDS→cds_fo.
+- **In-Memory Cache Layer** (`server/cache.ts`): TTL-based cache for webhooks, strategy configs, broker configs, active plans (2-min TTL for hot data, 5-min for broker sessions, 10s for open trades). Cache pre-warms on server start. Invalidation hooks on all mutation routes (config update, plan create/update/delete, broker config update).
+- **Hot Path / Cold Path Separation**: Webhook handler split into: HOT PATH (validate → resolve signal → execute trade → respond immediately) then COLD PATH (logging, data storage, webhook counters deferred via `setImmediate`). Response includes timing breakdown (`webhook_lookup_ms`, `parse_ms`, `signal_resolve_ms`, `trade_execute_ms`, `total_hot_path_ms`).
+- **Database Indexes**: Foreign key indexes on `plan_id`, `webhook_id`, `config_id`, `broker_config_id` columns to eliminate full table scans on hot path.
+- **Optimized Storage Methods**: `getStrategyConfigByWebhookId()` for direct lookup (eliminates N+1 pattern), `getOpenTradesByPlan()` for trade status queries.
+- **Target Latency**: Sub-30ms webhook-to-execution for cached paths (Paper Trade: ~1-5ms, Kotak Neo: bounded by API round-trip ~15-50ms).
 
 ## External Dependencies
 

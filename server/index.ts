@@ -5,6 +5,7 @@ import { createServer } from "http";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import cookieParser from "cookie-parser";
 import { storage } from "./storage";
+import { tradingCache } from "./cache";
 
 const app = express();
 const httpServer = createServer(app);
@@ -70,6 +71,8 @@ app.use((req, res, next) => {
   registerAuthRoutes(app);
   
   await registerRoutes(httpServer, app);
+
+  tradingCache.warmUp(storage).catch(err => log(`Cache warm-up error: ${err}`));
 
   // Auto-cleanup old webhook logs (older than 30 days) on startup
   try {

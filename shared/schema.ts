@@ -1,4 +1,4 @@
-import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -118,7 +118,9 @@ export const strategyConfigs = pgTable("strategy_configs", {
   createdBy: varchar("created_by", { length: 36 }),
   createdAt: text("created_at"),
   updatedAt: text("updated_at"),
-});
+}, (table) => [
+  index("idx_strategy_configs_webhook_id").on(table.webhookId),
+]);
 
 export const insertStrategyConfigSchema = createInsertSchema(strategyConfigs).omit({ id: true });
 export type InsertStrategyConfig = z.infer<typeof insertStrategyConfigSchema>;
@@ -146,7 +148,11 @@ export const strategyPlans = pgTable("strategy_plans", {
   createdBy: varchar("created_by", { length: 36 }),
   createdAt: text("created_at"),
   updatedAt: text("updated_at"),
-});
+}, (table) => [
+  index("idx_strategy_plans_config_id").on(table.configId),
+  index("idx_strategy_plans_broker_config_id").on(table.brokerConfigId),
+  index("idx_strategy_plans_deployment_status").on(table.deploymentStatus),
+]);
 
 export const insertStrategyPlanSchema = createInsertSchema(strategyPlans).omit({ id: true });
 export type InsertStrategyPlan = z.infer<typeof insertStrategyPlanSchema>;
@@ -183,7 +189,11 @@ export const strategyTrades = pgTable("strategy_trades", {
   localTime: text("local_time"),
   mode: text("mode"),
   modeDesc: text("mode_desc"),
-});
+}, (table) => [
+  index("idx_strategy_trades_plan_id").on(table.planId),
+  index("idx_strategy_trades_status").on(table.status),
+  index("idx_strategy_trades_plan_status").on(table.planId, table.status),
+]);
 
 export const insertStrategyTradeSchema = createInsertSchema(strategyTrades).omit({ id: true });
 export type InsertStrategyTrade = z.infer<typeof insertStrategyTradeSchema>;
@@ -201,7 +211,10 @@ export const strategyDailyPnl = pgTable("strategy_daily_pnl", {
   closedTrades: integer("closed_trades").default(0),
   status: text("status").notNull().default("active"),
   createdAt: text("created_at"),
-});
+}, (table) => [
+  index("idx_strategy_daily_pnl_plan_id").on(table.planId),
+  index("idx_strategy_daily_pnl_plan_date").on(table.planId, table.date),
+]);
 
 export const insertStrategyDailyPnlSchema = createInsertSchema(strategyDailyPnl).omit({ id: true });
 export type InsertStrategyDailyPnl = z.infer<typeof insertStrategyDailyPnlSchema>;
@@ -312,7 +325,9 @@ export const webhookLogs = pgTable("webhook_logs", {
   alertSystem: text("alert_system"),
   actionBinary: integer("action_binary"), // 1 = BUY, 0 = SELL
   lockState: text("lock_state"),
-});
+}, (table) => [
+  index("idx_webhook_logs_webhook_id").on(table.webhookId),
+]);
 
 export const insertWebhookLogSchema = createInsertSchema(webhookLogs).omit({ id: true });
 export type InsertWebhookLog = z.infer<typeof insertWebhookLogSchema>;
@@ -371,7 +386,10 @@ export const webhookData = pgTable("webhook_data", {
   signalType: text("signal_type"), // "buy", "sell", "hold"
   isProcessed: boolean("is_processed").default(false),
   processedAt: text("processed_at"),
-});
+}, (table) => [
+  index("idx_webhook_data_webhook_id").on(table.webhookId),
+  index("idx_webhook_data_strategy_id").on(table.strategyId),
+]);
 
 export const insertWebhookDataSchema = createInsertSchema(webhookData).omit({ id: true });
 export type InsertWebhookData = z.infer<typeof insertWebhookDataSchema>;

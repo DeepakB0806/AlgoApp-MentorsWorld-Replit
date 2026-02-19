@@ -106,6 +106,7 @@ export interface IStorage {
   // Strategy Configs (Mother Configurator) - persisted in database
   getStrategyConfigs(): Promise<StrategyConfig[]>;
   getStrategyConfig(id: string): Promise<StrategyConfig | undefined>;
+  getStrategyConfigByWebhookId(webhookId: string): Promise<StrategyConfig | undefined>;
   createStrategyConfig(config: InsertStrategyConfig): Promise<StrategyConfig>;
   updateStrategyConfig(id: string, config: Partial<InsertStrategyConfig>): Promise<StrategyConfig | undefined>;
   deleteStrategyConfig(id: string): Promise<boolean>;
@@ -120,6 +121,7 @@ export interface IStorage {
 
   // Strategy Trades - records trades executed by strategy plans
   getStrategyTradesByPlan(planId: string): Promise<StrategyTrade[]>;
+  getOpenTradesByPlan(planId: string): Promise<StrategyTrade[]>;
   createStrategyTrade(trade: InsertStrategyTrade): Promise<StrategyTrade>;
   updateStrategyTrade(id: string, trade: Partial<InsertStrategyTrade>): Promise<StrategyTrade | undefined>;
   deleteStrategyTradesByPlan(planId: string, olderThanDays?: number): Promise<number>;
@@ -712,6 +714,11 @@ export class DatabaseStorage implements IStorage {
     return config || undefined;
   }
 
+  async getStrategyConfigByWebhookId(webhookId: string): Promise<StrategyConfig | undefined> {
+    const [config] = await db.select().from(strategyConfigs).where(eq(strategyConfigs.webhookId, webhookId));
+    return config || undefined;
+  }
+
   async createStrategyConfig(insertConfig: InsertStrategyConfig): Promise<StrategyConfig> {
     const id = randomUUID();
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -799,6 +806,14 @@ export class DatabaseStorage implements IStorage {
 
   async getStrategyTradesByPlan(planId: string): Promise<StrategyTrade[]> {
     return await db.select().from(strategyTrades).where(eq(strategyTrades.planId, planId)).orderBy(desc(strategyTrades.createdAt));
+  }
+
+  async getOpenTradesByPlan(planId: string): Promise<StrategyTrade[]> {
+    return await db.select().from(strategyTrades)
+      .where(and(
+        eq(strategyTrades.planId, planId),
+        eq(strategyTrades.status, "open")
+      ));
   }
 
   async createStrategyTrade(trade: InsertStrategyTrade): Promise<StrategyTrade> {
