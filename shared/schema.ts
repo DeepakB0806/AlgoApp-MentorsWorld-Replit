@@ -82,6 +82,10 @@ export type TimeLogicConfig = {
   exitTime: string;
   exitOnExpiry: boolean;
   exitAfterDays: number;
+  expiryType?: "weekly" | "monthly" | "custom";
+  weeklyStartDay?: string;
+  weeklyEndDay?: string;
+  monthStartDate?: number;
 };
 
 export type TradeParams = {
@@ -110,6 +114,7 @@ export const strategyConfigs = pgTable("strategy_configs", {
   downtrendBlock: text("downtrend_block"),
   neutralBlock: text("neutral_block"),
   status: text("status").notNull().default("draft"),
+  configVersion: integer("config_version").notNull().default(1),
   createdBy: varchar("created_by", { length: 36 }),
   createdAt: text("created_at"),
   updatedAt: text("updated_at"),
@@ -128,8 +133,11 @@ export const strategyPlans = pgTable("strategy_plans", {
   configId: varchar("config_id", { length: 36 }).notNull(),
   selectedIndicators: text("selected_indicators").array(),
   tradeParams: text("trade_params"),
+  exchange: text("exchange"),
+  ticker: text("ticker"),
   status: text("status").notNull().default("draft"),
   deploymentStatus: text("deployment_status").notNull().default("draft"),
+  deployedConfigVersion: integer("deployed_config_version"),
   brokerConfigId: varchar("broker_config_id", { length: 36 }),
   isProxyMode: boolean("is_proxy_mode").default(false),
   lotMultiplier: integer("lot_multiplier").default(1),

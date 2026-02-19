@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Home, Plus, Trash2, Edit, Settings, Link2, Loader2, X, Save, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, TrendingDown, Activity, ChevronDown, ChevronUp, BarChart3 } from "lucide-react";
+import { Home, Plus, Trash2, Edit, Settings, Link2, Loader2, X, Save, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, TrendingDown, Activity, ChevronDown, ChevronUp, BarChart3, Archive, AlertTriangle } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -669,6 +669,8 @@ function TradePlanning() {
   const [configId, setConfigId] = useState("");
   const [planIndicators, setPlanIndicators] = useState<string[]>([]);
   const [planStatus, setPlanStatus] = useState("draft");
+  const [planExchange, setPlanExchange] = useState("");
+  const [planTicker, setPlanTicker] = useState("");
   const [uptrendLegs, setUptrendLegs] = useState<PlanTradeLeg[]>([]);
   const [downtrendLegs, setDowntrendLegs] = useState<PlanTradeLeg[]>([]);
   const [neutralLegs, setNeutralLegs] = useState<PlanTradeLeg[]>([]);
@@ -697,8 +699,26 @@ function TradePlanning() {
   useEffect(() => {
     if (selectedConfig && !editingPlan) {
       setPlanIndicators(selectedConfig.indicators || []);
+      if (!planExchange) setPlanExchange((selectedConfig as any).exchange || "");
+      if (!planTicker) setPlanTicker((selectedConfig as any).ticker || "");
     }
   }, [selectedConfig, editingPlan]);
+
+  useEffect(() => {
+    if (!timeLogic.exitOnExpiry) return;
+    const expType = timeLogic.expiryType || "weekly";
+    if (expType === "weekly") {
+      const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+      const startIdx = days.indexOf(timeLogic.weeklyStartDay || "Monday");
+      const endIdx = days.indexOf(timeLogic.weeklyEndDay || "Thursday");
+      if (startIdx >= 0 && endIdx >= 0) {
+        const span = endIdx >= startIdx ? endIdx - startIdx : 5 - startIdx + endIdx;
+        setTimeLogic((s) => ({ ...s, exitAfterDays: span }));
+      }
+    } else if (expType === "monthly") {
+      setTimeLogic((s) => ({ ...s, exitAfterDays: 30 }));
+    }
+  }, [timeLogic.exitOnExpiry, timeLogic.expiryType, timeLogic.weeklyStartDay, timeLogic.weeklyEndDay, timeLogic.monthStartDate]);
 
   const createMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -749,6 +769,8 @@ function TradePlanning() {
     setConfigId("");
     setPlanIndicators([]);
     setPlanStatus("draft");
+    setPlanExchange("");
+    setPlanTicker("");
     setUptrendLegs([]);
     setDowntrendLegs([]);
     setNeutralLegs([]);
@@ -765,6 +787,8 @@ function TradePlanning() {
     setConfigId(plan.configId);
     setPlanIndicators(plan.selectedIndicators || []);
     setPlanStatus(plan.status);
+    setPlanExchange(plan.exchange || "");
+    setPlanTicker(plan.ticker || "");
     const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [], uptrendLegs: [], downtrendLegs: [], neutralLegs: [] });
     setUptrendLegs(tp.uptrendLegs || tp.legs || []);
     setDowntrendLegs(tp.downtrendLegs || []);
@@ -792,6 +816,8 @@ function TradePlanning() {
       selectedIndicators: planIndicators,
       tradeParams: JSON.stringify({ legs: [], uptrendLegs, downtrendLegs, neutralLegs, stoploss, profitTarget, trailingSL, timeLogic }),
       status: planStatus,
+      exchange: planExchange || null,
+      ticker: planTicker || null,
     };
     if (editingPlan) {
       updateMutation.mutate({ id: editingPlan.id, data: payload });
@@ -889,6 +915,33 @@ function TradePlanning() {
                   <SelectItem value="paused">Paused</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Exchange</Label>
+                <Select value={planExchange} onValueChange={setPlanExchange}>
+                  <SelectTrigger data-testid="select-plan-exchange">
+                    <SelectValue placeholder="Select exchange" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NSE">NSE</SelectItem>
+                    <SelectItem value="BSE">BSE</SelectItem>
+                    <SelectItem value="NFO">NFO</SelectItem>
+                    <SelectItem value="BFO">BFO</SelectItem>
+                    <SelectItem value="MCX">MCX</SelectItem>
+                    <SelectItem value="CDS">CDS</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Ticker / Symbol</Label>
+                <Input
+                  value={planTicker}
+                  onChange={(e) => setPlanTicker(e.target.value.toUpperCase())}
+                  placeholder="e.g. NIFTY, BANKNIFTY, RELIANCE"
+                  data-testid="input-plan-ticker"
+                />
+              </div>
             </div>
             {selectedConfig && selectedConfig.indicators && selectedConfig.indicators.length > 0 && (
               <div>
@@ -1160,13 +1213,19 @@ function TradePlanning() {
                       />
                     </div>
                     <div>
-                      <Label className="text-xs text-muted-foreground">Exit After Entry + Days</Label>
+                      <Label className="text-xs text-muted-foreground">
+                        Exit After Entry + Days
+                        {timeLogic.exitOnExpiry && timeLogic.expiryType !== "custom" && (
+                          <span className="text-amber-400 ml-1">(auto)</span>
+                        )}
+                      </Label>
                       <Input
                         type="number"
                         min={0}
                         value={timeLogic.exitAfterDays || ""}
                         onChange={(e) => setTimeLogic((s) => ({ ...s, exitAfterDays: parseInt(e.target.value) || 0 }))}
                         placeholder="e.g. 3"
+                        disabled={timeLogic.exitOnExpiry && timeLogic.expiryType !== "custom"}
                         data-testid="input-exit-after-days"
                       />
                     </div>
@@ -1179,6 +1238,70 @@ function TradePlanning() {
                       data-testid="switch-exit-on-expiry"
                     />
                   </div>
+                  {timeLogic.exitOnExpiry && (
+                    <div className="space-y-3 pl-2 border-l-2 border-amber-500/30">
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Expiry Type</Label>
+                        <Select value={timeLogic.expiryType || "weekly"} onValueChange={(v) => setTimeLogic((s) => ({ ...s, expiryType: v as TimeLogicConfig["expiryType"] }))}>
+                          <SelectTrigger data-testid="select-expiry-type">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="weekly">Weekly</SelectItem>
+                            <SelectItem value="monthly">Monthly</SelectItem>
+                            <SelectItem value="custom">Custom</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {(timeLogic.expiryType === "weekly" || !timeLogic.expiryType) && (
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Start Day</Label>
+                            <Select value={timeLogic.weeklyStartDay || "Monday"} onValueChange={(v) => setTimeLogic((s) => ({ ...s, weeklyStartDay: v }))}>
+                              <SelectTrigger data-testid="select-weekly-start-day">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((d) => (
+                                  <SelectItem key={d} value={d}>{d}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground">End Day (Expiry)</Label>
+                            <Select value={timeLogic.weeklyEndDay || "Thursday"} onValueChange={(v) => setTimeLogic((s) => ({ ...s, weeklyEndDay: v }))}>
+                              <SelectTrigger data-testid="select-weekly-end-day">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((d) => (
+                                  <SelectItem key={d} value={d}>{d}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      )}
+                      {timeLogic.expiryType === "monthly" && (
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Month Start Date</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={31}
+                            value={timeLogic.monthStartDate || ""}
+                            onChange={(e) => setTimeLogic((s) => ({ ...s, monthStartDate: parseInt(e.target.value) || undefined }))}
+                            placeholder="e.g. 1 (last Thursday of month is expiry)"
+                            data-testid="input-month-start-date"
+                          />
+                        </div>
+                      )}
+                      {timeLogic.expiryType === "custom" && (
+                        <p className="text-xs text-muted-foreground">Custom expiry: manual entry or open-ended. Suitable for Crypto/Forex markets.</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1231,6 +1354,8 @@ function TradePlanning() {
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
                       Config: <span data-testid={`text-plan-config-${plan.id}`}>{getConfigName(plan.configId)}</span>
+                      {plan.exchange && <span className="ml-2">{plan.exchange}</span>}
+                      {plan.ticker && <span className="ml-1">/ {plan.ticker}</span>}
                     </p>
                   </div>
                   <div className="flex items-center gap-1">
@@ -1333,6 +1458,7 @@ const DEPLOYMENT_STATUS_CONFIG: Record<string, { label: string; color: string; i
   paused: { label: "Paused", color: "text-amber-400", icon: Pause },
   squared_off: { label: "Squared Off", color: "text-red-400", icon: Square },
   closed: { label: "Closed", color: "text-muted-foreground", icon: Power },
+  archived: { label: "Archived", color: "text-purple-400", icon: Archive },
 };
 
 function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: StrategyPlan; brokerConfigs: BrokerConfig[]; parentConfig?: StrategyConfig }) {
@@ -1799,7 +1925,12 @@ function BrokerLinking() {
         ];
       case "closed":
         return [
-          { action: "deployed", label: "Redeploy", icon: Rocket, variant: "default" },
+          { action: "archived", label: "Archive", icon: Archive, variant: "outline" },
+          { action: "deployed", label: "Re-deploy", icon: Rocket, variant: "default" },
+        ];
+      case "archived":
+        return [
+          { action: "deployed", label: "Re-deploy", icon: Rocket, variant: "default" },
         ];
       default:
         return [];
@@ -1856,7 +1987,25 @@ function BrokerLinking() {
                       </Badge>
                     )}
                   </CardTitle>
-                  <p className="text-xs text-muted-foreground">Config: {getConfigName(plan.configId)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Config: {getConfigName(plan.configId)}
+                    {plan.exchange && <span className="ml-2">{plan.exchange}</span>}
+                    {plan.ticker && <span className="ml-1">/ {plan.ticker}</span>}
+                  </p>
+                  {isDeployed && (() => {
+                    const parentCfg = configs.find((c) => c.id === plan.configId);
+                    const parentVersion = parentCfg?.configVersion || 1;
+                    const deployedVersion = plan.deployedConfigVersion || 1;
+                    if (parentVersion > deployedVersion) {
+                      return (
+                        <div className="flex items-center gap-1 mt-1" data-testid={`badge-new-version-${plan.id}`}>
+                          <AlertTriangle className="w-3 h-3 text-amber-400" />
+                          <span className="text-xs text-amber-400 font-medium">New Version Available (v{parentVersion}) — Archive & Re-deploy to update</span>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                   {isDeployed && (() => {
                     const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] });
                     const effectiveSL = plan.deployStoploss ?? (tp.stoploss?.enabled ? tp.stoploss.value : null);
@@ -2165,7 +2314,8 @@ function BrokerLinking() {
                 {confirmAction.action === "active" && "Are you sure you want to activate this strategy? It will begin executing trades based on incoming signals."}
                 {confirmAction.action === "paused" && "Are you sure you want to pause this strategy? Open positions will remain, but no new trades will be executed."}
                 {confirmAction.action === "squared_off" && "Are you sure you want to square off? This will close all open positions for this strategy."}
-                {confirmAction.action === "closed" && "Are you sure you want to close this strategy? This will deactivate it completely. You can redeploy it later."}
+                {confirmAction.action === "closed" && "Are you sure you want to close this strategy? This will deactivate it completely. You can archive or re-deploy it later."}
+                {confirmAction.action === "archived" && "Are you sure you want to archive this strategy? Your P&L history will be preserved. You can re-deploy it later to use updated features."}
               </p>
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" onClick={() => setConfirmAction(null)} data-testid="button-cancel-deployment">

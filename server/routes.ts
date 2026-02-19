@@ -234,7 +234,12 @@ export async function registerRoutes(
       if (!parsed.success) {
         return res.status(400).json({ error: "Invalid strategy config data", details: parsed.error });
       }
-      const config = await storage.updateStrategyConfig(req.params.id, parsed.data);
+      const existing = await storage.getStrategyConfig(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Strategy config not found" });
+      }
+      const updateData = { ...parsed.data, configVersion: (existing.configVersion || 1) + 1 };
+      const config = await storage.updateStrategyConfig(req.params.id, updateData);
       if (!config) {
         return res.status(404).json({ error: "Strategy config not found" });
       }
@@ -1572,7 +1577,7 @@ export async function registerRoutes(
     try {
       const { id } = req.params;
       const { deploymentStatus } = req.body;
-      const validStatuses = ["draft", "deployed", "active", "paused", "squared_off", "closed"];
+      const validStatuses = ["draft", "deployed", "active", "paused", "squared_off", "closed", "archived"];
       if (!validStatuses.includes(deploymentStatus)) {
         return res.status(400).json({ error: `Invalid deployment status. Must be one of: ${validStatuses.join(", ")}` });
       }
@@ -1586,7 +1591,8 @@ export async function registerRoutes(
         active: ["paused", "squared_off", "closed"],
         paused: ["active", "squared_off", "closed"],
         squared_off: ["active", "closed"],
-        closed: ["deployed"],
+        closed: ["archived", "deployed"],
+        archived: ["deployed"],
       };
       const currentStatus = plan.deploymentStatus || "draft";
       const allowed = allowedTransitions[currentStatus] || [];
@@ -1594,6 +1600,12 @@ export async function registerRoutes(
         return res.status(400).json({ error: `Cannot transition from '${currentStatus}' to '${deploymentStatus}'. Allowed: ${allowed.join(", ")}` });
       }
       const updateData: Record<string, unknown> = { deploymentStatus, updatedAt: new Date().toISOString() };
+      if (deploymentStatus === "deployed") {
+        const parentConfig = await storage.getStrategyConfig(plan.configId);
+        if (parentConfig) {
+          updateData.deployedConfigVersion = parentConfig.configVersion || 1;
+        }
+      }
       if (req.body.lotMultiplier !== undefined) {
         const lm = Number(req.body.lotMultiplier);
         if (!isNaN(lm) && lm >= 1 && lm <= 10) updateData.lotMultiplier = Math.round(lm);
