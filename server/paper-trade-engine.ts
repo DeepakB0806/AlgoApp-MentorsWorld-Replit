@@ -152,10 +152,15 @@ async function closePaperTrade(
     ? (exitPrice - entryPrice) * qty
     : (entryPrice - exitPrice) * qty;
 
+  const exitAction = trade.action === "BUY" ? "SELL" : "BUY";
+
   const updated = await storage.updateStrategyTrade(trade.id, {
     status: "closed",
     pnl: Math.round(pnl * 100) / 100,
     ltp: exitPrice,
+    exitPrice,
+    exitAction,
+    exitedAt: now,
     updatedAt: now,
   });
 

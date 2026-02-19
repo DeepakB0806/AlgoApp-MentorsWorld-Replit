@@ -1612,34 +1612,55 @@ function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: Stra
                         <thead>
                           <tr className="border-b border-border/30">
                             <th className="text-left px-2 py-1 text-muted-foreground">Symbol</th>
-                            <th className="text-left px-2 py-1 text-muted-foreground">Action</th>
+                            <th className="text-left px-2 py-1 text-muted-foreground">Entry</th>
+                            <th className="text-left px-2 py-1 text-muted-foreground">Exit</th>
                             <th className="text-right px-2 py-1 text-muted-foreground">Qty</th>
-                            <th className="text-right px-2 py-1 text-muted-foreground">Price</th>
-                            <th className="text-right px-2 py-1 text-muted-foreground">LTP</th>
                             <th className="text-right px-2 py-1 text-muted-foreground">P&L</th>
                             <th className="text-left px-2 py-1 text-muted-foreground">Status</th>
-                            <th className="text-left px-2 py-1 text-muted-foreground">Leg</th>
+                            <th className="text-left px-2 py-1 text-muted-foreground">Time</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {blockTrades.map((trade) => (
-                            <tr key={trade.id} className="border-b border-border/20" data-testid={`row-trade-${trade.id}`}>
-                              <td className="px-2 py-1.5 font-mono font-medium">{trade.tradingSymbol}</td>
-                              <td className="px-2 py-1.5">
-                                <Badge variant={trade.action === "BUY" ? "default" : "destructive"} className="text-xs">{trade.action}</Badge>
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono">{trade.quantity}</td>
-                              <td className="px-2 py-1.5 text-right font-mono">{(trade.price || 0).toFixed(2)}</td>
-                              <td className="px-2 py-1.5 text-right font-mono">{(trade.ltp || 0).toFixed(2)}</td>
-                              <td className={`px-2 py-1.5 text-right font-mono ${(trade.pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                                {(trade.pnl || 0) >= 0 ? "+" : ""}{(trade.pnl || 0).toFixed(2)}
-                              </td>
-                              <td className="px-2 py-1.5">
-                                <Badge variant="outline" className="text-xs">{trade.status}</Badge>
-                              </td>
-                              <td className="px-2 py-1.5 text-xs text-muted-foreground font-mono">L{(trade.legIndex || 0) + 1}</td>
-                            </tr>
-                          ))}
+                          {blockTrades.map((trade) => {
+                            const isClosed = trade.status === "closed" || trade.status === "squared_off";
+                            const entryLabel = trade.action;
+                            const entryPrice = trade.price || 0;
+                            const exitLabel = trade.exitAction || (trade.action === "BUY" ? "SELL" : "BUY");
+                            const exitPriceVal = trade.exitPrice || trade.ltp || 0;
+                            const entryTime = trade.executedAt ? new Date(trade.executedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+                            const exitTime = trade.exitedAt ? new Date(trade.exitedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+                            return (
+                              <tr key={trade.id} className="border-b border-border/20" data-testid={`row-trade-${trade.id}`}>
+                                <td className="px-2 py-1.5 font-mono font-medium">{trade.tradingSymbol}</td>
+                                <td className="px-2 py-1.5">
+                                  <div className="flex items-center gap-1">
+                                    <Badge variant={entryLabel === "BUY" ? "default" : "destructive"} className="text-xs">{entryLabel}</Badge>
+                                    <span className="font-mono">{entryPrice.toFixed(2)}</span>
+                                  </div>
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  {isClosed ? (
+                                    <div className="flex items-center gap-1">
+                                      <Badge variant={exitLabel === "BUY" ? "default" : "destructive"} className="text-xs">{exitLabel}</Badge>
+                                      <span className="font-mono">{exitPriceVal.toFixed(2)}</span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground/60">--</span>
+                                  )}
+                                </td>
+                                <td className="px-2 py-1.5 text-right font-mono">{trade.quantity}</td>
+                                <td className={`px-2 py-1.5 text-right font-mono font-semibold ${(trade.pnl || 0) > 0 ? "text-emerald-400" : (trade.pnl || 0) < 0 ? "text-red-400" : "text-muted-foreground"}`}>
+                                  {isClosed ? (<>{(trade.pnl || 0) >= 0 ? "+" : ""}{(trade.pnl || 0).toFixed(2)}</>) : (<span className="text-muted-foreground/60">--</span>)}
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  <Badge variant="outline" className="text-xs">{trade.status}</Badge>
+                                </td>
+                                <td className="px-2 py-1.5 text-xs text-muted-foreground font-mono">
+                                  {entryTime}{isClosed && exitTime ? ` - ${exitTime}` : ""}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
