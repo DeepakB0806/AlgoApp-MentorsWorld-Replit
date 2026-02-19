@@ -2297,5 +2297,60 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/admin/sync-data", async (req, res) => {
+    try {
+      const syncKey = req.headers["x-sync-key"];
+      if (syncKey !== process.env.SESSION_SECRET) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const { strategyConfigs: configs, strategyPlans: plans, brokerConfigs: brokers } = req.body;
+      const results: any = { configs: [], plans: [], brokers: [] };
+      const { db: database } = await import("./db");
+      const schema = await import("@shared/schema");
+
+      if (brokers && Array.isArray(brokers)) {
+        for (const broker of brokers) {
+          const existing = await storage.getBrokerConfig(broker.id);
+          if (!existing) {
+            const [inserted] = await database.insert(schema.brokerConfigs).values(broker).returning();
+            results.brokers.push({ id: inserted.id, action: "inserted" });
+          } else {
+            results.brokers.push({ id: broker.id, action: "already_exists" });
+          }
+        }
+      }
+
+      if (configs && Array.isArray(configs)) {
+        for (const config of configs) {
+          const existing = await storage.getStrategyConfig(config.id);
+          if (!existing) {
+            const [inserted] = await database.insert(schema.strategyConfigs).values(config).returning();
+            results.configs.push({ id: inserted.id, action: "inserted" });
+          } else {
+            results.configs.push({ id: config.id, action: "already_exists" });
+          }
+        }
+      }
+
+      if (plans && Array.isArray(plans)) {
+        for (const plan of plans) {
+          const existing = await storage.getStrategyPlan(plan.id);
+          if (!existing) {
+            const [inserted] = await database.insert(schema.strategyPlans).values(plan).returning();
+            results.plans.push({ id: inserted.id, action: "inserted" });
+          } else {
+            results.plans.push({ id: plan.id, action: "already_exists" });
+          }
+        }
+      }
+
+      res.json({ success: true, results });
+    } catch (error: any) {
+      console.error("Sync data error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return httpServer;
 }
