@@ -133,6 +133,13 @@ async function executePaperTradeForPlan(
       executedAt: now,
       createdAt: now,
       updatedAt: now,
+      timeUnix: data.timeUnix || null,
+      ticker: data.indices || ticker,
+      indicator: data.indicator || null,
+      alert: data.alert || null,
+      localTime: data.localTime || null,
+      mode: data.mode || null,
+      modeDesc: data.modeDesc || null,
     });
 
     return { success: true, action: "open", trade, message: `Paper BUY: ${quantity} ${ticker} @ ${price} [${resolvedBlockType}]` };
@@ -172,6 +179,13 @@ async function executePaperTradeForPlan(
       executedAt: now,
       createdAt: now,
       updatedAt: now,
+      timeUnix: data.timeUnix || null,
+      ticker: data.indices || ticker,
+      indicator: data.indicator || null,
+      alert: data.alert || null,
+      localTime: data.localTime || null,
+      mode: data.mode || null,
+      modeDesc: data.modeDesc || null,
     });
 
     return { success: true, action: "open", trade, pnl: closePnl, message: `Paper SELL: ${quantity} ${ticker} @ ${price} [${resolvedBlockType}]` };
