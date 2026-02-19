@@ -1916,6 +1916,22 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/strategy-trades/:planId/clear", async (req, res) => {
+    try {
+      const { planId } = req.params;
+      const days = req.query.days;
+      let deletedCount: number;
+      if (days && days !== "all") {
+        deletedCount = await storage.deleteStrategyTradesByPlan(planId, parseInt(days as string));
+      } else {
+        deletedCount = await storage.deleteAllStrategyTradesByPlan(planId);
+      }
+      res.json({ success: true, deletedCount });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to clear strategy trades" });
+    }
+  });
+
   // Strategy Daily P&L log entries
   app.get("/api/strategy-daily-pnl/:planId", async (req, res) => {
     try {
