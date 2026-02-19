@@ -780,8 +780,16 @@ export async function registerRoutes(
       logData.executionTime = Date.now() - startTime;
       await storage.createWebhookLog(logData);
 
+      // Resolve signal via actionMapper from linked strategy config
+      const linkedConfigForMapper = await (async () => {
+        const allConfigs = await storage.getStrategyConfigs();
+        return allConfigs.find((c) => c.webhookId === webhookId) || null;
+      })();
+
+      const { resolveSignalFromActionMapper } = await import("./paper-trade-engine");
+      const { signalType, blockType: directBlockType } = resolveSignalFromActionMapper(logData, linkedConfigForMapper?.actionMapper);
+
       // Store webhook data for strategy access
-      const signalType = logData.actionBinary === 1 ? "buy" : logData.actionBinary === 0 ? "sell" : "hold";
       await storage.createWebhookData({
         webhookId,
         strategyId: webhook.strategyId || undefined,
@@ -818,17 +826,17 @@ export async function registerRoutes(
       });
 
       let paperTradeResults: any[] = [];
-      const strategyConfigId = webhook.strategyId || await (async () => {
-        const allConfigs = await storage.getStrategyConfigs();
-        const match = allConfigs.find((c) => c.webhookId === webhookId);
-        return match?.id || null;
-      })();
+      const strategyConfigId = linkedConfigForMapper?.id || webhook.strategyId || null;
       if (strategyConfigId && (signalType === "buy" || signalType === "sell")) {
         try {
           const { processPaperTrade } = await import("./paper-trade-engine");
           const latestData = await storage.getLatestWebhookData(webhookId);
           if (latestData) {
-            paperTradeResults = await processPaperTrade(storage, latestData, strategyConfigId);
+            paperTradeResults = await processPaperTrade(storage, latestData, strategyConfigId, {
+              blockType: directBlockType,
+              parentExchange: linkedConfigForMapper?.exchange,
+              parentTicker: linkedConfigForMapper?.ticker,
+            });
             console.log("Paper trade results:", JSON.stringify(paperTradeResults));
           }
         } catch (ptError) {
@@ -1012,10 +1020,10 @@ export async function registerRoutes(
       }
 
       const results: any[] = [];
-      const { processPaperTrade } = await import("./paper-trade-engine");
+      const { processPaperTrade, resolveSignalFromActionMapper } = await import("./paper-trade-engine");
 
       for (const signal of newSignals) {
-        const signalType = signal.signalType || (signal.actionBinary === 1 ? "buy" : signal.actionBinary === 0 ? "sell" : "hold");
+        const { signalType, blockType } = resolveSignalFromActionMapper(signal, strategyConfig.actionMapper);
         if (signalType !== "buy" && signalType !== "sell") continue;
 
         let enrichedPayload = signal.rawPayload || "{}";
@@ -1057,8 +1065,8 @@ export async function registerRoutes(
         });
 
         try {
-          const ptResults = await processPaperTrade(storage, localEntry, strategyConfig.id);
-          results.push({ signal: signalType, price: signal.price, time: signal.localTime, trades: ptResults });
+          const ptResults = await processPaperTrade(storage, localEntry, strategyConfig.id, { blockType, parentExchange: strategyConfig.exchange, parentTicker: strategyConfig.ticker });
+          results.push({ signal: signalType, blockType, price: signal.price, time: signal.localTime, trades: ptResults });
         } catch (ptErr) {
           console.error("Paper trade error for signal:", ptErr);
           results.push({ signal: signalType, price: signal.price, error: String(ptErr) });

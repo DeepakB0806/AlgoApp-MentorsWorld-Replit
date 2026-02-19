@@ -58,6 +58,13 @@ Inspired by Tradetron (tradetron.tech), a popular Indian algo trading marketplac
 
 **Priority**: Items 1-2 (UI refresh) are lower effort and can be tackled first. Items 3-6 (core features) are major undertakings requiring significant backend work. Items 7-10 are longer-term enhancements.
 
+### Signal Processing Pipeline (Feb 2026)
+- **ActionMapper Resolution**: Mother Config's `actionMapper` is now actively consulted during signal processing. The shared `resolveSignalFromActionMapper()` function in `paper-trade-engine.ts` maps webhook field values (e.g., `alert` field) against configured ENTRY/EXIT/HOLD actions to determine correct `signalType` (buy/sell/hold) and `blockType` (uptrendLegs/downtrendLegs/neutralLegs). Falls back to `actionBinary` (1=buy, 0=sell) when no mapper match found.
+- **Both Processing Paths**: Both the direct webhook receiver (`POST /api/webhook/:id`) and production signal processor (`POST /api/process-production-signals/:webhookId`) use the same shared resolver.
+- **Exchange/Ticker Inheritance Chain**: Paper trade engine fallback order: webhook data → plan fields → Mother Config fields → defaults ("PAPER"/"UNKNOWN"). Passed via `SignalContext` interface.
+- **BlockType Propagation**: Trade records now store the correct `blockType` from the actionMapper instead of hardcoding uptrendLegs/downtrendLegs.
+- **Daily P&L Panel Controls**: Refresh, clear data (1/7/30 days or all), and expand/collapse buttons added to the Daily P&L Log sheet, matching webhook data log and trade tracker patterns.
+
 ## External Dependencies
 
 - **Kotak Neo Trade API**: Integrated for broker services, including authentication, order management, and fetching trading data (positions, orders, holdings, quotes).

@@ -1,5 +1,5 @@
 import type { IStorage } from "./storage";
-import type { StrategyPlan, StrategyTrade, WebhookData } from "@shared/schema";
+import type { StrategyPlan, StrategyTrade, WebhookData, ActionMapperEntry } from "@shared/schema";
 
 interface PaperTradeResult {
   success: boolean;
@@ -9,10 +9,48 @@ interface PaperTradeResult {
   message: string;
 }
 
+export interface SignalContext {
+  blockType?: string;
+  parentExchange?: string | null;
+  parentTicker?: string | null;
+}
+
+export function resolveSignalFromActionMapper(
+  signalData: Record<string, any>,
+  actionMapperJson: string | null | undefined
+): { signalType: string; blockType: string } {
+  let actionMapper: ActionMapperEntry[] = [];
+  try {
+    actionMapper = JSON.parse(actionMapperJson || "[]");
+  } catch {}
+
+  if (actionMapper.length > 0) {
+    for (const entry of actionMapper) {
+      const fieldKey = entry.fieldKey || "alert";
+      const fieldValue = signalData[fieldKey];
+      if (fieldValue !== undefined && fieldValue !== null && String(fieldValue) === entry.signalValue) {
+        if (entry.uptrend === "ENTRY") return { signalType: "buy", blockType: "uptrendLegs" };
+        if (entry.uptrend === "EXIT") return { signalType: "sell", blockType: "uptrendLegs" };
+        if (entry.downtrend === "ENTRY") return { signalType: "sell", blockType: "downtrendLegs" };
+        if (entry.downtrend === "EXIT") return { signalType: "buy", blockType: "downtrendLegs" };
+        if (entry.neutral === "ENTRY") return { signalType: "hold", blockType: "neutralLegs" };
+        if (entry.neutral === "EXIT") return { signalType: "hold", blockType: "neutralLegs" };
+        if (entry.uptrend === "HOLD" || entry.downtrend === "HOLD" || entry.neutral === "HOLD") {
+          return { signalType: "hold", blockType: "neutralLegs" };
+        }
+      }
+    }
+  }
+
+  const fallbackType = signalData.signalType || (signalData.actionBinary === 1 ? "buy" : signalData.actionBinary === 0 ? "sell" : "hold");
+  return { signalType: fallbackType, blockType: fallbackType === "buy" ? "uptrendLegs" : fallbackType === "sell" ? "downtrendLegs" : "neutralLegs" };
+}
+
 export async function processPaperTrade(
   storage: IStorage,
   webhookDataEntry: WebhookData,
-  strategyConfigId: string
+  strategyConfigId: string,
+  signalContext?: SignalContext
 ): Promise<PaperTradeResult[]> {
   const results: PaperTradeResult[] = [];
 
@@ -31,7 +69,7 @@ export async function processPaperTrade(
       continue;
     }
 
-    const result = await executePaperTradeForPlan(storage, plan, webhookDataEntry);
+    const result = await executePaperTradeForPlan(storage, plan, webhookDataEntry, signalContext);
     results.push(result);
   }
 
@@ -45,12 +83,14 @@ export async function processPaperTrade(
 async function executePaperTradeForPlan(
   storage: IStorage,
   plan: StrategyPlan,
-  data: WebhookData
+  data: WebhookData,
+  signalContext?: SignalContext
 ): Promise<PaperTradeResult> {
   const signalType = data.signalType;
   const price = data.price || 0;
-  const ticker = data.indices || plan.ticker || "UNKNOWN";
-  const exchange = data.exchange || plan.exchange || "PAPER";
+  const ticker = data.indices || plan.ticker || signalContext?.parentTicker || "UNKNOWN";
+  const exchange = data.exchange || plan.exchange || signalContext?.parentExchange || "PAPER";
+  const resolvedBlockType = signalContext?.blockType || (signalType === "buy" ? "uptrendLegs" : signalType === "sell" ? "downtrendLegs" : "neutralLegs");
   const now = new Date().toISOString();
   const today = now.split("T")[0];
   const lotMultiplier = plan.lotMultiplier || 1;
@@ -83,7 +123,7 @@ async function executePaperTradeForPlan(
       quantity,
       price,
       action: "BUY",
-      blockType: "uptrendLegs",
+      blockType: resolvedBlockType,
       legIndex: 0,
       orderType: "MKT",
       productType: "PAPER",
@@ -95,7 +135,7 @@ async function executePaperTradeForPlan(
       updatedAt: now,
     });
 
-    return { success: true, action: "open", trade, message: `Paper BUY: ${quantity} ${ticker} @ ${price}` };
+    return { success: true, action: "open", trade, message: `Paper BUY: ${quantity} ${ticker} @ ${price} [${resolvedBlockType}]` };
   }
 
   if (signalType === "sell") {
@@ -122,7 +162,7 @@ async function executePaperTradeForPlan(
       quantity,
       price,
       action: "SELL",
-      blockType: "downtrendLegs",
+      blockType: resolvedBlockType,
       legIndex: 0,
       orderType: "MKT",
       productType: "PAPER",
@@ -134,7 +174,7 @@ async function executePaperTradeForPlan(
       updatedAt: now,
     });
 
-    return { success: true, action: "open", trade, pnl: closePnl, message: `Paper SELL: ${quantity} ${ticker} @ ${price}` };
+    return { success: true, action: "open", trade, pnl: closePnl, message: `Paper SELL: ${quantity} ${ticker} @ ${price} [${resolvedBlockType}]` };
   }
 
   return { success: false, action: "error", message: `Unknown signal type: ${signalType}` };
