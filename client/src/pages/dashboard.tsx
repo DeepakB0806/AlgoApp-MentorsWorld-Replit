@@ -3,17 +3,15 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TrendingUp, TrendingDown, RefreshCw, Home, Wifi, WifiOff, Search, BarChart3, Activity, Play, Pause, Square, Power, Rocket, Loader2, Clock } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Position, Order, Holding, PortfolioSummary, OrderParams, StrategyPlan, StrategyConfig, BrokerConfig, StrategyTrade } from "@shared/schema";
+import type { Position, Order, Holding, PortfolioSummary, StrategyPlan, StrategyConfig, BrokerConfig, StrategyTrade } from "@shared/schema";
 import { Target } from "lucide-react";
 
 interface BrokerSessionStatus {
@@ -25,16 +23,6 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("positions");
   const [searchPositions, setSearchPositions] = useState("");
   const [searchHoldings, setSearchHoldings] = useState("");
-  const [orderForm, setOrderForm] = useState<OrderParams>({
-    exchange_segment: "nse_cm",
-    product: "CNC",
-    price: "",
-    order_type: "L",
-    quantity: "",
-    validity: "DAY",
-    trading_symbol: "",
-    transaction_type: "B",
-  });
 
   const { data: positions = [], isLoading: positionsLoading, refetch: refetchPositions } = useQuery<Position[]>({
     queryKey: ["/api/positions"],
@@ -179,9 +167,6 @@ export default function Dashboard() {
             </TabsTrigger>
             <TabsTrigger value="orders" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-orders">
               ORDERS <Badge variant="secondary" className="ml-2">{orders.length}</Badge>
-            </TabsTrigger>
-            <TabsTrigger value="place-order" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-place-order">
-              PLACE ORDER
             </TabsTrigger>
             <TabsTrigger value="live-trades" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-live-trades">
               LIVE TRADES <Badge variant="secondary" className="ml-2"><Activity className="w-3 h-3" /></Badge>
@@ -432,143 +417,6 @@ export default function Dashboard() {
                     </TableBody>
                   </Table>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* PLACE ORDER Tab */}
-          <TabsContent value="place-order">
-            <Card>
-              <CardHeader>
-                <CardTitle>Place New Order</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <Label>Trading Symbol</Label>
-                    <Input
-                      value={orderForm.trading_symbol}
-                      onChange={(e) => setOrderForm({ ...orderForm, trading_symbol: e.target.value })}
-                      placeholder="e.g., RELIANCE"
-                      data-testid="input-trading-symbol"
-                    />
-                  </div>
-
-                  <div>
-                    <Label>Exchange</Label>
-                    <Select
-                      value={orderForm.exchange_segment}
-                      onValueChange={(value) => setOrderForm({ ...orderForm, exchange_segment: value })}
-                    >
-                      <SelectTrigger data-testid="select-exchange">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="nse_cm">NSE Cash</SelectItem>
-                        <SelectItem value="bse_cm">BSE Cash</SelectItem>
-                        <SelectItem value="nse_fo">NSE F&O</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label>Transaction Type</Label>
-                    <Select
-                      value={orderForm.transaction_type}
-                      onValueChange={(value) => setOrderForm({ ...orderForm, transaction_type: value })}
-                    >
-                      <SelectTrigger data-testid="select-transaction-type">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="B">Buy</SelectItem>
-                        <SelectItem value="S">Sell</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label>Product Type</Label>
-                    <Select
-                      value={orderForm.product}
-                      onValueChange={(value) => setOrderForm({ ...orderForm, product: value })}
-                    >
-                      <SelectTrigger data-testid="select-product">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="CNC">CNC (Delivery)</SelectItem>
-                        <SelectItem value="MIS">MIS (Intraday)</SelectItem>
-                        <SelectItem value="NRML">NRML (Normal)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label>Order Type</Label>
-                    <Select
-                      value={orderForm.order_type}
-                      onValueChange={(value) => setOrderForm({ ...orderForm, order_type: value })}
-                    >
-                      <SelectTrigger data-testid="select-order-type">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="L">Limit</SelectItem>
-                        <SelectItem value="MKT">Market</SelectItem>
-                        <SelectItem value="SL">Stop Loss</SelectItem>
-                        <SelectItem value="SL-M">Stop Loss Market</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label>Validity</Label>
-                    <Select
-                      value={orderForm.validity}
-                      onValueChange={(value) => setOrderForm({ ...orderForm, validity: value })}
-                    >
-                      <SelectTrigger data-testid="select-validity">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="DAY">Day</SelectItem>
-                        <SelectItem value="IOC">Immediate or Cancel</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label>Quantity</Label>
-                    <Input
-                      type="number"
-                      value={orderForm.quantity}
-                      onChange={(e) => setOrderForm({ ...orderForm, quantity: e.target.value })}
-                      placeholder="Enter quantity"
-                      data-testid="input-quantity"
-                    />
-                  </div>
-
-                  <div>
-                    <Label>Price</Label>
-                    <Input
-                      type="number"
-                      value={orderForm.price}
-                      onChange={(e) => setOrderForm({ ...orderForm, price: e.target.value })}
-                      placeholder="Enter price"
-                      disabled={orderForm.order_type === "MKT"}
-                      data-testid="input-price"
-                    />
-                  </div>
-                </div>
-
-                <Button
-                  className="w-full"
-                  disabled={!orderForm.trading_symbol || !orderForm.quantity}
-                  data-testid="button-place-order"
-                >
-                  Place {orderForm.transaction_type === "B" ? "Buy" : "Sell"} Order
-                </Button>
               </CardContent>
             </Card>
           </TabsContent>
