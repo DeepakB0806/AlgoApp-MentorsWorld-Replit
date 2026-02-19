@@ -16,12 +16,10 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import type { StrategyConfig, StrategyPlan, Webhook } from "@shared/schema";
-import { PREDEFINED_INDICATORS, type ActionMapperEntry, type TradeLeg, type ExecutionBlock, type PlanTradeLeg, type TradeParams, BROKER_FIELD_MAP, buildBrokerOrderParams } from "@shared/schema";
+import { PREDEFINED_INDICATORS, type ActionMapperEntry, type PlanTradeLeg, type TradeParams, BROKER_FIELD_MAP, buildBrokerOrderParams } from "@shared/schema";
 import type { BrokerConfig } from "@shared/schema";
 
 const ACTION_OPTIONS = ["--", "ENTRY", "EXIT", "HOLD"] as const;
-const LEG_TYPES = ["CE", "PE", "FUT"] as const;
-const LEG_ACTIONS = ["BUY", "SELL"] as const;
 
 function generateStrikeOptions(): string[] {
   const strikes: string[] = [];
@@ -30,8 +28,6 @@ function generateStrikeOptions(): string[] {
   for (let i = 1; i <= 14; i++) strikes.push(`OTM ${i}`);
   return strikes;
 }
-
-const STRIKE_OPTIONS = generateStrikeOptions();
 
 function parseJsonSafe<T>(val: string | null | undefined, fallback: T): T {
   if (!val) return fallback;
@@ -58,9 +54,6 @@ function MotherConfigurator() {
   const [signalsFetched, setSignalsFetched] = useState(false);
   const [mapperReady, setMapperReady] = useState(false);
   const [loadingValues, setLoadingValues] = useState(false);
-  const [uptrendLegs, setUptrendLegs] = useState<TradeLeg[]>([]);
-  const [downtrendLegs, setDowntrendLegs] = useState<TradeLeg[]>([]);
-  const [neutralLegs, setNeutralLegs] = useState<TradeLeg[]>([]);
   const [status, setStatus] = useState("draft");
   const [exchange, setExchange] = useState("");
   const [ticker, setTicker] = useState("");
@@ -221,9 +214,6 @@ function MotherConfigurator() {
     setSignalsFetched(false);
     setMapperReady(false);
     setLoadingValues(false);
-    setUptrendLegs([]);
-    setDowntrendLegs([]);
-    setNeutralLegs([]);
     setStatus("draft");
   };
 
@@ -242,12 +232,6 @@ function MotherConfigurator() {
     setSelectedField("");
     setSignalsFetched(parsedMapper.length > 0);
     setMapperReady(parsedMapper.length > 0);
-    const upBlock = parseJsonSafe<ExecutionBlock>(config.uptrendBlock, { legs: [] });
-    const downBlock = parseJsonSafe<ExecutionBlock>(config.downtrendBlock, { legs: [] });
-    const neutralBlock = parseJsonSafe<ExecutionBlock>(config.neutralBlock, { legs: [] });
-    setUptrendLegs(upBlock.legs);
-    setDowntrendLegs(downBlock.legs);
-    setNeutralLegs(neutralBlock.legs);
     setStatus(config.status);
     setIsEditing(true);
   };
@@ -264,9 +248,6 @@ function MotherConfigurator() {
       exchange: exchange || null,
       ticker: ticker || null,
       actionMapper: JSON.stringify(actionMapper),
-      uptrendBlock: JSON.stringify({ legs: uptrendLegs }),
-      downtrendBlock: JSON.stringify({ legs: downtrendLegs }),
-      neutralBlock: JSON.stringify({ legs: neutralLegs }),
       status,
     };
     if (editingId) {
@@ -278,23 +259,6 @@ function MotherConfigurator() {
 
   const updateMapperEntry = (index: number, field: keyof ActionMapperEntry, value: string | null) => {
     setActionMapper((prev) => prev.map((entry, i) => (i === index ? { ...entry, [field]: value } : entry)));
-  };
-
-  const addLeg = (block: "uptrend" | "downtrend" | "neutral") => {
-    const newLeg: TradeLeg = { type: "CE", action: "BUY", strike: "ATM", lots: 1 };
-    if (block === "uptrend") setUptrendLegs((prev) => [...prev, newLeg]);
-    else if (block === "downtrend") setDowntrendLegs((prev) => [...prev, newLeg]);
-    else setNeutralLegs((prev) => [...prev, newLeg]);
-  };
-
-  const updateLeg = (block: "uptrend" | "downtrend" | "neutral", index: number, field: keyof TradeLeg, value: string | number) => {
-    const setter = block === "uptrend" ? setUptrendLegs : block === "downtrend" ? setDowntrendLegs : setNeutralLegs;
-    setter((prev) => prev.map((leg, i) => (i === index ? { ...leg, [field]: value } : leg)));
-  };
-
-  const removeLeg = (block: "uptrend" | "downtrend" | "neutral", index: number) => {
-    const setter = block === "uptrend" ? setUptrendLegs : block === "downtrend" ? setDowntrendLegs : setNeutralLegs;
-    setter((prev) => prev.filter((_, i) => i !== index));
   };
 
   const getWebhookName = (wId: string | null | undefined) => {
@@ -571,83 +535,6 @@ function MotherConfigurator() {
           </div>
         )}
 
-        <div>
-          <div className="grid gap-4 md:grid-cols-3">
-            {(
-              [
-                { key: "uptrend" as const, label: "UPTREND BLOCK", legs: uptrendLegs, borderColor: "border-emerald-500", textColor: "text-emerald-400", btnLabel: "+ Add Uptrend Leg" },
-                { key: "downtrend" as const, label: "DOWNTREND BLOCK", legs: downtrendLegs, borderColor: "border-red-500", textColor: "text-red-400", btnLabel: "+ Add Downtrend Leg" },
-                { key: "neutral" as const, label: "NEUTRAL BLOCK", legs: neutralLegs, borderColor: "border-blue-500", textColor: "text-blue-400", btnLabel: "+ Add Neutral Leg" },
-              ] as const
-            ).map((block) => (
-              <div key={block.key} className={`border-2 ${block.borderColor} rounded-md p-3 space-y-3`} data-testid={`card-block-${block.key}`}>
-                <h3 className={`font-bold text-sm ${block.textColor}`}>{block.label}</h3>
-                <div className="space-y-2">
-                  {block.legs.map((leg, idx) => (
-                    <div key={idx} className="flex items-center gap-2 flex-wrap" data-testid={`leg-${block.key}-${idx}`}>
-                      <span className="text-xs font-medium text-muted-foreground w-12 shrink-0">Leg {idx + 1}:</span>
-                      <Select value={leg.type} onValueChange={(v) => updateLeg(block.key, idx, "type", v)}>
-                        <SelectTrigger className="w-[70px]" data-testid={`select-leg-type-${block.key}-${idx}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {LEG_TYPES.map((t) => (
-                            <SelectItem key={t} value={t}>{t}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Select value={leg.action} onValueChange={(v) => updateLeg(block.key, idx, "action", v)}>
-                        <SelectTrigger className="w-[80px]" data-testid={`select-leg-action-${block.key}-${idx}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {LEG_ACTIONS.map((a) => (
-                            <SelectItem key={a} value={a}>{a}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Select value={leg.strike} onValueChange={(v) => updateLeg(block.key, idx, "strike", v)}>
-                        <SelectTrigger className="w-[100px]" data-testid={`select-leg-strike-${block.key}-${idx}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {STRIKE_OPTIONS.map((s) => (
-                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        type="number"
-                        min={1}
-                        value={leg.lots}
-                        onChange={(e) => updateLeg(block.key, idx, "lots", Math.max(1, parseInt(e.target.value) || 1))}
-                        className="w-[60px]"
-                        data-testid={`input-leg-lots-${block.key}-${idx}`}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeLeg(block.key, idx)}
-                        data-testid={`button-remove-leg-${block.key}-${idx}`}
-                      >
-                        <X className="w-3 h-3 text-destructive" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addLeg(block.key)}
-                  data-testid={`button-add-leg-${block.key}`}
-                >
-                  {block.btnLabel}
-                </Button>
-              </div>
-            ))}
-          </div>
-        </div>
-
         <Button
           className="w-full"
           onClick={handleSave}
@@ -763,7 +650,9 @@ function TradePlanning() {
   const [configId, setConfigId] = useState("");
   const [planIndicators, setPlanIndicators] = useState<string[]>([]);
   const [planStatus, setPlanStatus] = useState("draft");
-  const [planLegs, setPlanLegs] = useState<PlanTradeLeg[]>([]);
+  const [uptrendLegs, setUptrendLegs] = useState<PlanTradeLeg[]>([]);
+  const [downtrendLegs, setDowntrendLegs] = useState<PlanTradeLeg[]>([]);
+  const [neutralLegs, setNeutralLegs] = useState<PlanTradeLeg[]>([]);
 
   const { data: plans = [], isLoading } = useQuery<StrategyPlan[]>({
     queryKey: ["/api/strategy-plans"],
@@ -783,10 +672,6 @@ function TradePlanning() {
   useEffect(() => {
     if (selectedConfig && !editingPlan) {
       setPlanIndicators(selectedConfig.indicators || []);
-      const parentLegs = parseJsonSafe<ExecutionBlock>(selectedConfig.uptrendBlock, { legs: [] }).legs;
-      if (parentLegs.length > 0 && planLegs.length === 0) {
-        setPlanLegs(parentLegs.map((l) => ({ ...l, orderType: "MIS" as const })));
-      }
     }
   }, [selectedConfig, editingPlan]);
 
@@ -839,7 +724,9 @@ function TradePlanning() {
     setConfigId("");
     setPlanIndicators([]);
     setPlanStatus("draft");
-    setPlanLegs([]);
+    setUptrendLegs([]);
+    setDowntrendLegs([]);
+    setNeutralLegs([]);
   };
 
   const handleEdit = (plan: StrategyPlan) => {
@@ -849,8 +736,10 @@ function TradePlanning() {
     setConfigId(plan.configId);
     setPlanIndicators(plan.selectedIndicators || []);
     setPlanStatus(plan.status);
-    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] });
-    setPlanLegs(tp.legs);
+    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [], uptrendLegs: [], downtrendLegs: [], neutralLegs: [] });
+    setUptrendLegs(tp.uptrendLegs || tp.legs || []);
+    setDowntrendLegs(tp.downtrendLegs || []);
+    setNeutralLegs(tp.neutralLegs || []);
     setIsDialogOpen(true);
   };
 
@@ -868,7 +757,7 @@ function TradePlanning() {
       description: planDescription.trim() || null,
       configId,
       selectedIndicators: planIndicators,
-      tradeParams: JSON.stringify({ legs: planLegs }),
+      tradeParams: JSON.stringify({ legs: [], uptrendLegs, downtrendLegs, neutralLegs }),
       status: planStatus,
     };
     if (editingPlan) {
@@ -914,7 +803,7 @@ function TradePlanning() {
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); else setIsDialogOpen(true); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle data-testid="text-plan-form-title">
               {editingPlan ? "Edit Plan" : "New Plan"}
@@ -923,7 +812,7 @@ function TradePlanning() {
           <div className="space-y-4">
             <div>
               <Label>Parent Configuration</Label>
-              <Select value={configId} onValueChange={(v) => { setConfigId(v); setPlanLegs([]); }}>
+              <Select value={configId} onValueChange={(v) => { setConfigId(v); setUptrendLegs([]); setDowntrendLegs([]); setNeutralLegs([]); }}>
                 <SelectTrigger data-testid="select-plan-config">
                   <SelectValue placeholder="Select configuration" />
                 </SelectTrigger>
@@ -989,84 +878,93 @@ function TradePlanning() {
               </div>
             )}
             {configId && (
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-                  <Label>Trade Legs</Label>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPlanLegs((prev) => [...prev, { type: "CE", action: "BUY", strike: "ATM", lots: 1, orderType: "MIS" }])}
-                    data-testid="button-add-plan-leg"
-                  >
-                    <Plus className="w-3 h-3 mr-1" /> Add Leg
-                  </Button>
-                </div>
-                {planLegs.length === 0 && (
-                  <p className="text-xs text-muted-foreground">No trade legs configured. Add legs to define your trade combinations.</p>
-                )}
-                <div className="space-y-2">
-                  {planLegs.map((leg, idx) => (
-                    <div key={idx} className="flex items-center gap-2 flex-wrap p-2 rounded-md border border-border/50 bg-muted/30">
-                      <span className="text-xs text-muted-foreground w-4">#{idx + 1}</span>
-                      <Select value={leg.type} onValueChange={(v) => setPlanLegs((prev) => prev.map((l, i) => i === idx ? { ...l, type: v as PlanTradeLeg["type"] } : l))}>
-                        <SelectTrigger className="w-20" data-testid={`select-plan-leg-type-${idx}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="CE">CE</SelectItem>
-                          <SelectItem value="PE">PE</SelectItem>
-                          <SelectItem value="FUT">FUT</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={leg.action} onValueChange={(v) => setPlanLegs((prev) => prev.map((l, i) => i === idx ? { ...l, action: v as PlanTradeLeg["action"] } : l))}>
-                        <SelectTrigger className="w-20" data-testid={`select-plan-leg-action-${idx}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="BUY">BUY</SelectItem>
-                          <SelectItem value="SELL">SELL</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={leg.strike} onValueChange={(v) => setPlanLegs((prev) => prev.map((l, i) => i === idx ? { ...l, strike: v } : l))}>
-                        <SelectTrigger className="w-24" data-testid={`select-plan-leg-strike-${idx}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {generateStrikeOptions().map((s) => (
-                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Select value={leg.orderType} onValueChange={(v) => setPlanLegs((prev) => prev.map((l, i) => i === idx ? { ...l, orderType: v as PlanTradeLeg["orderType"] } : l))}>
-                        <SelectTrigger className="w-20" data-testid={`select-plan-leg-order-${idx}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="MIS">MIS</SelectItem>
-                          <SelectItem value="NRML">NRML</SelectItem>
-                          <SelectItem value="CNC">CNC</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        type="number"
-                        min={1}
-                        value={leg.lots}
-                        onChange={(e) => setPlanLegs((prev) => prev.map((l, i) => i === idx ? { ...l, lots: parseInt(e.target.value) || 1 } : l))}
-                        className="w-16"
-                        data-testid={`input-plan-leg-lots-${idx}`}
-                      />
-                      <span className="text-xs text-muted-foreground">lots</span>
+              <div className="space-y-4">
+                <Label>Execution Blocks</Label>
+                {([
+                  { key: "uptrend" as const, label: "UPTREND BLOCK", legs: uptrendLegs, setter: setUptrendLegs, borderColor: "border-emerald-500", textColor: "text-emerald-400" },
+                  { key: "downtrend" as const, label: "DOWNTREND BLOCK", legs: downtrendLegs, setter: setDowntrendLegs, borderColor: "border-red-500", textColor: "text-red-400" },
+                  { key: "neutral" as const, label: "NEUTRAL BLOCK", legs: neutralLegs, setter: setNeutralLegs, borderColor: "border-blue-500", textColor: "text-blue-400" },
+                ] as const).map((block) => (
+                  <div key={block.key} className={`border-2 ${block.borderColor} rounded-md p-3 space-y-2`} data-testid={`card-plan-block-${block.key}`}>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <h4 className={`font-bold text-xs ${block.textColor}`}>{block.label}</h4>
                       <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setPlanLegs((prev) => prev.filter((_, i) => i !== idx))}
-                        data-testid={`button-remove-plan-leg-${idx}`}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => block.setter((prev: PlanTradeLeg[]) => [...prev, { type: "CE", action: "BUY", strike: "ATM", lots: 1, orderType: "MIS" }])}
+                        data-testid={`button-add-plan-leg-${block.key}`}
                       >
-                        <Trash2 className="w-3 h-3 text-destructive" />
+                        <Plus className="w-3 h-3 mr-1" /> Add Leg
                       </Button>
                     </div>
-                  ))}
-                </div>
+                    {block.legs.length === 0 && (
+                      <p className="text-xs text-muted-foreground">No legs configured for {block.key} condition.</p>
+                    )}
+                    <div className="space-y-2">
+                      {block.legs.map((leg, idx) => (
+                        <div key={idx} className="flex items-center gap-2 flex-wrap p-2 rounded-md border border-border/50 bg-muted/30" data-testid={`leg-plan-${block.key}-${idx}`}>
+                          <span className="text-xs text-muted-foreground w-4">#{idx + 1}</span>
+                          <Select value={leg.type} onValueChange={(v) => block.setter((prev: PlanTradeLeg[]) => prev.map((l, i) => i === idx ? { ...l, type: v as PlanTradeLeg["type"] } : l))}>
+                            <SelectTrigger className="w-20" data-testid={`select-plan-leg-type-${block.key}-${idx}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="CE">CE</SelectItem>
+                              <SelectItem value="PE">PE</SelectItem>
+                              <SelectItem value="FUT">FUT</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Select value={leg.action} onValueChange={(v) => block.setter((prev: PlanTradeLeg[]) => prev.map((l, i) => i === idx ? { ...l, action: v as PlanTradeLeg["action"] } : l))}>
+                            <SelectTrigger className="w-20" data-testid={`select-plan-leg-action-${block.key}-${idx}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="BUY">BUY</SelectItem>
+                              <SelectItem value="SELL">SELL</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Select value={leg.strike} onValueChange={(v) => block.setter((prev: PlanTradeLeg[]) => prev.map((l, i) => i === idx ? { ...l, strike: v } : l))}>
+                            <SelectTrigger className="w-24" data-testid={`select-plan-leg-strike-${block.key}-${idx}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {generateStrikeOptions().map((s) => (
+                                <SelectItem key={s} value={s}>{s}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Select value={leg.orderType} onValueChange={(v) => block.setter((prev: PlanTradeLeg[]) => prev.map((l, i) => i === idx ? { ...l, orderType: v as PlanTradeLeg["orderType"] } : l))}>
+                            <SelectTrigger className="w-20" data-testid={`select-plan-leg-order-${block.key}-${idx}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="MIS">MIS</SelectItem>
+                              <SelectItem value="NRML">NRML</SelectItem>
+                              <SelectItem value="CNC">CNC</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={leg.lots}
+                            onChange={(e) => block.setter((prev: PlanTradeLeg[]) => prev.map((l, i) => i === idx ? { ...l, lots: parseInt(e.target.value) || 1 } : l))}
+                            className="w-16"
+                            data-testid={`input-plan-leg-lots-${block.key}-${idx}`}
+                          />
+                          <span className="text-xs text-muted-foreground">lots</span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => block.setter((prev: PlanTradeLeg[]) => prev.filter((_, i) => i !== idx))}
+                            data-testid={`button-remove-plan-leg-${block.key}-${idx}`}
+                          >
+                            <Trash2 className="w-3 h-3 text-destructive" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             <Button
@@ -1142,13 +1040,24 @@ function TradePlanning() {
                     </div>
                   )}
                   {plan.tradeParams && (() => {
-                    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] });
-                    return tp.legs.length > 0 ? (
-                      <div className="flex flex-wrap gap-1" data-testid={`container-plan-legs-${plan.id}`}>
-                        {tp.legs.map((leg, i) => (
-                          <Badge key={i} variant="outline" className="text-xs font-mono">
-                            {leg.action} {leg.type} {leg.strike} x{leg.lots} ({leg.orderType})
-                          </Badge>
+                    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [], uptrendLegs: [], downtrendLegs: [], neutralLegs: [] });
+                    const allLegs = [
+                      ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400" }] : [],
+                      ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400" }] : [],
+                      ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400" }] : [],
+                      ...(tp.legs || []).length > 0 ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground" }] : [],
+                    ];
+                    return allLegs.length > 0 ? (
+                      <div className="space-y-1" data-testid={`container-plan-legs-${plan.id}`}>
+                        {allLegs.map((group) => (
+                          <div key={group.label} className="flex items-center gap-1 flex-wrap">
+                            <span className={`text-xs font-medium ${group.color}`}>{group.label}:</span>
+                            {group.legs.map((leg, i) => (
+                              <Badge key={i} variant="outline" className="text-xs font-mono">
+                                {leg.action} {leg.type} {leg.strike} x{leg.lots} ({leg.orderType})
+                              </Badge>
+                            ))}
+                          </div>
                         ))}
                       </div>
                     ) : null;
@@ -1346,9 +1255,15 @@ function BrokerLinking() {
                   </div>
 
                   {plan.brokerConfigId && plan.tradeParams && (() => {
-                    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] });
+                    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [], uptrendLegs: [], downtrendLegs: [], neutralLegs: [] });
                     const parentConfig = configs.find((c) => c.id === plan.configId);
-                    if (tp.legs.length === 0) return null;
+                    const blockGroups = [
+                      ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400" }] : [],
+                      ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400" }] : [],
+                      ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400" }] : [],
+                      ...(tp.legs || []).length > 0 ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground" }] : [],
+                    ];
+                    if (blockGroups.length === 0) return null;
                     return (
                       <div className="mt-3 border-t border-border/50 pt-3" data-testid={`container-field-correlation-${plan.id}`}>
                         <Label className="text-xs mb-2 block text-muted-foreground">Field Correlation Map</Label>
@@ -1356,40 +1271,46 @@ function BrokerLinking() {
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="border-b border-border/30">
+                                <th className="text-left px-2 py-1 text-muted-foreground">Block</th>
                                 <th className="text-left px-2 py-1 text-muted-foreground">Leg</th>
                                 <th className="text-left px-2 py-1 text-muted-foreground">Strategy</th>
                                 <th className="text-left px-2 py-1 text-muted-foreground">Broker API</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {tp.legs.map((leg, i) => {
-                                const params = buildBrokerOrderParams(leg, {
-                                  exchange: parentConfig?.exchange,
-                                  ticker: parentConfig?.ticker,
-                                });
-                                return (
-                                  <tr key={i} className="border-b border-border/20">
-                                    <td className="px-2 py-1.5 font-mono">#{i + 1}</td>
-                                    <td className="px-2 py-1.5">
-                                      <div className="flex flex-wrap gap-1">
-                                        <Badge variant="outline" className="text-xs">{leg.action}</Badge>
-                                        <Badge variant="outline" className="text-xs">{leg.type}</Badge>
-                                        <Badge variant="outline" className="text-xs">{leg.strike}</Badge>
-                                        <Badge variant="outline" className="text-xs">{leg.orderType}</Badge>
-                                      </div>
-                                    </td>
-                                    <td className="px-2 py-1.5">
-                                      <div className="flex flex-wrap gap-1">
-                                        <Badge variant="secondary" className="text-xs font-mono">tt={params.transaction_type}</Badge>
-                                        <Badge variant="secondary" className="text-xs font-mono">pc={params.product}</Badge>
-                                        <Badge variant="secondary" className="text-xs font-mono">es={params.exchange_segment}</Badge>
-                                        <Badge variant="secondary" className="text-xs font-mono">qt={params.quantity}</Badge>
-                                        {params.trading_symbol && <Badge variant="secondary" className="text-xs font-mono">ts={params.trading_symbol}</Badge>}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
+                              {blockGroups.map((group) =>
+                                group.legs.map((leg, i) => {
+                                  const params = buildBrokerOrderParams(leg, {
+                                    exchange: parentConfig?.exchange,
+                                    ticker: parentConfig?.ticker,
+                                  });
+                                  return (
+                                    <tr key={`${group.label}-${i}`} className="border-b border-border/20">
+                                      {i === 0 && (
+                                        <td className={`px-2 py-1.5 font-medium ${group.color}`} rowSpan={group.legs.length}>{group.label}</td>
+                                      )}
+                                      <td className="px-2 py-1.5 font-mono">#{i + 1}</td>
+                                      <td className="px-2 py-1.5">
+                                        <div className="flex flex-wrap gap-1">
+                                          <Badge variant="outline" className="text-xs">{leg.action}</Badge>
+                                          <Badge variant="outline" className="text-xs">{leg.type}</Badge>
+                                          <Badge variant="outline" className="text-xs">{leg.strike}</Badge>
+                                          <Badge variant="outline" className="text-xs">{leg.orderType}</Badge>
+                                        </div>
+                                      </td>
+                                      <td className="px-2 py-1.5">
+                                        <div className="flex flex-wrap gap-1">
+                                          <Badge variant="secondary" className="text-xs font-mono">tt={params.transaction_type}</Badge>
+                                          <Badge variant="secondary" className="text-xs font-mono">pc={params.product}</Badge>
+                                          <Badge variant="secondary" className="text-xs font-mono">es={params.exchange_segment}</Badge>
+                                          <Badge variant="secondary" className="text-xs font-mono">qt={params.quantity}</Badge>
+                                          {params.trading_symbol && <Badge variant="secondary" className="text-xs font-mono">ts={params.trading_symbol}</Badge>}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
                             </tbody>
                           </table>
                         </div>

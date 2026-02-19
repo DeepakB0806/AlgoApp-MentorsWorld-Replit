@@ -60,6 +60,9 @@ export type PlanTradeLeg = {
 
 export type TradeParams = {
   legs: PlanTradeLeg[];
+  uptrendLegs?: PlanTradeLeg[];
+  downtrendLegs?: PlanTradeLeg[];
+  neutralLegs?: PlanTradeLeg[];
 };
 
 // ====== STRATEGY MOTHER CONFIGURATOR ======
