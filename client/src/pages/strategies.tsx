@@ -1857,19 +1857,26 @@ function BrokerLinking() {
                     )}
                   </CardTitle>
                   <p className="text-xs text-muted-foreground">Config: {getConfigName(plan.configId)}</p>
-                  {isDeployed && (plan.lotMultiplier || plan.deployStoploss || plan.deployProfitTarget) && (
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      {plan.lotMultiplier && plan.lotMultiplier > 1 && (
-                        <Badge variant="outline" className="text-xs text-blue-400 border-blue-400/30">{plan.lotMultiplier}x Lots</Badge>
-                      )}
-                      {plan.deployStoploss != null && plan.deployStoploss > 0 && (
-                        <Badge variant="outline" className="text-xs text-red-400 border-red-400/30">SL: {plan.deployStoploss}</Badge>
-                      )}
-                      {plan.deployProfitTarget != null && plan.deployProfitTarget > 0 && (
-                        <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">PT: {plan.deployProfitTarget}</Badge>
-                      )}
-                    </div>
-                  )}
+                  {isDeployed && (() => {
+                    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] });
+                    const effectiveSL = plan.deployStoploss ?? (tp.stoploss?.enabled ? tp.stoploss.value : null);
+                    const effectivePT = plan.deployProfitTarget ?? (tp.profitTarget?.enabled ? tp.profitTarget.value : null);
+                    const effectiveMultiplier = plan.lotMultiplier || 1;
+                    if (effectiveMultiplier <= 1 && !effectiveSL && !effectivePT) return null;
+                    return (
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        {effectiveMultiplier > 1 && (
+                          <Badge variant="outline" className="text-xs text-blue-400 border-blue-400/30">{effectiveMultiplier}x Lots</Badge>
+                        )}
+                        {effectiveSL != null && effectiveSL > 0 && (
+                          <Badge variant="outline" className="text-xs text-red-400 border-red-400/30">SL: {effectiveSL}</Badge>
+                        )}
+                        {effectivePT != null && effectivePT > 0 && (
+                          <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">PT: {effectivePT}</Badge>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div>
