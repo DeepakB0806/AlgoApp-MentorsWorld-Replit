@@ -1955,6 +1955,26 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/strategy-daily-pnl/:planId/clear", async (req, res) => {
+    try {
+      const { planId } = req.params;
+      const { days } = req.query;
+      let deleted = 0;
+      if (days === "all") {
+        deleted = await storage.deleteAllStrategyDailyPnlByPlan(planId);
+      } else {
+        const daysNum = parseInt(days as string, 10);
+        if (isNaN(daysNum) || daysNum < 1) {
+          return res.status(400).json({ error: "Invalid days parameter" });
+        }
+        deleted = await storage.deleteStrategyDailyPnlByPlan(planId, daysNum);
+      }
+      res.json({ deleted });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to clear daily P&L data" });
+    }
+  });
+
   // Trading Data Routes - fetches real data from Kotak Neo if authenticated
   app.get("/api/positions", async (req, res) => {
     try {

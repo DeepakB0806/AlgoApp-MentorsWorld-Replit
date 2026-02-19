@@ -1858,10 +1858,69 @@ function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: Stra
   );
 }
 
+function DailyPnlTable({ entries }: { entries: StrategyDailyPnl[] }) {
+  if (entries.length === 0) return null;
+  return (
+    <div className="overflow-auto flex-1 min-h-0">
+      <table className="w-full text-xs border-collapse">
+        <thead className="sticky top-0 z-20 bg-card">
+          <tr className="border-b">
+            <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Date</th>
+            <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-right font-medium text-muted-foreground">Day P&L</th>
+            <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-right font-medium text-muted-foreground">Cumulative P&L</th>
+            <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-center font-medium text-muted-foreground">Trades</th>
+            <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-center font-medium text-muted-foreground">Open</th>
+            <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-center font-medium text-muted-foreground">Closed</th>
+            <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry) => (
+            <tr key={entry.id} data-testid={`row-daily-pnl-${entry.id}`} className="border-b hover:bg-muted/50">
+              <td className="whitespace-nowrap px-2 py-2 font-mono font-medium">{entry.date}</td>
+              <td className={`whitespace-nowrap px-2 py-2 text-right font-mono font-semibold ${(entry.dailyPnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {(entry.dailyPnl || 0) >= 0 ? "+" : ""}{(entry.dailyPnl || 0).toFixed(2)}
+              </td>
+              <td className={`whitespace-nowrap px-2 py-2 text-right font-mono font-semibold ${(entry.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {(entry.cumulativePnl || 0) >= 0 ? "+" : ""}{(entry.cumulativePnl || 0).toFixed(2)}
+              </td>
+              <td className="whitespace-nowrap px-2 py-2 text-center font-mono">{entry.tradesCount || 0}</td>
+              <td className="whitespace-nowrap px-2 py-2 text-center font-mono">{entry.openTrades || 0}</td>
+              <td className="whitespace-nowrap px-2 py-2 text-center font-mono">{entry.closedTrades || 0}</td>
+              <td className="whitespace-nowrap px-2 py-2">
+                <Badge variant={entry.status === "active" ? "default" : "secondary"} className="text-xs">{entry.status}</Badge>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; isOpen: boolean; onOpenChange: (open: boolean) => void }) {
-  const { data: rawEntries = [], isLoading } = useQuery<StrategyDailyPnl[]>({
+  const { toast } = useToast();
+  const [sheetExpanded, setSheetExpanded] = useState(false);
+
+  const { data: rawEntries = [], isLoading, refetch } = useQuery<StrategyDailyPnl[]>({
     queryKey: ["/api/strategy-daily-pnl", plan.id],
     enabled: isOpen,
+  });
+
+  const clearDailyPnlMutation = useMutation({
+    mutationFn: async (days: number | "all") => {
+      if (days === "all") {
+        return apiRequest("DELETE", `/api/strategy-daily-pnl/${plan.id}/clear?days=all`);
+      }
+      return apiRequest("DELETE", `/api/strategy-daily-pnl/${plan.id}/clear?days=${days}`);
+    },
+    onSuccess: (_data, days) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/strategy-daily-pnl", plan.id] });
+      toast({ title: days === "all" ? "All daily P&L data cleared" : `P&L entries older than ${days} day${days !== 1 ? "s" : ""} cleared` });
+    },
+    onError: () => {
+      toast({ title: "Failed to clear daily P&L data", variant: "destructive" });
+    },
   });
 
   const entries = [...rawEntries].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
@@ -1870,7 +1929,7 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
 
   return (
     <Sheet open={isOpen} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full max-w-[800px] h-full max-h-screen overflow-hidden flex flex-col" side="right">
+      <SheetContent className={`${sheetExpanded ? "w-full sm:max-w-full" : "w-full max-w-[800px]"} h-full max-h-screen overflow-hidden flex flex-col`} side="right">
         <SheetHeader>
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
@@ -1884,6 +1943,54 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
                 )}
               </SheetDescription>
             </div>
+            <div className="flex gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => refetch()}
+                disabled={isLoading}
+                data-testid={`button-sheet-refresh-pnl-${plan.id}`}
+                title="Refresh"
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    disabled={clearDailyPnlMutation.isPending || entries.length === 0}
+                    data-testid={`button-sheet-clear-pnl-${plan.id}`}
+                    title="Clear P&L data"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => clearDailyPnlMutation.mutate(1)} data-testid={`sheet-clear-pnl-1-day-${plan.id}`}>
+                    Older than 1 day
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => clearDailyPnlMutation.mutate(7)} data-testid={`sheet-clear-pnl-7-days-${plan.id}`}>
+                    Older than 7 days
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => clearDailyPnlMutation.mutate(30)} data-testid={`sheet-clear-pnl-30-days-${plan.id}`}>
+                    Older than 30 days
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => clearDailyPnlMutation.mutate("all")} data-testid={`sheet-clear-pnl-all-${plan.id}`} className="text-destructive">
+                    Clear All P&L Data
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setSheetExpanded(!sheetExpanded)}
+                data-testid={`button-sheet-expand-pnl-${plan.id}`}
+                title={sheetExpanded ? "Collapse" : "Expand"}
+              >
+                {sheetExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              </Button>
+            </div>
           </div>
         </SheetHeader>
         <div className="mt-6 flex-1 min-h-0 flex flex-col">
@@ -1895,47 +2002,7 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
           ) : entries.length === 0 ? (
             <p className="text-muted-foreground text-center py-8" data-testid={`empty-state-daily-pnl-${plan.id}`}>No daily P&L entries recorded yet for this strategy.</p>
           ) : (
-            <div
-              className="overflow-auto flex-1 min-h-0"
-              data-testid={`daily-pnl-scroll-container-${plan.id}`}
-            >
-              <table className="w-full text-xs border-collapse">
-                <thead className="sticky top-0 z-20 bg-card">
-                  <tr className="border-b">
-                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Date</th>
-                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-right font-medium text-muted-foreground">Day P&L</th>
-                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-right font-medium text-muted-foreground">Cumulative P&L</th>
-                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-center font-medium text-muted-foreground">Trades</th>
-                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-center font-medium text-muted-foreground">Open</th>
-                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-center font-medium text-muted-foreground">Closed</th>
-                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((entry) => (
-                    <tr
-                      key={entry.id}
-                      data-testid={`row-daily-pnl-${entry.id}`}
-                      className="border-b hover:bg-muted/50"
-                    >
-                      <td className="whitespace-nowrap px-2 py-2 font-mono font-medium">{entry.date}</td>
-                      <td className={`whitespace-nowrap px-2 py-2 text-right font-mono font-semibold ${(entry.dailyPnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {(entry.dailyPnl || 0) >= 0 ? "+" : ""}{(entry.dailyPnl || 0).toFixed(2)}
-                      </td>
-                      <td className={`whitespace-nowrap px-2 py-2 text-right font-mono font-semibold ${(entry.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {(entry.cumulativePnl || 0) >= 0 ? "+" : ""}{(entry.cumulativePnl || 0).toFixed(2)}
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-2 text-center font-mono">{entry.tradesCount || 0}</td>
-                      <td className="whitespace-nowrap px-2 py-2 text-center font-mono">{entry.openTrades || 0}</td>
-                      <td className="whitespace-nowrap px-2 py-2 text-center font-mono">{entry.closedTrades || 0}</td>
-                      <td className="whitespace-nowrap px-2 py-2">
-                        <Badge variant={entry.status === "active" ? "default" : "secondary"} className="text-xs">{entry.status}</Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DailyPnlTable entries={entries} />
           )}
         </div>
       </SheetContent>

@@ -129,6 +129,8 @@ export interface IStorage {
   getStrategyDailyPnl(planId: string): Promise<StrategyDailyPnl[]>;
   createStrategyDailyPnl(entry: InsertStrategyDailyPnl): Promise<StrategyDailyPnl>;
   updateStrategyDailyPnl(id: string, entry: Partial<InsertStrategyDailyPnl>): Promise<StrategyDailyPnl | undefined>;
+  deleteStrategyDailyPnlByPlan(planId: string, olderThanDays?: number): Promise<number>;
+  deleteAllStrategyDailyPnlByPlan(planId: string): Promise<number>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -839,6 +841,22 @@ export class DatabaseStorage implements IStorage {
   async updateStrategyDailyPnl(id: string, entry: Partial<InsertStrategyDailyPnl>): Promise<StrategyDailyPnl | undefined> {
     const [result] = await db.update(strategyDailyPnl).set(entry).where(eq(strategyDailyPnl.id, id)).returning();
     return result;
+  }
+
+  async deleteStrategyDailyPnlByPlan(planId: string, olderThanDays?: number): Promise<number> {
+    if (olderThanDays !== undefined) {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - olderThanDays);
+      const cutoffStr = cutoff.toISOString().split("T")[0];
+      const result = await db.delete(strategyDailyPnl).where(and(eq(strategyDailyPnl.planId, planId), lt(strategyDailyPnl.date, cutoffStr))).returning();
+      return result.length;
+    }
+    return this.deleteAllStrategyDailyPnlByPlan(planId);
+  }
+
+  async deleteAllStrategyDailyPnlByPlan(planId: string): Promise<number> {
+    const result = await db.delete(strategyDailyPnl).where(eq(strategyDailyPnl.planId, planId)).returning();
+    return result.length;
   }
 
   // Trading Data (mock data for demonstration - will be replaced by live data)
