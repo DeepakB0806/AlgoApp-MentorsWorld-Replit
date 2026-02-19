@@ -1503,6 +1503,90 @@ export async function registerRoutes(
     };
   }
 
+  // Helper to get authenticated session for a specific broker config
+  async function getAuthenticatedSessionByConfigId(configId: string): Promise<{ session: KotakNeoSession; consumerKey: string; brokerId: string } | null> {
+    const config = await storage.getBrokerConfig(configId);
+    if (!config || !config.isConnected || !config.accessToken || !config.sessionId || !config.baseUrl || !config.consumerKey) {
+      return null;
+    }
+    return {
+      session: {
+        viewToken: "",
+        sidView: "",
+        sessionToken: config.accessToken,
+        sidSession: config.sessionId,
+        baseUrl: config.baseUrl,
+      },
+      consumerKey: config.consumerKey,
+      brokerId: config.id,
+    };
+  }
+
+  // Broker-config-scoped positions endpoint
+  app.get("/api/positions/:brokerConfigId", async (req, res) => {
+    try {
+      const { brokerConfigId } = req.params;
+      const auth = await getAuthenticatedSessionByConfigId(brokerConfigId);
+      if (!auth) {
+        return res.status(400).json({ error: "Broker not connected or session expired" });
+      }
+      const result = await getKotakPositions(auth.session);
+      if (result.success && result.data) {
+        const positions = (result.data as unknown[]).map((pos: unknown) => {
+          const p = pos as Record<string, unknown>;
+          const buyQty = Number(p.flBuyQty || p.buyQty || 0);
+          const sellQty = Number(p.flSellQty || p.sellQty || 0);
+          const buyAmt = Number(p.buyAmt || 0);
+          const sellAmt = Number(p.sellAmt || 0);
+          return {
+            trading_symbol: String(p.trdSym || p.tradingSymbol || ""),
+            exchange: String(p.exSeg || p.exchange || "NSE"),
+            quantity: buyQty - sellQty,
+            buy_qty: buyQty,
+            sell_qty: sellQty,
+            buy_avg: buyQty > 0 ? buyAmt / buyQty : 0,
+            sell_avg: sellQty > 0 ? sellAmt / sellQty : 0,
+            buy_amt: buyAmt,
+            sell_amt: sellAmt,
+            pnl: Number(p.mtm || p.pnl || 0),
+            ltp: Number(p.ltp || 0),
+            product_type: String(p.prod || p.productType || "NRML"),
+            option_type: p.optTp ? String(p.optTp) : undefined,
+            strike_price: p.stkPrc ? Number(p.stkPrc) : undefined,
+            expiry: p.exDt ? String(p.exDt) : undefined,
+            realised_pnl: Number(p.realisedprofitloss || p.realisedPnl || 0),
+            unrealised_pnl: Number(p.unrealisedprofitloss || p.unrealisedPnl || 0),
+            token: String(p.tok || p.token || ""),
+          };
+        });
+        return res.json(positions);
+      }
+      res.json([]);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch positions for broker config" });
+    }
+  });
+
+  // Update deployment status for a strategy plan
+  app.patch("/api/strategy-plans/:id/deployment", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { deploymentStatus } = req.body;
+      const validStatuses = ["draft", "deployed", "active", "paused", "squared_off", "closed"];
+      if (!validStatuses.includes(deploymentStatus)) {
+        return res.status(400).json({ error: `Invalid deployment status. Must be one of: ${validStatuses.join(", ")}` });
+      }
+      const plan = await storage.getStrategyPlan(id);
+      if (!plan) {
+        return res.status(404).json({ error: "Strategy plan not found" });
+      }
+      const updated = await storage.updateStrategyPlan(id, { deploymentStatus, updatedAt: new Date().toISOString() });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update deployment status" });
+    }
+  });
+
   // Trading Data Routes - fetches real data from Kotak Neo if authenticated
   app.get("/api/positions", async (req, res) => {
     try {
