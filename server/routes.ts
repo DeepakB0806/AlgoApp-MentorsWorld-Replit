@@ -266,7 +266,23 @@ export async function registerRoutes(
     try {
       const data = await storage.getWebhookDataByWebhook(req.params.webhookId);
       const uniqueAlerts = Array.from(new Set(data.map(d => d.alert).filter(Boolean)));
-      res.json(uniqueAlerts);
+
+      if (uniqueAlerts.length > 0) {
+        return res.json(uniqueAlerts);
+      }
+
+      const webhook = await storage.getWebhook(req.params.webhookId);
+      if (webhook && webhook.fieldConfig) {
+        try {
+          const fields = JSON.parse(webhook.fieldConfig);
+          if (Array.isArray(fields)) {
+            const fieldKeys = fields.map((f: { key?: string; name?: string }) => f.key || f.name).filter(Boolean);
+            return res.json(fieldKeys);
+          }
+        } catch {}
+      }
+
+      res.json([]);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch webhook signals" });
     }

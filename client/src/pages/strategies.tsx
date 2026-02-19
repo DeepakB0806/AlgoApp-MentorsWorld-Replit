@@ -53,7 +53,6 @@ function MotherConfigurator() {
   const [webhookId, setWebhookId] = useState("");
   const [actionMapper, setActionMapper] = useState<ActionMapperEntry[]>([]);
   const [signalsFetched, setSignalsFetched] = useState(false);
-  const [fetchRequested, setFetchRequested] = useState(false);
   const [uptrendLegs, setUptrendLegs] = useState<TradeLeg[]>([]);
   const [downtrendLegs, setDowntrendLegs] = useState<TradeLeg[]>([]);
   const [neutralLegs, setNeutralLegs] = useState<TradeLeg[]>([]);
@@ -67,27 +66,25 @@ function MotherConfigurator() {
     queryKey: ["/api/webhooks"],
   });
 
-  const { data: signals = [] } = useQuery<string[]>({
+  const { data: signals = [], refetch: refetchSignals } = useQuery<string[]>({
     queryKey: ["/api/webhook-signals", webhookId],
-    enabled: !!webhookId,
+    enabled: false,
   });
 
-  const fetchSignals = () => {
+  const fetchSignals = async () => {
     if (!webhookId || webhookId === "none") return;
-    setFetchRequested(true);
     setSignalsFetched(false);
-    queryClient.invalidateQueries({ queryKey: ["/api/webhook-signals", webhookId] });
-  };
-
-  useEffect(() => {
-    if (fetchRequested && signals && signals.length > 0 && webhookId) {
+    const result = await refetchSignals();
+    const fetched = result.data || [];
+    if (fetched.length > 0) {
       setActionMapper(
-        signals.map((s) => ({ signalValue: s, uptrend: "--" as const, downtrend: "--" as const, neutral: "--" as const }))
+        fetched.map((s) => ({ signalValue: s, uptrend: "--" as const, downtrend: "--" as const, neutral: "--" as const }))
       );
       setSignalsFetched(true);
-      setFetchRequested(false);
+    } else {
+      toast({ title: "No signals found for this webhook", variant: "destructive" });
     }
-  }, [signals, webhookId, fetchRequested]);
+  };
 
   const createMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -138,7 +135,6 @@ function MotherConfigurator() {
     setWebhookId("");
     setActionMapper([]);
     setSignalsFetched(false);
-    setFetchRequested(false);
     setUptrendLegs([]);
     setDowntrendLegs([]);
     setNeutralLegs([]);
