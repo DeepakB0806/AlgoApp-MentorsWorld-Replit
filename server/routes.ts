@@ -1740,6 +1740,9 @@ export async function registerRoutes(
           updateData.deployedConfigVersion = parentConfig.configVersion || 1;
         }
       }
+      if (req.body.brokerConfigId !== undefined && deploymentStatus === "deployed" && (currentStatus === "closed" || currentStatus === "archived")) {
+        updateData.brokerConfigId = req.body.brokerConfigId;
+      }
       if (req.body.lotMultiplier !== undefined) {
         const lm = Number(req.body.lotMultiplier);
         if (!isNaN(lm) && lm >= 1 && lm <= 10) updateData.lotMultiplier = Math.round(lm);

@@ -1764,7 +1764,7 @@ function BrokerLinking() {
 
   const [localState, setLocalState] = useState<Record<string, { brokerConfigId: string; isProxyMode: boolean }>>({});
   const [confirmAction, setConfirmAction] = useState<{ planId: string; action: string } | null>(null);
-  const [deployConfig, setDeployConfig] = useState<Record<string, { lotMultiplier: number; stoploss: number; profitTarget: number; baseStoploss: number; baseProfitTarget: number }>>({});
+  const [deployConfig, setDeployConfig] = useState<Record<string, { lotMultiplier: number; stoploss: number; profitTarget: number; baseStoploss: number; baseProfitTarget: number; brokerConfigId?: string }>>({});
   const [pnlSheetPlanId, setPnlSheetPlanId] = useState<string | null>(null);
 
   const plansKey = activePlans.map((p) => `${p.id}:${p.brokerConfigId}:${p.isProxyMode}`).join(",");
@@ -1793,11 +1793,12 @@ function BrokerLinking() {
   });
 
   const deploymentMutation = useMutation({
-    mutationFn: async ({ id, deploymentStatus, lotMultiplier, deployStoploss, deployProfitTarget }: { id: string; deploymentStatus: string; lotMultiplier?: number; deployStoploss?: number; deployProfitTarget?: number }) => {
+    mutationFn: async ({ id, deploymentStatus, lotMultiplier, deployStoploss, deployProfitTarget, brokerConfigId }: { id: string; deploymentStatus: string; lotMultiplier?: number; deployStoploss?: number; deployProfitTarget?: number; brokerConfigId?: string }) => {
       const body: Record<string, unknown> = { deploymentStatus };
       if (lotMultiplier !== undefined) body.lotMultiplier = lotMultiplier;
       if (deployStoploss !== undefined) body.deployStoploss = deployStoploss;
       if (deployProfitTarget !== undefined) body.deployProfitTarget = deployProfitTarget;
+      if (brokerConfigId !== undefined) body.brokerConfigId = brokerConfigId;
       return apiRequest("PATCH", `/api/strategy-plans/${id}/deployment`, body);
     },
     onSuccess: () => {
@@ -1855,6 +1856,7 @@ function BrokerLinking() {
         profitTarget: plan.deployProfitTarget || basePT,
         baseStoploss: baseSL,
         baseProfitTarget: basePT,
+        brokerConfigId: plan.brokerConfigId || "",
       },
     }));
   };
@@ -1889,6 +1891,7 @@ function BrokerLinking() {
         lotMultiplier: cfg.lotMultiplier,
         deployStoploss: cfg.stoploss,
         deployProfitTarget: cfg.profitTarget,
+        brokerConfigId: cfg.brokerConfigId || undefined,
       });
     } else {
       deploymentMutation.mutate({ id: confirmAction.planId, deploymentStatus: confirmAction.action });
@@ -1978,6 +1981,7 @@ function BrokerLinking() {
             const depConfig = DEPLOYMENT_STATUS_CONFIG[depStatus] || DEPLOYMENT_STATUS_CONFIG.draft;
             const DepIcon = depConfig.icon;
             const canDeploy = hasFieldCorrelation(plan) && depStatus === "draft";
+            const canRedeploy = depStatus === "closed" || depStatus === "archived";
             const isDeployed = depStatus !== "draft";
             const actions = getDeploymentActions(depStatus);
 
@@ -2164,7 +2168,7 @@ function BrokerLinking() {
                     );
                   })()}
 
-                  {canDeploy && (
+                  {(canDeploy || (canRedeploy && deployConfig[plan.id])) && (
                     <div className="mt-3 border-t border-border/50 pt-3 space-y-3">
                       {!deployConfig[plan.id] ? (
                         <Button
@@ -2178,7 +2182,31 @@ function BrokerLinking() {
                         </Button>
                       ) : (
                         <div className="space-y-3" data-testid={`container-deploy-config-${plan.id}`}>
-                          <Label className="text-xs font-semibold block text-muted-foreground">Pre-Deploy Configuration</Label>
+                          <Label className="text-xs font-semibold block text-muted-foreground">{canRedeploy ? "Re-Deploy Configuration" : "Pre-Deploy Configuration"}</Label>
+
+                          {canRedeploy && (
+                            <div>
+                              <Label className="text-xs mb-1.5 block text-muted-foreground">Broker</Label>
+                              <Select
+                                value={deployConfig[plan.id].brokerConfigId || ""}
+                                onValueChange={(v) => setDeployConfig((prev) => ({
+                                  ...prev,
+                                  [plan.id]: { ...prev[plan.id], brokerConfigId: v },
+                                }))}
+                              >
+                                <SelectTrigger data-testid={`select-redeploy-broker-${plan.id}`}>
+                                  <SelectValue placeholder="Select broker" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {brokerConfigs.map((bc) => (
+                                    <SelectItem key={bc.id} value={bc.id}>
+                                      {bc.name || bc.brokerName} {bc.ucc ? `(${bc.ucc})` : ""}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
 
                           <div>
                             <Label className="text-xs mb-1.5 block text-muted-foreground">Lot Multiplier</Label>
@@ -2236,6 +2264,9 @@ function BrokerLinking() {
 
                           <div className="bg-card border border-border rounded-md p-2">
                             <div className="flex items-center justify-between gap-2 text-xs flex-wrap">
+                              {canRedeploy && deployConfig[plan.id].brokerConfigId && (
+                                <span className="text-muted-foreground">Broker: <span className="font-mono font-semibold text-foreground">{(() => { const bc = brokerConfigs.find((b) => b.id === deployConfig[plan.id].brokerConfigId); return bc ? (bc.name || bc.brokerName) : "—"; })()}</span></span>
+                              )}
                               <span className="text-muted-foreground">Multiplier: <span className="font-mono font-semibold text-foreground">{deployConfig[plan.id].lotMultiplier}x</span></span>
                               <span className="text-muted-foreground">SL: <span className="font-mono font-semibold text-red-400">{deployConfig[plan.id].stoploss}</span></span>
                               <span className="text-muted-foreground">Target: <span className="font-mono font-semibold text-emerald-400">{deployConfig[plan.id].profitTarget}</span></span>
@@ -2259,11 +2290,11 @@ function BrokerLinking() {
                             <Button
                               className="flex-1"
                               onClick={() => handleDeploymentAction(plan.id, "deployed")}
-                              disabled={deploymentMutation.isPending}
+                              disabled={deploymentMutation.isPending || (canRedeploy && !deployConfig[plan.id]?.brokerConfigId)}
                               data-testid={`button-deploy-${plan.id}`}
                             >
                               {deploymentMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
-                              Deploy Strategy
+                              {canRedeploy ? "Re-Deploy Strategy" : "Deploy Strategy"}
                             </Button>
                           </div>
                         </div>
@@ -2277,6 +2308,21 @@ function BrokerLinking() {
                       <div className="flex gap-2 flex-wrap">
                         {actions.map((a) => {
                           const ActionIcon = a.icon;
+                          if (a.action === "deployed" && canRedeploy) {
+                            return (
+                              <Button
+                                key={a.action}
+                                variant={a.variant}
+                                size="sm"
+                                onClick={() => initDeployConfig(plan)}
+                                disabled={deploymentMutation.isPending}
+                                data-testid={`button-${a.action}-${plan.id}`}
+                              >
+                                <ActionIcon className="w-3 h-3 mr-1" />
+                                {a.label}
+                              </Button>
+                            );
+                          }
                           return (
                             <Button
                               key={a.action}
