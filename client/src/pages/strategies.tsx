@@ -16,7 +16,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import type { StrategyConfig, StrategyPlan, Webhook } from "@shared/schema";
-import { PREDEFINED_INDICATORS, type ActionMapperEntry, type TradeLeg, type ExecutionBlock } from "@shared/schema";
+import { PREDEFINED_INDICATORS, type ActionMapperEntry, type TradeLeg, type ExecutionBlock, type PlanTradeLeg, type TradeParams, BROKER_FIELD_MAP, buildBrokerOrderParams } from "@shared/schema";
 import type { BrokerConfig } from "@shared/schema";
 
 const ACTION_OPTIONS = ["--", "ENTRY", "EXIT", "HOLD"] as const;
@@ -62,6 +62,12 @@ function MotherConfigurator() {
   const [downtrendLegs, setDowntrendLegs] = useState<TradeLeg[]>([]);
   const [neutralLegs, setNeutralLegs] = useState<TradeLeg[]>([]);
   const [status, setStatus] = useState("draft");
+  const [exchange, setExchange] = useState("");
+  const [ticker, setTicker] = useState("");
+  const [exchangeOptions, setExchangeOptions] = useState<string[]>([]);
+  const [tickerOptions, setTickerOptions] = useState<string[]>([]);
+  const [editingFieldName, setEditingFieldName] = useState<string | null>(null);
+  const [editFieldValue, setEditFieldValue] = useState("");
 
   const { data: configs = [], isLoading } = useQuery<StrategyConfig[]>({
     queryKey: ["/api/strategy-configs"],
@@ -75,6 +81,30 @@ function MotherConfigurator() {
     queryKey: ["/api/webhook-signals", webhookId],
     enabled: false,
   });
+
+  useEffect(() => {
+    if (!webhookId || webhookId === "none") {
+      setExchangeOptions([]);
+      setTickerOptions([]);
+      return;
+    }
+    (async () => {
+      try {
+        const [exResp, tkResp] = await Promise.all([
+          fetch(`/api/webhook-field-values/${webhookId}/exchange`),
+          fetch(`/api/webhook-field-values/${webhookId}/ticker`),
+        ]);
+        if (exResp.ok) {
+          const vals: string[] = await exResp.json();
+          setExchangeOptions(vals.filter(Boolean));
+        }
+        if (tkResp.ok) {
+          const vals: string[] = await tkResp.json();
+          setTickerOptions(vals.filter(Boolean));
+        }
+      } catch {}
+    })();
+  }, [webhookId]);
 
   const fetchSignals = async () => {
     if (!webhookId || webhookId === "none") return;
@@ -112,7 +142,7 @@ function MotherConfigurator() {
           const resp = await fetch(`/api/webhook-field-values/${webhookId}/${field}`);
           if (resp.ok) {
             const values: string[] = await resp.json();
-            return values.map((val) => ({ signalValue: val, fieldKey: field, uptrend: "--" as const, downtrend: "--" as const, neutral: "--" as const }));
+            return values.map((val) => ({ signalValue: val, fieldKey: field, uptrend: null, downtrend: null, neutral: null }));
           }
           return [];
         })
@@ -180,6 +210,10 @@ function MotherConfigurator() {
     setName("");
     setDescription("");
     setWebhookId("");
+    setExchange("");
+    setTicker("");
+    setExchangeOptions([]);
+    setTickerOptions([]);
     setActionMapper([]);
     setAvailableFields([]);
     setAddedFields([]);
@@ -198,6 +232,8 @@ function MotherConfigurator() {
     setName(config.name);
     setDescription(config.description || "");
     setWebhookId(config.webhookId || "");
+    setExchange(config.exchange || "");
+    setTicker(config.ticker || "");
     const parsedMapper = parseJsonSafe<ActionMapperEntry[]>(config.actionMapper, []);
     setActionMapper(parsedMapper);
     const existingFieldKeys = Array.from(new Set(parsedMapper.map((e) => e.fieldKey).filter(Boolean))) as string[];
@@ -225,6 +261,8 @@ function MotherConfigurator() {
       name: name.trim(),
       description: description.trim() || null,
       webhookId: webhookId || null,
+      exchange: exchange || null,
+      ticker: ticker || null,
       actionMapper: JSON.stringify(actionMapper),
       uptrendBlock: JSON.stringify({ legs: uptrendLegs }),
       downtrendBlock: JSON.stringify({ legs: downtrendLegs }),
@@ -238,7 +276,7 @@ function MotherConfigurator() {
     }
   };
 
-  const updateMapperEntry = (index: number, field: keyof ActionMapperEntry, value: string) => {
+  const updateMapperEntry = (index: number, field: keyof ActionMapperEntry, value: string | null) => {
     setActionMapper((prev) => prev.map((entry, i) => (i === index ? { ...entry, [field]: value } : entry)));
   };
 
@@ -343,6 +381,44 @@ function MotherConfigurator() {
               {signalsFetched ? "Signals Loaded" : "Fetch Signals"}
             </Button>
           </div>
+          {webhookId && webhookId !== "none" && (
+            <div className="flex items-center gap-4 mt-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Label className="whitespace-nowrap text-xs text-muted-foreground">Exchange</Label>
+                <Select value={exchange || "auto"} onValueChange={(v) => setExchange(v === "auto" ? "" : v)}>
+                  <SelectTrigger className="w-36" data-testid="select-config-exchange">
+                    <SelectValue placeholder="Auto-detect" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto-detect</SelectItem>
+                    {exchangeOptions.map((ex) => (
+                      <SelectItem key={ex} value={ex}>{ex}</SelectItem>
+                    ))}
+                    {!exchangeOptions.includes("NSE") && <SelectItem value="NSE">NSE</SelectItem>}
+                    {!exchangeOptions.includes("BSE") && <SelectItem value="BSE">BSE</SelectItem>}
+                    {!exchangeOptions.includes("MCX") && <SelectItem value="MCX">MCX</SelectItem>}
+                    {!exchangeOptions.includes("NFO") && <SelectItem value="NFO">NFO</SelectItem>}
+                    {!exchangeOptions.includes("BFO") && <SelectItem value="BFO">BFO</SelectItem>}
+                    {!exchangeOptions.includes("CDS") && <SelectItem value="CDS">CDS</SelectItem>}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="whitespace-nowrap text-xs text-muted-foreground">Ticker</Label>
+                <Select value={ticker || "auto"} onValueChange={(v) => setTicker(v === "auto" ? "" : v)}>
+                  <SelectTrigger className="w-40" data-testid="select-config-ticker">
+                    <SelectValue placeholder="Auto-detect" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto-detect</SelectItem>
+                    {tickerOptions.map((tk) => (
+                      <SelectItem key={tk} value={tk}>{tk}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
         </div>
 
         {signalsFetched && (
@@ -424,9 +500,35 @@ function MotherConfigurator() {
                 <tbody>
                   {actionMapper.map((entry, idx) => (
                     <tr key={`${entry.fieldKey}-${entry.signalValue}`} className="border-b border-border/50 last:border-0">
-                      <td className="px-3 py-2 font-mono text-xs" data-testid={`text-signal-${idx}`}>{entry.signalValue}</td>
+                      <td className="px-3 py-2 font-mono text-xs" data-testid={`text-signal-${idx}`}>
+                        {editingFieldName === `${idx}` ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              value={editFieldValue}
+                              onChange={(e) => setEditFieldValue(e.target.value)}
+                              className="w-32 h-7 text-xs"
+                              data-testid={`input-edit-signal-${idx}`}
+                            />
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { updateMapperEntry(idx, "signalValue", editFieldValue); setEditingFieldName(null); }} data-testid={`button-save-field-${idx}`}>
+                              <Save className="w-3 h-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setEditingFieldName(null)} data-testid={`button-cancel-field-${idx}`}>
+                              <X className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="flex items-center gap-1">
+                            {entry.signalValue}
+                            {isSuperAdmin && (
+                              <button onClick={() => { setEditingFieldName(`${idx}`); setEditFieldValue(entry.signalValue); }} className="visibility-hidden group-hover:visibility-visible ml-1 opacity-50 hover:opacity-100" data-testid={`button-edit-field-${idx}`}>
+                                <Edit className="w-3 h-3" />
+                              </button>
+                            )}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2">
-                        <Select value={entry.uptrend} onValueChange={(v) => updateMapperEntry(idx, "uptrend", v)}>
+                        <Select value={entry.uptrend || "--"} onValueChange={(v) => updateMapperEntry(idx, "uptrend", v === "--" ? null : v)}>
                           <SelectTrigger className="w-28" data-testid={`select-uptrend-${idx}`}>
                             <SelectValue />
                           </SelectTrigger>
@@ -438,7 +540,7 @@ function MotherConfigurator() {
                         </Select>
                       </td>
                       <td className="px-3 py-2">
-                        <Select value={entry.downtrend} onValueChange={(v) => updateMapperEntry(idx, "downtrend", v)}>
+                        <Select value={entry.downtrend || "--"} onValueChange={(v) => updateMapperEntry(idx, "downtrend", v === "--" ? null : v)}>
                           <SelectTrigger className="w-28" data-testid={`select-downtrend-${idx}`}>
                             <SelectValue />
                           </SelectTrigger>
@@ -450,7 +552,7 @@ function MotherConfigurator() {
                         </Select>
                       </td>
                       <td className="px-3 py-2">
-                        <Select value={entry.neutral} onValueChange={(v) => updateMapperEntry(idx, "neutral", v)}>
+                        <Select value={entry.neutral || "--"} onValueChange={(v) => updateMapperEntry(idx, "neutral", v === "--" ? null : v)}>
                           <SelectTrigger className="w-28" data-testid={`select-neutral-${idx}`}>
                             <SelectValue />
                           </SelectTrigger>
@@ -622,9 +724,11 @@ function MotherConfigurator() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm">
+                  <div className="flex items-center gap-2 text-sm flex-wrap">
                     <span className="text-muted-foreground">Webhook:</span>
                     <span data-testid={`text-config-webhook-${config.id}`}>{getWebhookName(config.webhookId)}</span>
+                    {config.exchange && <Badge variant="outline" data-testid={`badge-exchange-${config.id}`}>{config.exchange}</Badge>}
+                    {config.ticker && <Badge variant="outline" data-testid={`badge-ticker-${config.id}`}>{config.ticker}</Badge>}
                   </div>
                   {config.indicators && config.indicators.length > 0 && (
                     <div className="flex flex-wrap gap-1" data-testid={`container-config-indicators-${config.id}`}>
@@ -659,6 +763,7 @@ function TradePlanning() {
   const [configId, setConfigId] = useState("");
   const [planIndicators, setPlanIndicators] = useState<string[]>([]);
   const [planStatus, setPlanStatus] = useState("draft");
+  const [planLegs, setPlanLegs] = useState<PlanTradeLeg[]>([]);
 
   const { data: plans = [], isLoading } = useQuery<StrategyPlan[]>({
     queryKey: ["/api/strategy-plans"],
@@ -672,11 +777,16 @@ function TradePlanning() {
     queryKey: ["/api/broker-configs"],
   });
 
+  const activeConfigs = configs.filter((c) => c.status === "active" || c.status === "draft");
   const selectedConfig = configs.find((c) => c.id === configId);
 
   useEffect(() => {
     if (selectedConfig && !editingPlan) {
       setPlanIndicators(selectedConfig.indicators || []);
+      const parentLegs = parseJsonSafe<ExecutionBlock>(selectedConfig.uptrendBlock, { legs: [] }).legs;
+      if (parentLegs.length > 0 && planLegs.length === 0) {
+        setPlanLegs(parentLegs.map((l) => ({ ...l, orderType: "MIS" as const })));
+      }
     }
   }, [selectedConfig, editingPlan]);
 
@@ -729,6 +839,7 @@ function TradePlanning() {
     setConfigId("");
     setPlanIndicators([]);
     setPlanStatus("draft");
+    setPlanLegs([]);
   };
 
   const handleEdit = (plan: StrategyPlan) => {
@@ -738,6 +849,8 @@ function TradePlanning() {
     setConfigId(plan.configId);
     setPlanIndicators(plan.selectedIndicators || []);
     setPlanStatus(plan.status);
+    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] });
+    setPlanLegs(tp.legs);
     setIsDialogOpen(true);
   };
 
@@ -755,6 +868,7 @@ function TradePlanning() {
       description: planDescription.trim() || null,
       configId,
       selectedIndicators: planIndicators,
+      tradeParams: JSON.stringify({ legs: planLegs }),
       status: planStatus,
     };
     if (editingPlan) {
@@ -809,13 +923,16 @@ function TradePlanning() {
           <div className="space-y-4">
             <div>
               <Label>Parent Configuration</Label>
-              <Select value={configId} onValueChange={setConfigId}>
+              <Select value={configId} onValueChange={(v) => { setConfigId(v); setPlanLegs([]); }}>
                 <SelectTrigger data-testid="select-plan-config">
                   <SelectValue placeholder="Select configuration" />
                 </SelectTrigger>
                 <SelectContent>
-                  {configs.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  {activeConfigs.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                      {c.status === "draft" ? " (Draft)" : ""}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -867,6 +984,87 @@ function TradePlanning() {
                     >
                       {ind}
                     </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {configId && (
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                  <Label>Trade Legs</Label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPlanLegs((prev) => [...prev, { type: "CE", action: "BUY", strike: "ATM", lots: 1, orderType: "MIS" }])}
+                    data-testid="button-add-plan-leg"
+                  >
+                    <Plus className="w-3 h-3 mr-1" /> Add Leg
+                  </Button>
+                </div>
+                {planLegs.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No trade legs configured. Add legs to define your trade combinations.</p>
+                )}
+                <div className="space-y-2">
+                  {planLegs.map((leg, idx) => (
+                    <div key={idx} className="flex items-center gap-2 flex-wrap p-2 rounded-md border border-border/50 bg-muted/30">
+                      <span className="text-xs text-muted-foreground w-4">#{idx + 1}</span>
+                      <Select value={leg.type} onValueChange={(v) => setPlanLegs((prev) => prev.map((l, i) => i === idx ? { ...l, type: v as PlanTradeLeg["type"] } : l))}>
+                        <SelectTrigger className="w-20" data-testid={`select-plan-leg-type-${idx}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="CE">CE</SelectItem>
+                          <SelectItem value="PE">PE</SelectItem>
+                          <SelectItem value="FUT">FUT</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={leg.action} onValueChange={(v) => setPlanLegs((prev) => prev.map((l, i) => i === idx ? { ...l, action: v as PlanTradeLeg["action"] } : l))}>
+                        <SelectTrigger className="w-20" data-testid={`select-plan-leg-action-${idx}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="BUY">BUY</SelectItem>
+                          <SelectItem value="SELL">SELL</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={leg.strike} onValueChange={(v) => setPlanLegs((prev) => prev.map((l, i) => i === idx ? { ...l, strike: v } : l))}>
+                        <SelectTrigger className="w-24" data-testid={`select-plan-leg-strike-${idx}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {generateStrikeOptions().map((s) => (
+                            <SelectItem key={s} value={s}>{s}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select value={leg.orderType} onValueChange={(v) => setPlanLegs((prev) => prev.map((l, i) => i === idx ? { ...l, orderType: v as PlanTradeLeg["orderType"] } : l))}>
+                        <SelectTrigger className="w-20" data-testid={`select-plan-leg-order-${idx}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="MIS">MIS</SelectItem>
+                          <SelectItem value="NRML">NRML</SelectItem>
+                          <SelectItem value="CNC">CNC</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={leg.lots}
+                        onChange={(e) => setPlanLegs((prev) => prev.map((l, i) => i === idx ? { ...l, lots: parseInt(e.target.value) || 1 } : l))}
+                        className="w-16"
+                        data-testid={`input-plan-leg-lots-${idx}`}
+                      />
+                      <span className="text-xs text-muted-foreground">lots</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setPlanLegs((prev) => prev.filter((_, i) => i !== idx))}
+                        data-testid={`button-remove-plan-leg-${idx}`}
+                      >
+                        <Trash2 className="w-3 h-3 text-destructive" />
+                      </Button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -943,6 +1141,18 @@ function TradePlanning() {
                       ))}
                     </div>
                   )}
+                  {plan.tradeParams && (() => {
+                    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] });
+                    return tp.legs.length > 0 ? (
+                      <div className="flex flex-wrap gap-1" data-testid={`container-plan-legs-${plan.id}`}>
+                        {tp.legs.map((leg, i) => (
+                          <Badge key={i} variant="outline" className="text-xs font-mono">
+                            {leg.action} {leg.type} {leg.strike} x{leg.lots} ({leg.orderType})
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
                   {plan.brokerConfigId && (
                     <div className="flex items-center gap-2">
                       <Link2 className="w-3 h-3 text-emerald-400" />
@@ -1134,6 +1344,58 @@ function BrokerLinking() {
                       )}
                     </div>
                   </div>
+
+                  {plan.brokerConfigId && plan.tradeParams && (() => {
+                    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] });
+                    const parentConfig = configs.find((c) => c.id === plan.configId);
+                    if (tp.legs.length === 0) return null;
+                    return (
+                      <div className="mt-3 border-t border-border/50 pt-3" data-testid={`container-field-correlation-${plan.id}`}>
+                        <Label className="text-xs mb-2 block text-muted-foreground">Field Correlation Map</Label>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-border/30">
+                                <th className="text-left px-2 py-1 text-muted-foreground">Leg</th>
+                                <th className="text-left px-2 py-1 text-muted-foreground">Strategy</th>
+                                <th className="text-left px-2 py-1 text-muted-foreground">Broker API</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {tp.legs.map((leg, i) => {
+                                const params = buildBrokerOrderParams(leg, {
+                                  exchange: parentConfig?.exchange,
+                                  ticker: parentConfig?.ticker,
+                                });
+                                return (
+                                  <tr key={i} className="border-b border-border/20">
+                                    <td className="px-2 py-1.5 font-mono">#{i + 1}</td>
+                                    <td className="px-2 py-1.5">
+                                      <div className="flex flex-wrap gap-1">
+                                        <Badge variant="outline" className="text-xs">{leg.action}</Badge>
+                                        <Badge variant="outline" className="text-xs">{leg.type}</Badge>
+                                        <Badge variant="outline" className="text-xs">{leg.strike}</Badge>
+                                        <Badge variant="outline" className="text-xs">{leg.orderType}</Badge>
+                                      </div>
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      <div className="flex flex-wrap gap-1">
+                                        <Badge variant="secondary" className="text-xs font-mono">tt={params.transaction_type}</Badge>
+                                        <Badge variant="secondary" className="text-xs font-mono">pc={params.product}</Badge>
+                                        <Badge variant="secondary" className="text-xs font-mono">es={params.exchange_segment}</Badge>
+                                        <Badge variant="secondary" className="text-xs font-mono">qt={params.quantity}</Badge>
+                                        {params.trading_symbol && <Badge variant="secondary" className="text-xs font-mono">ts={params.trading_symbol}</Badge>}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </CardContent>
               </Card>
             );

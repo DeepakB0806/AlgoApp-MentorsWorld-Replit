@@ -33,9 +33,9 @@ export type PredefinedIndicator = typeof PREDEFINED_INDICATORS[number];
 export type ActionMapperEntry = {
   signalValue: string;
   fieldKey?: string;
-  uptrend: "ENTRY" | "EXIT" | "HOLD" | "--";
-  downtrend: "ENTRY" | "EXIT" | "HOLD" | "--";
-  neutral: "ENTRY" | "EXIT" | "HOLD" | "--";
+  uptrend: "ENTRY" | "EXIT" | "HOLD" | "--" | null;
+  downtrend: "ENTRY" | "EXIT" | "HOLD" | "--" | null;
+  neutral: "ENTRY" | "EXIT" | "HOLD" | "--" | null;
 };
 
 export type TradeLeg = {
@@ -49,6 +49,19 @@ export type ExecutionBlock = {
   legs: TradeLeg[];
 };
 
+export type PlanTradeLeg = {
+  type: "CE" | "PE" | "FUT";
+  action: "BUY" | "SELL";
+  strike: string;
+  lots: number;
+  orderType: "MIS" | "NRML" | "CNC";
+  exchange?: string;
+};
+
+export type TradeParams = {
+  legs: PlanTradeLeg[];
+};
+
 // ====== STRATEGY MOTHER CONFIGURATOR ======
 // Created by Super Admin only - defines the master template
 export const strategyConfigs = pgTable("strategy_configs", {
@@ -56,6 +69,8 @@ export const strategyConfigs = pgTable("strategy_configs", {
   name: text("name").notNull(),
   description: text("description"),
   webhookId: varchar("webhook_id", { length: 36 }),
+  exchange: text("exchange"),
+  ticker: text("ticker"),
   indicators: text("indicators").array(),
   actionMapper: text("action_mapper"),
   uptrendBlock: text("uptrend_block"),
@@ -441,6 +456,65 @@ export interface OrderParams {
   market_protection?: string;
   pf?: string;
   trigger_price?: string;
+}
+
+// ====== BROKER FIELD CORRELATION MAP ======
+// Maps strategy/plan parameters to Kotak Neo API field codes
+// Reference: broker-api.tsx order placement fields
+
+export const BROKER_FIELD_MAP = {
+  // Transaction Type: BUY/SELL → tt: B/S
+  transactionType: {
+    brokerField: "tt",
+    values: { BUY: "B", SELL: "S" },
+  },
+  // Product Code: MIS/NRML/CNC → pc
+  orderType: {
+    brokerField: "pc",
+    values: { MIS: "MIS", NRML: "NRML", CNC: "CNC" },
+  },
+  // Exchange Segment: NSE/BSE/NFO/MCX → es
+  exchange: {
+    brokerField: "es",
+    values: {
+      NSE: "nse_cm",
+      BSE: "bse_cm",
+      NFO: "nse_fo",
+      BFO: "bse_fo",
+      MCX: "mcx_fo",
+      CDS: "cde_fo",
+    },
+  },
+  // Option Type mapping for symbol construction
+  optionType: {
+    brokerField: "ts",
+    values: { CE: "CE", PE: "PE", FUT: "XX" },
+  },
+} as const;
+
+export type BrokerFieldMapKey = keyof typeof BROKER_FIELD_MAP;
+
+export function buildTradingSymbol(ticker: string, legType: string, strike: string): string {
+  if (!ticker) return "";
+  if (legType === "FUT") return `${ticker}-FUT`;
+  const strikeLabel = strike || "ATM";
+  return `${ticker}-${strikeLabel}-${legType}`;
+}
+
+export function buildBrokerOrderParams(leg: PlanTradeLeg, config: { exchange?: string | null; ticker?: string | null }): Partial<OrderParams> {
+  const exchange = leg.exchange || config.exchange || "NFO";
+  const ticker = config.ticker || "";
+  const ts = buildTradingSymbol(ticker, leg.type, leg.strike);
+  return {
+    transaction_type: BROKER_FIELD_MAP.transactionType.values[leg.action] || "B",
+    product: BROKER_FIELD_MAP.orderType.values[leg.orderType] || "MIS",
+    exchange_segment: BROKER_FIELD_MAP.exchange.values[exchange as keyof typeof BROKER_FIELD_MAP.exchange.values] || "nse_fo",
+    quantity: String(leg.lots),
+    order_type: "MKT",
+    validity: "DAY",
+    price: "0",
+    trading_symbol: ts,
+  };
 }
 
 // Export auth models (users, sessions, invitations)
