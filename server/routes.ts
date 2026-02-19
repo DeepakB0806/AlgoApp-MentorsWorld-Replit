@@ -311,34 +311,49 @@ export async function registerRoutes(
   app.get("/api/webhook-field-values/:webhookId/:fieldKey", async (req, res) => {
     try {
       const { webhookId, fieldKey } = req.params;
-      const logs = await storage.getWebhookLogsByWebhookId(webhookId);
       const uniqueValues = new Set<string>();
 
-      for (const log of logs) {
-        if (log.payload) {
-          try {
-            const parsed = JSON.parse(log.payload);
-            const val = parsed[fieldKey];
-            if (val !== undefined && val !== null && val !== "") {
-              uniqueValues.add(String(val));
-            }
-          } catch {}
+      const extractValuesFromLogs = (logs: { payload?: string | null }[]) => {
+        for (const log of logs) {
+          const raw = log.payload || (log as any).rawPayload;
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              const val = parsed[fieldKey];
+              if (val !== undefined && val !== null && val !== "") {
+                uniqueValues.add(String(val));
+              }
+            } catch {}
+          }
         }
-      }
+      };
+
+      const logs = await storage.getWebhookLogsByWebhookId(webhookId);
+      extractValuesFromLogs(logs);
 
       if (uniqueValues.size === 0) {
         const webhook = await storage.getWebhook(webhookId);
         if (webhook?.linkedWebhookId) {
           const linkedLogs = await storage.getWebhookLogsByWebhookId(webhook.linkedWebhookId);
-          for (const log of linkedLogs) {
-            if (log.payload) {
+          extractValuesFromLogs(linkedLogs);
+
+          if (uniqueValues.size === 0) {
+            const domainSetting = await storage.getSetting('domain_name');
+            const domainName = domainSetting?.value;
+            if (domainName) {
               try {
-                const parsed = JSON.parse(log.payload);
-                const val = parsed[fieldKey];
-                if (val !== undefined && val !== null && val !== "") {
-                  uniqueValues.add(String(val));
+                const prodResponse = await fetch(
+                  `https://${domainName}/api/webhook-data/webhook/${webhook.linkedWebhookId}`
+                );
+                if (prodResponse.ok) {
+                  const prodData = await prodResponse.json();
+                  if (Array.isArray(prodData)) {
+                    extractValuesFromLogs(prodData);
+                  }
                 }
-              } catch {}
+              } catch (fetchError) {
+                console.log("Failed to fetch production data for field values:", fetchError);
+              }
             }
           }
         }
