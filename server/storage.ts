@@ -126,6 +126,7 @@ export interface IStorage {
   // Strategy Daily P&L - daily P&L log entries
   getStrategyDailyPnl(planId: string): Promise<StrategyDailyPnl[]>;
   createStrategyDailyPnl(entry: InsertStrategyDailyPnl): Promise<StrategyDailyPnl>;
+  updateStrategyDailyPnl(id: string, entry: Partial<InsertStrategyDailyPnl>): Promise<StrategyDailyPnl | undefined>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -814,6 +815,11 @@ export class DatabaseStorage implements IStorage {
   async createStrategyDailyPnl(entry: InsertStrategyDailyPnl): Promise<StrategyDailyPnl> {
     const id = randomUUID();
     const [result] = await db.insert(strategyDailyPnl).values({ ...entry, id }).returning();
+    return result;
+  }
+
+  async updateStrategyDailyPnl(id: string, entry: Partial<InsertStrategyDailyPnl>): Promise<StrategyDailyPnl | undefined> {
+    const [result] = await db.update(strategyDailyPnl).set(entry).where(eq(strategyDailyPnl.id, id)).returning();
     return result;
   }
 

@@ -401,7 +401,8 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
   const [isEditingName, setIsEditingName] = useState(false);
   const brokerName = config?.brokerName || "kotak_neo";
   const isBinance = brokerName === "binance";
-  const defaultName = isBinance ? "Binance Credentials" : "Kotak Neo Credentials";
+  const isPaperTrade = brokerName === "paper_trade";
+  const defaultName = isPaperTrade ? "Paper Trade" : isBinance ? "Binance Credentials" : "Kotak Neo Credentials";
   const [editName, setEditName] = useState(config?.name || defaultName);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [formData, setFormData] = useState<Partial<InsertBrokerConfig>>({
@@ -697,7 +698,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                 {config && (
                   <>
                     <Badge variant="outline" className="text-xs">
-                      {config.brokerName === "binance" ? "Binance" : "Kotak Neo"}
+                      {config.brokerName === "paper_trade" ? "Paper Trade" : config.brokerName === "binance" ? "Binance" : "Kotak Neo"}
                     </Badge>
                     <Badge variant={config.isConnected ? "default" : "secondary"}>
                       {config.isConnected ? "Active" : "Saved"}
@@ -740,7 +741,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                     <span className="flex flex-col gap-0.5 mt-1">
                       <span className="flex items-center gap-1 text-primary">
                         <CheckCircle className="w-4 h-4" />
-                        {isBinance ? "Authenticated - API Key Validated" : "Connected - Session Active"}
+                        {isPaperTrade ? "Always Connected — Simulated Trading Engine" : isBinance ? "Authenticated - API Key Validated" : "Connected - Session Active"}
                       </span>
                       {!isBinance && config.accessToken && (() => {
                         try {
@@ -828,6 +829,42 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {isPaperTrade && config ? (
+            <div className="space-y-3">
+              <Alert className="border-emerald-500/30 bg-emerald-500/5">
+                <CheckCircle className="h-4 w-4 text-emerald-400" />
+                <AlertDescription className="text-sm">
+                  <strong className="text-emerald-400">Paper Trade Engine Active</strong>
+                  <p className="text-muted-foreground mt-1">
+                    No API credentials needed. This broker simulates trades locally using webhook signal data.
+                  </p>
+                </AlertDescription>
+              </Alert>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Card className="bg-muted/30">
+                  <CardContent className="p-3 text-center">
+                    <div className="text-xs text-muted-foreground mb-1">How it works</div>
+                    <div className="text-sm font-medium">Webhook signals trigger simulated BUY/SELL trades</div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-muted/30">
+                  <CardContent className="p-3 text-center">
+                    <div className="text-xs text-muted-foreground mb-1">P&L Tracking</div>
+                    <div className="text-sm font-medium">Entry/exit prices from webhook data calculate P&L</div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-muted/30">
+                  <CardContent className="p-3 text-center">
+                    <div className="text-xs text-muted-foreground mb-1">Risk</div>
+                    <div className="text-sm font-medium">Zero risk — no real orders placed</div>
+                  </CardContent>
+                </Card>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Link a strategy plan to this Paper Trade broker in the Strategy Management page, then deploy and activate it. Incoming webhook signals will automatically create simulated trades with P&L.
+              </div>
+            </div>
+          ) : (
           <div className="grid gap-3">
             <div>
               <Label className="mb-1 block text-xs text-muted-foreground">Environment</Label>
@@ -1138,6 +1175,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
               )
             )}
           </div>
+        )}
         </CardContent>
       </Card>
 
@@ -1434,8 +1472,30 @@ export default function BrokerApi() {
     },
   });
 
-  const handleAddBrokerConfig = (broker: "kotak_neo" | "binance" = "kotak_neo") => {
+  const handleAddBrokerConfig = (broker: "kotak_neo" | "binance" | "paper_trade" = "kotak_neo") => {
     const existingCount = brokerConfigs.filter(c => c.brokerName === broker).length;
+
+    if (broker === "paper_trade") {
+      const existingPaper = brokerConfigs.filter(c => c.brokerName === "paper_trade").length;
+      if (existingPaper > 0) {
+        toast({ title: "Paper Trade broker already exists", variant: "destructive" });
+        return;
+      }
+      createMutation.mutate({
+        name: "Paper Trade",
+        brokerName: "paper_trade",
+        environment: "uat",
+        isConnected: true,
+      });
+      setTimeout(() => {
+        const configs = queryClient.getQueryData<BrokerConfig[]>(["/api/broker-configs"]);
+        const paperConfig = configs?.find(c => c.brokerName === "paper_trade");
+        if (paperConfig) {
+          apiRequest("POST", `/api/broker-configs/${paperConfig.id}/authenticate`, {}).catch(() => {});
+        }
+      }, 1000);
+      return;
+    }
 
     if (broker === "binance") {
       const defaultName = existingCount === 0 ? "Binance - Testnet" : `Binance Config ${existingCount + 1}`;
@@ -1502,6 +1562,9 @@ export default function BrokerApi() {
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleAddBrokerConfig("binance")} data-testid="menu-add-binance">
                     Binance
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleAddBrokerConfig("paper_trade")} data-testid="menu-add-paper-trade">
+                    Paper Trade
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

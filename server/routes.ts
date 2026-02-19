@@ -817,11 +817,26 @@ export async function registerRoutes(
         totalTriggers: (webhook.totalTriggers || 0) + 1,
       });
 
+      let paperTradeResults: any[] = [];
+      if (webhook.strategyId && (signalType === "buy" || signalType === "sell")) {
+        try {
+          const { processPaperTrade } = await import("./paper-trade-engine");
+          const latestData = await storage.getLatestWebhookData(webhookId);
+          if (latestData) {
+            paperTradeResults = await processPaperTrade(storage, latestData, webhook.strategyId);
+            console.log("Paper trade results:", JSON.stringify(paperTradeResults));
+          }
+        } catch (ptError) {
+          console.error("Paper trade processing error:", ptError);
+        }
+      }
+
       res.json({ 
         success: true, 
         message: "Webhook processed successfully",
         action: logData.actionBinary === 1 ? "BUY" : logData.actionBinary === 0 ? "SELL" : "UNKNOWN",
         signal: signalType,
+        paperTrades: paperTradeResults.length > 0 ? paperTradeResults : undefined,
       });
     } catch (error) {
       console.error("Webhook processing error:", error);
@@ -1341,7 +1356,9 @@ export async function registerRoutes(
 
       let result: { success: boolean; message: string; error?: string };
 
-      if (config.brokerName === "kotak_neo") {
+      if (config.brokerName === "paper_trade") {
+        result = { success: true, message: "Paper Trade engine is ready — no external connection needed" };
+      } else if (config.brokerName === "kotak_neo") {
         if (!config.consumerKey) {
           return res.status(400).json({ 
             success: false, 
@@ -1358,7 +1375,7 @@ export async function registerRoutes(
 
       const responseTime = Date.now() - startTime;
 
-      if (result.success || config.brokerName === "kotak_neo" || config.brokerName === "binance") {
+      if (result.success || config.brokerName === "kotak_neo" || config.brokerName === "binance" || config.brokerName === "paper_trade") {
         const updated = await storage.updateBrokerConfig(req.params.id, {
           isConnected: result.success,
           lastConnected: result.success ? now : config.lastConnected,
@@ -1423,6 +1440,30 @@ export async function registerRoutes(
 
       const { totp } = req.body;
       const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+      if (config.brokerName === "paper_trade") {
+        const updated = await storage.updateBrokerConfig(req.params.id, {
+          isConnected: true,
+          lastConnected: now,
+          connectionError: null,
+          totalLogins: (config.totalLogins || 0) + 1,
+          successfulLogins: (config.successfulLogins || 0) + 1,
+          updatedAt: now,
+        });
+
+        await storage.createBrokerSessionLog({
+          brokerConfigId: req.params.id,
+          status: "success",
+          message: "Paper Trade engine activated — ready for simulated trading",
+          loginAt: now,
+        });
+
+        return res.json({
+          success: true,
+          message: "Paper Trade engine activated",
+          config: updated,
+        });
+      }
 
       if (config.brokerName === "binance") {
         if (!config.consumerKey || !config.consumerSecret) {
