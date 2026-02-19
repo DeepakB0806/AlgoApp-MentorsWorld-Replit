@@ -58,11 +58,41 @@ export type PlanTradeLeg = {
   exchange?: string;
 };
 
+export type StoplossConfig = {
+  enabled: boolean;
+  mode: "amount" | "percentage";
+  value: number;
+};
+
+export type ProfitTargetConfig = {
+  enabled: boolean;
+  mode: "amount" | "percentage";
+  value: number;
+};
+
+export type TrailingStoplossConfig = {
+  enabled: boolean;
+  activateAt: number;
+  lockProfitAt: number;
+  whenProfitIncreaseBy: number;
+  increaseTslBy: number;
+};
+
+export type TimeLogicConfig = {
+  exitTime: string;
+  exitOnExpiry: boolean;
+  exitAfterDays: number;
+};
+
 export type TradeParams = {
   legs: PlanTradeLeg[];
   uptrendLegs?: PlanTradeLeg[];
   downtrendLegs?: PlanTradeLeg[];
   neutralLegs?: PlanTradeLeg[];
+  stoploss?: StoplossConfig;
+  profitTarget?: ProfitTargetConfig;
+  trailingSL?: TrailingStoplossConfig;
+  timeLogic?: TimeLogicConfig;
 };
 
 // ====== STRATEGY MOTHER CONFIGURATOR ======

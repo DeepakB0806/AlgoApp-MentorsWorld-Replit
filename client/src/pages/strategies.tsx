@@ -10,13 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Home, Plus, Trash2, Edit, Settings, Link2, Loader2, X, Save } from "lucide-react";
+import { Home, Plus, Trash2, Edit, Settings, Link2, Loader2, X, Save, Clock, Shield, Target, TrendingUp } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import type { StrategyConfig, StrategyPlan, Webhook } from "@shared/schema";
-import { PREDEFINED_INDICATORS, type ActionMapperEntry, type PlanTradeLeg, type TradeParams, BROKER_FIELD_MAP, buildBrokerOrderParams } from "@shared/schema";
+import { PREDEFINED_INDICATORS, type ActionMapperEntry, type PlanTradeLeg, type TradeParams, type StoplossConfig, type ProfitTargetConfig, type TrailingStoplossConfig, type TimeLogicConfig, BROKER_FIELD_MAP, buildBrokerOrderParams } from "@shared/schema";
 import type { BrokerConfig } from "@shared/schema";
 
 const ACTION_OPTIONS = ["--", "ENTRY", "EXIT", "HOLD"] as const;
@@ -653,6 +653,10 @@ function TradePlanning() {
   const [uptrendLegs, setUptrendLegs] = useState<PlanTradeLeg[]>([]);
   const [downtrendLegs, setDowntrendLegs] = useState<PlanTradeLeg[]>([]);
   const [neutralLegs, setNeutralLegs] = useState<PlanTradeLeg[]>([]);
+  const [stoploss, setStoploss] = useState<StoplossConfig>({ enabled: false, mode: "amount", value: 0 });
+  const [profitTarget, setProfitTarget] = useState<ProfitTargetConfig>({ enabled: false, mode: "amount", value: 0 });
+  const [trailingSL, setTrailingSL] = useState<TrailingStoplossConfig>({ enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
+  const [timeLogic, setTimeLogic] = useState<TimeLogicConfig>({ exitTime: "", exitOnExpiry: false, exitAfterDays: 0 });
 
   const { data: plans = [], isLoading } = useQuery<StrategyPlan[]>({
     queryKey: ["/api/strategy-plans"],
@@ -668,6 +672,8 @@ function TradePlanning() {
 
   const activeConfigs = configs.filter((c) => c.status === "active" || c.status === "draft");
   const selectedConfig = configs.find((c) => c.id === configId);
+  const allLegsFlat = [...uptrendLegs, ...downtrendLegs, ...neutralLegs];
+  const hasMISLegs = allLegsFlat.some((l) => l.orderType === "MIS");
 
   useEffect(() => {
     if (selectedConfig && !editingPlan) {
@@ -727,6 +733,10 @@ function TradePlanning() {
     setUptrendLegs([]);
     setDowntrendLegs([]);
     setNeutralLegs([]);
+    setStoploss({ enabled: false, mode: "amount", value: 0 });
+    setProfitTarget({ enabled: false, mode: "amount", value: 0 });
+    setTrailingSL({ enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
+    setTimeLogic({ exitTime: "", exitOnExpiry: false, exitAfterDays: 0 });
   };
 
   const handleEdit = (plan: StrategyPlan) => {
@@ -740,6 +750,10 @@ function TradePlanning() {
     setUptrendLegs(tp.uptrendLegs || tp.legs || []);
     setDowntrendLegs(tp.downtrendLegs || []);
     setNeutralLegs(tp.neutralLegs || []);
+    setStoploss(tp.stoploss || { enabled: false, mode: "amount", value: 0 });
+    setProfitTarget(tp.profitTarget || { enabled: false, mode: "amount", value: 0 });
+    setTrailingSL(tp.trailingSL || { enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
+    setTimeLogic(tp.timeLogic || { exitTime: "", exitOnExpiry: false, exitAfterDays: 0 });
     setIsDialogOpen(true);
   };
 
@@ -757,7 +771,7 @@ function TradePlanning() {
       description: planDescription.trim() || null,
       configId,
       selectedIndicators: planIndicators,
-      tradeParams: JSON.stringify({ legs: [], uptrendLegs, downtrendLegs, neutralLegs }),
+      tradeParams: JSON.stringify({ legs: [], uptrendLegs, downtrendLegs, neutralLegs, stoploss, profitTarget, trailingSL, timeLogic }),
       status: planStatus,
     };
     if (editingPlan) {
@@ -812,7 +826,7 @@ function TradePlanning() {
           <div className="space-y-4">
             <div>
               <Label>Parent Configuration</Label>
-              <Select value={configId} onValueChange={(v) => { setConfigId(v); setUptrendLegs([]); setDowntrendLegs([]); setNeutralLegs([]); }}>
+              <Select value={configId} onValueChange={(v) => { setConfigId(v); setUptrendLegs([]); setDowntrendLegs([]); setNeutralLegs([]); setStoploss({ enabled: false, mode: "amount", value: 0 }); setProfitTarget({ enabled: false, mode: "amount", value: 0 }); setTrailingSL({ enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 }); setTimeLogic({ exitTime: "", exitOnExpiry: false, exitAfterDays: 0 }); }}>
                 <SelectTrigger data-testid="select-plan-config">
                   <SelectValue placeholder="Select configuration" />
                 </SelectTrigger>
@@ -967,6 +981,189 @@ function TradePlanning() {
                 ))}
               </div>
             )}
+            {configId && (
+              <div className="space-y-4">
+                <Label className="flex items-center gap-2"><Shield className="w-4 h-4" /> Exit & Risk Settings</Label>
+
+                <div className="border border-border rounded-md p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-3 h-3 text-red-400" />
+                      <span className="text-sm font-medium">Stoploss MTM</span>
+                    </div>
+                    <Switch
+                      checked={stoploss.enabled}
+                      onCheckedChange={(v) => setStoploss((s) => ({ ...s, enabled: v }))}
+                      data-testid="switch-stoploss-enabled"
+                    />
+                  </div>
+                  {stoploss.enabled && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Select value={stoploss.mode} onValueChange={(v) => setStoploss((s) => ({ ...s, mode: v as "amount" | "percentage" }))}>
+                        <SelectTrigger className="w-32" data-testid="select-stoploss-mode">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="amount">Amount</SelectItem>
+                          <SelectItem value="percentage">Percentage %</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={stoploss.mode === "percentage" ? 0.1 : 1}
+                        value={stoploss.value || ""}
+                        onChange={(e) => setStoploss((s) => ({ ...s, value: parseFloat(e.target.value) || 0 }))}
+                        placeholder={stoploss.mode === "percentage" ? "e.g. 2.5" : "e.g. 5000"}
+                        className="w-32"
+                        data-testid="input-stoploss-value"
+                      />
+                      <span className="text-xs text-muted-foreground">{stoploss.mode === "percentage" ? "%" : "INR"}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="border border-border rounded-md p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Target className="w-3 h-3 text-emerald-400" />
+                      <span className="text-sm font-medium">Profit MTM Target</span>
+                    </div>
+                    <Switch
+                      checked={profitTarget.enabled}
+                      onCheckedChange={(v) => setProfitTarget((s) => ({ ...s, enabled: v }))}
+                      data-testid="switch-profit-enabled"
+                    />
+                  </div>
+                  {profitTarget.enabled && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Select value={profitTarget.mode} onValueChange={(v) => setProfitTarget((s) => ({ ...s, mode: v as "amount" | "percentage" }))}>
+                        <SelectTrigger className="w-32" data-testid="select-profit-mode">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="amount">Amount</SelectItem>
+                          <SelectItem value="percentage">Percentage %</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={profitTarget.mode === "percentage" ? 0.1 : 1}
+                        value={profitTarget.value || ""}
+                        onChange={(e) => setProfitTarget((s) => ({ ...s, value: parseFloat(e.target.value) || 0 }))}
+                        placeholder={profitTarget.mode === "percentage" ? "e.g. 5.0" : "e.g. 10000"}
+                        className="w-32"
+                        data-testid="input-profit-value"
+                      />
+                      <span className="text-xs text-muted-foreground">{profitTarget.mode === "percentage" ? "%" : "INR"}</span>
+                    </div>
+                  )}
+                </div>
+
+                {hasMISLegs && (
+                  <div className="border border-border rounded-md p-3 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <TrendingUp className="w-3 h-3 text-blue-400" />
+                        <span className="text-sm font-medium">Trailing Stoploss (MIS Only)</span>
+                      </div>
+                      <Switch
+                        checked={trailingSL.enabled}
+                        onCheckedChange={(v) => setTrailingSL((s) => ({ ...s, enabled: v }))}
+                        data-testid="switch-tsl-enabled"
+                      />
+                    </div>
+                    {trailingSL.enabled && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Activate At</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={trailingSL.activateAt || ""}
+                            onChange={(e) => setTrailingSL((s) => ({ ...s, activateAt: parseFloat(e.target.value) || 0 }))}
+                            placeholder="e.g. 2000"
+                            data-testid="input-tsl-activate-at"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Lock Profit At</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={trailingSL.lockProfitAt || ""}
+                            onChange={(e) => setTrailingSL((s) => ({ ...s, lockProfitAt: parseFloat(e.target.value) || 0 }))}
+                            placeholder="e.g. 1000"
+                            data-testid="input-tsl-lock-profit"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">When Profit Increase By</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={trailingSL.whenProfitIncreaseBy || ""}
+                            onChange={(e) => setTrailingSL((s) => ({ ...s, whenProfitIncreaseBy: parseFloat(e.target.value) || 0 }))}
+                            placeholder="e.g. 500"
+                            data-testid="input-tsl-profit-increase"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Increase TSL By</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={trailingSL.increaseTslBy || ""}
+                            onChange={(e) => setTrailingSL((s) => ({ ...s, increaseTslBy: parseFloat(e.target.value) || 0 }))}
+                            placeholder="e.g. 250"
+                            data-testid="input-tsl-increase-by"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="border border-border rounded-md p-3 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-3 h-3 text-yellow-400" />
+                    <span className="text-sm font-medium">Time Logic</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Exit Time (HH:MM)</Label>
+                      <Input
+                        type="time"
+                        value={timeLogic.exitTime}
+                        onChange={(e) => setTimeLogic((s) => ({ ...s, exitTime: e.target.value }))}
+                        data-testid="input-exit-time"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Exit After Entry + Days</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={timeLogic.exitAfterDays || ""}
+                        onChange={(e) => setTimeLogic((s) => ({ ...s, exitAfterDays: parseInt(e.target.value) || 0 }))}
+                        placeholder="e.g. 3"
+                        data-testid="input-exit-after-days"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <Label className="text-sm">Exit On Expiry</Label>
+                    <Switch
+                      checked={timeLogic.exitOnExpiry}
+                      onCheckedChange={(v) => setTimeLogic((s) => ({ ...s, exitOnExpiry: v }))}
+                      data-testid="switch-exit-on-expiry"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             <Button
               onClick={handleSave}
               disabled={!planName.trim() || !configId || createMutation.isPending || updateMutation.isPending}
@@ -1058,6 +1255,36 @@ function TradePlanning() {
                               </Badge>
                             ))}
                           </div>
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
+                  {plan.tradeParams && (() => {
+                    const tp2 = parseJsonSafe<TradeParams>(plan.tradeParams, {} as TradeParams);
+                    const exitBadges: { label: string; color: string }[] = [];
+                    if (tp2.stoploss?.enabled) {
+                      exitBadges.push({ label: `SL: ${tp2.stoploss.value}${tp2.stoploss.mode === "percentage" ? "%" : " INR"}`, color: "text-red-400" });
+                    }
+                    if (tp2.profitTarget?.enabled) {
+                      exitBadges.push({ label: `Target: ${tp2.profitTarget.value}${tp2.profitTarget.mode === "percentage" ? "%" : " INR"}`, color: "text-emerald-400" });
+                    }
+                    if (tp2.trailingSL?.enabled) {
+                      exitBadges.push({ label: "TSL Active", color: "text-blue-400" });
+                    }
+                    if (tp2.timeLogic?.exitTime) {
+                      exitBadges.push({ label: `Exit @ ${tp2.timeLogic.exitTime}`, color: "text-yellow-400" });
+                    }
+                    if (tp2.timeLogic?.exitOnExpiry) {
+                      exitBadges.push({ label: "Exit On Expiry", color: "text-yellow-400" });
+                    }
+                    if (tp2.timeLogic?.exitAfterDays && tp2.timeLogic.exitAfterDays > 0) {
+                      exitBadges.push({ label: `Exit +${tp2.timeLogic.exitAfterDays}d`, color: "text-yellow-400" });
+                    }
+                    return exitBadges.length > 0 ? (
+                      <div className="flex items-center gap-1 flex-wrap" data-testid={`container-plan-exit-${plan.id}`}>
+                        <Shield className="w-3 h-3 text-muted-foreground" />
+                        {exitBadges.map((eb, i) => (
+                          <Badge key={i} variant="outline" className={`text-xs font-mono ${eb.color}`}>{eb.label}</Badge>
                         ))}
                       </div>
                     ) : null;
