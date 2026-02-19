@@ -980,7 +980,7 @@ export async function registerRoutes(
       localData.forEach((d: any) => {
         try {
           const raw = JSON.parse(d.rawPayload || "{}");
-          if (raw._prodSourceId) processedProdIds.add(raw._prodSourceId);
+          if (raw._prodSourceId) processedProdIds.add(String(raw._prodSourceId));
         } catch {}
         processedProdIds.add(`${d.timeUnix || 0}_${d.price || 0}_${d.alert || ""}`);
       });
@@ -991,16 +991,11 @@ export async function registerRoutes(
         return res.json({ processed: 0, message: "No strategy config linked to this webhook" });
       }
 
-      const latestLocalTimeUnix = localData.length > 0
-        ? Math.max(...localData.map((d: any) => d.timeUnix || 0))
-        : 0;
-
       const newSignals = productionData
         .filter((pd: any) => {
-          if (pd.id && processedProdIds.has(pd.id)) return false;
+          if (pd.id && processedProdIds.has(String(pd.id))) return false;
           const fallbackKey = `${pd.timeUnix || 0}_${pd.price || 0}_${pd.alert || ""}`;
           if (processedProdIds.has(fallbackKey)) return false;
-          if (latestLocalTimeUnix > 0 && pd.timeUnix && pd.timeUnix < latestLocalTimeUnix) return false;
           return true;
         })
         .sort((a: any, b: any) => {
