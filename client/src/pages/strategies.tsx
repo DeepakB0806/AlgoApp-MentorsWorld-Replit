@@ -1478,6 +1478,19 @@ function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: Stra
   const brokerConfig = brokerConfigs.find((bc) => bc.id === plan.brokerConfigId);
   const isConnected = brokerConfig?.isConnected || false;
   const isDeployed = plan.deploymentStatus && plan.deploymentStatus !== "draft";
+  const isPaperTrade = brokerConfig?.brokerName === "paper_trade";
+  const webhookId = parentConfig?.webhookId;
+
+  const { data: _syncResult } = useQuery({
+    queryKey: ["/api/process-production-signals", webhookId],
+    queryFn: async () => {
+      const resp = await fetch(`/api/process-production-signals/${webhookId}`, { method: "POST" });
+      if (!resp.ok) return null;
+      return resp.json();
+    },
+    enabled: !!isPaperTrade && !!webhookId && plan.deploymentStatus === "active",
+    refetchInterval: 60000,
+  });
 
   const { data: trades = [], isLoading, refetch } = useQuery<StrategyTrade[]>({
     queryKey: ["/api/strategy-trades", plan.id],

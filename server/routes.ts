@@ -946,6 +946,137 @@ export async function registerRoutes(
     }
   });
 
+  // Process production signals for linked webhooks (paper trade engine)
+  app.post("/api/process-production-signals/:webhookId", async (req, res) => {
+    try {
+      const webhookId = req.params.webhookId;
+      const webhook = await storage.getWebhook(webhookId);
+      if (!webhook || !webhook.linkedWebhookId) {
+        return res.json({ processed: 0, message: "No linked production webhook" });
+      }
+
+      const domainSetting = await storage.getSetting('domain_name');
+      const domainName = domainSetting?.value;
+      if (!domainName) {
+        return res.json({ processed: 0, message: "No production domain configured" });
+      }
+
+      let productionData: any[] = [];
+      try {
+        const prodResp = await fetch(`https://${domainName}/api/webhook-data/webhook/${webhook.linkedWebhookId}`);
+        if (prodResp.ok) {
+          productionData = await prodResp.json();
+        }
+      } catch (fetchErr) {
+        return res.json({ processed: 0, message: "Could not fetch production data" });
+      }
+
+      if (!productionData.length) {
+        return res.json({ processed: 0, message: "No production signals found" });
+      }
+
+      const localData = await storage.getWebhookDataByWebhook(webhookId);
+      const processedProdIds = new Set<string>();
+      localData.forEach((d: any) => {
+        try {
+          const raw = JSON.parse(d.rawPayload || "{}");
+          if (raw._prodSourceId) processedProdIds.add(raw._prodSourceId);
+        } catch {}
+        processedProdIds.add(`${d.timeUnix || 0}_${d.price || 0}_${d.alert || ""}`);
+      });
+
+      const allConfigs = await storage.getStrategyConfigs();
+      const strategyConfig = allConfigs.find((c) => c.webhookId === webhookId);
+      if (!strategyConfig) {
+        return res.json({ processed: 0, message: "No strategy config linked to this webhook" });
+      }
+
+      const latestLocalTimeUnix = localData.length > 0
+        ? Math.max(...localData.map((d: any) => d.timeUnix || 0))
+        : 0;
+
+      const newSignals = productionData
+        .filter((pd: any) => {
+          if (pd.id && processedProdIds.has(pd.id)) return false;
+          const fallbackKey = `${pd.timeUnix || 0}_${pd.price || 0}_${pd.alert || ""}`;
+          if (processedProdIds.has(fallbackKey)) return false;
+          if (latestLocalTimeUnix > 0 && pd.timeUnix && pd.timeUnix < latestLocalTimeUnix) return false;
+          return true;
+        })
+        .sort((a: any, b: any) => {
+          const timeA = a.timeUnix || 0;
+          const timeB = b.timeUnix || 0;
+          if (timeA !== timeB) return timeA - timeB;
+          const dateA = a.receivedAt ? new Date(a.receivedAt).getTime() : 0;
+          const dateB = b.receivedAt ? new Date(b.receivedAt).getTime() : 0;
+          return dateA - dateB;
+        });
+
+      if (!newSignals.length) {
+        return res.json({ processed: 0, message: "All production signals already processed" });
+      }
+
+      const results: any[] = [];
+      const { processPaperTrade } = await import("./paper-trade-engine");
+
+      for (const signal of newSignals) {
+        const signalType = signal.signalType || (signal.actionBinary === 1 ? "buy" : signal.actionBinary === 0 ? "sell" : "hold");
+        if (signalType !== "buy" && signalType !== "sell") continue;
+
+        let enrichedPayload = signal.rawPayload || "{}";
+        if (signal.id) {
+          try {
+            const parsed = JSON.parse(enrichedPayload);
+            parsed._prodSourceId = signal.id;
+            enrichedPayload = JSON.stringify(parsed);
+          } catch {}
+        }
+
+        const localEntry = await storage.createWebhookData({
+          webhookId,
+          strategyId: strategyConfig.id,
+          webhookName: webhook.name,
+          receivedAt: signal.receivedAt || new Date().toISOString(),
+          rawPayload: enrichedPayload,
+          timeUnix: signal.timeUnix,
+          exchange: signal.exchange,
+          indices: signal.indices,
+          indicator: signal.indicator,
+          alert: signal.alert,
+          price: signal.price,
+          localTime: signal.localTime,
+          mode: signal.mode,
+          modeDesc: signal.modeDesc,
+          firstLine: signal.firstLine,
+          midLine: signal.midLine,
+          slowLine: signal.slowLine,
+          st: signal.st,
+          ht: signal.ht,
+          rsi: signal.rsi,
+          rsiScaled: signal.rsiScaled,
+          alertSystem: signal.alertSystem,
+          actionBinary: signal.actionBinary,
+          lockState: signal.lockState,
+          signalType,
+          isProcessed: false,
+        });
+
+        try {
+          const ptResults = await processPaperTrade(storage, localEntry, strategyConfig.id);
+          results.push({ signal: signalType, price: signal.price, time: signal.localTime, trades: ptResults });
+        } catch (ptErr) {
+          console.error("Paper trade error for signal:", ptErr);
+          results.push({ signal: signalType, price: signal.price, error: String(ptErr) });
+        }
+      }
+
+      res.json({ processed: results.length, results });
+    } catch (error: any) {
+      console.error("Process production signals error:", error);
+      res.status(500).json({ error: error.message || "Failed to process production signals" });
+    }
+  });
+
   // Link webhook to production webhook data stream by unique code or webhook ID
   app.post("/api/webhooks/:id/link", async (req, res) => {
     try {
