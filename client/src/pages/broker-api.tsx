@@ -1111,9 +1111,16 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
             )}
 
             {config?.connectionError && (
-              <Alert variant="destructive">
+              <Alert variant={config.connectionError.includes("geo-restricted") ? "default" : "destructive"}>
                 <XCircle className="h-4 w-4" />
-                <AlertDescription>{config.connectionError}</AlertDescription>
+                <AlertDescription>
+                  {config.connectionError}
+                  {config.connectionError.includes("geo-restricted") && (
+                    <span className="block mt-1 text-xs text-muted-foreground">
+                      This is a Binance regional restriction on the server IP. Your credentials may still be valid when deployed to a supported region.
+                    </span>
+                  )}
+                </AlertDescription>
               </Alert>
             )}
           </div>

@@ -29,7 +29,7 @@ function createClient(session: BinanceSession): MainClient {
   return new MainClient({
     api_key: session.apiKey,
     api_secret: session.apiSecret,
-    ...(session.isTestnet ? { baseUrl: "https://testnet.binance.vision" } : {}),
+    ...(session.isTestnet ? { testnet: true } : {}),
   });
 }
 
@@ -38,7 +38,7 @@ export async function testConnectivity(apiKey?: string, apiSecret?: string, isTe
     const client = new MainClient({
       ...(apiKey ? { api_key: apiKey } : {}),
       ...(apiSecret ? { api_secret: apiSecret } : {}),
-      ...(isTestnet ? { baseUrl: "https://testnet.binance.vision" } : {}),
+      ...(isTestnet ? { testnet: true } : {}),
     });
 
     await client.testConnectivity();
@@ -48,11 +48,34 @@ export async function testConnectivity(apiKey?: string, apiSecret?: string, isTe
       success: true,
       message: `Binance ${isTestnet ? "Testnet" : "Production"} API is reachable. Server time: ${new Date(serverTime).toISOString()}`,
     };
-  } catch (error) {
+  } catch (error: unknown) {
+    let errMsg = "Network error";
+    if (error instanceof Error) {
+      errMsg = error.message;
+    } else if (typeof error === "object" && error !== null) {
+      const errObj = error as Record<string, unknown>;
+      if (errObj.body && typeof errObj.body === "object") {
+        const body = errObj.body as Record<string, unknown>;
+        errMsg = String(body.msg || body.message || JSON.stringify(body));
+      } else if (errObj.msg) {
+        errMsg = String(errObj.msg);
+      } else if (errObj.message) {
+        errMsg = String(errObj.message);
+      } else {
+        errMsg = JSON.stringify(error);
+      }
+    }
+
+    const isGeoRestricted = errMsg.includes("restricted location") || errMsg.includes("Service unavailable");
+
     return {
       success: false,
-      message: "Unable to reach Binance API servers",
-      error: error instanceof Error ? error.message : "Network error",
+      message: isGeoRestricted
+        ? "Binance API is geo-restricted from this server location"
+        : "Unable to reach Binance API servers",
+      error: isGeoRestricted
+        ? "Binance blocks API access from certain server regions. Your API keys may still be valid — try Save & Authenticate to verify with a signed request."
+        : errMsg,
     };
   }
 }
@@ -66,7 +89,7 @@ export async function authenticate(
     const client = new MainClient({
       api_key: apiKey,
       api_secret: apiSecret,
-      ...(isTestnet ? { baseUrl: "https://testnet.binance.vision" } : {}),
+      ...(isTestnet ? { testnet: true } : {}),
     });
 
     const account = await client.getAccountInformation();
@@ -82,20 +105,43 @@ export async function authenticate(
       sessionId: isTestnet ? "testnet" : "production",
       baseUrl: isTestnet ? "https://testnet.binance.vision" : "https://api.binance.com",
     };
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : "Authentication failed";
+  } catch (error: unknown) {
+    let errMsg = "Authentication failed";
+    if (error instanceof Error) {
+      errMsg = error.message;
+    } else if (typeof error === "object" && error !== null) {
+      const errObj = error as Record<string, unknown>;
+      if (errObj.body && typeof errObj.body === "object") {
+        const body = errObj.body as Record<string, unknown>;
+        errMsg = String(body.msg || body.message || JSON.stringify(body));
+      } else if (errObj.msg) {
+        errMsg = String(errObj.msg);
+      } else if (errObj.message) {
+        errMsg = String(errObj.message);
+      } else {
+        errMsg = JSON.stringify(error);
+      }
+    }
+
     const isInvalidKey = errMsg.includes("API-key") || errMsg.includes("-2015") || errMsg.includes("-2014");
+    const isGeoRestricted = errMsg.includes("restricted location") || errMsg.includes("Service unavailable");
 
     return {
       success: false,
-      message: isInvalidKey ? "Invalid API Key or Secret" : "Authentication failed",
-      error: errMsg,
+      message: isGeoRestricted
+        ? "Binance API is geo-restricted from this server location"
+        : isInvalidKey
+          ? "Invalid API Key or Secret"
+          : "Authentication failed",
+      error: isGeoRestricted
+        ? "Binance blocks API access from certain server regions. To use Binance integration, the app needs to be deployed to a non-restricted region, or use a proxy."
+        : errMsg,
     };
   }
 }
 
-export async function testBinanceConnectivity(apiKey: string, isTestnet = true): Promise<KotakNeoAuthResponse> {
-  return testConnectivity(apiKey, undefined, isTestnet);
+export async function testBinanceConnectivity(apiKey: string, apiSecret: string, isTestnet = true): Promise<KotakNeoAuthResponse> {
+  return testConnectivity(apiKey, apiSecret, isTestnet);
 }
 
 export async function authenticateBinance(credentials: {

@@ -1346,7 +1346,7 @@ export async function registerRoutes(
         result = await testKotakNeoConnectivity(config.consumerKey);
       } else if (config.brokerName === "binance") {
         const isTestnet = config.environment !== "prod";
-        result = await testBinanceConnectivity(config.consumerKey || "", isTestnet);
+        result = await testBinanceConnectivity(config.consumerKey || "", config.consumerSecret || "", isTestnet);
       } else {
         result = { success: false, message: "Broker not yet supported for live connectivity test" };
       }
