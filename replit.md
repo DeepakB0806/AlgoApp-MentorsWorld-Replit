@@ -35,6 +35,10 @@ The application is structured into `client/`, `server/`, and `shared/` directori
 - **Collapsible Trade Data**: Strategy Trade Tracker section in Broker Linking is now collapsible (collapsed by default), showing trade count and P&L summary in the header. Strategy Controls (Activate/Pause/Square Off/Close) are always visible above the collapsible section.
 - **Daily P&L Log Panel**: New `strategy_daily_pnl` table stores daily P&L snapshots per strategy plan. Collapsible panel styled like webhook data logs with sticky headers, showing Date, Day P&L, Cumulative P&L, Trades count, Open/Closed trades, and Status.
 - **Deployment Multiplier & Risk Config**: Pre-deploy configuration panel with lot multiplier buttons (1x-5x) and editable Stoploss MTM / Profit Target MTM values. Multiplier auto-scales SL/PT from base values but allows manual adjustment. Fields stored as `lotMultiplier`, `deployStoploss`, `deployProfitTarget` on strategy_plans table. Deployed strategies show config badges (Lots multiplier, SL, PT) in card header.
+- **Archive & Re-deploy Lifecycle**: Added "archived" deployment status. Transition flow: Closed → Archive (preserves P&L history) or Re-deploy, Archived → Re-deploy. Re-deploy captures latest parent config version.
+- **Config Versioning**: `configVersion` on strategyConfigs auto-increments on update, `deployedConfigVersion` on strategyPlans captured at deployment. "New Version Available" amber badge shown in Broker Linking when parent version > deployed version.
+- **Exchange & Ticker Fields**: `exchange` and `ticker` fields on strategy_plans for broker API order params. Exchange selector (NSE/BSE/NFO/BFO/MCX/CDS) and ticker text input in Trade Planning form. Displayed in plan cards and broker linking headers.
+- **Enhanced Time Logic**: TimeLogicConfig expanded with `expiryType` (weekly/monthly/custom), `weeklyStartDay`, `weeklyEndDay`, `monthStartDate`. Weekly mode auto-calculates exitAfterDays from day span. Monthly defaults to 30 days. Custom mode allows manual entry for Crypto/Forex. Exit After Days field disabled when auto-calculated.
 
 ## Future Development Plans
 
