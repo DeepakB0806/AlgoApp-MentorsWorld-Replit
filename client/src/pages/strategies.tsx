@@ -17,6 +17,7 @@ import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import type { StrategyConfig, StrategyPlan, Webhook, StrategyTrade, StrategyDailyPnl } from "@shared/schema";
 import { PREDEFINED_INDICATORS, type ActionMapperEntry, type PlanTradeLeg, type TradeParams, type StoplossConfig, type ProfitTargetConfig, type TrailingStoplossConfig, type TimeLogicConfig, BROKER_FIELD_MAP, buildBrokerOrderParams } from "@shared/schema";
 import type { BrokerConfig } from "@shared/schema";
@@ -2712,12 +2713,9 @@ export default function Strategies() {
               <h1 className="text-2xl font-bold text-foreground" data-testid="text-strategies-title">Strategy Management</h1>
               <p className="text-muted-foreground text-sm">Configure strategies, plans, and broker linking</p>
             </div>
-            <Link href="/">
-              <Button variant="outline" size="sm" data-testid="button-home">
-                <Home className="w-4 h-4 mr-2" />
-                Home
-              </Button>
-            </Link>
+          </div>
+          <div className="mt-2">
+            <PageBreadcrumbs items={[{ label: "Strategies" }]} />
           </div>
         </div>
       </header>

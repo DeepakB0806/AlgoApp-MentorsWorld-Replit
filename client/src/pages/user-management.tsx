@@ -13,6 +13,7 @@ import {
   Send, RefreshCw, MailCheck, MailX
 } from "lucide-react";
 import { Link } from "wouter";
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import {
   Dialog,
   DialogContent,
@@ -198,11 +199,6 @@ export default function UserManagement() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center gap-4">
             <div className="flex items-center gap-4">
-              <Link href="/">
-                <Button variant="ghost" size="icon" data-testid="button-back-home">
-                  <ArrowLeft className="w-5 h-5" />
-                </Button>
-              </Link>
               <div>
                 <h1 className="text-2xl font-bold text-foreground" data-testid="text-page-title">
                   User Management
@@ -273,6 +269,9 @@ export default function UserManagement() {
                 </form>
               </DialogContent>
             </Dialog>
+          </div>
+          <div className="mt-2">
+            <PageBreadcrumbs items={[{ label: "User Management" }]} />
           </div>
         </div>
       </header>

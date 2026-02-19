@@ -13,6 +13,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import type { BrokerConfig, InsertBrokerConfig, BrokerTestLog, BrokerSessionLog } from "@shared/schema";
 
 interface TestResult {
@@ -1568,13 +1569,10 @@ export default function BrokerApi() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Link href="/">
-                <Button variant="outline" size="sm" data-testid="button-home">
-                  <Home className="w-4 h-4 mr-2" />
-                  Home
-                </Button>
-              </Link>
             </div>
+          </div>
+          <div className="mt-2">
+            <PageBreadcrumbs items={[{ label: "Broker API" }]} />
           </div>
         </div>
       </header>

@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Home, Plus, Webhook, Trash2, Edit, Copy, Clock, CheckCircle, XCircle, Play, Settings, FileText, ExternalLink, Save, Eye, EyeOff, Activity, Timer, Wrench, Upload, Link2, RefreshCw, ChevronDown } from "lucide-react";
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import { Textarea } from "@/components/ui/textarea";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -586,12 +587,6 @@ export default function Webhooks() {
               <p className="text-muted-foreground text-sm">Configure trading webhooks for TradingView alerts</p>
             </div>
             <div className="flex gap-2 flex-wrap">
-              <Link href="/">
-                <Button variant="outline" size="sm" data-testid="button-home">
-                  <Home className="w-4 h-4 mr-2" />
-                  Home
-                </Button>
-              </Link>
               <Button 
                 variant="outline" 
                 onClick={() => syncMutation.mutate()}
@@ -700,6 +695,9 @@ export default function Webhooks() {
                 </DialogContent>
               </Dialog>
             </div>
+          </div>
+          <div className="mt-2">
+            <PageBreadcrumbs items={[{ label: "Webhooks" }]} />
           </div>
         </div>
       </header>

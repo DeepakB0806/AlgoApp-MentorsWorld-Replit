@@ -10,6 +10,7 @@ import { TrendingUp, TrendingDown, RefreshCw, Home, Wifi, WifiOff, Search, BarCh
 import { Link } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import type { Position, Order, Holding, PortfolioSummary, StrategyPlan, StrategyConfig, BrokerConfig, StrategyTrade } from "@shared/schema";
 import { Target } from "lucide-react";
 
@@ -134,12 +135,6 @@ export default function Dashboard() {
               </Badge>
             </div>
             <div className="flex gap-2 flex-wrap">
-              <Link href="/">
-                <Button variant="outline" size="sm" data-testid="button-home">
-                  <Home className="w-4 h-4 mr-2" />
-                  Home
-                </Button>
-              </Link>
               <Button
                 onClick={handleRefresh}
                 variant="outline"
@@ -151,6 +146,9 @@ export default function Dashboard() {
                 Refresh
               </Button>
             </div>
+          </div>
+          <div className="mt-2">
+            <PageBreadcrumbs items={[{ label: "Dashboard" }]} />
           </div>
         </div>
       </header>

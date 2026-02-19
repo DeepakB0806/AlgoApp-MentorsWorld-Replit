@@ -12,6 +12,7 @@ import {
   Eye, EyeOff, AlertTriangle, FileText
 } from "lucide-react";
 import { Link } from "wouter";
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
 
 interface MailSettings {
@@ -388,11 +389,6 @@ export default function Settings() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center gap-4">
             <div className="flex items-center gap-4">
-              <Link href="/user-home">
-                <Button variant="ghost" size="icon" data-testid="button-back-home">
-                  <ArrowLeft className="w-5 h-5" />
-                </Button>
-              </Link>
               <div className="flex items-center gap-3">
                 <img src={mwLogo} alt="MentorsWorld" className="w-10 h-10 object-contain" />
                 <div>
@@ -403,6 +399,9 @@ export default function Settings() {
                 </div>
               </div>
             </div>
+          </div>
+          <div className="mt-2">
+            <PageBreadcrumbs items={[{ label: "Settings" }]} />
           </div>
         </div>
       </header>

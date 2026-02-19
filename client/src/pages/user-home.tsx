@@ -4,6 +4,7 @@ import { TrendingUp, BarChart3, Activity, ArrowRight, Webhook, Key, Users, LogOu
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "@tanstack/react-query";
+import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
 
 interface BrokerConfig {
@@ -77,6 +78,9 @@ export default function UserHome() {
                 Sign Out
               </Button>
             </div>
+          </div>
+          <div className="mt-2">
+            <PageBreadcrumbs items={[{ label: "Home" }]} />
           </div>
         </div>
       </header>
