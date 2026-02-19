@@ -1355,13 +1355,24 @@ const DEPLOYMENT_STATUS_CONFIG: Record<string, { label: string; color: string; i
   closed: { label: "Closed", color: "text-muted-foreground", icon: Power },
 };
 
-function LivePositionTracker({ plan, brokerConfigs }: { plan: StrategyPlan; brokerConfigs: BrokerConfig[] }) {
+function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: StrategyPlan; brokerConfigs: BrokerConfig[]; parentConfig?: StrategyConfig }) {
   const [positions, setPositions] = useState<PositionData[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastFetched, setLastFetched] = useState<string | null>(null);
 
   const brokerConfig = brokerConfigs.find((bc) => bc.id === plan.brokerConfigId);
   const isConnected = brokerConfig?.isConnected || false;
+
+  const strategyTicker = parentConfig?.ticker?.toUpperCase() || "";
+  const strategyExchange = parentConfig?.exchange?.toUpperCase() || "";
+
+  const filterPositionsByStrategy = (allPositions: PositionData[]): PositionData[] => {
+    if (!strategyTicker) return allPositions;
+    return allPositions.filter((pos) => {
+      const sym = pos.trading_symbol.toUpperCase();
+      return sym.startsWith(strategyTicker) || sym.includes(strategyTicker);
+    });
+  };
 
   const fetchPositions = async () => {
     if (!plan.brokerConfigId) return;
@@ -1370,7 +1381,7 @@ function LivePositionTracker({ plan, brokerConfigs }: { plan: StrategyPlan; brok
       const resp = await fetch(`/api/positions/${plan.brokerConfigId}`);
       if (resp.ok) {
         const data: PositionData[] = await resp.json();
-        setPositions(data);
+        setPositions(filterPositionsByStrategy(data));
         setLastFetched(new Date().toLocaleTimeString());
       }
     } catch {} finally {
@@ -1395,6 +1406,9 @@ function LivePositionTracker({ plan, brokerConfigs }: { plan: StrategyPlan; brok
         <div className="flex items-center gap-2">
           <Activity className="w-4 h-4 text-emerald-400" />
           <Label className="text-xs font-semibold">Live Position Tracker</Label>
+          {strategyTicker && (
+            <Badge variant="secondary" className="text-xs font-mono">{strategyTicker}</Badge>
+          )}
           {isConnected ? (
             <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">
               <Wifi className="w-3 h-3 mr-1" />
@@ -1837,7 +1851,7 @@ function BrokerLinking() {
                   )}
 
                   {isDeployed && (
-                    <LivePositionTracker plan={plan} brokerConfigs={brokerConfigs} />
+                    <LivePositionTracker plan={plan} brokerConfigs={brokerConfigs} parentConfig={configs.find((c) => c.id === plan.configId)} />
                   )}
 
                   {isDeployed && actions.length > 0 && (

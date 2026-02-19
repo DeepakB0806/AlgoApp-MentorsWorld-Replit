@@ -632,6 +632,19 @@ function LiveTradesPanel() {
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
   const [confirmAction, setConfirmAction] = useState<{ planId: string; action: string } | null>(null);
 
+  const getStrategyTicker = (plan: StrategyPlan): string => {
+    const config = configs.find((c) => c.id === plan.configId);
+    return config?.ticker?.toUpperCase() || "";
+  };
+
+  const filterByStrategy = (allPositions: LivePositionData[], ticker: string): LivePositionData[] => {
+    if (!ticker) return allPositions;
+    return allPositions.filter((pos) => {
+      const sym = pos.trading_symbol.toUpperCase();
+      return sym.startsWith(ticker) || sym.includes(ticker);
+    });
+  };
+
   const fetchPositionsForPlan = async (plan: StrategyPlan) => {
     if (!plan.brokerConfigId) return;
     setLoadingMap((prev) => ({ ...prev, [plan.id]: true }));
@@ -639,7 +652,8 @@ function LiveTradesPanel() {
       const resp = await fetch(`/api/positions/${plan.brokerConfigId}`);
       if (resp.ok) {
         const data: LivePositionData[] = await resp.json();
-        setPositionsMap((prev) => ({ ...prev, [plan.id]: data }));
+        const ticker = getStrategyTicker(plan);
+        setPositionsMap((prev) => ({ ...prev, [plan.id]: filterByStrategy(data, ticker) }));
       }
     } catch {} finally {
       setLoadingMap((prev) => ({ ...prev, [plan.id]: false }));
@@ -795,6 +809,7 @@ function LiveTradesPanel() {
                   <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
                     <span>Config: {getConfigName(plan.configId)}</span>
                     <span>Broker: {getBrokerName(plan.brokerConfigId)}</span>
+                    {getStrategyTicker(plan) && <Badge variant="secondary" className="text-xs font-mono">{getStrategyTicker(plan)}</Badge>}
                   </div>
                 </CardHeader>
                 <CardContent>
