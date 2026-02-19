@@ -264,27 +264,89 @@ export async function registerRoutes(
 
   app.get("/api/webhook-signals/:webhookId", async (req, res) => {
     try {
-      const data = await storage.getWebhookDataByWebhook(req.params.webhookId);
-      const uniqueAlerts = Array.from(new Set(data.map(d => d.alert).filter(Boolean)));
+      const webhookId = req.params.webhookId;
+      const fieldKeys = new Set<string>();
 
-      if (uniqueAlerts.length > 0) {
-        return res.json(uniqueAlerts);
-      }
-
-      const webhook = await storage.getWebhook(req.params.webhookId);
+      const webhook = await storage.getWebhook(webhookId);
       if (webhook && webhook.fieldConfig) {
         try {
           const fields = JSON.parse(webhook.fieldConfig);
           if (Array.isArray(fields)) {
-            const fieldKeys = fields.map((f: { key?: string; name?: string }) => f.key || f.name).filter(Boolean);
-            return res.json(fieldKeys);
+            fields.forEach((f: { key?: string; name?: string }) => {
+              const k = f.key || f.name;
+              if (k) fieldKeys.add(k);
+            });
           }
         } catch {}
       }
 
-      res.json([]);
+      const logs = await storage.getWebhookLogsByWebhookId(webhookId);
+      for (const log of logs) {
+        if (log.payload) {
+          try {
+            const parsed = JSON.parse(log.payload);
+            Object.keys(parsed).forEach((k) => fieldKeys.add(k));
+          } catch {}
+        }
+      }
+
+      if (fieldKeys.size === 0 && webhook?.linkedWebhookId) {
+        const linkedLogs = await storage.getWebhookLogsByWebhookId(webhook.linkedWebhookId);
+        for (const log of linkedLogs) {
+          if (log.payload) {
+            try {
+              const parsed = JSON.parse(log.payload);
+              Object.keys(parsed).forEach((k) => fieldKeys.add(k));
+            } catch {}
+          }
+        }
+      }
+
+      res.json(Array.from(fieldKeys).sort());
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch webhook signals" });
+    }
+  });
+
+  app.get("/api/webhook-field-values/:webhookId/:fieldKey", async (req, res) => {
+    try {
+      const { webhookId, fieldKey } = req.params;
+      const logs = await storage.getWebhookLogsByWebhookId(webhookId);
+      const uniqueValues = new Set<string>();
+
+      for (const log of logs) {
+        if (log.payload) {
+          try {
+            const parsed = JSON.parse(log.payload);
+            const val = parsed[fieldKey];
+            if (val !== undefined && val !== null && val !== "") {
+              uniqueValues.add(String(val));
+            }
+          } catch {}
+        }
+      }
+
+      if (uniqueValues.size === 0) {
+        const webhook = await storage.getWebhook(webhookId);
+        if (webhook?.linkedWebhookId) {
+          const linkedLogs = await storage.getWebhookLogsByWebhookId(webhook.linkedWebhookId);
+          for (const log of linkedLogs) {
+            if (log.payload) {
+              try {
+                const parsed = JSON.parse(log.payload);
+                const val = parsed[fieldKey];
+                if (val !== undefined && val !== null && val !== "") {
+                  uniqueValues.add(String(val));
+                }
+              } catch {}
+            }
+          }
+        }
+      }
+
+      res.json(Array.from(uniqueValues).sort());
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch field values" });
     }
   });
 

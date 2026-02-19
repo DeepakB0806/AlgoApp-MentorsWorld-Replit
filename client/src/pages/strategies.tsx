@@ -53,8 +53,11 @@ function MotherConfigurator() {
   const [webhookId, setWebhookId] = useState("");
   const [actionMapper, setActionMapper] = useState<ActionMapperEntry[]>([]);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
+  const [addedFields, setAddedFields] = useState<string[]>([]);
   const [selectedField, setSelectedField] = useState("");
   const [signalsFetched, setSignalsFetched] = useState(false);
+  const [mapperReady, setMapperReady] = useState(false);
+  const [loadingValues, setLoadingValues] = useState(false);
   const [uptrendLegs, setUptrendLegs] = useState<TradeLeg[]>([]);
   const [downtrendLegs, setDowntrendLegs] = useState<TradeLeg[]>([]);
   const [neutralLegs, setNeutralLegs] = useState<TradeLeg[]>([]);
@@ -79,8 +82,7 @@ function MotherConfigurator() {
     const result = await refetchSignals();
     const fetched = result.data || [];
     if (fetched.length > 0) {
-      const usedFields = actionMapper.map((e) => e.signalValue);
-      setAvailableFields(fetched.filter((f) => !usedFields.includes(f)));
+      setAvailableFields(fetched.filter((f) => !addedFields.includes(f)));
       setSignalsFetched(true);
       setSelectedField("");
     } else {
@@ -90,16 +92,44 @@ function MotherConfigurator() {
 
   const addSignalField = () => {
     if (!selectedField) return;
-    setActionMapper((prev) => [...prev, { signalValue: selectedField, uptrend: "--" as const, downtrend: "--" as const, neutral: "--" as const }]);
+    setAddedFields((prev) => [...prev, selectedField]);
     setAvailableFields((prev) => prev.filter((f) => f !== selectedField));
     setSelectedField("");
   };
 
-  const removeSignalField = (index: number) => {
-    const removed = actionMapper[index];
-    setActionMapper((prev) => prev.filter((_, i) => i !== index));
-    if (removed) {
-      setAvailableFields((prev) => [...prev, removed.signalValue]);
+  const removeAddedField = (field: string) => {
+    setAddedFields((prev) => prev.filter((f) => f !== field));
+    setAvailableFields((prev) => [...prev, field]);
+    setActionMapper((prev) => prev.filter((e) => e.fieldKey !== field));
+  };
+
+  const loadFieldValues = async () => {
+    if (addedFields.length === 0) return;
+    setLoadingValues(true);
+    try {
+      const results = await Promise.all(
+        addedFields.map(async (field) => {
+          const resp = await fetch(`/api/webhook-field-values/${webhookId}/${field}`);
+          if (resp.ok) {
+            const values: string[] = await resp.json();
+            return values.map((val) => ({ signalValue: val, fieldKey: field, uptrend: "--" as const, downtrend: "--" as const, neutral: "--" as const }));
+          }
+          return [];
+        })
+      );
+      const allEntries = results.flat().filter(
+        (entry, idx, arr) => arr.findIndex((e) => e.signalValue === entry.signalValue && e.fieldKey === entry.fieldKey) === idx
+      );
+      if (allEntries.length > 0) {
+        setActionMapper(allEntries);
+        setMapperReady(true);
+      } else {
+        toast({ title: "No signal values found for selected fields. Webhook may not have received data yet.", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Failed to load field values", variant: "destructive" });
+    } finally {
+      setLoadingValues(false);
     }
   };
 
@@ -152,8 +182,11 @@ function MotherConfigurator() {
     setWebhookId("");
     setActionMapper([]);
     setAvailableFields([]);
+    setAddedFields([]);
     setSelectedField("");
     setSignalsFetched(false);
+    setMapperReady(false);
+    setLoadingValues(false);
     setUptrendLegs([]);
     setDowntrendLegs([]);
     setNeutralLegs([]);
@@ -167,9 +200,12 @@ function MotherConfigurator() {
     setWebhookId(config.webhookId || "");
     const parsedMapper = parseJsonSafe<ActionMapperEntry[]>(config.actionMapper, []);
     setActionMapper(parsedMapper);
+    const existingFieldKeys = Array.from(new Set(parsedMapper.map((e) => e.fieldKey).filter(Boolean))) as string[];
+    setAddedFields(existingFieldKeys);
     setAvailableFields([]);
     setSelectedField("");
     setSignalsFetched(parsedMapper.length > 0);
+    setMapperReady(parsedMapper.length > 0);
     const upBlock = parseJsonSafe<ExecutionBlock>(config.uptrendBlock, { legs: [] });
     const downBlock = parseJsonSafe<ExecutionBlock>(config.downtrendBlock, { legs: [] });
     const neutralBlock = parseJsonSafe<ExecutionBlock>(config.neutralBlock, { legs: [] });
@@ -285,7 +321,7 @@ function MotherConfigurator() {
         <div>
           <Label className="mb-2 block">Indicator Source (Webhook)</Label>
           <div className="flex items-center gap-2 flex-wrap">
-            <Select value={webhookId} onValueChange={(val) => { setWebhookId(val); setActionMapper([]); setAvailableFields([]); setSelectedField(""); setSignalsFetched(false); }}>
+            <Select value={webhookId} onValueChange={(val) => { setWebhookId(val); setActionMapper([]); setAvailableFields([]); setAddedFields([]); setSelectedField(""); setSignalsFetched(false); setMapperReady(false); }}>
               <SelectTrigger className="flex-1 min-w-[200px]" data-testid="select-config-webhook">
                 <SelectValue placeholder="Select indicator webhook..." />
               </SelectTrigger>
@@ -311,103 +347,125 @@ function MotherConfigurator() {
 
         {signalsFetched && (
           <div className="space-y-3">
-            <Label className="mb-2 block">Signal Action Mapper</Label>
+            <Label className="mb-2 block">Select Signal Fields</Label>
 
-            {availableFields.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <Select value={selectedField} onValueChange={setSelectedField}>
-                  <SelectTrigger className="flex-1 min-w-[200px]" data-testid="select-signal-field">
-                    <SelectValue placeholder="Select a signal field to add..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableFields.map((f) => (
-                      <SelectItem key={f} value={f}>{f}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  variant="outline"
-                  onClick={addSignalField}
-                  disabled={!selectedField}
-                  data-testid="button-add-signal-field"
-                >
-                  <Plus className="w-4 h-4 mr-1" /> Add Signal
-                </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {availableFields.length > 0 && (
+                <>
+                  <Select value={selectedField} onValueChange={setSelectedField}>
+                    <SelectTrigger className="flex-1 min-w-[200px]" data-testid="select-signal-field">
+                      <SelectValue placeholder="Select a signal field to add..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableFields.map((f) => (
+                        <SelectItem key={f} value={f}>{f}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    onClick={addSignalField}
+                    disabled={!selectedField}
+                    data-testid="button-add-signal-field"
+                  >
+                    <Plus className="w-4 h-4 mr-1" /> Add
+                  </Button>
+                </>
+              )}
+            </div>
+
+            {addedFields.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {addedFields.map((field) => (
+                    <Badge key={field} variant="secondary" className="gap-1" data-testid={`badge-field-${field}`}>
+                      {field}
+                      <button onClick={() => removeAddedField(field)} className="ml-1" data-testid={`button-remove-field-${field}`}>
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+                {!mapperReady && (
+                  <Button
+                    onClick={loadFieldValues}
+                    disabled={loadingValues}
+                    data-testid="button-next-load-values"
+                  >
+                    {loadingValues ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Loading...</> : "Next"}
+                  </Button>
+                )}
               </div>
             )}
 
-            {actionMapper.length > 0 && (
-              <div className="border border-border rounded-md overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Signal</th>
-                      <th className="text-left px-3 py-2 font-medium text-emerald-400">Uptrend</th>
-                      <th className="text-left px-3 py-2 font-medium text-red-400">Downtrend</th>
-                      <th className="text-left px-3 py-2 font-medium text-blue-400">Neutral</th>
-                      <th className="px-3 py-2 w-10"></th>
+            {addedFields.length === 0 && !mapperReady && (
+              <p className="text-sm text-muted-foreground">Select signal fields from the dropdown above, then click "Next" to load their values for mapping.</p>
+            )}
+          </div>
+        )}
+
+        {mapperReady && actionMapper.length > 0 && (
+          <div className="space-y-3">
+            <Label className="mb-2 block">Strategy Action Mapper</Label>
+            <div className="border border-border rounded-md overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Signal Name</th>
+                    <th className="text-center px-3 py-2 font-medium text-emerald-400" colSpan={1}>Uptrend Action</th>
+                    <th className="text-center px-3 py-2 font-medium text-red-400" colSpan={1}>Downtrend Action</th>
+                    <th className="text-center px-3 py-2 font-medium text-blue-400" colSpan={1}>Neutral Action</th>
+                  </tr>
+                  <tr className="border-b border-border">
+                    <th></th>
+                    <th className="text-center px-3 py-1 text-xs text-muted-foreground" colSpan={3}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {actionMapper.map((entry, idx) => (
+                    <tr key={`${entry.fieldKey}-${entry.signalValue}`} className="border-b border-border/50 last:border-0">
+                      <td className="px-3 py-2 font-mono text-xs" data-testid={`text-signal-${idx}`}>{entry.signalValue}</td>
+                      <td className="px-3 py-2">
+                        <Select value={entry.uptrend} onValueChange={(v) => updateMapperEntry(idx, "uptrend", v)}>
+                          <SelectTrigger className="w-28" data-testid={`select-uptrend-${idx}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ACTION_OPTIONS.map((a) => (
+                              <SelectItem key={a} value={a}>{a}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-3 py-2">
+                        <Select value={entry.downtrend} onValueChange={(v) => updateMapperEntry(idx, "downtrend", v)}>
+                          <SelectTrigger className="w-28" data-testid={`select-downtrend-${idx}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ACTION_OPTIONS.map((a) => (
+                              <SelectItem key={a} value={a}>{a}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-3 py-2">
+                        <Select value={entry.neutral} onValueChange={(v) => updateMapperEntry(idx, "neutral", v)}>
+                          <SelectTrigger className="w-28" data-testid={`select-neutral-${idx}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ACTION_OPTIONS.map((a) => (
+                              <SelectItem key={a} value={a}>{a}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {actionMapper.map((entry, idx) => (
-                      <tr key={entry.signalValue} className="border-b border-border/50 last:border-0">
-                        <td className="px-3 py-2 font-mono text-xs" data-testid={`text-signal-${idx}`}>{entry.signalValue}</td>
-                        <td className="px-3 py-2">
-                          <Select value={entry.uptrend} onValueChange={(v) => updateMapperEntry(idx, "uptrend", v)}>
-                            <SelectTrigger className="w-28" data-testid={`select-uptrend-${idx}`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {ACTION_OPTIONS.map((a) => (
-                                <SelectItem key={a} value={a}>{a}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className="px-3 py-2">
-                          <Select value={entry.downtrend} onValueChange={(v) => updateMapperEntry(idx, "downtrend", v)}>
-                            <SelectTrigger className="w-28" data-testid={`select-downtrend-${idx}`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {ACTION_OPTIONS.map((a) => (
-                                <SelectItem key={a} value={a}>{a}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className="px-3 py-2">
-                          <Select value={entry.neutral} onValueChange={(v) => updateMapperEntry(idx, "neutral", v)}>
-                            <SelectTrigger className="w-28" data-testid={`select-neutral-${idx}`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {ACTION_OPTIONS.map((a) => (
-                                <SelectItem key={a} value={a}>{a}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className="px-3 py-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeSignalField(idx)}
-                            data-testid={`button-remove-signal-${idx}`}
-                          >
-                            <X className="w-3 h-3 text-destructive" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {actionMapper.length === 0 && availableFields.length > 0 && (
-              <p className="text-sm text-muted-foreground">Select signal fields from the dropdown above and click "Add Signal" to build the action mapper.</p>
-            )}
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
