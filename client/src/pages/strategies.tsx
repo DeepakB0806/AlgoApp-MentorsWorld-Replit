@@ -247,7 +247,7 @@ function MotherConfigurator() {
       webhookId: webhookId || null,
       exchange: exchange || null,
       ticker: ticker || null,
-      actionMapper: JSON.stringify(actionMapper),
+      actionMapper: JSON.stringify(actionMapper.filter((e) => e.signalValue.trim())),
       status,
     };
     if (editingId) {
@@ -528,6 +528,22 @@ function MotherConfigurator() {
                 </tbody>
               </table>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => {
+                const fieldKey = addedFields.length === 1 ? addedFields[0] : (selectedField || addedFields[addedFields.length - 1] || "custom");
+                const newIdx = actionMapper.length;
+                setActionMapper((prev) => [...prev, { signalValue: "", fieldKey, uptrend: null, downtrend: null, neutral: null }]);
+                setEditingFieldName(`${newIdx}`);
+                setEditFieldValue("");
+              }}
+              data-testid="button-add-signal-row"
+            >
+              <Plus className="w-3 h-3 mr-1" />
+              Add Signal
+            </Button>
           </div>
         )}
 
