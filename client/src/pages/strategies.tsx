@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
@@ -1524,95 +1525,88 @@ function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: Stra
   );
 }
 
-function DailyPnlLog({ plan }: { plan: StrategyPlan }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const isDeployed = plan.deploymentStatus && plan.deploymentStatus !== "draft";
-
+function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; isOpen: boolean; onOpenChange: (open: boolean) => void }) {
   const { data: rawEntries = [], isLoading } = useQuery<StrategyDailyPnl[]>({
     queryKey: ["/api/strategy-daily-pnl", plan.id],
-    enabled: !!isDeployed,
+    enabled: isOpen,
   });
 
   const entries = [...rawEntries].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
-  if (!isDeployed) return null;
+  const planName = plan.name || `Plan #${plan.id}`;
 
   return (
-    <div className="mt-3 border-t border-border/50 pt-3" data-testid={`container-daily-pnl-${plan.id}`}>
-      <button
-        className="w-full flex items-center justify-between gap-2 mb-2 cursor-pointer"
-        onClick={() => setIsExpanded(!isExpanded)}
-        data-testid={`button-toggle-daily-pnl-${plan.id}`}
-      >
-        <div className="flex items-center gap-2">
-          <BarChart3 className="w-4 h-4 text-blue-400" />
-          <Label className="text-xs font-semibold cursor-pointer">Daily P&L Log</Label>
-          <Badge variant="secondary" className="text-xs">{entries.length} day{entries.length !== 1 ? "s" : ""}</Badge>
-          {entries.length > 0 && (
-            <span className={`text-xs font-mono font-semibold ${(entries[0]?.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-              Cumulative: {(entries[0]?.cumulativePnl || 0) >= 0 ? "+" : ""}{(entries[0]?.cumulativePnl || 0).toFixed(2)}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-        </div>
-      </button>
-
-      {isExpanded && (
-        <div>
+    <Sheet open={isOpen} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full max-w-[800px] h-full max-h-screen overflow-hidden flex flex-col" side="right">
+        <SheetHeader>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <SheetTitle data-testid={`title-daily-pnl-sheet-${plan.id}`}>Daily P&L Log: {planName}</SheetTitle>
+              <SheetDescription>
+                {entries.length} day{entries.length !== 1 ? "s" : ""} of P&L data recorded
+                {entries.length > 0 && (
+                  <span className={`ml-2 font-mono font-semibold ${(entries[0]?.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    Cumulative: {(entries[0]?.cumulativePnl || 0) >= 0 ? "+" : ""}{(entries[0]?.cumulativePnl || 0).toFixed(2)}
+                  </span>
+                )}
+              </SheetDescription>
+            </div>
+          </div>
+        </SheetHeader>
+        <div className="mt-6 flex-1 min-h-0 flex flex-col">
           {isLoading ? (
-            <div className="flex items-center justify-center py-6">
+            <div className="flex items-center justify-center py-8">
               <Loader2 className="w-5 h-5 animate-spin text-muted-foreground mr-2" />
-              <span className="text-xs text-muted-foreground">Loading daily P&L data...</span>
+              <span className="text-sm text-muted-foreground">Loading daily P&L data...</span>
             </div>
-          ) : entries.length > 0 ? (
-            <div className="border border-border/30 rounded-md">
-              <div className="overflow-x-auto max-h-64 overflow-y-auto">
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-card z-10">
-                    <tr className="border-b border-border/30">
-                      <th className="text-left px-3 py-2 text-muted-foreground font-medium">Date</th>
-                      <th className="text-right px-3 py-2 text-muted-foreground font-medium">Day P&L</th>
-                      <th className="text-right px-3 py-2 text-muted-foreground font-medium">Cumulative P&L</th>
-                      <th className="text-center px-3 py-2 text-muted-foreground font-medium">Trades</th>
-                      <th className="text-center px-3 py-2 text-muted-foreground font-medium">Open</th>
-                      <th className="text-center px-3 py-2 text-muted-foreground font-medium">Closed</th>
-                      <th className="text-left px-3 py-2 text-muted-foreground font-medium">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entries.map((entry) => (
-                      <tr key={entry.id} className="border-b border-border/20" data-testid={`row-daily-pnl-${entry.id}`}>
-                        <td className="px-3 py-2 font-mono font-medium">{entry.date}</td>
-                        <td className={`px-3 py-2 text-right font-mono font-semibold ${(entry.dailyPnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                          {(entry.dailyPnl || 0) >= 0 ? "+" : ""}{(entry.dailyPnl || 0).toFixed(2)}
-                        </td>
-                        <td className={`px-3 py-2 text-right font-mono font-semibold ${(entry.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                          {(entry.cumulativePnl || 0) >= 0 ? "+" : ""}{(entry.cumulativePnl || 0).toFixed(2)}
-                        </td>
-                        <td className="px-3 py-2 text-center font-mono">{entry.tradesCount || 0}</td>
-                        <td className="px-3 py-2 text-center font-mono">{entry.openTrades || 0}</td>
-                        <td className="px-3 py-2 text-center font-mono">{entry.closedTrades || 0}</td>
-                        <td className="px-3 py-2">
-                          <Badge variant={entry.status === "active" ? "default" : "secondary"} className="text-xs">{entry.status}</Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          ) : entries.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8" data-testid={`empty-state-daily-pnl-${plan.id}`}>No daily P&L entries recorded yet for this strategy.</p>
           ) : (
-            <div className="text-center py-4 border border-dashed border-border/40 rounded-md" data-testid={`empty-state-daily-pnl-${plan.id}`}>
-              <BarChart3 className="w-6 h-6 text-muted-foreground/40 mx-auto mb-2" />
-              <p className="text-xs text-muted-foreground">No daily P&L entries recorded yet</p>
-              <p className="text-xs text-muted-foreground/70 mt-1">Daily snapshots will appear here as trading days are logged</p>
+            <div
+              className="overflow-auto flex-1 min-h-0"
+              data-testid={`daily-pnl-scroll-container-${plan.id}`}
+            >
+              <table className="w-full text-xs border-collapse">
+                <thead className="sticky top-0 z-20 bg-card">
+                  <tr className="border-b">
+                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Date</th>
+                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-right font-medium text-muted-foreground">Day P&L</th>
+                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-right font-medium text-muted-foreground">Cumulative P&L</th>
+                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-center font-medium text-muted-foreground">Trades</th>
+                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-center font-medium text-muted-foreground">Open</th>
+                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-center font-medium text-muted-foreground">Closed</th>
+                    <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((entry) => (
+                    <tr
+                      key={entry.id}
+                      data-testid={`row-daily-pnl-${entry.id}`}
+                      className="border-b hover:bg-muted/50"
+                    >
+                      <td className="whitespace-nowrap px-2 py-2 font-mono font-medium">{entry.date}</td>
+                      <td className={`whitespace-nowrap px-2 py-2 text-right font-mono font-semibold ${(entry.dailyPnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {(entry.dailyPnl || 0) >= 0 ? "+" : ""}{(entry.dailyPnl || 0).toFixed(2)}
+                      </td>
+                      <td className={`whitespace-nowrap px-2 py-2 text-right font-mono font-semibold ${(entry.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {(entry.cumulativePnl || 0) >= 0 ? "+" : ""}{(entry.cumulativePnl || 0).toFixed(2)}
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-2 text-center font-mono">{entry.tradesCount || 0}</td>
+                      <td className="whitespace-nowrap px-2 py-2 text-center font-mono">{entry.openTrades || 0}</td>
+                      <td className="whitespace-nowrap px-2 py-2 text-center font-mono">{entry.closedTrades || 0}</td>
+                      <td className="whitespace-nowrap px-2 py-2">
+                        <Badge variant={entry.status === "active" ? "default" : "secondary"} className="text-xs">{entry.status}</Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
-      )}
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -1632,6 +1626,7 @@ function BrokerLinking() {
   const [localState, setLocalState] = useState<Record<string, { brokerConfigId: string; isProxyMode: boolean }>>({});
   const [confirmAction, setConfirmAction] = useState<{ planId: string; action: string } | null>(null);
   const [deployConfig, setDeployConfig] = useState<Record<string, { lotMultiplier: number; stoploss: number; profitTarget: number; baseStoploss: number; baseProfitTarget: number }>>({});
+  const [pnlSheetPlanId, setPnlSheetPlanId] = useState<string | null>(null);
 
   const plansKey = activePlans.map((p) => `${p.id}:${p.brokerConfigId}:${p.isProxyMode}`).join(",");
   useEffect(() => {
@@ -2127,16 +2122,21 @@ function BrokerLinking() {
                             </Button>
                           );
                         })}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setPnlSheetPlanId(plan.id)}
+                          data-testid={`button-daily-pnl-${plan.id}`}
+                        >
+                          <BarChart3 className="w-3 h-3 mr-1" />
+                          P&L Log
+                        </Button>
                       </div>
                     </div>
                   )}
 
                   {isDeployed && (
                     <LivePositionTracker plan={plan} brokerConfigs={brokerConfigs} parentConfig={configs.find((c) => c.id === plan.configId)} />
-                  )}
-
-                  {isDeployed && (
-                    <DailyPnlLog plan={plan} />
                   )}
                 </CardContent>
               </Card>
@@ -2178,6 +2178,18 @@ function BrokerLinking() {
           )}
         </DialogContent>
       </Dialog>
+
+      {pnlSheetPlanId && (() => {
+        const selectedPlan = plans.find((p) => p.id === pnlSheetPlanId);
+        if (!selectedPlan) return null;
+        return (
+          <DailyPnlLogSheet
+            plan={selectedPlan}
+            isOpen={!!pnlSheetPlanId}
+            onOpenChange={(open) => { if (!open) setPnlSheetPlanId(null); }}
+          />
+        );
+      })()}
     </div>
   );
 }
