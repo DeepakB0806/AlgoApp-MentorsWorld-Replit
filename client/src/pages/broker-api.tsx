@@ -1111,17 +1111,31 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
             )}
 
             {config?.connectionError && (
-              <Alert variant={config.connectionError.includes("geo-restricted") ? "default" : "destructive"}>
-                <XCircle className="h-4 w-4" />
-                <AlertDescription>
-                  {config.connectionError}
-                  {config.connectionError.includes("geo-restricted") && (
-                    <span className="block mt-1 text-xs text-muted-foreground">
-                      This is a Binance regional restriction on the server IP. Your credentials may still be valid when deployed to a supported region.
+              config.connectionError.includes("geo-restricted") ? (
+                <Alert variant="default" className="border-amber-500/50 bg-amber-500/10">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  <AlertDescription>
+                    <span className="font-medium text-amber-500">Binance API Geo-Restricted</span>
+                    <span className="block mt-1 text-sm text-muted-foreground">
+                      Binance blocks API access from this server's region (US). Your credentials are saved and will work when:
                     </span>
-                  )}
-                </AlertDescription>
-              </Alert>
+                    <ul className="mt-1.5 ml-4 list-disc text-xs text-muted-foreground space-y-0.5">
+                      <li>A <code className="text-xs bg-muted px-1 rounded">BINANCE_PROXY_URL</code> environment variable is configured with a non-US proxy</li>
+                      <li>The app is deployed to a server in a supported region (e.g., Singapore, Europe)</li>
+                    </ul>
+                    {config.lastTestResult === "success" && (
+                      <span className="block mt-1.5 text-xs text-emerald-500">
+                        Connectivity test passed — public API endpoints are reachable.
+                      </span>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert variant="destructive">
+                  <XCircle className="h-4 w-4" />
+                  <AlertDescription>{config.connectionError}</AlertDescription>
+                </Alert>
+              )
             )}
           </div>
         </CardContent>

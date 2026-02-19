@@ -26,6 +26,7 @@ import {
   getOrderBook as getBinanceOrders,
   getHoldings as getBinanceHoldings,
   getAccountBalance as getBinanceBalance,
+  getProxyStatus as getBinanceProxyStatus,
   type BinanceSession
 } from "./binance-api";
 
@@ -1259,6 +1260,10 @@ export async function registerRoutes(
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch webhook logs" });
     }
+  });
+
+  app.get("/api/binance/proxy-status", async (_req, res) => {
+    res.json(getBinanceProxyStatus());
   });
 
   // Broker Config Routes

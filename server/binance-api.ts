@@ -1,4 +1,6 @@
 import { MainClient, OrderType, OrderSide, OrderTimeInForce } from "binance";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { SocksProxyAgent } from "socks-proxy-agent";
 import type { KotakNeoAuthResponse } from "@shared/schema";
 
 export interface BinanceSession {
@@ -25,7 +27,7 @@ export interface BinanceOrderParams {
   timeInForce?: "GTC" | "IOC" | "FOK";
 }
 
-const BINANCE_TESTNET_BASE = "https://data-api.binance.vision";
+const BINANCE_TESTNET_BASE = "https://testnet.binance.vision";
 const BINANCE_PROD_BASE = "https://api.binance.com";
 
 const BINANCE_FALLBACK_URLS = {
@@ -33,13 +35,33 @@ const BINANCE_FALLBACK_URLS = {
   production: ["https://data-api.binance.com", "https://api1.binance.com", "https://api.binance.com"],
 };
 
+function getProxyAgent(): HttpsProxyAgent<string> | SocksProxyAgent | undefined {
+  const proxyUrl = process.env.BINANCE_PROXY_URL;
+  if (!proxyUrl) return undefined;
+
+  if (proxyUrl.startsWith("socks")) {
+    return new SocksProxyAgent(proxyUrl);
+  }
+  return new HttpsProxyAgent(proxyUrl);
+}
+
 function createClient(session: BinanceSession): MainClient {
-  const baseUrl = session.isTestnet ? BINANCE_TESTNET_BASE : BINANCE_PROD_BASE;
+  const proxyAgent = getProxyAgent();
+  const hasProxy = !!proxyAgent;
+  const baseUrl = hasProxy
+    ? (session.isTestnet ? BINANCE_TESTNET_BASE : BINANCE_PROD_BASE)
+    : (session.isTestnet ? "https://data-api.binance.vision" : BINANCE_PROD_BASE);
+
   return new MainClient({
     api_key: session.apiKey,
     api_secret: session.apiSecret,
     baseUrl,
+    ...(proxyAgent ? { requestOptions: { agent: proxyAgent } } : {}),
   });
+}
+
+export function getProxyStatus(): { configured: boolean } {
+  return { configured: !!process.env.BINANCE_PROXY_URL };
 }
 
 function extractErrorMessage(error: unknown, fallback: string): string {
@@ -58,8 +80,36 @@ function extractErrorMessage(error: unknown, fallback: string): string {
 }
 
 export async function testConnectivity(apiKey?: string, apiSecret?: string, isTestnet = true): Promise<KotakNeoAuthResponse> {
-  const urls = isTestnet ? BINANCE_FALLBACK_URLS.testnet : BINANCE_FALLBACK_URLS.production;
+  const proxyAgent = getProxyAgent();
+  const hasProxy = !!proxyAgent;
 
+  if (hasProxy) {
+    const baseUrl = isTestnet ? BINANCE_TESTNET_BASE : BINANCE_PROD_BASE;
+    try {
+      const client = new MainClient({
+        ...(apiKey ? { api_key: apiKey } : {}),
+        ...(apiSecret ? { api_secret: apiSecret } : {}),
+        baseUrl,
+        requestOptions: { agent: proxyAgent },
+      });
+
+      await client.testConnectivity();
+
+      return {
+        success: true,
+        message: `Binance ${isTestnet ? "Testnet" : "Production"} API is reachable via proxy → ${new URL(baseUrl).hostname}`,
+      };
+    } catch (error: unknown) {
+      const errMsg = extractErrorMessage(error, "Network error");
+      return {
+        success: false,
+        message: "Unable to reach Binance API via proxy",
+        error: errMsg,
+      };
+    }
+  }
+
+  const urls = isTestnet ? BINANCE_FALLBACK_URLS.testnet : BINANCE_FALLBACK_URLS.production;
   for (const baseUrl of urls) {
     try {
       const client = new MainClient({
@@ -91,7 +141,7 @@ export async function testConnectivity(apiKey?: string, apiSecret?: string, isTe
   return {
     success: false,
     message: "Binance API is geo-restricted from this server location",
-    error: "Binance blocks API access from all known endpoints in this region. Your API keys may still be valid when deployed to a supported region.",
+    error: "Binance blocks API access from all known endpoints in this region. Set BINANCE_PROXY_URL to route through a non-restricted proxy.",
   };
 }
 
@@ -100,6 +150,43 @@ export async function authenticate(
   apiSecret: string,
   isTestnet = true
 ): Promise<KotakNeoAuthResponse> {
+  const proxyAgent = getProxyAgent();
+  const hasProxy = !!proxyAgent;
+
+  if (hasProxy) {
+    const baseUrl = isTestnet ? BINANCE_TESTNET_BASE : BINANCE_PROD_BASE;
+    try {
+      const client = new MainClient({
+        api_key: apiKey,
+        api_secret: apiSecret,
+        baseUrl,
+        requestOptions: { agent: proxyAgent },
+      });
+
+      const account = await client.getAccountInformation();
+
+      const balances = (account.balances || [])
+        .filter((b: { free: string; locked: string }) => parseFloat(b.free) > 0 || parseFloat(b.locked) > 0)
+        .length;
+
+      return {
+        success: true,
+        message: `Authenticated via proxy → ${new URL(baseUrl).hostname}. Account has ${balances} assets with balance.`,
+        accessToken: apiKey,
+        sessionId: isTestnet ? "testnet" : "production",
+        baseUrl,
+      };
+    } catch (error: unknown) {
+      const errMsg = extractErrorMessage(error, "Authentication failed");
+      const isInvalidKey = errMsg.includes("API-key") || errMsg.includes("-2015") || errMsg.includes("-2014");
+      return {
+        success: false,
+        message: isInvalidKey ? "Invalid API Key or Secret" : "Authentication failed via proxy",
+        error: errMsg,
+      };
+    }
+  }
+
   const urls = isTestnet ? BINANCE_FALLBACK_URLS.testnet : BINANCE_FALLBACK_URLS.production;
   let lastGeoRestricted = false;
 
@@ -151,7 +238,7 @@ export async function authenticate(
     return {
       success: false,
       message: "Binance API is geo-restricted from this server location",
-      error: "Binance blocks API access from all known endpoints in this region. Connectivity test passed — credentials are saved. Authentication will work when deployed to a supported region.",
+      error: "Binance API is geo-restricted. Set BINANCE_PROXY_URL env var to route through a non-restricted proxy, or deploy to a supported region.",
     };
   }
 
