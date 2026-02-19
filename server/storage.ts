@@ -3,7 +3,7 @@ import { eq, desc, and, lt } from "drizzle-orm";
 import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
-  brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans,
+  brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -16,6 +16,7 @@ import {
   type BrokerSessionLog, type InsertBrokerSessionLog,
   type StrategyConfig, type InsertStrategyConfig,
   type StrategyPlan, type InsertStrategyPlan,
+  type StrategyTrade, type InsertStrategyTrade,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -115,6 +116,11 @@ export interface IStorage {
   createStrategyPlan(plan: InsertStrategyPlan): Promise<StrategyPlan>;
   updateStrategyPlan(id: string, plan: Partial<InsertStrategyPlan>): Promise<StrategyPlan | undefined>;
   deleteStrategyPlan(id: string): Promise<boolean>;
+
+  // Strategy Trades - records trades executed by strategy plans
+  getStrategyTradesByPlan(planId: string): Promise<StrategyTrade[]>;
+  createStrategyTrade(trade: InsertStrategyTrade): Promise<StrategyTrade>;
+  updateStrategyTrade(id: string, trade: Partial<InsertStrategyTrade>): Promise<StrategyTrade | undefined>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -779,6 +785,21 @@ export class DatabaseStorage implements IStorage {
   async deleteStrategyPlan(id: string): Promise<boolean> {
     const result = await db.delete(strategyPlans).where(eq(strategyPlans.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async getStrategyTradesByPlan(planId: string): Promise<StrategyTrade[]> {
+    return await db.select().from(strategyTrades).where(eq(strategyTrades.planId, planId)).orderBy(desc(strategyTrades.createdAt));
+  }
+
+  async createStrategyTrade(trade: InsertStrategyTrade): Promise<StrategyTrade> {
+    const id = randomUUID();
+    const [result] = await db.insert(strategyTrades).values({ ...trade, id }).returning();
+    return result;
+  }
+
+  async updateStrategyTrade(id: string, trade: Partial<InsertStrategyTrade>): Promise<StrategyTrade | undefined> {
+    const [result] = await db.update(strategyTrades).set(trade).where(eq(strategyTrades.id, id)).returning();
+    return result;
   }
 
   // Trading Data (mock data for demonstration - will be replaced by live data)

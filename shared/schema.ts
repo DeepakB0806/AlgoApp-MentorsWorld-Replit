@@ -141,6 +141,33 @@ export const insertStrategyPlanSchema = createInsertSchema(strategyPlans).omit({
 export type InsertStrategyPlan = z.infer<typeof insertStrategyPlanSchema>;
 export type StrategyPlan = typeof strategyPlans.$inferSelect;
 
+// ====== STRATEGY TRADES ======
+// Records every trade executed by a strategy plan - links positions to strategies
+export const strategyTrades = pgTable("strategy_trades", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  planId: varchar("plan_id", { length: 36 }).notNull(),
+  orderId: text("order_id"),
+  tradingSymbol: text("trading_symbol").notNull(),
+  exchange: text("exchange").notNull().default("NFO"),
+  quantity: integer("quantity").notNull().default(0),
+  price: real("price").default(0),
+  action: text("action").notNull().default("BUY"),
+  blockType: text("block_type").notNull().default("legs"),
+  legIndex: integer("leg_index").notNull().default(0),
+  orderType: text("order_type"),
+  productType: text("product_type"),
+  status: text("status").notNull().default("pending"),
+  pnl: real("pnl").default(0),
+  ltp: real("ltp").default(0),
+  executedAt: text("executed_at"),
+  createdAt: text("created_at"),
+  updatedAt: text("updated_at"),
+});
+
+export const insertStrategyTradeSchema = createInsertSchema(strategyTrades).omit({ id: true });
+export type InsertStrategyTrade = z.infer<typeof insertStrategyTradeSchema>;
+export type StrategyTrade = typeof strategyTrades.$inferSelect;
+
 // Legacy strategy table kept for backward compatibility
 export const strategies = pgTable("strategies", {
   id: varchar("id", { length: 36 }).primaryKey(),

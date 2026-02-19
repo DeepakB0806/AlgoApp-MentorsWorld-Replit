@@ -1600,6 +1600,29 @@ export async function registerRoutes(
     }
   });
 
+  // Strategy Trades - records of trades executed by strategy plans
+  app.get("/api/strategy-trades/:planId", async (req, res) => {
+    try {
+      const { planId } = req.params;
+      const trades = await storage.getStrategyTradesByPlan(planId);
+      res.json(trades);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch strategy trades" });
+    }
+  });
+
+  app.post("/api/strategy-trades", async (req, res) => {
+    try {
+      const trade = await storage.createStrategyTrade({
+        ...req.body,
+        createdAt: new Date().toISOString(),
+      });
+      res.json(trade);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create strategy trade" });
+    }
+  });
+
   // Trading Data Routes - fetches real data from Kotak Neo if authenticated
   app.get("/api/positions", async (req, res) => {
     try {
