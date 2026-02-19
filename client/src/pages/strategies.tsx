@@ -469,7 +469,13 @@ function MotherConfigurator() {
                               className="w-32 h-7 text-xs"
                               data-testid={`input-edit-signal-${idx}`}
                             />
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { updateMapperEntry(idx, "signalValue", editFieldValue); setEditingFieldName(null); }} data-testid={`button-save-field-${idx}`}>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
+                              const trimmed = editFieldValue.trim();
+                              if (!trimmed) { toast({ title: "Signal name cannot be empty", variant: "destructive" }); return; }
+                              const isDuplicate = actionMapper.some((e, i) => i !== idx && e.signalValue.trim().toLowerCase() === trimmed.toLowerCase());
+                              if (isDuplicate) { toast({ title: "Duplicate signal name. This name already exists.", variant: "destructive" }); return; }
+                              updateMapperEntry(idx, "signalValue", trimmed); setEditingFieldName(null);
+                            }} data-testid={`button-save-field-${idx}`}>
                               <Save className="w-3 h-3" />
                             </Button>
                             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setEditingFieldName(null)} data-testid={`button-cancel-field-${idx}`}>
