@@ -818,12 +818,17 @@ export async function registerRoutes(
       });
 
       let paperTradeResults: any[] = [];
-      if (webhook.strategyId && (signalType === "buy" || signalType === "sell")) {
+      const strategyConfigId = webhook.strategyId || await (async () => {
+        const allConfigs = await storage.getStrategyConfigs();
+        const match = allConfigs.find((c) => c.webhookId === webhookId);
+        return match?.id || null;
+      })();
+      if (strategyConfigId && (signalType === "buy" || signalType === "sell")) {
         try {
           const { processPaperTrade } = await import("./paper-trade-engine");
           const latestData = await storage.getLatestWebhookData(webhookId);
           if (latestData) {
-            paperTradeResults = await processPaperTrade(storage, latestData, webhook.strategyId);
+            paperTradeResults = await processPaperTrade(storage, latestData, strategyConfigId);
             console.log("Paper trade results:", JSON.stringify(paperTradeResults));
           }
         } catch (ptError) {
