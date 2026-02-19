@@ -705,7 +705,6 @@ function TradePlanning() {
   }, [selectedConfig, editingPlan]);
 
   useEffect(() => {
-    if (!timeLogic.exitOnExpiry) return;
     const expType = timeLogic.expiryType || "weekly";
     if (expType === "weekly") {
       const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
@@ -718,7 +717,7 @@ function TradePlanning() {
     } else if (expType === "monthly") {
       setTimeLogic((s) => ({ ...s, exitAfterDays: 30 }));
     }
-  }, [timeLogic.exitOnExpiry, timeLogic.expiryType, timeLogic.weeklyStartDay, timeLogic.weeklyEndDay, timeLogic.monthStartDate]);
+  }, [timeLogic.expiryType, timeLogic.weeklyStartDay, timeLogic.weeklyEndDay, timeLogic.monthStartDate]);
 
   const createMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -935,12 +934,24 @@ function TradePlanning() {
               </div>
               <div>
                 <Label>Ticker / Symbol</Label>
-                <Input
-                  value={planTicker}
-                  onChange={(e) => setPlanTicker(e.target.value.toUpperCase())}
-                  placeholder="e.g. NIFTY, BANKNIFTY, RELIANCE"
-                  data-testid="input-plan-ticker"
-                />
+                <Select value={planTicker || "auto"} onValueChange={(v) => setPlanTicker(v === "auto" ? "" : v)}>
+                  <SelectTrigger data-testid="select-plan-ticker">
+                    <SelectValue placeholder="Auto-detect" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto-detect</SelectItem>
+                    <SelectItem value="NIFTY">NIFTY</SelectItem>
+                    <SelectItem value="BANKNIFTY">BANKNIFTY</SelectItem>
+                    <SelectItem value="FINNIFTY">FINNIFTY</SelectItem>
+                    <SelectItem value="MIDCPNIFTY">MIDCPNIFTY</SelectItem>
+                    <SelectItem value="SENSEX">SENSEX</SelectItem>
+                    <SelectItem value="BANKEX">BANKEX</SelectItem>
+                    <SelectItem value="CRUDEOIL">CRUDEOIL</SelectItem>
+                    <SelectItem value="GOLD">GOLD</SelectItem>
+                    <SelectItem value="SILVER">SILVER</SelectItem>
+                    <SelectItem value="USDINR">USDINR</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             {selectedConfig && selectedConfig.indicators && selectedConfig.indicators.length > 0 && (
@@ -1215,7 +1226,7 @@ function TradePlanning() {
                     <div>
                       <Label className="text-xs text-muted-foreground">
                         Exit After Entry + Days
-                        {timeLogic.exitOnExpiry && timeLogic.expiryType !== "custom" && (
+                        {(timeLogic.expiryType || "weekly") !== "custom" && (
                           <span className="text-amber-400 ml-1">(auto)</span>
                         )}
                       </Label>
@@ -1225,11 +1236,71 @@ function TradePlanning() {
                         value={timeLogic.exitAfterDays || ""}
                         onChange={(e) => setTimeLogic((s) => ({ ...s, exitAfterDays: parseInt(e.target.value) || 0 }))}
                         placeholder="e.g. 3"
-                        disabled={timeLogic.exitOnExpiry && timeLogic.expiryType !== "custom"}
+                        disabled={(timeLogic.expiryType || "weekly") !== "custom"}
                         data-testid="input-exit-after-days"
                       />
                     </div>
                   </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Expiry Type</Label>
+                    <Select value={timeLogic.expiryType || "weekly"} onValueChange={(v) => setTimeLogic((s) => ({ ...s, expiryType: v as TimeLogicConfig["expiryType"] }))}>
+                      <SelectTrigger data-testid="select-expiry-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                        <SelectItem value="monthly">Monthly</SelectItem>
+                        <SelectItem value="custom">Custom</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {(timeLogic.expiryType === "weekly" || !timeLogic.expiryType) && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Start Day</Label>
+                        <Select value={timeLogic.weeklyStartDay || "Monday"} onValueChange={(v) => setTimeLogic((s) => ({ ...s, weeklyStartDay: v }))}>
+                          <SelectTrigger data-testid="select-weekly-start-day">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((d) => (
+                              <SelectItem key={d} value={d}>{d}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">End Day (Expiry)</Label>
+                        <Select value={timeLogic.weeklyEndDay || "Thursday"} onValueChange={(v) => setTimeLogic((s) => ({ ...s, weeklyEndDay: v }))}>
+                          <SelectTrigger data-testid="select-weekly-end-day">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((d) => (
+                              <SelectItem key={d} value={d}>{d}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+                  {timeLogic.expiryType === "monthly" && (
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Month Start Date</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={timeLogic.monthStartDate || ""}
+                        onChange={(e) => setTimeLogic((s) => ({ ...s, monthStartDate: parseInt(e.target.value) || undefined }))}
+                        placeholder="e.g. 1 (last Thursday of month is expiry)"
+                        data-testid="input-month-start-date"
+                      />
+                    </div>
+                  )}
+                  {timeLogic.expiryType === "custom" && (
+                    <p className="text-xs text-muted-foreground">Custom expiry: manual entry or open-ended. Suitable for Crypto/Forex markets.</p>
+                  )}
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <Label className="text-sm">Exit On Expiry</Label>
                     <Switch
@@ -1238,70 +1309,6 @@ function TradePlanning() {
                       data-testid="switch-exit-on-expiry"
                     />
                   </div>
-                  {timeLogic.exitOnExpiry && (
-                    <div className="space-y-3 pl-2 border-l-2 border-amber-500/30">
-                      <div>
-                        <Label className="text-xs text-muted-foreground">Expiry Type</Label>
-                        <Select value={timeLogic.expiryType || "weekly"} onValueChange={(v) => setTimeLogic((s) => ({ ...s, expiryType: v as TimeLogicConfig["expiryType"] }))}>
-                          <SelectTrigger data-testid="select-expiry-type">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="weekly">Weekly</SelectItem>
-                            <SelectItem value="monthly">Monthly</SelectItem>
-                            <SelectItem value="custom">Custom</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {(timeLogic.expiryType === "weekly" || !timeLogic.expiryType) && (
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <Label className="text-xs text-muted-foreground">Start Day</Label>
-                            <Select value={timeLogic.weeklyStartDay || "Monday"} onValueChange={(v) => setTimeLogic((s) => ({ ...s, weeklyStartDay: v }))}>
-                              <SelectTrigger data-testid="select-weekly-start-day">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((d) => (
-                                  <SelectItem key={d} value={d}>{d}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="text-xs text-muted-foreground">End Day (Expiry)</Label>
-                            <Select value={timeLogic.weeklyEndDay || "Thursday"} onValueChange={(v) => setTimeLogic((s) => ({ ...s, weeklyEndDay: v }))}>
-                              <SelectTrigger data-testid="select-weekly-end-day">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((d) => (
-                                  <SelectItem key={d} value={d}>{d}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      )}
-                      {timeLogic.expiryType === "monthly" && (
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Month Start Date</Label>
-                          <Input
-                            type="number"
-                            min={1}
-                            max={31}
-                            value={timeLogic.monthStartDate || ""}
-                            onChange={(e) => setTimeLogic((s) => ({ ...s, monthStartDate: parseInt(e.target.value) || undefined }))}
-                            placeholder="e.g. 1 (last Thursday of month is expiry)"
-                            data-testid="input-month-start-date"
-                          />
-                        </div>
-                      )}
-                      {timeLogic.expiryType === "custom" && (
-                        <p className="text-xs text-muted-foreground">Custom expiry: manual entry or open-ended. Suitable for Crypto/Forex markets.</p>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
             )}
@@ -1419,7 +1426,12 @@ function TradePlanning() {
                       exitBadges.push({ label: `Exit @ ${tp2.timeLogic.exitTime}`, color: "text-yellow-400" });
                     }
                     if (tp2.timeLogic?.exitOnExpiry) {
-                      exitBadges.push({ label: "Exit On Expiry", color: "text-yellow-400" });
+                      const expType = tp2.timeLogic.expiryType || "weekly";
+                      const expLabel = expType === "weekly"
+                        ? `Expiry: Weekly (${tp2.timeLogic.weeklyStartDay || "Mon"}-${tp2.timeLogic.weeklyEndDay || "Thu"})`
+                        : expType === "monthly" ? "Expiry: Monthly"
+                        : "Expiry: Custom";
+                      exitBadges.push({ label: expLabel, color: "text-yellow-400" });
                     }
                     if (tp2.timeLogic?.exitAfterDays && tp2.timeLogic.exitAfterDays > 0) {
                       exitBadges.push({ label: `Exit +${tp2.timeLogic.exitAfterDays}d`, color: "text-yellow-400" });
