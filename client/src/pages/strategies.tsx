@@ -456,10 +456,6 @@ function MotherConfigurator() {
                     <th className="text-center px-3 py-2 font-medium text-red-400" colSpan={1}>Downtrend Action</th>
                     <th className="text-center px-3 py-2 font-medium text-blue-400" colSpan={1}>Neutral Action</th>
                   </tr>
-                  <tr className="border-b border-border">
-                    <th></th>
-                    <th className="text-center px-3 py-1 text-xs text-muted-foreground" colSpan={3}>Action</th>
-                  </tr>
                 </thead>
                 <tbody>
                   {actionMapper.map((entry, idx) => (
