@@ -1475,12 +1475,56 @@ const DEPLOYMENT_STATUS_CONFIG: Record<string, { label: string; color: string; i
   archived: { label: "Archived", color: "text-purple-400", icon: Archive },
 };
 
-function TradeTableContent({ trades, groupedTrades, BLOCK_LABELS }: {
+function formatTradeTime(timeUnix: number | null, localTime: string | null, executedAt: string | null): string {
+  if (localTime) return localTime;
+  if (timeUnix) {
+    const d = new Date(timeUnix > 9999999999 ? timeUnix : timeUnix * 1000);
+    return d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+  }
+  if (executedAt) {
+    const d = new Date(executedAt);
+    return d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+  }
+  return "-";
+}
+
+function TradeTableContent({ trades, groupedTrades, BLOCK_LABELS, plan }: {
   trades: StrategyTrade[];
   groupedTrades: Record<string, StrategyTrade[]>;
   BLOCK_LABELS: Record<string, { label: string; icon: typeof TrendingUp; color: string }>;
+  plan?: StrategyPlan;
 }) {
   if (trades.length === 0) return null;
+
+  const getFieldValue = (trade: StrategyTrade, key: string): string => {
+    if (key === "timeUnix") return formatTradeTime(trade.timeUnix || null, null, trade.executedAt);
+    if (key === "exchange") return trade.exchange || plan?.exchange || "-";
+    if (key === "ticker") return trade.ticker || trade.tradingSymbol || plan?.ticker || "-";
+    if (key === "indicator") return trade.indicator || "-";
+    if (key === "alert") return trade.alert || trade.action || "-";
+    if (key === "signalPrice") return (trade.price || 0).toFixed(2);
+    if (key === "localTime") return trade.localTime || "-";
+    if (key === "mode") return trade.mode || "-";
+    if (key === "modeDesc") return trade.modeDesc || "-";
+    return "-";
+  };
+
+  const HEADERS = [
+    { key: "timeUnix", label: "time_unix", align: "text-left" },
+    { key: "exchange", label: "exchange", align: "text-left" },
+    { key: "ticker", label: "ticker", align: "text-left" },
+    { key: "indicator", label: "indicator", align: "text-left" },
+    { key: "alert", label: "action", align: "text-left" },
+    { key: "signalPrice", label: "price", align: "text-right" },
+    { key: "localTime", label: "local_time", align: "text-left" },
+    { key: "mode", label: "mode", align: "text-left" },
+    { key: "modeDesc", label: "mode_desc", align: "text-left" },
+    { key: "qty", label: "qty", align: "text-right" },
+    { key: "entryPrice", label: "price", align: "text-right" },
+    { key: "pnl", label: "p&l", align: "text-right" },
+    { key: "status", label: "status", align: "text-left" },
+  ];
+
   return (
     <div className="space-y-3">
       {Object.entries(groupedTrades).map(([blockType, blockTrades]) => {
@@ -1496,59 +1540,46 @@ function TradeTableContent({ trades, groupedTrades, BLOCK_LABELS }: {
                 <Badge variant="secondary" className="text-xs">{blockTrades.length} trade{blockTrades.length !== 1 ? "s" : ""}</Badge>
               </div>
               <span className={`text-xs font-mono font-semibold ${blockPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                P&L: {blockPnl >= 0 ? "+" : ""}{blockPnl.toFixed(2)}
+                p&l: {blockPnl >= 0 ? "+" : ""}{blockPnl.toFixed(2)}
               </span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/30">
-                    <th className="text-left px-2 py-1 text-muted-foreground">Symbol</th>
-                    <th className="text-left px-2 py-1 text-muted-foreground">Entry</th>
-                    <th className="text-left px-2 py-1 text-muted-foreground">Exit</th>
-                    <th className="text-right px-2 py-1 text-muted-foreground">Qty</th>
-                    <th className="text-right px-2 py-1 text-muted-foreground">P&L</th>
-                    <th className="text-left px-2 py-1 text-muted-foreground">Status</th>
-                    <th className="text-left px-2 py-1 text-muted-foreground">Time</th>
+                    {HEADERS.map((h) => (
+                      <th key={h.key} className={`whitespace-nowrap ${h.align} px-2 py-1 text-muted-foreground font-medium`}>{h.label}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {blockTrades.map((trade) => {
                     const isClosed = trade.status === "closed" || trade.status === "squared_off";
-                    const entryLabel = trade.action;
-                    const entryPrice = trade.price || 0;
-                    const exitLabel = trade.exitAction || (trade.action === "BUY" ? "SELL" : "BUY");
-                    const exitPriceVal = trade.exitPrice || trade.ltp || 0;
-                    const entryTime = trade.executedAt ? new Date(trade.executedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-                    const exitTime = trade.exitedAt ? new Date(trade.exitedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+                    const alertVal = trade.alert || trade.action || "-";
+                    const isSell = alertVal.toUpperCase().includes("SELL") || trade.action === "SELL";
+                    const isBuy = alertVal.toUpperCase().includes("BUY") || trade.action === "BUY";
                     return (
                       <tr key={trade.id} className="border-b border-border/20" data-testid={`row-trade-${trade.id}`}>
-                        <td className="px-2 py-1.5 font-mono font-medium">{trade.tradingSymbol}</td>
-                        <td className="px-2 py-1.5">
-                          <div className="flex items-center gap-1">
-                            <Badge variant={entryLabel === "BUY" ? "default" : "destructive"} className="text-xs">{entryLabel}</Badge>
-                            <span className="font-mono">{entryPrice.toFixed(2)}</span>
-                          </div>
+                        <td className="whitespace-nowrap px-2 py-1.5 font-mono text-muted-foreground">{getFieldValue(trade, "timeUnix")}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5 font-mono">{getFieldValue(trade, "exchange")}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5 font-mono font-medium">{getFieldValue(trade, "ticker")}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5">{getFieldValue(trade, "indicator")}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5">
+                          <Badge variant={isSell ? "destructive" : isBuy ? "default" : "secondary"} className="font-mono text-xs">
+                            {alertVal}
+                          </Badge>
                         </td>
-                        <td className="px-2 py-1.5">
-                          {isClosed ? (
-                            <div className="flex items-center gap-1">
-                              <Badge variant={exitLabel === "BUY" ? "default" : "destructive"} className="text-xs">{exitLabel}</Badge>
-                              <span className="font-mono">{exitPriceVal.toFixed(2)}</span>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground/60">--</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 text-right font-mono">{trade.quantity}</td>
-                        <td className={`px-2 py-1.5 text-right font-mono font-semibold ${(trade.pnl || 0) > 0 ? "text-emerald-400" : (trade.pnl || 0) < 0 ? "text-red-400" : "text-muted-foreground"}`}>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{getFieldValue(trade, "signalPrice")}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5 font-mono text-muted-foreground">{getFieldValue(trade, "localTime")}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5">{getFieldValue(trade, "mode")}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5">{getFieldValue(trade, "modeDesc")}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{trade.quantity}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{(trade.price || 0).toFixed(2)}</td>
+                        <td className={`whitespace-nowrap px-2 py-1.5 text-right font-mono font-semibold ${(trade.pnl || 0) > 0 ? "text-emerald-400" : (trade.pnl || 0) < 0 ? "text-red-400" : "text-muted-foreground"}`}>
                           {isClosed ? (<>{(trade.pnl || 0) >= 0 ? "+" : ""}{(trade.pnl || 0).toFixed(2)}</>) : (<span className="text-muted-foreground/60">--</span>)}
                         </td>
-                        <td className="px-2 py-1.5">
+                        <td className="whitespace-nowrap px-2 py-1.5">
                           <Badge variant="outline" className="text-xs">{trade.status}</Badge>
-                        </td>
-                        <td className="px-2 py-1.5 text-xs text-muted-foreground font-mono">
-                          {entryTime}{isClosed && exitTime ? ` - ${exitTime}` : ""}
                         </td>
                       </tr>
                     );
@@ -1747,7 +1778,7 @@ function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: Stra
           </div>
 
           {trades.length > 0 ? (
-            <TradeTableContent trades={trades} groupedTrades={groupedTrades} BLOCK_LABELS={BLOCK_LABELS} />
+            <TradeTableContent trades={trades} groupedTrades={groupedTrades} BLOCK_LABELS={BLOCK_LABELS} plan={plan} />
           ) : (
             <div className="text-center py-6 border border-dashed border-border/40 rounded-md" data-testid={`empty-state-trades-${plan.id}`}>
               <Activity className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
@@ -1844,7 +1875,7 @@ function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: Stra
               </div>
             </div>
             {trades.length > 0 ? (
-              <TradeTableContent trades={trades} groupedTrades={groupedTrades} BLOCK_LABELS={BLOCK_LABELS} />
+              <TradeTableContent trades={trades} groupedTrades={groupedTrades} BLOCK_LABELS={BLOCK_LABELS} plan={plan} />
             ) : (
               <div className="text-center py-8">
                 <Activity className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />

@@ -439,19 +439,6 @@ const DEPLOY_STATUS_MAP: Record<string, { label: string; color: string; icon: ty
   closed: { label: "Closed", color: "text-muted-foreground", icon: Power },
 };
 
-function formatTradeTime(timeUnix: number | null, localTime: string | null, executedAt: string | null): string {
-  if (localTime) return localTime;
-  if (timeUnix) {
-    const d = new Date(timeUnix * 1000);
-    return d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
-  }
-  if (executedAt) {
-    const d = new Date(executedAt);
-    return d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
-  }
-  return "-";
-}
-
 function DashboardTradeCard({ plan, configs, brokerConfigs }: { plan: StrategyPlan; configs: StrategyConfig[]; brokerConfigs: BrokerConfig[] }) {
   const depStatus = plan.deploymentStatus || "draft";
   const depConfig = DEPLOY_STATUS_MAP[depStatus] || DEPLOY_STATUS_MAP.draft;
@@ -478,60 +465,6 @@ function DashboardTradeCard({ plan, configs, brokerConfigs }: { plan: StrategyPl
     return bc?.name || bc?.brokerName || "Unknown";
   };
 
-  const SIGNAL_FIELDS: { key: keyof StrategyTrade; label: string }[] = [
-    { key: "timeUnix", label: "Time Unix" },
-    { key: "exchange", label: "Exchange" },
-    { key: "ticker", label: "Ticker" },
-    { key: "indicator", label: "Indicator" },
-    { key: "alert", label: "Action" },
-    { key: "price", label: "Price" },
-    { key: "localTime", label: "Local Time" },
-    { key: "mode", label: "Mode" },
-    { key: "modeDesc", label: "Mode Desc" },
-  ];
-
-  const TRADE_FIELDS: { key: keyof StrategyTrade | "exitInfo"; label: string }[] = [
-    { key: "quantity", label: "Qty" },
-    { key: "price", label: "Entry Price" },
-    { key: "exitInfo", label: "Exit Price" },
-    { key: "pnl", label: "P&L" },
-    { key: "status", label: "Status" },
-  ];
-
-  const renderSignalCellValue = (trade: StrategyTrade, key: keyof StrategyTrade) => {
-    let value = trade[key];
-    if ((value === null || value === undefined) && key === "alert") value = trade.action;
-    if ((value === null || value === undefined) && key === "ticker") value = trade.tradingSymbol || plan.ticker;
-    if ((value === null || value === undefined) && key === "exchange") value = plan.exchange;
-    if ((value === null || value === undefined) && key === "timeUnix") {
-      return <span className="font-mono text-muted-foreground">{formatTradeTime(null, null, trade.executedAt)}</span>;
-    }
-    if (value === null || value === undefined) return <span className="text-muted-foreground/40">-</span>;
-
-    if (key === "alert") {
-      const strVal = String(value);
-      const isSell = strVal.toUpperCase().includes("SELL") || trade.action === "SELL";
-      const isBuy = strVal.toUpperCase().includes("BUY") || trade.action === "BUY";
-      return (
-        <Badge variant={isSell ? "destructive" : isBuy ? "default" : "secondary"} className="font-mono text-xs">
-          {strVal}
-        </Badge>
-      );
-    }
-
-    if (key === "price") return <span className="font-mono">{Number(value).toFixed(2)}</span>;
-    if (key === "timeUnix") return <span className="font-mono text-muted-foreground">{formatTradeTime(trade.timeUnix, null, null)}</span>;
-    if (key === "localTime") return <span className="font-mono text-muted-foreground">{String(value)}</span>;
-
-    return <span>{String(value)}</span>;
-  };
-
-  const sortedTrades = [...trades].sort((a, b) => {
-    const aTime = a.timeUnix || new Date(a.executedAt || 0).getTime() / 1000;
-    const bTime = b.timeUnix || new Date(b.executedAt || 0).getTime() / 1000;
-    return bTime - aTime;
-  });
-
   return (
     <Card data-testid={`card-live-trade-${plan.id}`}>
       <CardHeader className="pb-2">
@@ -555,80 +488,22 @@ function DashboardTradeCard({ plan, configs, brokerConfigs }: { plan: StrategyPl
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-3 gap-3 mb-3">
+        <div className="grid grid-cols-3 gap-3">
           <div className="bg-card border border-border rounded-md p-2 text-center">
-            <p className="text-xs text-muted-foreground">Total P&L</p>
+            <p className="text-xs text-muted-foreground">total p&l</p>
             <p className={`text-sm font-bold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
             </p>
           </div>
           <div className="bg-card border border-border rounded-md p-2 text-center">
-            <p className="text-xs text-muted-foreground">Open</p>
+            <p className="text-xs text-muted-foreground">open</p>
             <p className="text-sm font-bold font-mono">{openCount}</p>
           </div>
           <div className="bg-card border border-border rounded-md p-2 text-center">
-            <p className="text-xs text-muted-foreground">Closed</p>
+            <p className="text-xs text-muted-foreground">closed</p>
             <p className="text-sm font-bold font-mono">{closedCount}</p>
           </div>
         </div>
-
-        {trades.length > 0 ? (
-          <div className="overflow-x-auto border border-border/30 rounded-md">
-            <table className="w-full text-xs border-collapse">
-              <thead className="sticky top-0 z-10 bg-card">
-                <tr className="border-b border-border/40">
-                  {SIGNAL_FIELDS.map((f) => (
-                    <th key={f.key} className="whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">{f.label}</th>
-                  ))}
-                  <th className="px-1 py-2 text-muted-foreground/30">|</th>
-                  {TRADE_FIELDS.map((f) => (
-                    <th key={f.key} className={`whitespace-nowrap px-2 py-2 font-medium text-muted-foreground ${f.key === "pnl" || f.key === "quantity" || f.key === "exitInfo" ? "text-right" : "text-left"}`}>
-                      {f.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sortedTrades.map((trade) => (
-                  <tr key={trade.id} className="border-b border-border/20 hover:bg-muted/30" data-testid={`row-dash-trade-${trade.id}`}>
-                    {SIGNAL_FIELDS.map((f) => (
-                      <td key={f.key} className="whitespace-nowrap px-2 py-1.5">
-                        {renderSignalCellValue(trade, f.key)}
-                      </td>
-                    ))}
-                    <td className="px-1 py-1.5 text-border/30">|</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{trade.quantity}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{(trade.price || 0).toFixed(2)}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">
-                      {trade.exitPrice ? trade.exitPrice.toFixed(2) : <span className="text-muted-foreground/40">-</span>}
-                    </td>
-                    <td className={`whitespace-nowrap px-2 py-1.5 text-right font-mono font-semibold ${(trade.pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      {(trade.pnl || 0) >= 0 ? "+" : ""}{(trade.pnl || 0).toFixed(2)}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-1.5">
-                      <Badge
-                        variant="outline"
-                        className={`text-xs ${
-                          trade.status === "open" ? "border-blue-500/50 text-blue-400" :
-                          trade.status === "closed" ? "border-muted-foreground/30 text-muted-foreground" :
-                          trade.status === "squared_off" ? "border-amber-500/50 text-amber-400" :
-                          ""
-                        }`}
-                      >
-                        {trade.status}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="text-center py-4 border border-dashed border-border/40 rounded-md" data-testid={`empty-state-dash-trades-${plan.id}`}>
-            <Activity className="w-6 h-6 text-muted-foreground/40 mx-auto mb-1" />
-            <p className="text-xs text-muted-foreground">No trades executed by this strategy</p>
-          </div>
-        )}
       </CardContent>
     </Card>
   );
