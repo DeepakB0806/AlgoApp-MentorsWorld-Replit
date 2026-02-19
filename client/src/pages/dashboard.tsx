@@ -1,15 +1,14 @@
 import { useState, useEffect } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { TrendingUp, TrendingDown, RefreshCw, Home, Wifi, WifiOff, Search, BarChart3, Activity, Play, Pause, Square, Power, Rocket, Loader2, Clock } from "lucide-react";
+import { TrendingUp, TrendingDown, RefreshCw, Home, Wifi, WifiOff, Search, BarChart3, Activity, Play, Pause, Square, Power, Rocket, Clock } from "lucide-react";
 import { Link } from "wouter";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Position, Order, Holding, PortfolioSummary, StrategyPlan, StrategyConfig, BrokerConfig, StrategyTrade } from "@shared/schema";
 import { Target } from "lucide-react";
@@ -525,48 +524,6 @@ function LiveTradesPanel() {
   });
 
   const deployedPlans = plans.filter((p) => p.deploymentStatus && p.deploymentStatus !== "draft" && p.brokerConfigId);
-  const [confirmAction, setConfirmAction] = useState<{ planId: string; action: string } | null>(null);
-
-  const deploymentMutation = useMutation({
-    mutationFn: async ({ id, deploymentStatus }: { id: string; deploymentStatus: string }) => {
-      return apiRequest("PATCH", `/api/strategy-plans/${id}/deployment`, { deploymentStatus });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/strategy-plans"] });
-      setConfirmAction(null);
-      toast({ title: "Strategy deployment status updated" });
-    },
-    onError: () => {
-      toast({ title: "Failed to update deployment status", variant: "destructive" });
-    },
-  });
-
-  const getActions = (status: string): { action: string; label: string; icon: typeof Play; variant: "default" | "outline" | "destructive" }[] => {
-    switch (status) {
-      case "deployed":
-        return [
-          { action: "active", label: "Activate", icon: Play, variant: "default" },
-          { action: "closed", label: "Close", icon: Power, variant: "destructive" },
-        ];
-      case "active":
-        return [
-          { action: "paused", label: "Pause", icon: Pause, variant: "outline" },
-          { action: "squared_off", label: "Square Off", icon: Square, variant: "destructive" },
-        ];
-      case "paused":
-        return [
-          { action: "active", label: "Resume", icon: Play, variant: "default" },
-          { action: "squared_off", label: "Square Off", icon: Square, variant: "destructive" },
-        ];
-      case "squared_off":
-        return [
-          { action: "active", label: "Reactivate", icon: Play, variant: "default" },
-          { action: "closed", label: "Close", icon: Power, variant: "destructive" },
-        ];
-      default:
-        return [];
-    }
-  };
 
   return (
     <div className="space-y-4">
@@ -592,70 +549,11 @@ function LiveTradesPanel() {
         </Card>
       ) : (
         <div className="grid gap-4">
-          {deployedPlans.map((plan) => {
-            const depStatus = plan.deploymentStatus || "draft";
-            const actions = getActions(depStatus);
-            return (
-              <div key={plan.id} className="space-y-2">
-                <DashboardTradeCard plan={plan} configs={configs} brokerConfigs={brokerConfigs} />
-                {actions.length > 0 && (
-                  <div className="flex items-center gap-2 pl-4 flex-wrap">
-                    {actions.map((a) => {
-                      const ActionIcon = a.icon;
-                      return (
-                        <Button
-                          key={a.action}
-                          variant={a.variant}
-                          size="sm"
-                          onClick={() => setConfirmAction({ planId: plan.id, action: a.action })}
-                          disabled={deploymentMutation.isPending}
-                          data-testid={`button-dash-${a.action}-${plan.id}`}
-                        >
-                          <ActionIcon className="w-3 h-3 mr-1" />
-                          {a.label}
-                        </Button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {deployedPlans.map((plan) => (
+            <DashboardTradeCard key={plan.id} plan={plan} configs={configs} brokerConfigs={brokerConfigs} />
+          ))}
         </div>
       )}
-
-      <Dialog open={!!confirmAction} onOpenChange={() => setConfirmAction(null)}>
-        <DialogContent aria-describedby="dash-deployment-confirm-desc">
-          <DialogHeader>
-            <DialogTitle>Confirm Action</DialogTitle>
-            <DialogDescription id="dash-deployment-confirm-desc">Confirm the strategy control action below.</DialogDescription>
-          </DialogHeader>
-          {confirmAction && (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                {confirmAction.action === "active" && "Activate this strategy? It will begin executing trades."}
-                {confirmAction.action === "paused" && "Pause this strategy? Open positions will remain, no new trades."}
-                {confirmAction.action === "squared_off" && "Square off all positions for this strategy?"}
-                {confirmAction.action === "closed" && "Close this strategy deployment?"}
-              </p>
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setConfirmAction(null)} data-testid="button-cancel-dash-action">Cancel</Button>
-                <Button
-                  variant={confirmAction.action === "squared_off" || confirmAction.action === "closed" ? "destructive" : "default"}
-                  onClick={() => {
-                    if (confirmAction) deploymentMutation.mutate({ id: confirmAction.planId, deploymentStatus: confirmAction.action });
-                  }}
-                  disabled={deploymentMutation.isPending}
-                  data-testid="button-confirm-dash-action"
-                >
-                  {deploymentMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  Confirm
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
