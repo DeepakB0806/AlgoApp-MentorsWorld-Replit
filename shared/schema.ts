@@ -129,6 +129,7 @@ export const strategyPlans = pgTable("strategy_plans", {
   selectedIndicators: text("selected_indicators").array(),
   tradeParams: text("trade_params"),
   status: text("status").notNull().default("draft"),
+  deploymentStatus: text("deployment_status").notNull().default("draft"),
   brokerConfigId: varchar("broker_config_id", { length: 36 }),
   isProxyMode: boolean("is_proxy_mode").default(false),
   createdBy: varchar("created_by", { length: 36 }),
