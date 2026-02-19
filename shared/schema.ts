@@ -332,6 +332,7 @@ export const brokerConfigs = pgTable("broker_configs", {
   mobileNumber: text("mobile_number"),
   ucc: text("ucc"), // Unique Client Code for Kotak Neo
   mpin: text("mpin"), // 6-digit MPIN for Kotak Neo
+  environment: text("environment").default("prod"), // "uat" or "prod"
   
   // Session data
   isConnected: boolean("is_connected").notNull().default(false),

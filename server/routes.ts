@@ -1416,6 +1416,7 @@ export async function registerRoutes(
         ucc: config.ucc,
         mpin: config.mpin,
         totp: totp,
+        environment: config.environment || "prod",
       });
 
       // Extract session expiry from JWT token

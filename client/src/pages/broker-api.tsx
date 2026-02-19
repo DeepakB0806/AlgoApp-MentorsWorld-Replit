@@ -404,6 +404,7 @@ export default function BrokerApi() {
     mobileNumber: "",
     ucc: "",
     mpin: "",
+    environment: "prod",
   });
 
   const { data: brokerConfigs = [], isLoading } = useQuery<BrokerConfig[]>({
@@ -430,6 +431,7 @@ export default function BrokerApi() {
         mobileNumber: kotakConfig.mobileNumber || "",
         ucc: kotakConfig.ucc || "",
         mpin: kotakConfig.mpin || "",
+        environment: kotakConfig.environment || "prod",
       });
       setShowCredentials(false);
     }
@@ -631,9 +633,18 @@ export default function BrokerApi() {
                       <Key className="w-5 h-5" />
                       Kotak Neo Credentials
                       {kotakConfig && (
-                        <Badge variant={kotakConfig.isConnected ? "default" : "secondary"}>
-                          {kotakConfig.isConnected ? "Active" : "Saved"}
-                        </Badge>
+                        <>
+                          <Badge variant={kotakConfig.isConnected ? "default" : "secondary"}>
+                            {kotakConfig.isConnected ? "Active" : "Saved"}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className={`text-xs font-bold ${kotakConfig.environment === "uat" ? "text-amber-400 border-amber-500/50" : "text-emerald-400 border-emerald-500/50"}`}
+                            data-testid="badge-broker-environment"
+                          >
+                            {kotakConfig.environment === "uat" ? "UAT" : "PROD"}
+                          </Badge>
+                        </>
                       )}
                       {kotakConfig?.accessToken && (() => {
                         try {
@@ -742,6 +753,40 @@ export default function BrokerApi() {
                   {(!kotakConfig || showCredentials) && (
                     <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
                       <div className="space-y-3">
+                        <div>
+                          <Label className="mb-1 block">Environment</Label>
+                          <div className="flex items-center gap-3" data-testid="container-environment-toggle">
+                            <div className="flex items-center rounded-md border border-border overflow-visible">
+                              <button
+                                type="button"
+                                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                                  formData.environment === "uat"
+                                    ? "bg-amber-600 text-white"
+                                    : "text-muted-foreground hover-elevate"
+                                }`}
+                                onClick={() => setFormData({ ...formData, environment: "uat" })}
+                                data-testid="button-env-uat"
+                              >
+                                UAT / Sandbox
+                              </button>
+                              <button
+                                type="button"
+                                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                                  formData.environment === "prod"
+                                    ? "bg-emerald-600 text-white"
+                                    : "text-muted-foreground hover-elevate"
+                                }`}
+                                onClick={() => setFormData({ ...formData, environment: "prod" })}
+                                data-testid="button-env-prod"
+                              >
+                                Production
+                              </button>
+                            </div>
+                            <span className={`text-xs font-medium ${formData.environment === "uat" ? "text-amber-400" : "text-emerald-400"}`} data-testid="text-env-label">
+                              {formData.environment === "uat" ? "Paper trading mode — orders are simulated" : "Live trading — real orders will be placed"}
+                            </span>
+                          </div>
+                        </div>
                         <div>
                           <Label>Consumer Key (API Token)</Label>
                           <Input

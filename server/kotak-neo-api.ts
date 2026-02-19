@@ -12,8 +12,13 @@
 import type { KotakNeoAuthResponse } from "@shared/schema";
 
 // API Base URLs
-const LOGIN_BASE_URL = "https://mis.kotaksecurities.com";
+const LOGIN_BASE_URL_PROD = "https://mis.kotaksecurities.com";
+const LOGIN_BASE_URL_UAT = "https://mis.kotaksecurities.com"; // UAT uses same login endpoint; Kotak routes based on credentials
 const NEO_FIN_KEY = "neotradeapi";
+
+function getLoginBaseUrl(environment?: string): string {
+  return environment === "uat" ? LOGIN_BASE_URL_UAT : LOGIN_BASE_URL_PROD;
+}
 
 export interface KotakNeoSession {
   viewToken: string;
@@ -54,10 +59,12 @@ export async function totpLogin(
   consumerKey: string,
   mobileNumber: string,
   ucc: string,
-  totp: string
+  totp: string,
+  environment?: string
 ): Promise<ApiResponse<{ token: string; sid: string }>> {
   try {
-    const response = await fetch(`${LOGIN_BASE_URL}/login/1.0/tradeApiLogin`, {
+    const loginUrl = getLoginBaseUrl(environment);
+    const response = await fetch(`${loginUrl}/login/1.0/tradeApiLogin`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -101,10 +108,12 @@ export async function mpinValidate(
   consumerKey: string,
   viewToken: string,
   sidView: string,
-  mpin: string
+  mpin: string,
+  environment?: string
 ): Promise<ApiResponse<{ token: string; sid: string; baseUrl: string }>> {
   try {
-    const response = await fetch(`${LOGIN_BASE_URL}/login/1.0/tradeApiValidate`, {
+    const loginUrl = getLoginBaseUrl(environment);
+    const response = await fetch(`${loginUrl}/login/1.0/tradeApiValidate`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -150,10 +159,11 @@ export async function authenticate(
   mobileNumber: string,
   ucc: string,
   mpin: string,
-  totp: string
+  totp: string,
+  environment?: string
 ): Promise<ApiResponse<KotakNeoSession>> {
   // Step 1: TOTP Login
-  const totpResult = await totpLogin(consumerKey, mobileNumber, ucc, totp);
+  const totpResult = await totpLogin(consumerKey, mobileNumber, ucc, totp, environment);
 
   if (!totpResult.success || !totpResult.data) {
     return {
@@ -167,7 +177,8 @@ export async function authenticate(
     consumerKey,
     totpResult.data.token,
     totpResult.data.sid,
-    mpin
+    mpin,
+    environment
   );
 
   if (!mpinResult.success || !mpinResult.data) {
@@ -710,7 +721,8 @@ export async function getScripMasterPaths(
 export async function testConnectivity(consumerKey?: string): Promise<KotakNeoAuthResponse> {
   try {
     // Test connection to Kotak Neo API servers using a simple request
-    const response = await fetch(`${LOGIN_BASE_URL}/login/1.0/tradeApiLogin`, {
+    const loginUrl = getLoginBaseUrl();
+    const response = await fetch(`${loginUrl}/login/1.0/tradeApiLogin`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -758,13 +770,15 @@ export async function authenticateKotakNeo(credentials: {
   ucc: string;
   mpin: string;
   totp: string;
+  environment?: string;
 }): Promise<KotakNeoAuthResponse> {
   const result = await authenticate(
     credentials.consumer_key,
     credentials.mobile_number,
     credentials.ucc,
     credentials.mpin,
-    credentials.totp
+    credentials.totp,
+    credentials.environment
   );
 
   if (result.success && result.data) {
