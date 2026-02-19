@@ -176,6 +176,13 @@ export const strategyTrades = pgTable("strategy_trades", {
   executedAt: text("executed_at"),
   createdAt: text("created_at"),
   updatedAt: text("updated_at"),
+  timeUnix: bigint("time_unix", { mode: "number" }),
+  ticker: text("ticker"),
+  indicator: text("indicator"),
+  alert: text("alert"),
+  localTime: text("local_time"),
+  mode: text("mode"),
+  modeDesc: text("mode_desc"),
 });
 
 export const insertStrategyTradeSchema = createInsertSchema(strategyTrades).omit({ id: true });
