@@ -918,11 +918,12 @@ function TradePlanning() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Exchange</Label>
-                <Select value={planExchange} onValueChange={setPlanExchange}>
+                <Select value={planExchange || "auto"} onValueChange={(v) => setPlanExchange(v === "auto" ? "" : v)}>
                   <SelectTrigger data-testid="select-plan-exchange">
-                    <SelectValue placeholder="Select exchange" />
+                    <SelectValue placeholder="Auto-detect" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="auto">Auto-detect</SelectItem>
                     <SelectItem value="NSE">NSE</SelectItem>
                     <SelectItem value="BSE">BSE</SelectItem>
                     <SelectItem value="NFO">NFO</SelectItem>
