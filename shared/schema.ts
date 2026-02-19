@@ -132,6 +132,9 @@ export const strategyPlans = pgTable("strategy_plans", {
   deploymentStatus: text("deployment_status").notNull().default("draft"),
   brokerConfigId: varchar("broker_config_id", { length: 36 }),
   isProxyMode: boolean("is_proxy_mode").default(false),
+  lotMultiplier: integer("lot_multiplier").default(1),
+  deployStoploss: real("deploy_stoploss"),
+  deployProfitTarget: real("deploy_profit_target"),
   createdBy: varchar("created_by", { length: 36 }),
   createdAt: text("created_at"),
   updatedAt: text("updated_at"),
@@ -167,6 +170,24 @@ export const strategyTrades = pgTable("strategy_trades", {
 export const insertStrategyTradeSchema = createInsertSchema(strategyTrades).omit({ id: true });
 export type InsertStrategyTrade = z.infer<typeof insertStrategyTradeSchema>;
 export type StrategyTrade = typeof strategyTrades.$inferSelect;
+
+// ====== STRATEGY DAILY P&L LOG ======
+export const strategyDailyPnl = pgTable("strategy_daily_pnl", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  planId: varchar("plan_id", { length: 36 }).notNull(),
+  date: text("date").notNull(),
+  dailyPnl: real("daily_pnl").default(0),
+  cumulativePnl: real("cumulative_pnl").default(0),
+  tradesCount: integer("trades_count").default(0),
+  openTrades: integer("open_trades").default(0),
+  closedTrades: integer("closed_trades").default(0),
+  status: text("status").notNull().default("active"),
+  createdAt: text("created_at"),
+});
+
+export const insertStrategyDailyPnlSchema = createInsertSchema(strategyDailyPnl).omit({ id: true });
+export type InsertStrategyDailyPnl = z.infer<typeof insertStrategyDailyPnlSchema>;
+export type StrategyDailyPnl = typeof strategyDailyPnl.$inferSelect;
 
 // Legacy strategy table kept for backward compatibility
 export const strategies = pgTable("strategies", {

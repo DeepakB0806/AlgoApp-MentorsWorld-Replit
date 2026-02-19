@@ -3,7 +3,7 @@ import { eq, desc, and, lt } from "drizzle-orm";
 import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
-  brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades,
+  brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades, strategyDailyPnl,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -17,6 +17,7 @@ import {
   type StrategyConfig, type InsertStrategyConfig,
   type StrategyPlan, type InsertStrategyPlan,
   type StrategyTrade, type InsertStrategyTrade,
+  type StrategyDailyPnl, type InsertStrategyDailyPnl,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -121,6 +122,10 @@ export interface IStorage {
   getStrategyTradesByPlan(planId: string): Promise<StrategyTrade[]>;
   createStrategyTrade(trade: InsertStrategyTrade): Promise<StrategyTrade>;
   updateStrategyTrade(id: string, trade: Partial<InsertStrategyTrade>): Promise<StrategyTrade | undefined>;
+
+  // Strategy Daily P&L - daily P&L log entries
+  getStrategyDailyPnl(planId: string): Promise<StrategyDailyPnl[]>;
+  createStrategyDailyPnl(entry: InsertStrategyDailyPnl): Promise<StrategyDailyPnl>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -799,6 +804,16 @@ export class DatabaseStorage implements IStorage {
 
   async updateStrategyTrade(id: string, trade: Partial<InsertStrategyTrade>): Promise<StrategyTrade | undefined> {
     const [result] = await db.update(strategyTrades).set(trade).where(eq(strategyTrades.id, id)).returning();
+    return result;
+  }
+
+  async getStrategyDailyPnl(planId: string): Promise<StrategyDailyPnl[]> {
+    return await db.select().from(strategyDailyPnl).where(eq(strategyDailyPnl.planId, planId)).orderBy(desc(strategyDailyPnl.date));
+  }
+
+  async createStrategyDailyPnl(entry: InsertStrategyDailyPnl): Promise<StrategyDailyPnl> {
+    const id = randomUUID();
+    const [result] = await db.insert(strategyDailyPnl).values({ ...entry, id }).returning();
     return result;
   }
 

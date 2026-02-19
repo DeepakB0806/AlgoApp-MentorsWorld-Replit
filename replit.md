@@ -31,6 +31,11 @@ The frontend is developed using React with Vite, TypeScript, and TailwindCSS, au
 ### System Design Choices
 The application is structured into `client/`, `server/`, and `shared/` directories for clear separation of concerns. `shared/` contains common Zod schemas and TypeScript types. Authentication includes robust security features like bcrypt hashing for passwords, TOTP for team members, and session management using HTTP-only cookies. Environment detection for URLs is automated, using request headers for dynamic URL generation, with a database-stored domain name as a fallback. Critical timestamp fields in the database use `bigint` to prevent overflow errors with millisecond timestamps.
 
+### Recent Enhancements (Feb 2026)
+- **Collapsible Trade Data**: Strategy Trade Tracker section in Broker Linking is now collapsible (collapsed by default), showing trade count and P&L summary in the header. Strategy Controls (Activate/Pause/Square Off/Close) are always visible above the collapsible section.
+- **Daily P&L Log Panel**: New `strategy_daily_pnl` table stores daily P&L snapshots per strategy plan. Collapsible panel styled like webhook data logs with sticky headers, showing Date, Day P&L, Cumulative P&L, Trades count, Open/Closed trades, and Status.
+- **Deployment Multiplier & Risk Config**: Pre-deploy configuration panel with lot multiplier buttons (1x-5x) and editable Stoploss MTM / Profit Target MTM values. Multiplier auto-scales SL/PT from base values but allows manual adjustment. Fields stored as `lotMultiplier`, `deployStoploss`, `deployProfitTarget` on strategy_plans table. Deployed strategies show config badges (Lots multiplier, SL, PT) in card header.
+
 ## Future Development Plans
 
 ### Tradetron Alike Development Plan

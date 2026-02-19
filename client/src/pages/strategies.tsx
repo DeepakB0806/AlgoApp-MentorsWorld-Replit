@@ -10,12 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Home, Plus, Trash2, Edit, Settings, Link2, Loader2, X, Save, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, TrendingDown, Activity } from "lucide-react";
+import { Home, Plus, Trash2, Edit, Settings, Link2, Loader2, X, Save, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, TrendingDown, Activity, ChevronDown, ChevronUp, BarChart3 } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import type { StrategyConfig, StrategyPlan, Webhook, StrategyTrade } from "@shared/schema";
+import type { StrategyConfig, StrategyPlan, Webhook, StrategyTrade, StrategyDailyPnl } from "@shared/schema";
 import { PREDEFINED_INDICATORS, type ActionMapperEntry, type PlanTradeLeg, type TradeParams, type StoplossConfig, type ProfitTargetConfig, type TrailingStoplossConfig, type TimeLogicConfig, BROKER_FIELD_MAP, buildBrokerOrderParams } from "@shared/schema";
 import type { BrokerConfig } from "@shared/schema";
 
@@ -1375,12 +1375,18 @@ function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: Stra
     groupedTrades[key].push(t);
   });
 
+  const [isExpanded, setIsExpanded] = useState(false);
+
   return (
     <div className="mt-3 border-t border-border/50 pt-3" data-testid={`container-live-positions-${plan.id}`}>
-      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+      <button
+        className="w-full flex items-center justify-between gap-2 mb-2 cursor-pointer"
+        onClick={() => setIsExpanded(!isExpanded)}
+        data-testid={`button-toggle-trades-${plan.id}`}
+      >
         <div className="flex items-center gap-2">
           <Activity className="w-4 h-4 text-emerald-400" />
-          <Label className="text-xs font-semibold">Strategy Trade Tracker</Label>
+          <Label className="text-xs font-semibold cursor-pointer">Strategy Trade Tracker</Label>
           {isConnected ? (
             <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">
               <Wifi className="w-3 h-3 mr-1" />
@@ -1392,113 +1398,218 @@ function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: Stra
               Disconnected
             </Badge>
           )}
+          <Badge variant="secondary" className="text-xs">{trades.length} trade{trades.length !== 1 ? "s" : ""}</Badge>
+          {trades.length > 0 && (
+            <span className={`text-xs font-mono font-semibold ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              P&L: {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {lastFetched && <span className="text-xs text-muted-foreground">Updated: {lastFetched}</span>}
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading} data-testid={`button-refresh-positions-${plan.id}`}>
-            <RefreshCw className={`w-3 h-3 mr-1 ${isLoading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+          {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
         </div>
-      </div>
+      </button>
 
-      {brokerConfig && (
-        <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1 flex-wrap">
-          <span>Broker:</span>
-          <span className="font-medium text-foreground">{brokerConfig.name || brokerConfig.brokerName}</span>
-          {brokerConfig.environment === "uat" && <Badge variant="outline" className="text-xs text-amber-400 border-amber-400/30">Sandbox</Badge>}
-          {brokerConfig.environment === "prod" && <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">Production</Badge>}
+      {isExpanded && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            {brokerConfig && (
+              <div className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
+                <span>Broker:</span>
+                <span className="font-medium text-foreground">{brokerConfig.name || brokerConfig.brokerName}</span>
+                {brokerConfig.environment === "uat" && <Badge variant="outline" className="text-xs text-amber-400 border-amber-400/30">Sandbox</Badge>}
+                {brokerConfig.environment === "prod" && <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">Production</Badge>}
+              </div>
+            )}
+            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); refetch(); }} disabled={isLoading} data-testid={`button-refresh-positions-${plan.id}`}>
+              <RefreshCw className={`w-3 h-3 mr-1 ${isLoading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="bg-card border border-border rounded-md p-2">
+              <p className="text-xs text-muted-foreground">Total Value</p>
+              <p className="text-sm font-semibold font-mono">{totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</p>
+            </div>
+            <div className="bg-card border border-border rounded-md p-2">
+              <p className="text-xs text-muted-foreground">Total P&L</p>
+              <p className={`text-sm font-semibold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-card border border-border rounded-md p-2">
+              <p className="text-xs text-muted-foreground">Open Trades</p>
+              <p className="text-sm font-semibold font-mono">{openTrades.length}</p>
+            </div>
+            <div className="bg-card border border-border rounded-md p-2">
+              <p className="text-xs text-muted-foreground">Closed Trades</p>
+              <p className="text-sm font-semibold font-mono">{closedTrades.length}</p>
+            </div>
+          </div>
+
+          {trades.length > 0 ? (
+            <div className="space-y-3">
+              {Object.entries(groupedTrades).map(([blockType, blockTrades]) => {
+                const blockCfg = BLOCK_LABELS[blockType] || BLOCK_LABELS.legs;
+                const BlockIcon = blockCfg.icon;
+                const blockPnl = blockTrades.reduce((s, t) => s + (t.pnl || 0), 0);
+                return (
+                  <div key={blockType} className="border border-border/30 rounded-md" data-testid={`container-block-${blockType}`}>
+                    <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border/20 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <BlockIcon className={`w-3.5 h-3.5 ${blockCfg.color}`} />
+                        <span className="text-xs font-semibold">{blockCfg.label}</span>
+                        <Badge variant="secondary" className="text-xs">{blockTrades.length} trade{blockTrades.length !== 1 ? "s" : ""}</Badge>
+                      </div>
+                      <span className={`text-xs font-mono font-semibold ${blockPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        P&L: {blockPnl >= 0 ? "+" : ""}{blockPnl.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-border/30">
+                            <th className="text-left px-2 py-1 text-muted-foreground">Symbol</th>
+                            <th className="text-left px-2 py-1 text-muted-foreground">Action</th>
+                            <th className="text-right px-2 py-1 text-muted-foreground">Qty</th>
+                            <th className="text-right px-2 py-1 text-muted-foreground">Price</th>
+                            <th className="text-right px-2 py-1 text-muted-foreground">LTP</th>
+                            <th className="text-right px-2 py-1 text-muted-foreground">P&L</th>
+                            <th className="text-left px-2 py-1 text-muted-foreground">Status</th>
+                            <th className="text-left px-2 py-1 text-muted-foreground">Leg</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {blockTrades.map((trade) => (
+                            <tr key={trade.id} className="border-b border-border/20" data-testid={`row-trade-${trade.id}`}>
+                              <td className="px-2 py-1.5 font-mono font-medium">{trade.tradingSymbol}</td>
+                              <td className="px-2 py-1.5">
+                                <Badge variant={trade.action === "BUY" ? "default" : "destructive"} className="text-xs">{trade.action}</Badge>
+                              </td>
+                              <td className="px-2 py-1.5 text-right font-mono">{trade.quantity}</td>
+                              <td className="px-2 py-1.5 text-right font-mono">{(trade.price || 0).toFixed(2)}</td>
+                              <td className="px-2 py-1.5 text-right font-mono">{(trade.ltp || 0).toFixed(2)}</td>
+                              <td className={`px-2 py-1.5 text-right font-mono ${(trade.pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                                {(trade.pnl || 0) >= 0 ? "+" : ""}{(trade.pnl || 0).toFixed(2)}
+                              </td>
+                              <td className="px-2 py-1.5">
+                                <Badge variant="outline" className="text-xs">{trade.status}</Badge>
+                              </td>
+                              <td className="px-2 py-1.5 text-xs text-muted-foreground font-mono">L{(trade.legIndex || 0) + 1}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-6 border border-dashed border-border/40 rounded-md" data-testid={`empty-state-trades-${plan.id}`}>
+              <Activity className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground font-medium">No trades executed by this strategy</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                {plan.deploymentStatus === "active"
+                  ? "Trades will appear here when market conditions trigger execution blocks"
+                  : "Deploy and activate this strategy to start executing trades"}
+              </p>
+            </div>
+          )}
         </div>
       )}
+    </div>
+  );
+}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-        <div className="bg-card border border-border rounded-md p-2">
-          <p className="text-xs text-muted-foreground">Total Value</p>
-          <p className="text-sm font-semibold font-mono">{totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</p>
-        </div>
-        <div className="bg-card border border-border rounded-md p-2">
-          <p className="text-xs text-muted-foreground">Total P&L</p>
-          <p className={`text-sm font-semibold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-            {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
-          </p>
-        </div>
-        <div className="bg-card border border-border rounded-md p-2">
-          <p className="text-xs text-muted-foreground">Open Trades</p>
-          <p className="text-sm font-semibold font-mono">{openTrades.length}</p>
-        </div>
-        <div className="bg-card border border-border rounded-md p-2">
-          <p className="text-xs text-muted-foreground">Closed Trades</p>
-          <p className="text-sm font-semibold font-mono">{closedTrades.length}</p>
-        </div>
-      </div>
+function DailyPnlLog({ plan }: { plan: StrategyPlan }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isDeployed = plan.deploymentStatus && plan.deploymentStatus !== "draft";
 
-      {trades.length > 0 ? (
-        <div className="space-y-3">
-          {Object.entries(groupedTrades).map(([blockType, blockTrades]) => {
-            const blockCfg = BLOCK_LABELS[blockType] || BLOCK_LABELS.legs;
-            const BlockIcon = blockCfg.icon;
-            const blockPnl = blockTrades.reduce((s, t) => s + (t.pnl || 0), 0);
-            return (
-              <div key={blockType} className="border border-border/30 rounded-md" data-testid={`container-block-${blockType}`}>
-                <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border/20 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <BlockIcon className={`w-3.5 h-3.5 ${blockCfg.color}`} />
-                    <span className="text-xs font-semibold">{blockCfg.label}</span>
-                    <Badge variant="secondary" className="text-xs">{blockTrades.length} trade{blockTrades.length !== 1 ? "s" : ""}</Badge>
-                  </div>
-                  <span className={`text-xs font-mono font-semibold ${blockPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    P&L: {blockPnl >= 0 ? "+" : ""}{blockPnl.toFixed(2)}
-                  </span>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-border/30">
-                        <th className="text-left px-2 py-1 text-muted-foreground">Symbol</th>
-                        <th className="text-left px-2 py-1 text-muted-foreground">Action</th>
-                        <th className="text-right px-2 py-1 text-muted-foreground">Qty</th>
-                        <th className="text-right px-2 py-1 text-muted-foreground">Price</th>
-                        <th className="text-right px-2 py-1 text-muted-foreground">LTP</th>
-                        <th className="text-right px-2 py-1 text-muted-foreground">P&L</th>
-                        <th className="text-left px-2 py-1 text-muted-foreground">Status</th>
-                        <th className="text-left px-2 py-1 text-muted-foreground">Leg</th>
+  const { data: rawEntries = [], isLoading } = useQuery<StrategyDailyPnl[]>({
+    queryKey: ["/api/strategy-daily-pnl", plan.id],
+    enabled: !!isDeployed,
+  });
+
+  const entries = [...rawEntries].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
+  if (!isDeployed) return null;
+
+  return (
+    <div className="mt-3 border-t border-border/50 pt-3" data-testid={`container-daily-pnl-${plan.id}`}>
+      <button
+        className="w-full flex items-center justify-between gap-2 mb-2 cursor-pointer"
+        onClick={() => setIsExpanded(!isExpanded)}
+        data-testid={`button-toggle-daily-pnl-${plan.id}`}
+      >
+        <div className="flex items-center gap-2">
+          <BarChart3 className="w-4 h-4 text-blue-400" />
+          <Label className="text-xs font-semibold cursor-pointer">Daily P&L Log</Label>
+          <Badge variant="secondary" className="text-xs">{entries.length} day{entries.length !== 1 ? "s" : ""}</Badge>
+          {entries.length > 0 && (
+            <span className={`text-xs font-mono font-semibold ${(entries[0]?.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              Cumulative: {(entries[0]?.cumulativePnl || 0) >= 0 ? "+" : ""}{(entries[0]?.cumulativePnl || 0).toFixed(2)}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div>
+          {isLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground mr-2" />
+              <span className="text-xs text-muted-foreground">Loading daily P&L data...</span>
+            </div>
+          ) : entries.length > 0 ? (
+            <div className="border border-border/30 rounded-md">
+              <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-card z-10">
+                    <tr className="border-b border-border/30">
+                      <th className="text-left px-3 py-2 text-muted-foreground font-medium">Date</th>
+                      <th className="text-right px-3 py-2 text-muted-foreground font-medium">Day P&L</th>
+                      <th className="text-right px-3 py-2 text-muted-foreground font-medium">Cumulative P&L</th>
+                      <th className="text-center px-3 py-2 text-muted-foreground font-medium">Trades</th>
+                      <th className="text-center px-3 py-2 text-muted-foreground font-medium">Open</th>
+                      <th className="text-center px-3 py-2 text-muted-foreground font-medium">Closed</th>
+                      <th className="text-left px-3 py-2 text-muted-foreground font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entries.map((entry) => (
+                      <tr key={entry.id} className="border-b border-border/20" data-testid={`row-daily-pnl-${entry.id}`}>
+                        <td className="px-3 py-2 font-mono font-medium">{entry.date}</td>
+                        <td className={`px-3 py-2 text-right font-mono font-semibold ${(entry.dailyPnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {(entry.dailyPnl || 0) >= 0 ? "+" : ""}{(entry.dailyPnl || 0).toFixed(2)}
+                        </td>
+                        <td className={`px-3 py-2 text-right font-mono font-semibold ${(entry.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {(entry.cumulativePnl || 0) >= 0 ? "+" : ""}{(entry.cumulativePnl || 0).toFixed(2)}
+                        </td>
+                        <td className="px-3 py-2 text-center font-mono">{entry.tradesCount || 0}</td>
+                        <td className="px-3 py-2 text-center font-mono">{entry.openTrades || 0}</td>
+                        <td className="px-3 py-2 text-center font-mono">{entry.closedTrades || 0}</td>
+                        <td className="px-3 py-2">
+                          <Badge variant={entry.status === "active" ? "default" : "secondary"} className="text-xs">{entry.status}</Badge>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {blockTrades.map((trade, idx) => (
-                        <tr key={trade.id} className="border-b border-border/20" data-testid={`row-trade-${trade.id}`}>
-                          <td className="px-2 py-1.5 font-mono font-medium">{trade.tradingSymbol}</td>
-                          <td className="px-2 py-1.5">
-                            <Badge variant={trade.action === "BUY" ? "default" : "destructive"} className="text-xs">{trade.action}</Badge>
-                          </td>
-                          <td className="px-2 py-1.5 text-right font-mono">{trade.quantity}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{(trade.price || 0).toFixed(2)}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{(trade.ltp || 0).toFixed(2)}</td>
-                          <td className={`px-2 py-1.5 text-right font-mono ${(trade.pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                            {(trade.pnl || 0) >= 0 ? "+" : ""}{(trade.pnl || 0).toFixed(2)}
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <Badge variant="outline" className="text-xs">{trade.status}</Badge>
-                          </td>
-                          <td className="px-2 py-1.5 text-xs text-muted-foreground font-mono">L{(trade.legIndex || 0) + 1}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="text-center py-6 border border-dashed border-border/40 rounded-md" data-testid={`empty-state-trades-${plan.id}`}>
-          <Activity className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
-          <p className="text-sm text-muted-foreground font-medium">No trades executed by this strategy</p>
-          <p className="text-xs text-muted-foreground/70 mt-1">
-            {plan.deploymentStatus === "active"
-              ? "Trades will appear here when market conditions trigger execution blocks"
-              : "Deploy and activate this strategy to start executing trades"}
-          </p>
+            </div>
+          ) : (
+            <div className="text-center py-4 border border-dashed border-border/40 rounded-md" data-testid={`empty-state-daily-pnl-${plan.id}`}>
+              <BarChart3 className="w-6 h-6 text-muted-foreground/40 mx-auto mb-2" />
+              <p className="text-xs text-muted-foreground">No daily P&L entries recorded yet</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">Daily snapshots will appear here as trading days are logged</p>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1520,6 +1631,7 @@ function BrokerLinking() {
 
   const [localState, setLocalState] = useState<Record<string, { brokerConfigId: string; isProxyMode: boolean }>>({});
   const [confirmAction, setConfirmAction] = useState<{ planId: string; action: string } | null>(null);
+  const [deployConfig, setDeployConfig] = useState<Record<string, { lotMultiplier: number; stoploss: number; profitTarget: number; baseStoploss: number; baseProfitTarget: number }>>({});
 
   const plansKey = activePlans.map((p) => `${p.id}:${p.brokerConfigId}:${p.isProxyMode}`).join(",");
   useEffect(() => {
@@ -1547,8 +1659,12 @@ function BrokerLinking() {
   });
 
   const deploymentMutation = useMutation({
-    mutationFn: async ({ id, deploymentStatus }: { id: string; deploymentStatus: string }) => {
-      return apiRequest("PATCH", `/api/strategy-plans/${id}/deployment`, { deploymentStatus });
+    mutationFn: async ({ id, deploymentStatus, lotMultiplier, deployStoploss, deployProfitTarget }: { id: string; deploymentStatus: string; lotMultiplier?: number; deployStoploss?: number; deployProfitTarget?: number }) => {
+      const body: Record<string, unknown> = { deploymentStatus };
+      if (lotMultiplier !== undefined) body.lotMultiplier = lotMultiplier;
+      if (deployStoploss !== undefined) body.deployStoploss = deployStoploss;
+      if (deployProfitTarget !== undefined) body.deployProfitTarget = deployProfitTarget;
+      return apiRequest("PATCH", `/api/strategy-plans/${id}/deployment`, body);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/strategy-plans"] });
@@ -1593,13 +1709,56 @@ function BrokerLinking() {
     }));
   };
 
+  const initDeployConfig = (plan: StrategyPlan) => {
+    const tp = plan.tradeParams ? parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] }) : { legs: [] };
+    const baseSL = tp.stoploss?.value || 0;
+    const basePT = tp.profitTarget?.value || 0;
+    setDeployConfig((prev) => ({
+      ...prev,
+      [plan.id]: {
+        lotMultiplier: plan.lotMultiplier || 1,
+        stoploss: plan.deployStoploss || baseSL,
+        profitTarget: plan.deployProfitTarget || basePT,
+        baseStoploss: baseSL,
+        baseProfitTarget: basePT,
+      },
+    }));
+  };
+
+  const updateDeployMultiplier = (planId: string, multiplier: number) => {
+    setDeployConfig((prev) => {
+      const cfg = prev[planId];
+      if (!cfg) return prev;
+      return {
+        ...prev,
+        [planId]: {
+          ...cfg,
+          lotMultiplier: multiplier,
+          stoploss: parseFloat((cfg.baseStoploss * multiplier).toFixed(2)),
+          profitTarget: parseFloat((cfg.baseProfitTarget * multiplier).toFixed(2)),
+        },
+      };
+    });
+  };
+
   const handleDeploymentAction = (planId: string, action: string) => {
     setConfirmAction({ planId, action });
   };
 
   const executeDeploymentAction = () => {
     if (!confirmAction) return;
-    deploymentMutation.mutate({ id: confirmAction.planId, deploymentStatus: confirmAction.action });
+    const cfg = deployConfig[confirmAction.planId];
+    if (confirmAction.action === "deployed" && cfg) {
+      deploymentMutation.mutate({
+        id: confirmAction.planId,
+        deploymentStatus: confirmAction.action,
+        lotMultiplier: cfg.lotMultiplier,
+        deployStoploss: cfg.stoploss,
+        deployProfitTarget: cfg.profitTarget,
+      });
+    } else {
+      deploymentMutation.mutate({ id: confirmAction.planId, deploymentStatus: confirmAction.action });
+    }
   };
 
   const { data: configs = [] } = useQuery<StrategyConfig[]>({
@@ -1703,6 +1862,19 @@ function BrokerLinking() {
                     )}
                   </CardTitle>
                   <p className="text-xs text-muted-foreground">Config: {getConfigName(plan.configId)}</p>
+                  {isDeployed && (plan.lotMultiplier || plan.deployStoploss || plan.deployProfitTarget) && (
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      {plan.lotMultiplier && plan.lotMultiplier > 1 && (
+                        <Badge variant="outline" className="text-xs text-blue-400 border-blue-400/30">{plan.lotMultiplier}x Lots</Badge>
+                      )}
+                      {plan.deployStoploss != null && plan.deployStoploss > 0 && (
+                        <Badge variant="outline" className="text-xs text-red-400 border-red-400/30">SL: {plan.deployStoploss}</Badge>
+                      )}
+                      {plan.deployProfitTarget != null && plan.deployProfitTarget > 0 && (
+                        <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">PT: {plan.deployProfitTarget}</Badge>
+                      )}
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div>
@@ -1829,21 +2001,110 @@ function BrokerLinking() {
                   })()}
 
                   {canDeploy && (
-                    <div className="mt-3 border-t border-border/50 pt-3">
-                      <Button
-                        className="w-full"
-                        onClick={() => handleDeploymentAction(plan.id, "deployed")}
-                        disabled={deploymentMutation.isPending}
-                        data-testid={`button-deploy-${plan.id}`}
-                      >
-                        {deploymentMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
-                        Deploy Strategy
-                      </Button>
-                    </div>
-                  )}
+                    <div className="mt-3 border-t border-border/50 pt-3 space-y-3">
+                      {!deployConfig[plan.id] ? (
+                        <Button
+                          className="w-full"
+                          variant="outline"
+                          onClick={() => initDeployConfig(plan)}
+                          data-testid={`button-configure-deploy-${plan.id}`}
+                        >
+                          <Settings className="w-4 h-4 mr-2" />
+                          Configure & Deploy
+                        </Button>
+                      ) : (
+                        <div className="space-y-3" data-testid={`container-deploy-config-${plan.id}`}>
+                          <Label className="text-xs font-semibold block text-muted-foreground">Pre-Deploy Configuration</Label>
 
-                  {isDeployed && (
-                    <LivePositionTracker plan={plan} brokerConfigs={brokerConfigs} parentConfig={configs.find((c) => c.id === plan.configId)} />
+                          <div>
+                            <Label className="text-xs mb-1.5 block text-muted-foreground">Lot Multiplier</Label>
+                            <div className="flex gap-1.5 flex-wrap">
+                              {[1, 2, 3, 4, 5].map((m) => (
+                                <Button
+                                  key={m}
+                                  size="sm"
+                                  variant={deployConfig[plan.id].lotMultiplier === m ? "default" : "outline"}
+                                  onClick={() => updateDeployMultiplier(plan.id, m)}
+                                  data-testid={`button-multiplier-${m}x-${plan.id}`}
+                                >
+                                  {m}x
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <Label className="text-xs mb-1 block text-muted-foreground">
+                                Stoploss MTM
+                                {deployConfig[plan.id].baseStoploss > 0 && (
+                                  <span className="ml-1 text-muted-foreground/60">(base: {deployConfig[plan.id].baseStoploss})</span>
+                                )}
+                              </Label>
+                              <Input
+                                type="number"
+                                value={deployConfig[plan.id].stoploss}
+                                onChange={(e) => setDeployConfig((prev) => ({
+                                  ...prev,
+                                  [plan.id]: { ...prev[plan.id], stoploss: parseFloat(e.target.value) || 0 },
+                                }))}
+                                data-testid={`input-deploy-stoploss-${plan.id}`}
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs mb-1 block text-muted-foreground">
+                                Profit Target MTM
+                                {deployConfig[plan.id].baseProfitTarget > 0 && (
+                                  <span className="ml-1 text-muted-foreground/60">(base: {deployConfig[plan.id].baseProfitTarget})</span>
+                                )}
+                              </Label>
+                              <Input
+                                type="number"
+                                value={deployConfig[plan.id].profitTarget}
+                                onChange={(e) => setDeployConfig((prev) => ({
+                                  ...prev,
+                                  [plan.id]: { ...prev[plan.id], profitTarget: parseFloat(e.target.value) || 0 },
+                                }))}
+                                data-testid={`input-deploy-profit-target-${plan.id}`}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="bg-card border border-border rounded-md p-2">
+                            <div className="flex items-center justify-between gap-2 text-xs flex-wrap">
+                              <span className="text-muted-foreground">Multiplier: <span className="font-mono font-semibold text-foreground">{deployConfig[plan.id].lotMultiplier}x</span></span>
+                              <span className="text-muted-foreground">SL: <span className="font-mono font-semibold text-red-400">{deployConfig[plan.id].stoploss}</span></span>
+                              <span className="text-muted-foreground">Target: <span className="font-mono font-semibold text-emerald-400">{deployConfig[plan.id].profitTarget}</span></span>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setDeployConfig((prev) => {
+                                const next = { ...prev };
+                                delete next[plan.id];
+                                return next;
+                              })}
+                              data-testid={`button-cancel-deploy-config-${plan.id}`}
+                            >
+                              <X className="w-3 h-3 mr-1" />
+                              Cancel
+                            </Button>
+                            <Button
+                              className="flex-1"
+                              onClick={() => handleDeploymentAction(plan.id, "deployed")}
+                              disabled={deploymentMutation.isPending}
+                              data-testid={`button-deploy-${plan.id}`}
+                            >
+                              {deploymentMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
+                              Deploy Strategy
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {isDeployed && actions.length > 0 && (
@@ -1868,6 +2129,14 @@ function BrokerLinking() {
                         })}
                       </div>
                     </div>
+                  )}
+
+                  {isDeployed && (
+                    <LivePositionTracker plan={plan} brokerConfigs={brokerConfigs} parentConfig={configs.find((c) => c.id === plan.configId)} />
+                  )}
+
+                  {isDeployed && (
+                    <DailyPnlLog plan={plan} />
                   )}
                 </CardContent>
               </Card>

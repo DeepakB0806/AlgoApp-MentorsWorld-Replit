@@ -1593,7 +1593,20 @@ export async function registerRoutes(
       if (!allowed.includes(deploymentStatus)) {
         return res.status(400).json({ error: `Cannot transition from '${currentStatus}' to '${deploymentStatus}'. Allowed: ${allowed.join(", ")}` });
       }
-      const updated = await storage.updateStrategyPlan(id, { deploymentStatus, updatedAt: new Date().toISOString() });
+      const updateData: Record<string, unknown> = { deploymentStatus, updatedAt: new Date().toISOString() };
+      if (req.body.lotMultiplier !== undefined) {
+        const lm = Number(req.body.lotMultiplier);
+        if (!isNaN(lm) && lm >= 1 && lm <= 10) updateData.lotMultiplier = Math.round(lm);
+      }
+      if (req.body.deployStoploss !== undefined) {
+        const sl = Number(req.body.deployStoploss);
+        if (!isNaN(sl) && sl >= 0) updateData.deployStoploss = sl;
+      }
+      if (req.body.deployProfitTarget !== undefined) {
+        const pt = Number(req.body.deployProfitTarget);
+        if (!isNaN(pt) && pt >= 0) updateData.deployProfitTarget = pt;
+      }
+      const updated = await storage.updateStrategyPlan(id, updateData as any);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: "Failed to update deployment status" });
@@ -1620,6 +1633,29 @@ export async function registerRoutes(
       res.json(trade);
     } catch (error) {
       res.status(500).json({ error: "Failed to create strategy trade" });
+    }
+  });
+
+  // Strategy Daily P&L log entries
+  app.get("/api/strategy-daily-pnl/:planId", async (req, res) => {
+    try {
+      const { planId } = req.params;
+      const entries = await storage.getStrategyDailyPnl(planId);
+      res.json(entries);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch daily P&L logs" });
+    }
+  });
+
+  app.post("/api/strategy-daily-pnl", async (req, res) => {
+    try {
+      const entry = await storage.createStrategyDailyPnl({
+        ...req.body,
+        createdAt: new Date().toISOString(),
+      });
+      res.json(entry);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create daily P&L entry" });
     }
   });
 
