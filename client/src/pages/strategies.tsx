@@ -5,12 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Home, Plus, Trash2, Edit, Settings, Link2, Loader2, X, Save, Clock, Shield, Target, TrendingUp } from "lucide-react";
+import { Home, Plus, Trash2, Edit, Settings, Link2, Loader2, X, Save, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, TrendingDown, Activity } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -1325,6 +1325,181 @@ function TradePlanning() {
   );
 }
 
+interface PositionData {
+  trading_symbol: string;
+  exchange: string;
+  quantity: number;
+  buy_qty: number;
+  sell_qty: number;
+  buy_avg: number;
+  sell_avg: number;
+  buy_amt: number;
+  sell_amt: number;
+  pnl: number;
+  ltp: number;
+  product_type: string;
+  option_type?: string;
+  strike_price?: number;
+  expiry?: string;
+  realised_pnl: number;
+  unrealised_pnl: number;
+  token: string;
+}
+
+const DEPLOYMENT_STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Activity }> = {
+  draft: { label: "Draft", color: "text-muted-foreground", icon: Clock },
+  deployed: { label: "Deployed", color: "text-blue-400", icon: Rocket },
+  active: { label: "Active", color: "text-emerald-400", icon: Play },
+  paused: { label: "Paused", color: "text-amber-400", icon: Pause },
+  squared_off: { label: "Squared Off", color: "text-red-400", icon: Square },
+  closed: { label: "Closed", color: "text-muted-foreground", icon: Power },
+};
+
+function LivePositionTracker({ plan, brokerConfigs }: { plan: StrategyPlan; brokerConfigs: BrokerConfig[] }) {
+  const [positions, setPositions] = useState<PositionData[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [lastFetched, setLastFetched] = useState<string | null>(null);
+
+  const brokerConfig = brokerConfigs.find((bc) => bc.id === plan.brokerConfigId);
+  const isConnected = brokerConfig?.isConnected || false;
+
+  const fetchPositions = async () => {
+    if (!plan.brokerConfigId) return;
+    setLoading(true);
+    try {
+      const resp = await fetch(`/api/positions/${plan.brokerConfigId}`);
+      if (resp.ok) {
+        const data: PositionData[] = await resp.json();
+        setPositions(data);
+        setLastFetched(new Date().toLocaleTimeString());
+      }
+    } catch {} finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (plan.brokerConfigId && isConnected && plan.deploymentStatus && plan.deploymentStatus !== "draft") {
+      fetchPositions();
+    }
+  }, [plan.brokerConfigId, plan.deploymentStatus]);
+
+  const totalPnl = positions.reduce((sum, p) => sum + p.pnl, 0);
+  const totalRealisedPnl = positions.reduce((sum, p) => sum + p.realised_pnl, 0);
+  const totalUnrealisedPnl = positions.reduce((sum, p) => sum + p.unrealised_pnl, 0);
+  const totalBuyAmt = positions.reduce((sum, p) => sum + p.buy_amt, 0);
+
+  return (
+    <div className="mt-3 border-t border-border/50 pt-3" data-testid={`container-live-positions-${plan.id}`}>
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Activity className="w-4 h-4 text-emerald-400" />
+          <Label className="text-xs font-semibold">Live Position Tracker</Label>
+          {isConnected ? (
+            <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">
+              <Wifi className="w-3 h-3 mr-1" />
+              Connected
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-xs text-red-400 border-red-400/30">
+              <WifiOff className="w-3 h-3 mr-1" />
+              Disconnected
+            </Badge>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {lastFetched && <span className="text-xs text-muted-foreground">Updated: {lastFetched}</span>}
+          <Button variant="outline" size="sm" onClick={fetchPositions} disabled={loading || !isConnected} data-testid={`button-refresh-positions-${plan.id}`}>
+            <RefreshCw className={`w-3 h-3 mr-1 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      {brokerConfig && (
+        <p className="text-xs text-muted-foreground mb-2">
+          Broker: <span className="font-medium text-foreground">{brokerConfig.name || brokerConfig.brokerName}</span>
+          {brokerConfig.environment === "uat" && <Badge variant="outline" className="ml-2 text-xs text-amber-400 border-amber-400/30">Sandbox</Badge>}
+          {brokerConfig.environment === "prod" && <Badge variant="outline" className="ml-2 text-xs text-emerald-400 border-emerald-400/30">Production</Badge>}
+        </p>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+        <div className="bg-card border border-border rounded-md p-2">
+          <p className="text-xs text-muted-foreground">Total Invested</p>
+          <p className="text-sm font-semibold font-mono">{totalBuyAmt.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</p>
+        </div>
+        <div className="bg-card border border-border rounded-md p-2">
+          <p className="text-xs text-muted-foreground">Total P&L</p>
+          <p className={`text-sm font-semibold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+            {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
+          </p>
+        </div>
+        <div className="bg-card border border-border rounded-md p-2">
+          <p className="text-xs text-muted-foreground">Realised P&L</p>
+          <p className={`text-sm font-semibold font-mono ${totalRealisedPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+            {totalRealisedPnl >= 0 ? "+" : ""}{totalRealisedPnl.toFixed(2)}
+          </p>
+        </div>
+        <div className="bg-card border border-border rounded-md p-2">
+          <p className="text-xs text-muted-foreground">Unrealised P&L</p>
+          <p className={`text-sm font-semibold font-mono ${totalUnrealisedPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+            {totalUnrealisedPnl >= 0 ? "+" : ""}{totalUnrealisedPnl.toFixed(2)}
+          </p>
+        </div>
+      </div>
+
+      {positions.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border/30">
+                <th className="text-left px-2 py-1 text-muted-foreground">Symbol</th>
+                <th className="text-right px-2 py-1 text-muted-foreground">Qty</th>
+                <th className="text-right px-2 py-1 text-muted-foreground">Buy Avg</th>
+                <th className="text-right px-2 py-1 text-muted-foreground">LTP</th>
+                <th className="text-right px-2 py-1 text-muted-foreground">P&L</th>
+                <th className="text-left px-2 py-1 text-muted-foreground">Product</th>
+                <th className="text-left px-2 py-1 text-muted-foreground">Exchange</th>
+              </tr>
+            </thead>
+            <tbody>
+              {positions.map((pos, idx) => {
+                const pnlPct = pos.buy_avg > 0 ? ((pos.ltp - pos.buy_avg) / pos.buy_avg) * 100 : 0;
+                return (
+                  <tr key={`${pos.trading_symbol}-${idx}`} className="border-b border-border/20">
+                    <td className="px-2 py-1.5 font-mono font-medium" data-testid={`text-pos-symbol-${idx}`}>
+                      {pos.trading_symbol}
+                      {pos.option_type && <span className="text-muted-foreground ml-1">{pos.option_type}</span>}
+                      {pos.strike_price && <span className="text-muted-foreground ml-1">{pos.strike_price}</span>}
+                      {pos.expiry && <span className="text-muted-foreground ml-1 text-xs">({pos.expiry})</span>}
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono">{pos.quantity}</td>
+                    <td className="px-2 py-1.5 text-right font-mono">{pos.buy_avg.toFixed(2)}</td>
+                    <td className="px-2 py-1.5 text-right font-mono">{pos.ltp.toFixed(2)}</td>
+                    <td className={`px-2 py-1.5 text-right font-mono ${pos.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {pos.pnl >= 0 ? "+" : ""}{pos.pnl.toFixed(2)}
+                      <span className="text-xs ml-1">({pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)</span>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <Badge variant="outline" className="text-xs">{pos.product_type}</Badge>
+                    </td>
+                    <td className="px-2 py-1.5 text-xs text-muted-foreground">{pos.exchange}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="text-center py-4">
+          <p className="text-xs text-muted-foreground">{loading ? "Fetching positions..." : (isConnected ? "No open positions found" : "Connect broker to view positions")}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BrokerLinking() {
   const { toast } = useToast();
 
@@ -1339,6 +1514,7 @@ function BrokerLinking() {
   const activePlans = plans.filter((p) => p.status === "active");
 
   const [localState, setLocalState] = useState<Record<string, { brokerConfigId: string; isProxyMode: boolean }>>({});
+  const [confirmAction, setConfirmAction] = useState<{ planId: string; action: string } | null>(null);
 
   useEffect(() => {
     const state: Record<string, { brokerConfigId: string; isProxyMode: boolean }> = {};
@@ -1361,6 +1537,20 @@ function BrokerLinking() {
     },
     onError: () => {
       toast({ title: "Failed to update broker linking", variant: "destructive" });
+    },
+  });
+
+  const deploymentMutation = useMutation({
+    mutationFn: async ({ id, deploymentStatus }: { id: string; deploymentStatus: string }) => {
+      return apiRequest("PATCH", `/api/strategy-plans/${id}/deployment`, { deploymentStatus });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/strategy-plans"] });
+      setConfirmAction(null);
+      toast({ title: "Strategy deployment status updated" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update deployment status", variant: "destructive" });
     },
   });
 
@@ -1397,6 +1587,15 @@ function BrokerLinking() {
     }));
   };
 
+  const handleDeploymentAction = (planId: string, action: string) => {
+    setConfirmAction({ planId, action });
+  };
+
+  const executeDeploymentAction = () => {
+    if (!confirmAction) return;
+    deploymentMutation.mutate({ id: confirmAction.planId, deploymentStatus: confirmAction.action });
+  };
+
   const { data: configs = [] } = useQuery<StrategyConfig[]>({
     queryKey: ["/api/strategy-configs"],
   });
@@ -1404,6 +1603,47 @@ function BrokerLinking() {
   const getConfigName = (cId: string) => {
     const c = configs.find((cfg) => cfg.id === cId);
     return c ? c.name : "Unknown";
+  };
+
+  const hasFieldCorrelation = (plan: StrategyPlan) => {
+    if (!plan.brokerConfigId || !plan.tradeParams) return false;
+    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [], uptrendLegs: [], downtrendLegs: [], neutralLegs: [] });
+    return (tp.uptrendLegs || []).length > 0 || (tp.downtrendLegs || []).length > 0 || (tp.neutralLegs || []).length > 0 || (tp.legs || []).length > 0;
+  };
+
+  const getDeploymentActions = (status: string): { action: string; label: string; icon: typeof Play; variant: "default" | "outline" | "destructive" }[] => {
+    switch (status) {
+      case "draft":
+        return [];
+      case "deployed":
+        return [
+          { action: "active", label: "Activate", icon: Play, variant: "default" },
+          { action: "closed", label: "Close", icon: Power, variant: "destructive" },
+        ];
+      case "active":
+        return [
+          { action: "paused", label: "Pause", icon: Pause, variant: "outline" },
+          { action: "squared_off", label: "Square Off", icon: Square, variant: "destructive" },
+          { action: "closed", label: "Close", icon: Power, variant: "destructive" },
+        ];
+      case "paused":
+        return [
+          { action: "active", label: "Resume", icon: Play, variant: "default" },
+          { action: "squared_off", label: "Square Off", icon: Square, variant: "destructive" },
+          { action: "closed", label: "Close", icon: Power, variant: "destructive" },
+        ];
+      case "squared_off":
+        return [
+          { action: "active", label: "Reactivate", icon: Play, variant: "default" },
+          { action: "closed", label: "Close", icon: Power, variant: "destructive" },
+        ];
+      case "closed":
+        return [
+          { action: "deployed", label: "Redeploy", icon: Rocket, variant: "default" },
+        ];
+      default:
+        return [];
+    }
   };
 
   if (isLoading) {
@@ -1430,6 +1670,13 @@ function BrokerLinking() {
         <div className="grid gap-4">
           {activePlans.map((plan) => {
             const state = localState[plan.id] || { brokerConfigId: "", isProxyMode: false };
+            const depStatus = plan.deploymentStatus || "draft";
+            const depConfig = DEPLOYMENT_STATUS_CONFIG[depStatus] || DEPLOYMENT_STATUS_CONFIG.draft;
+            const DepIcon = depConfig.icon;
+            const canDeploy = hasFieldCorrelation(plan) && depStatus === "draft";
+            const isDeployed = depStatus !== "draft";
+            const actions = getDeploymentActions(depStatus);
+
             return (
               <Card key={plan.id} data-testid={`card-broker-link-${plan.id}`}>
                 <CardHeader className="pb-2">
@@ -1442,6 +1689,12 @@ function BrokerLinking() {
                         Linked
                       </Badge>
                     )}
+                    {isDeployed && (
+                      <Badge variant="outline" className={`text-xs ${depConfig.color}`} data-testid={`badge-deployment-${plan.id}`}>
+                        <DepIcon className="w-3 h-3 mr-1" />
+                        {depConfig.label}
+                      </Badge>
+                    )}
                   </CardTitle>
                   <p className="text-xs text-muted-foreground">Config: {getConfigName(plan.configId)}</p>
                 </CardHeader>
@@ -1451,6 +1704,7 @@ function BrokerLinking() {
                     <Select
                       value={state.brokerConfigId}
                       onValueChange={(v) => updateLocalState(plan.id, "brokerConfigId", v)}
+                      disabled={isDeployed}
                     >
                       <SelectTrigger data-testid={`select-broker-${plan.id}`}>
                         <SelectValue placeholder="Select broker" />
@@ -1471,30 +1725,35 @@ function BrokerLinking() {
                       <Switch
                         checked={state.isProxyMode}
                         onCheckedChange={(v) => updateLocalState(plan.id, "isProxyMode", v)}
+                        disabled={isDeployed}
                         data-testid={`switch-proxy-${plan.id}`}
                       />
                       <Label className="text-xs cursor-pointer">Proxy Mode</Label>
                     </div>
                     <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => handleLink(plan.id)}
-                        disabled={linkMutation.isPending}
-                        data-testid={`button-link-${plan.id}`}
-                      >
-                        {linkMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Link2 className="w-3 h-3 mr-1" />}
-                        Link
-                      </Button>
-                      {plan.brokerConfigId && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleUnlink(plan.id)}
-                          disabled={linkMutation.isPending}
-                          data-testid={`button-unlink-${plan.id}`}
-                        >
-                          Unlink
-                        </Button>
+                      {!isDeployed && (
+                        <>
+                          <Button
+                            size="sm"
+                            onClick={() => handleLink(plan.id)}
+                            disabled={linkMutation.isPending}
+                            data-testid={`button-link-${plan.id}`}
+                          >
+                            {linkMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Link2 className="w-3 h-3 mr-1" />}
+                            Link
+                          </Button>
+                          {plan.brokerConfigId && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleUnlink(plan.id)}
+                              disabled={linkMutation.isPending}
+                              data-testid={`button-unlink-${plan.id}`}
+                            >
+                              Unlink
+                            </Button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -1562,12 +1821,88 @@ function BrokerLinking() {
                       </div>
                     );
                   })()}
+
+                  {canDeploy && (
+                    <div className="mt-3 border-t border-border/50 pt-3">
+                      <Button
+                        className="w-full"
+                        onClick={() => handleDeploymentAction(plan.id, "deployed")}
+                        disabled={deploymentMutation.isPending}
+                        data-testid={`button-deploy-${plan.id}`}
+                      >
+                        {deploymentMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
+                        Deploy Strategy
+                      </Button>
+                    </div>
+                  )}
+
+                  {isDeployed && (
+                    <LivePositionTracker plan={plan} brokerConfigs={brokerConfigs} />
+                  )}
+
+                  {isDeployed && actions.length > 0 && (
+                    <div className="mt-3 border-t border-border/50 pt-3" data-testid={`container-deployment-actions-${plan.id}`}>
+                      <Label className="text-xs mb-2 block text-muted-foreground">Strategy Controls</Label>
+                      <div className="flex gap-2 flex-wrap">
+                        {actions.map((a) => {
+                          const ActionIcon = a.icon;
+                          return (
+                            <Button
+                              key={a.action}
+                              variant={a.variant}
+                              size="sm"
+                              onClick={() => handleDeploymentAction(plan.id, a.action)}
+                              disabled={deploymentMutation.isPending}
+                              data-testid={`button-${a.action}-${plan.id}`}
+                            >
+                              <ActionIcon className="w-3 h-3 mr-1" />
+                              {a.label}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             );
           })}
         </div>
       )}
+
+      <Dialog open={!!confirmAction} onOpenChange={() => setConfirmAction(null)}>
+        <DialogContent aria-describedby="deployment-confirm-desc">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription id="deployment-confirm-desc">Confirm the strategy deployment action below.</DialogDescription>
+          </DialogHeader>
+          {confirmAction && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {confirmAction.action === "deployed" && "Are you sure you want to deploy this strategy? Once deployed, the broker linking and trade parameters will be locked."}
+                {confirmAction.action === "active" && "Are you sure you want to activate this strategy? It will begin executing trades based on incoming signals."}
+                {confirmAction.action === "paused" && "Are you sure you want to pause this strategy? Open positions will remain, but no new trades will be executed."}
+                {confirmAction.action === "squared_off" && "Are you sure you want to square off? This will close all open positions for this strategy."}
+                {confirmAction.action === "closed" && "Are you sure you want to close this strategy? This will deactivate it completely. You can redeploy it later."}
+              </p>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setConfirmAction(null)} data-testid="button-cancel-deployment">
+                  Cancel
+                </Button>
+                <Button
+                  variant={confirmAction.action === "squared_off" || confirmAction.action === "closed" ? "destructive" : "default"}
+                  onClick={executeDeploymentAction}
+                  disabled={deploymentMutation.isPending}
+                  data-testid="button-confirm-deployment"
+                >
+                  {deploymentMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                  Confirm
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

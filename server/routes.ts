@@ -1580,6 +1580,19 @@ export async function registerRoutes(
       if (!plan) {
         return res.status(404).json({ error: "Strategy plan not found" });
       }
+      const allowedTransitions: Record<string, string[]> = {
+        draft: ["deployed"],
+        deployed: ["active", "closed"],
+        active: ["paused", "squared_off", "closed"],
+        paused: ["active", "squared_off", "closed"],
+        squared_off: ["active", "closed"],
+        closed: ["deployed"],
+      };
+      const currentStatus = plan.deploymentStatus || "draft";
+      const allowed = allowedTransitions[currentStatus] || [];
+      if (!allowed.includes(deploymentStatus)) {
+        return res.status(400).json({ error: `Cannot transition from '${currentStatus}' to '${deploymentStatus}'. Allowed: ${allowed.join(", ")}` });
+      }
       const updated = await storage.updateStrategyPlan(id, { deploymentStatus, updatedAt: new Date().toISOString() });
       res.json(updated);
     } catch (error) {
