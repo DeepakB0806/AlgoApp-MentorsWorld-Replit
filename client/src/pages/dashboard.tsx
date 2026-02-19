@@ -13,7 +13,8 @@ import { TrendingUp, TrendingDown, RefreshCw, Home, Wifi, WifiOff, Search, BarCh
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Position, Order, Holding, PortfolioSummary, OrderParams, StrategyPlan, StrategyConfig, BrokerConfig } from "@shared/schema";
+import type { Position, Order, Holding, PortfolioSummary, OrderParams, StrategyPlan, StrategyConfig, BrokerConfig, StrategyTrade } from "@shared/schema";
+import { Target } from "lucide-react";
 
 interface BrokerSessionStatus {
   isAuthenticated: boolean;
@@ -581,27 +582,6 @@ export default function Dashboard() {
   );
 }
 
-interface LivePositionData {
-  trading_symbol: string;
-  exchange: string;
-  quantity: number;
-  buy_qty: number;
-  sell_qty: number;
-  buy_avg: number;
-  sell_avg: number;
-  buy_amt: number;
-  sell_amt: number;
-  pnl: number;
-  ltp: number;
-  product_type: string;
-  option_type?: string;
-  strike_price?: number;
-  expiry?: string;
-  realised_pnl: number;
-  unrealised_pnl: number;
-  token: string;
-}
-
 const DEPLOY_STATUS_MAP: Record<string, { label: string; color: string; icon: typeof Activity }> = {
   draft: { label: "Draft", color: "text-muted-foreground", icon: Clock },
   deployed: { label: "Deployed", color: "text-blue-400", icon: Rocket },
@@ -610,6 +590,149 @@ const DEPLOY_STATUS_MAP: Record<string, { label: string; color: string; icon: ty
   squared_off: { label: "Squared Off", color: "text-red-400", icon: Square },
   closed: { label: "Closed", color: "text-muted-foreground", icon: Power },
 };
+
+function DashboardTradeCard({ plan, configs, brokerConfigs }: { plan: StrategyPlan; configs: StrategyConfig[]; brokerConfigs: BrokerConfig[] }) {
+  const depStatus = plan.deploymentStatus || "draft";
+  const depConfig = DEPLOY_STATUS_MAP[depStatus] || DEPLOY_STATUS_MAP.draft;
+  const DepIcon = depConfig.icon;
+
+  const { data: trades = [], isLoading: tradesLoading, refetch } = useQuery<StrategyTrade[]>({
+    queryKey: ["/api/strategy-trades", plan.id],
+    queryFn: async () => {
+      const resp = await fetch(`/api/strategy-trades/${plan.id}`);
+      if (!resp.ok) throw new Error("Failed to fetch");
+      return resp.json();
+    },
+    refetchInterval: depStatus === "active" ? 30000 : false,
+  });
+
+  const totalPnl = trades.reduce((s, t) => s + (t.pnl || 0), 0);
+  const openCount = trades.filter((t) => t.status === "executed" || t.status === "partial").length;
+  const closedCount = trades.filter((t) => t.status === "closed" || t.status === "squared_off").length;
+
+  const BLOCK_LABELS: Record<string, { label: string; icon: typeof TrendingUp; color: string }> = {
+    uptrend: { label: "Uptrend", icon: TrendingUp, color: "text-emerald-400" },
+    downtrend: { label: "Downtrend", icon: TrendingDown, color: "text-red-400" },
+    neutral: { label: "Neutral", icon: Activity, color: "text-amber-400" },
+    legs: { label: "Legs", icon: Target, color: "text-blue-400" },
+  };
+
+  const groupedTrades: Record<string, StrategyTrade[]> = {};
+  trades.forEach((t) => {
+    const key = t.blockType || "legs";
+    if (!groupedTrades[key]) groupedTrades[key] = [];
+    groupedTrades[key].push(t);
+  });
+
+  const getConfigName = (configId: string) => configs.find((c) => c.id === configId)?.name || "Unknown";
+  const getBrokerName = (bId: string | null) => {
+    if (!bId) return "None";
+    const bc = brokerConfigs.find((b) => b.id === bId);
+    return bc?.name || bc?.brokerName || "Unknown";
+  };
+
+  return (
+    <Card data-testid={`card-live-trade-${plan.id}`}>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <CardTitle className="text-sm" data-testid={`text-live-trade-name-${plan.id}`}>{plan.name}</CardTitle>
+            <Badge variant="outline" className={`text-xs ${depConfig.color}`}>
+              <DepIcon className="w-3 h-3 mr-1" />
+              {depConfig.label}
+            </Badge>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={tradesLoading} data-testid={`button-refresh-trade-${plan.id}`}>
+            <RefreshCw className={`w-3 h-3 ${tradesLoading ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+        <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+          <span>Config: {getConfigName(plan.configId)}</span>
+          <span>Broker: {getBrokerName(plan.brokerConfigId)}</span>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="bg-card border border-border rounded-md p-2 text-center">
+            <p className="text-xs text-muted-foreground">Total P&L</p>
+            <p className={`text-sm font-bold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
+            </p>
+          </div>
+          <div className="bg-card border border-border rounded-md p-2 text-center">
+            <p className="text-xs text-muted-foreground">Open</p>
+            <p className="text-sm font-bold font-mono">{openCount}</p>
+          </div>
+          <div className="bg-card border border-border rounded-md p-2 text-center">
+            <p className="text-xs text-muted-foreground">Closed</p>
+            <p className="text-sm font-bold font-mono">{closedCount}</p>
+          </div>
+        </div>
+
+        {trades.length > 0 ? (
+          <div className="space-y-2">
+            {Object.entries(groupedTrades).map(([blockType, blockTrades]) => {
+              const blockCfg = BLOCK_LABELS[blockType] || BLOCK_LABELS.legs;
+              const BlockIcon = blockCfg.icon;
+              const blockPnl = blockTrades.reduce((s, t) => s + (t.pnl || 0), 0);
+              return (
+                <div key={blockType} className="border border-border/30 rounded-md">
+                  <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border/20 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <BlockIcon className={`w-3.5 h-3.5 ${blockCfg.color}`} />
+                      <span className="text-xs font-semibold">{blockCfg.label}</span>
+                      <Badge variant="secondary" className="text-xs">{blockTrades.length}</Badge>
+                    </div>
+                    <span className={`text-xs font-mono font-semibold ${blockPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {blockPnl >= 0 ? "+" : ""}{blockPnl.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border/30">
+                          <th className="text-left px-2 py-1 text-muted-foreground">Symbol</th>
+                          <th className="text-left px-2 py-1 text-muted-foreground">Action</th>
+                          <th className="text-right px-2 py-1 text-muted-foreground">Qty</th>
+                          <th className="text-right px-2 py-1 text-muted-foreground">Price</th>
+                          <th className="text-right px-2 py-1 text-muted-foreground">P&L</th>
+                          <th className="text-left px-2 py-1 text-muted-foreground">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {blockTrades.map((trade) => (
+                          <tr key={trade.id} className="border-b border-border/20" data-testid={`row-dash-trade-${trade.id}`}>
+                            <td className="px-2 py-1.5 font-mono font-medium">{trade.tradingSymbol}</td>
+                            <td className="px-2 py-1.5">
+                              <Badge variant={trade.action === "BUY" ? "default" : "destructive"} className="text-xs">{trade.action}</Badge>
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono">{trade.quantity}</td>
+                            <td className="px-2 py-1.5 text-right font-mono">{(trade.price || 0).toFixed(2)}</td>
+                            <td className={`px-2 py-1.5 text-right font-mono ${(trade.pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                              {(trade.pnl || 0) >= 0 ? "+" : ""}{(trade.pnl || 0).toFixed(2)}
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <Badge variant="outline" className="text-xs">{trade.status}</Badge>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-4 border border-dashed border-border/40 rounded-md" data-testid={`empty-state-dash-trades-${plan.id}`}>
+            <Activity className="w-6 h-6 text-muted-foreground/40 mx-auto mb-1" />
+            <p className="text-xs text-muted-foreground">No trades executed by this strategy</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function LiveTradesPanel() {
   const { toast } = useToast();
@@ -627,48 +750,7 @@ function LiveTradesPanel() {
   });
 
   const deployedPlans = plans.filter((p) => p.deploymentStatus && p.deploymentStatus !== "draft" && p.brokerConfigId);
-
-  const [positionsMap, setPositionsMap] = useState<Record<string, LivePositionData[]>>({});
-  const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
   const [confirmAction, setConfirmAction] = useState<{ planId: string; action: string } | null>(null);
-
-  const getStrategyTicker = (plan: StrategyPlan): string => {
-    const config = configs.find((c) => c.id === plan.configId);
-    return config?.ticker?.toUpperCase() || "";
-  };
-
-  const filterByStrategy = (allPositions: LivePositionData[], ticker: string): LivePositionData[] => {
-    if (!ticker) return allPositions;
-    return allPositions.filter((pos) => {
-      const sym = pos.trading_symbol.toUpperCase();
-      return sym.startsWith(ticker) || sym.includes(ticker);
-    });
-  };
-
-  const fetchPositionsForPlan = async (plan: StrategyPlan) => {
-    if (!plan.brokerConfigId) return;
-    setLoadingMap((prev) => ({ ...prev, [plan.id]: true }));
-    try {
-      const resp = await fetch(`/api/positions/${plan.brokerConfigId}`);
-      if (resp.ok) {
-        const data: LivePositionData[] = await resp.json();
-        const ticker = getStrategyTicker(plan);
-        setPositionsMap((prev) => ({ ...prev, [plan.id]: filterByStrategy(data, ticker) }));
-      }
-    } catch {} finally {
-      setLoadingMap((prev) => ({ ...prev, [plan.id]: false }));
-    }
-  };
-
-  const refreshAll = () => {
-    deployedPlans.forEach((plan) => fetchPositionsForPlan(plan));
-  };
-
-  useEffect(() => {
-    if (deployedPlans.length > 0) {
-      refreshAll();
-    }
-  }, [plans.length]);
 
   const deploymentMutation = useMutation({
     mutationFn: async ({ id, deploymentStatus }: { id: string; deploymentStatus: string }) => {
@@ -711,21 +793,6 @@ function LiveTradesPanel() {
     }
   };
 
-  const getConfigName = (configId: string) => {
-    const c = configs.find((cfg) => cfg.id === configId);
-    return c?.name || "Unknown";
-  };
-
-  const getBrokerName = (brokerConfigId: string | null) => {
-    if (!brokerConfigId) return "None";
-    const bc = brokerConfigs.find((b) => b.id === brokerConfigId);
-    return bc?.name || bc?.brokerName || "Unknown";
-  };
-
-  const totalPnlAllStrategies = Object.values(positionsMap)
-    .flat()
-    .reduce((sum, p) => sum + p.pnl, 0);
-
   return (
     <div className="space-y-4">
       <Card>
@@ -735,18 +802,6 @@ function LiveTradesPanel() {
               <Activity className="w-5 h-5 text-emerald-400" />
               <CardTitle data-testid="text-live-trades-title">Live Trades</CardTitle>
               <Badge variant="secondary">{deployedPlans.length} strategies</Badge>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="text-right mr-4">
-                <p className="text-xs text-muted-foreground">Combined P&L</p>
-                <p className={`text-lg font-bold font-mono ${totalPnlAllStrategies >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                  {totalPnlAllStrategies >= 0 ? "+" : ""}{totalPnlAllStrategies.toFixed(2)}
-                </p>
-              </div>
-              <Button variant="outline" size="sm" onClick={refreshAll} data-testid="button-refresh-all-trades">
-                <RefreshCw className="w-3 h-3 mr-1" />
-                Refresh All
-              </Button>
             </div>
           </div>
         </CardHeader>
@@ -764,115 +819,31 @@ function LiveTradesPanel() {
         <div className="grid gap-4">
           {deployedPlans.map((plan) => {
             const depStatus = plan.deploymentStatus || "draft";
-            const depConfig = DEPLOY_STATUS_MAP[depStatus] || DEPLOY_STATUS_MAP.draft;
-            const DepIcon = depConfig.icon;
-            const positions = positionsMap[plan.id] || [];
-            const isLoading = loadingMap[plan.id] || false;
-            const planPnl = positions.reduce((sum, p) => sum + p.pnl, 0);
-            const planRealisedPnl = positions.reduce((sum, p) => sum + p.realised_pnl, 0);
-            const planUnrealisedPnl = positions.reduce((sum, p) => sum + p.unrealised_pnl, 0);
             const actions = getActions(depStatus);
-
             return (
-              <Card key={plan.id} data-testid={`card-live-trade-${plan.id}`}>
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <CardTitle className="text-sm" data-testid={`text-live-trade-name-${plan.id}`}>{plan.name}</CardTitle>
-                      <Badge variant="outline" className={`text-xs ${depConfig.color}`}>
-                        <DepIcon className="w-3 h-3 mr-1" />
-                        {depConfig.label}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {actions.map((a) => {
-                        const ActionIcon = a.icon;
-                        return (
-                          <Button
-                            key={a.action}
-                            variant={a.variant}
-                            size="sm"
-                            onClick={() => setConfirmAction({ planId: plan.id, action: a.action })}
-                            disabled={deploymentMutation.isPending}
-                            data-testid={`button-dash-${a.action}-${plan.id}`}
-                          >
-                            <ActionIcon className="w-3 h-3 mr-1" />
-                            {a.label}
-                          </Button>
-                        );
-                      })}
-                      <Button variant="outline" size="sm" onClick={() => fetchPositionsForPlan(plan)} disabled={isLoading} data-testid={`button-refresh-trade-${plan.id}`}>
-                        <RefreshCw className={`w-3 h-3 ${isLoading ? "animate-spin" : ""}`} />
-                      </Button>
-                    </div>
+              <div key={plan.id} className="space-y-2">
+                <DashboardTradeCard plan={plan} configs={configs} brokerConfigs={brokerConfigs} />
+                {actions.length > 0 && (
+                  <div className="flex items-center gap-2 pl-4 flex-wrap">
+                    {actions.map((a) => {
+                      const ActionIcon = a.icon;
+                      return (
+                        <Button
+                          key={a.action}
+                          variant={a.variant}
+                          size="sm"
+                          onClick={() => setConfirmAction({ planId: plan.id, action: a.action })}
+                          disabled={deploymentMutation.isPending}
+                          data-testid={`button-dash-${a.action}-${plan.id}`}
+                        >
+                          <ActionIcon className="w-3 h-3 mr-1" />
+                          {a.label}
+                        </Button>
+                      );
+                    })}
                   </div>
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
-                    <span>Config: {getConfigName(plan.configId)}</span>
-                    <span>Broker: {getBrokerName(plan.brokerConfigId)}</span>
-                    {getStrategyTicker(plan) && <Badge variant="secondary" className="text-xs font-mono">{getStrategyTicker(plan)}</Badge>}
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-3 gap-3 mb-3">
-                    <div className="bg-card border border-border rounded-md p-2 text-center">
-                      <p className="text-xs text-muted-foreground">Total P&L</p>
-                      <p className={`text-sm font-bold font-mono ${planPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {planPnl >= 0 ? "+" : ""}{planPnl.toFixed(2)}
-                      </p>
-                    </div>
-                    <div className="bg-card border border-border rounded-md p-2 text-center">
-                      <p className="text-xs text-muted-foreground">Realised</p>
-                      <p className={`text-sm font-bold font-mono ${planRealisedPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {planRealisedPnl >= 0 ? "+" : ""}{planRealisedPnl.toFixed(2)}
-                      </p>
-                    </div>
-                    <div className="bg-card border border-border rounded-md p-2 text-center">
-                      <p className="text-xs text-muted-foreground">Unrealised</p>
-                      <p className={`text-sm font-bold font-mono ${planUnrealisedPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {planUnrealisedPnl >= 0 ? "+" : ""}{planUnrealisedPnl.toFixed(2)}
-                      </p>
-                    </div>
-                  </div>
-
-                  {positions.length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b border-border/30">
-                            <th className="text-left px-2 py-1 text-muted-foreground">Symbol</th>
-                            <th className="text-right px-2 py-1 text-muted-foreground">Qty</th>
-                            <th className="text-right px-2 py-1 text-muted-foreground">Buy Avg</th>
-                            <th className="text-right px-2 py-1 text-muted-foreground">LTP</th>
-                            <th className="text-right px-2 py-1 text-muted-foreground">P&L</th>
-                            <th className="text-left px-2 py-1 text-muted-foreground">Product</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {positions.map((pos, idx) => (
-                            <tr key={`${pos.trading_symbol}-${idx}`} className="border-b border-border/20">
-                              <td className="px-2 py-1.5 font-mono font-medium" data-testid={`text-dash-pos-symbol-${idx}`}>
-                                {pos.trading_symbol}
-                                {pos.option_type && <span className="text-muted-foreground ml-1">{pos.option_type}</span>}
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono">{pos.quantity}</td>
-                              <td className="px-2 py-1.5 text-right font-mono">{pos.buy_avg.toFixed(2)}</td>
-                              <td className="px-2 py-1.5 text-right font-mono">{pos.ltp.toFixed(2)}</td>
-                              <td className={`px-2 py-1.5 text-right font-mono ${pos.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                                {pos.pnl >= 0 ? "+" : ""}{pos.pnl.toFixed(2)}
-                              </td>
-                              <td className="px-2 py-1.5">
-                                <Badge variant="outline" className="text-xs">{pos.product_type}</Badge>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground text-center py-3">{isLoading ? "Loading positions..." : "No open positions"}</p>
-                  )}
-                </CardContent>
-              </Card>
+                )}
+              </div>
             );
           })}
         </div>
