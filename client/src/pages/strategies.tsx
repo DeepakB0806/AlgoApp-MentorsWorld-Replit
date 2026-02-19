@@ -789,7 +789,7 @@ function TradePlanning() {
   const getBrokerName = (bId: string | null | undefined) => {
     if (!bId) return null;
     const b = brokerConfigs.find((bc) => bc.id === bId);
-    return b ? b.brokerName : "Unknown";
+    return b ? (b.name || b.brokerName) : "Unknown";
   };
 
   const toggleIndicator = (indicator: string) => {
@@ -1441,7 +1441,7 @@ function BrokerLinking() {
                         <SelectItem value="none">None</SelectItem>
                         {brokerConfigs.map((bc) => (
                           <SelectItem key={bc.id} value={bc.id}>
-                            {bc.brokerName} {bc.ucc ? `(${bc.ucc})` : ""}
+                            {bc.name || bc.brokerName} {bc.ucc ? `(${bc.ucc})` : ""}
                           </SelectItem>
                         ))}
                       </SelectContent>

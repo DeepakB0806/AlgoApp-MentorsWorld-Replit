@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink, Trash2, Info, ArrowDown } from "lucide-react";
+import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink, Trash2, Info, ArrowDown, Plus, Pencil, Check, X } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Link } from "wouter";
@@ -388,54 +388,73 @@ function ApiFieldsReference() {
   );
 }
 
-export default function BrokerApi() {
+function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; onDeleted?: () => void }) {
   const { toast } = useToast();
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [totp, setTotp] = useState("");
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [isTestLogSheetOpen, setIsTestLogSheetOpen] = useState(false);
   const [testExpandedView, setTestExpandedView] = useState(false);
   const [isSessionLogSheetOpen, setIsSessionLogSheetOpen] = useState(false);
   const [sessionExpandedView, setSessionExpandedView] = useState(false);
-  const [showCredentials, setShowCredentials] = useState(false);
-  const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [showCredentials, setShowCredentials] = useState(!config);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editName, setEditName] = useState(config?.name || "Kotak Neo Credentials");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [formData, setFormData] = useState<Partial<InsertBrokerConfig>>({
+    name: config?.name || "Kotak Neo Credentials",
     brokerName: "kotak_neo",
-    consumerKey: "",
-    mobileNumber: "",
-    ucc: "",
-    mpin: "",
-    environment: "prod",
+    consumerKey: config?.consumerKey || "",
+    mobileNumber: config?.mobileNumber || "",
+    ucc: config?.ucc || "",
+    mpin: config?.mpin || "",
+    environment: config?.environment || "prod",
   });
-
-  const { data: brokerConfigs = [], isLoading } = useQuery<BrokerConfig[]>({
-    queryKey: ["/api/broker-configs"],
-  });
-
-  const kotakConfig = brokerConfigs.find(c => c.brokerName === "kotak_neo");
 
   const { data: testLogs = [], isLoading: isLoadingTestLogs } = useQuery<BrokerTestLog[]>({
-    queryKey: [`/api/broker-configs/${kotakConfig?.id}/test-logs`],
-    enabled: !!kotakConfig,
+    queryKey: ["/api/broker-configs", config?.id, "test-logs"],
+    queryFn: async () => {
+      if (!config) return [];
+      const res = await fetch(`/api/broker-configs/${config.id}/test-logs`);
+      if (!res.ok) throw new Error("Failed to fetch test logs");
+      return res.json();
+    },
+    enabled: !!config,
   });
 
   const { data: sessionLogs = [], isLoading: isLoadingSessionLogs } = useQuery<BrokerSessionLog[]>({
-    queryKey: [`/api/broker-configs/${kotakConfig?.id}/session-logs`],
-    enabled: !!kotakConfig,
+    queryKey: ["/api/broker-configs", config?.id, "session-logs"],
+    queryFn: async () => {
+      if (!config) return [];
+      const res = await fetch(`/api/broker-configs/${config.id}/session-logs`);
+      if (!res.ok) throw new Error("Failed to fetch session logs");
+      return res.json();
+    },
+    enabled: !!config,
   });
 
   useEffect(() => {
-    if (kotakConfig) {
+    if (config) {
       setFormData({
+        name: config.name || "Kotak Neo Credentials",
         brokerName: "kotak_neo",
-        consumerKey: kotakConfig.consumerKey || "",
-        mobileNumber: kotakConfig.mobileNumber || "",
-        ucc: kotakConfig.ucc || "",
-        mpin: kotakConfig.mpin || "",
-        environment: kotakConfig.environment || "prod",
+        consumerKey: config.consumerKey || "",
+        mobileNumber: config.mobileNumber || "",
+        ucc: config.ucc || "",
+        mpin: config.mpin || "",
+        environment: config.environment || "prod",
       });
+      setEditName(config.name || "Kotak Neo Credentials");
       setShowCredentials(false);
     }
-  }, [kotakConfig]);
+  }, [config]);
+
+  useEffect(() => {
+    if (isEditingName && nameInputRef.current) {
+      nameInputRef.current.focus();
+      nameInputRef.current.select();
+    }
+  }, [isEditingName]);
 
   const createMutation = useMutation({
     mutationFn: async (data: Partial<InsertBrokerConfig>) => {
@@ -463,6 +482,20 @@ export default function BrokerApi() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/broker-configs/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
+      toast({ title: "Broker configuration deleted" });
+      onDeleted?.();
+    },
+    onError: () => {
+      toast({ title: "Failed to delete broker configuration", variant: "destructive" });
+    },
+  });
+
   const testConnectionMutation = useMutation({
     mutationFn: async (id: string) => {
       const response = await apiRequest("POST", `/api/broker-configs/${id}/test`);
@@ -470,8 +503,8 @@ export default function BrokerApi() {
     },
     onSuccess: (data: TestResult) => {
       queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
-      if (kotakConfig) {
-        queryClient.invalidateQueries({ queryKey: [`/api/broker-configs/${kotakConfig.id}/test-logs`] });
+      if (config) {
+        queryClient.invalidateQueries({ queryKey: ["/api/broker-configs", config.id, "test-logs"] });
       }
       setTestResult(data);
       if (data.success) {
@@ -488,15 +521,15 @@ export default function BrokerApi() {
 
   const clearTestLogsMutation = useMutation({
     mutationFn: async (days: number | "all") => {
-      if (!kotakConfig) return;
+      if (!config) return;
       if (days === "all") {
-        return apiRequest("DELETE", `/api/broker-configs/${kotakConfig.id}/test-logs`);
+        return apiRequest("DELETE", `/api/broker-configs/${config.id}/test-logs`);
       }
-      return apiRequest("DELETE", `/api/broker-configs/${kotakConfig.id}/test-logs?days=${days}`);
+      return apiRequest("DELETE", `/api/broker-configs/${config.id}/test-logs?days=${days}`);
     },
     onSuccess: (_data, days) => {
-      if (kotakConfig) {
-        queryClient.invalidateQueries({ queryKey: [`/api/broker-configs/${kotakConfig.id}/test-logs`] });
+      if (config) {
+        queryClient.invalidateQueries({ queryKey: ["/api/broker-configs", config.id, "test-logs"] });
       }
       toast({ title: days === "all" ? "All test data cleared" : `Test data older than ${days} days cleared` });
     },
@@ -507,15 +540,15 @@ export default function BrokerApi() {
 
   const clearSessionLogsMutation = useMutation({
     mutationFn: async (days: number | "all") => {
-      if (!kotakConfig) return;
+      if (!config) return;
       if (days === "all") {
-        return apiRequest("DELETE", `/api/broker-configs/${kotakConfig.id}/session-logs`);
+        return apiRequest("DELETE", `/api/broker-configs/${config.id}/session-logs`);
       }
-      return apiRequest("DELETE", `/api/broker-configs/${kotakConfig.id}/session-logs?days=${days}`);
+      return apiRequest("DELETE", `/api/broker-configs/${config.id}/session-logs?days=${days}`);
     },
     onSuccess: (_data, days) => {
-      if (kotakConfig) {
-        queryClient.invalidateQueries({ queryKey: [`/api/broker-configs/${kotakConfig.id}/session-logs`] });
+      if (config) {
+        queryClient.invalidateQueries({ queryKey: ["/api/broker-configs", config.id, "session-logs"] });
       }
       toast({ title: days === "all" ? "All session data cleared" : `Session data older than ${days} days cleared` });
     },
@@ -525,15 +558,15 @@ export default function BrokerApi() {
   });
 
   const authenticateMutation = useMutation({
-    mutationFn: async ({ id, totp }: { id: string; totp: string }) => {
-      const response = await apiRequest("POST", `/api/broker-configs/${id}/authenticate`, { totp });
+    mutationFn: async ({ id, totp: t }: { id: string; totp: string }) => {
+      const response = await apiRequest("POST", `/api/broker-configs/${id}/authenticate`, { totp: t });
       return response.json();
     },
     onSuccess: (data: TestResult) => {
       queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
       queryClient.invalidateQueries({ queryKey: ["/api/broker-session-status"] });
-      if (kotakConfig) {
-        queryClient.invalidateQueries({ queryKey: [`/api/broker-configs/${kotakConfig.id}/session-logs`] });
+      if (config) {
+        queryClient.invalidateQueries({ queryKey: ["/api/broker-configs", config.id, "session-logs"] });
       }
       setTotp("");
       if (data.success) {
@@ -548,8 +581,8 @@ export default function BrokerApi() {
   });
 
   const handleSaveCredentials = () => {
-    if (kotakConfig) {
-      updateMutation.mutate({ id: kotakConfig.id, data: formData });
+    if (config) {
+      updateMutation.mutate({ id: config.id, data: formData });
     } else {
       createMutation.mutate(formData);
     }
@@ -561,11 +594,11 @@ export default function BrokerApi() {
       return;
     }
 
-    if (kotakConfig) {
+    if (config) {
       try {
-        await apiRequest("PATCH", `/api/broker-configs/${kotakConfig.id}`, formData);
+        await apiRequest("PATCH", `/api/broker-configs/${config.id}`, formData);
         queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
-        authenticateMutation.mutate({ id: kotakConfig.id, totp });
+        authenticateMutation.mutate({ id: config.id, totp });
       } catch {
         toast({ title: "Failed to save credentials", variant: "destructive" });
       }
@@ -581,9 +614,757 @@ export default function BrokerApi() {
     }
   };
 
+  const handleSaveName = () => {
+    if (!config || !editName.trim()) return;
+    updateMutation.mutate({ id: config.id, data: { name: editName.trim() } });
+    setIsEditingName(false);
+  };
+
+  const handleCancelEditName = () => {
+    setEditName(config?.name || "Kotak Neo Credentials");
+    setIsEditingName(false);
+  };
+
   const isFormValid = formData.consumerKey && formData.mobileNumber && formData.ucc && formData.mpin;
   const canLogin = isFormValid && totp.length === 6;
   const isSaving = createMutation.isPending || updateMutation.isPending;
+  const displayName = config?.name || formData.name || "Kotak Neo Credentials";
+
+  return (
+    <>
+      {testResult && (
+        <Alert className={`mb-4 ${testResult.success ? "border-primary" : "border-destructive"}`}>
+          {testResult.success ? (
+            <CheckCircle className="h-4 w-4 text-primary" />
+          ) : (
+            <XCircle className="h-4 w-4 text-destructive" />
+          )}
+          <AlertDescription>
+            <strong>{testResult.message}</strong>
+            {testResult.error && <p className="text-sm mt-1">{testResult.error}</p>}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <Card data-testid={`card-broker-config-${config?.id || "new"}`}>
+        <CardHeader className="pb-2">
+          <div className="flex justify-between items-start gap-4 flex-wrap">
+            <div className="flex-1 min-w-0">
+              <CardTitle className="flex items-center gap-2 flex-wrap">
+                <Key className="w-5 h-5 flex-shrink-0" />
+                {isEditingName ? (
+                  <div className="flex items-center gap-1">
+                    <Input
+                      ref={nameInputRef}
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSaveName();
+                        if (e.key === "Escape") handleCancelEditName();
+                      }}
+                      className="h-7 text-base font-semibold w-64"
+                      data-testid="input-broker-name"
+                    />
+                    <Button size="icon" variant="ghost" onClick={handleSaveName} data-testid="button-save-name">
+                      <Check className="w-4 h-4 text-primary" />
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={handleCancelEditName} data-testid="button-cancel-name">
+                      <X className="w-4 h-4 text-muted-foreground" />
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <span data-testid="text-broker-config-name">{displayName}</span>
+                    {config && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => setIsEditingName(true)}
+                        data-testid="button-edit-name"
+                      >
+                        <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                      </Button>
+                    )}
+                  </>
+                )}
+                {config && (
+                  <>
+                    <Badge variant={config.isConnected ? "default" : "secondary"}>
+                      {config.isConnected ? "Active" : "Saved"}
+                    </Badge>
+                    {config?.accessToken && (() => {
+                      try {
+                        const parts = config.accessToken!.split('.');
+                        if (parts.length === 3) {
+                          const payload = JSON.parse(atob(parts[1]));
+                          if (payload.exp) {
+                            const expiryDate = new Date(payload.exp * 1000);
+                            const now = new Date();
+                            const isExpired = expiryDate <= now;
+                            const diffMs = expiryDate.getTime() - now.getTime();
+                            const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+                            const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                            return (
+                              <Badge
+                                variant={isExpired ? "destructive" : "default"}
+                                className="text-xs font-bold"
+                                data-testid="badge-session-expiry-header"
+                              >
+                                <Clock className="w-3 h-3 mr-1" />
+                                {isExpired
+                                  ? "SESSION EXPIRED"
+                                  : `Expires in ${diffHrs}h ${diffMins}m`}
+                              </Badge>
+                            );
+                          }
+                        }
+                      } catch { /* JWT parsing failed */ }
+                      return null;
+                    })()}
+                  </>
+                )}
+              </CardTitle>
+              <CardDescription>
+                {config ? (
+                  config.isConnected ? (
+                    <span className="flex flex-col gap-0.5 mt-1">
+                      <span className="flex items-center gap-1 text-primary">
+                        <CheckCircle className="w-4 h-4" />
+                        Connected - Session Active
+                      </span>
+                      {config.accessToken && (() => {
+                        try {
+                          const parts = config.accessToken!.split('.');
+                          if (parts.length === 3) {
+                            const payload = JSON.parse(atob(parts[1]));
+                            if (payload.exp) {
+                              const expiryDate = new Date(payload.exp * 1000);
+                              return (
+                                <span className="text-xs font-mono text-muted-foreground">
+                                  Expires: {expiryDate.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "medium" })} IST
+                                </span>
+                              );
+                            }
+                          }
+                        } catch { /* JWT parsing failed */ }
+                        return null;
+                      })()}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground mt-1">
+                      Credentials saved - Enter TOTP to login
+                    </span>
+                  )
+                ) : (
+                  "Enter your credentials to connect"
+                )}
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {config && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsTestLogSheetOpen(true)}
+                    data-testid={`button-view-test-logs-${config.id}`}
+                  >
+                    <RefreshCw className="w-4 h-4 mr-1" />
+                    Tests ({testLogs.length})
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsSessionLogSheetOpen(true)}
+                    data-testid={`button-view-session-logs-${config.id}`}
+                  >
+                    <LogIn className="w-4 h-4 mr-1" />
+                    Sessions ({sessionLogs.length})
+                  </Button>
+                  {!confirmDelete ? (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setConfirmDelete(true)}
+                      data-testid={`button-delete-broker-${config.id}`}
+                    >
+                      <Trash2 className="w-4 h-4 text-muted-foreground" />
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => deleteMutation.mutate(config.id)}
+                        disabled={deleteMutation.isPending}
+                        data-testid={`button-confirm-delete-${config.id}`}
+                      >
+                        {deleteMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Trash2 className="w-3 h-3 mr-1" />}
+                        Delete
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setConfirmDelete(false)}
+                        data-testid={`button-cancel-delete-${config.id}`}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3">
+            <div>
+              <Label className="mb-1 block text-xs text-muted-foreground">Environment</Label>
+              <div className="flex items-center gap-3 flex-wrap" data-testid={`container-environment-toggle-${config?.id || "new"}`}>
+                <div className="flex items-center rounded-md border border-border overflow-visible">
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                      formData.environment === "uat"
+                        ? "bg-amber-600 text-white"
+                        : "text-muted-foreground hover-elevate"
+                    }`}
+                    onClick={() => setFormData({ ...formData, environment: "uat" })}
+                    data-testid={`button-env-uat-${config?.id || "new"}`}
+                  >
+                    UAT / Sandbox
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                      formData.environment === "prod"
+                        ? "bg-emerald-600 text-white"
+                        : "text-muted-foreground hover-elevate"
+                    }`}
+                    onClick={() => setFormData({ ...formData, environment: "prod" })}
+                    data-testid={`button-env-prod-${config?.id || "new"}`}
+                  >
+                    Production
+                  </button>
+                </div>
+                <Badge
+                  variant="outline"
+                  className={`text-xs font-bold ${formData.environment === "uat" ? "text-amber-400 border-amber-500/50" : "text-emerald-400 border-emerald-500/50"}`}
+                  data-testid={`badge-broker-environment-${config?.id || "new"}`}
+                >
+                  {formData.environment === "uat" ? "UAT" : "PROD"}
+                </Badge>
+                <span className={`text-xs font-medium ${formData.environment === "uat" ? "text-amber-400" : "text-emerald-400"}`} data-testid={`text-env-label-${config?.id || "new"}`}>
+                  {formData.environment === "uat" ? "Paper trading mode — orders are simulated" : "Live trading — real orders will be placed"}
+                </span>
+              </div>
+            </div>
+
+            {config && (
+              <button
+                type="button"
+                className="flex items-center gap-2 text-sm text-muted-foreground hover-elevate rounded-md px-2 py-1.5 -mx-2 w-fit"
+                onClick={() => setShowCredentials(!showCredentials)}
+                data-testid={`button-toggle-credentials-${config.id}`}
+              >
+                {showCredentials ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                {showCredentials ? "Hide Credentials" : "Show / Edit Credentials"}
+              </button>
+            )}
+
+            {(!config || showCredentials) && (
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+                <div className="space-y-3">
+                  <div>
+                    <Label>Consumer Key (API Token)</Label>
+                    <Input
+                      value={formData.consumerKey || ""}
+                      onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
+                      placeholder="From Neo Dashboard > Invest > Trade API"
+                      data-testid={`input-consumer-key-${config?.id || "new"}`}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <Label className="mb-0">Mobile #</Label>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs text-xs">
+                            Add mobile number with country code. Eg. +91
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                      <Input
+                        value={formData.mobileNumber || ""}
+                        onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
+                        placeholder="+919876543210"
+                        data-testid={`input-mobile-number-${config?.id || "new"}`}
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <Label className="mb-0">UCC</Label>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs text-xs">
+                            Unique Client Code — Your trading account identifier provided by the broker
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                      <Input
+                        value={formData.ucc || ""}
+                        onChange={(e) => setFormData({ ...formData, ucc: e.target.value })}
+                        placeholder="Client code"
+                        data-testid={`input-ucc-${config?.id || "new"}`}
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <Label className="mb-0">MPIN</Label>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs text-xs">
+                            The Mobile PIN you use to log in to the mobile app of the broker
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                      <Input
+                        type="password"
+                        maxLength={6}
+                        value={formData.mpin || ""}
+                        onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
+                        placeholder="6-digit"
+                        data-testid={`input-mpin-${config?.id || "new"}`}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="hidden md:flex flex-col items-center justify-end gap-1">
+                  <Button
+                    variant="outline"
+                    onClick={handleSaveCredentials}
+                    disabled={!isFormValid || isSaving}
+                    className="w-full"
+                    data-testid={`button-save-${config?.id || "new"}`}
+                  >
+                    <Save className="w-4 h-4 mr-2" />
+                    {isSaving ? "Saving..." : "Save Credentials"}
+                  </Button>
+                  {config && (
+                    <>
+                      <ArrowDown className="w-4 h-4 text-muted-foreground" />
+                      <Button
+                        variant="outline"
+                        onClick={() => testConnectionMutation.mutate(config.id)}
+                        disabled={testConnectionMutation.isPending}
+                        className="w-full"
+                        data-testid={`button-test-${config.id}`}
+                      >
+                        <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
+                        Test Connection
+                      </Button>
+                    </>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-2 md:hidden">
+                  <Button
+                    variant="outline"
+                    onClick={handleSaveCredentials}
+                    disabled={!isFormValid || isSaving}
+                    data-testid={`button-save-mobile-${config?.id || "new"}`}
+                  >
+                    <Save className="w-4 h-4 mr-2" />
+                    {isSaving ? "Saving..." : "Save Credentials"}
+                  </Button>
+                  {config && (
+                    <Button
+                      variant="outline"
+                      onClick={() => testConnectionMutation.mutate(config.id)}
+                      disabled={testConnectionMutation.isPending}
+                      data-testid={`button-test-mobile-${config.id}`}
+                    >
+                      <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
+                      Test Connection
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Label className="mb-0">TOTP (from Authenticator App)</Label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs text-xs">
+                      Your credentials are stored securely in the database and never shared. TOTP codes expire every 30 seconds and must be entered fresh each login.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <Input
+                  type="text"
+                  maxLength={6}
+                  value={totp}
+                  onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
+                  placeholder="123456"
+                  className="font-mono tracking-widest"
+                  data-testid={`input-totp-${config?.id || "new"}`}
+                />
+              </div>
+              <Button
+                onClick={handleSaveAndLogin}
+                disabled={!canLogin || authenticateMutation.isPending || isSaving}
+                data-testid={`button-save-and-login-${config?.id || "new"}`}
+              >
+                <LogIn className="w-4 h-4 mr-2" />
+                {authenticateMutation.isPending ? "Logging in..." : "Save & Login with TOTP"}
+              </Button>
+            </div>
+
+            {config?.connectionError && (
+              <Alert variant="destructive">
+                <XCircle className="h-4 w-4" />
+                <AlertDescription>{config.connectionError}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {config && (
+        <>
+          <Sheet open={isTestLogSheetOpen} onOpenChange={setIsTestLogSheetOpen}>
+            <SheetContent className={`${testExpandedView ? "w-full sm:max-w-full" : "w-full max-w-[800px]"} h-full max-h-screen overflow-hidden flex flex-col`} side="right">
+              <SheetHeader>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <SheetTitle>Test Connection Data: {displayName}</SheetTitle>
+                    <SheetDescription>
+                      History of all API connectivity test results
+                    </SheetDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      onClick={() => testConnectionMutation.mutate(config.id)}
+                      disabled={testConnectionMutation.isPending}
+                      size="sm"
+                      data-testid="button-test-connection-sheet"
+                    >
+                      <RefreshCw className={`w-4 h-4 mr-1 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
+                      {testConnectionMutation.isPending ? "Testing..." : "Test Connection"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setTestExpandedView(!testExpandedView)}
+                      data-testid="button-expand-test-data"
+                      title={testExpandedView ? "Collapse" : "Expand"}
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </SheetHeader>
+              <div className="mt-6 flex-1 min-h-0 flex flex-col">
+                <div className="flex items-center justify-between flex-shrink-0 gap-2 flex-wrap mb-3">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-medium text-sm">Test Logs</h4>
+                    <Badge variant="secondary" className="text-xs">{testLogs.length} entries</Badge>
+                  </div>
+                  {testLogs.length > 0 && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          data-testid="button-clear-test-data"
+                          disabled={clearTestLogsMutation.isPending}
+                        >
+                          <Trash2 className="w-4 h-4 mr-1" />
+                          Clear
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate(1)} data-testid="clear-test-data-1-day">
+                          Older than 1 day
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate(7)} data-testid="clear-test-data-7-days">
+                          Older than 7 days
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate(30)} data-testid="clear-test-data-30-days">
+                          Older than 30 days
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate("all")} data-testid="clear-test-data-all" className="text-destructive">
+                          Clear All Data
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+                {isLoadingTestLogs ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                    <span className="ml-2 text-sm text-muted-foreground">Loading test logs...</span>
+                  </div>
+                ) : testLogs.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-8">No test logs yet. Click "Test Connection" to run your first test.</p>
+                ) : (
+                  <div
+                    className="overflow-auto flex-1 min-h-0"
+                    data-testid="test-logs-scroll-container"
+                  >
+                    <table className="w-full text-xs border-collapse">
+                      <thead className="sticky top-0 z-20 bg-card">
+                        <tr className="border-b">
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">#</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Status</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Tested At</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Response Time</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Message</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Error</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {testLogs.map((log, index) => (
+                          <tr
+                            key={log.id}
+                            data-testid={`row-test-log-${log.id}`}
+                            className="border-b hover:bg-muted/50"
+                          >
+                            <td className="whitespace-nowrap px-2 py-2 font-mono text-muted-foreground">{testLogs.length - index}</td>
+                            <td className="whitespace-nowrap px-2 py-2">
+                              <div className="flex items-center gap-1">
+                                {log.status === "success" ? (
+                                  <CheckCircle className="w-3 h-3 text-primary flex-shrink-0" />
+                                ) : (
+                                  <XCircle className="w-3 h-3 text-destructive flex-shrink-0" />
+                                )}
+                                <span className={log.status === "success" ? "text-primary font-medium" : "text-destructive font-medium"}>
+                                  {log.status === "success" ? "Success" : "Failed"}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="whitespace-nowrap px-2 py-2 font-mono">{log.testedAt}</td>
+                            <td className="whitespace-nowrap px-2 py-2 font-mono">{log.responseTime ? `${log.responseTime}ms` : "—"}</td>
+                            <td className="px-2 py-2 max-w-[200px] truncate" title={log.message || ""}>{log.message || "—"}</td>
+                            <td className="px-2 py-2 max-w-[200px] truncate text-destructive" title={log.errorMessage || ""}>{log.errorMessage || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          <Sheet open={isSessionLogSheetOpen} onOpenChange={setIsSessionLogSheetOpen}>
+            <SheetContent className={`${sessionExpandedView ? "w-full sm:max-w-full" : "w-full max-w-[800px]"} h-full max-h-screen overflow-hidden flex flex-col`} side="right">
+              <SheetHeader>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <SheetTitle>Session Data: {displayName}</SheetTitle>
+                    <SheetDescription>
+                      {sessionLogs.length} session records from login history
+                    </SheetDescription>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setSessionExpandedView(!sessionExpandedView)}
+                      data-testid="button-expand-session-data"
+                      title={sessionExpandedView ? "Collapse" : "Expand"}
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </SheetHeader>
+              <div className="mt-6 flex-1 min-h-0 flex flex-col">
+                <div className="flex items-center justify-between flex-shrink-0 gap-2 flex-wrap mb-3">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-medium text-sm">Session Logs</h4>
+                    <Badge variant="secondary" className="text-xs">{sessionLogs.length} entries</Badge>
+                  </div>
+                  {sessionLogs.length > 0 && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          data-testid="button-clear-session-data"
+                          disabled={clearSessionLogsMutation.isPending}
+                        >
+                          <Trash2 className="w-4 h-4 mr-1" />
+                          Clear
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate(1)} data-testid="clear-session-data-1-day">
+                          Older than 1 day
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate(7)} data-testid="clear-session-data-7-days">
+                          Older than 7 days
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate(30)} data-testid="clear-session-data-30-days">
+                          Older than 30 days
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate("all")} data-testid="clear-session-data-all" className="text-destructive">
+                          Clear All Data
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+                {isLoadingSessionLogs ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                    <span className="ml-2 text-sm text-muted-foreground">Loading session data...</span>
+                  </div>
+                ) : sessionLogs.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-8">No session data yet. Use "Save & Login with TOTP" to start your first session.</p>
+                ) : (
+                  <div
+                    className="overflow-auto flex-1 min-h-0"
+                    data-testid="session-logs-scroll-container"
+                  >
+                    <table className="w-full text-xs border-collapse">
+                      <thead className="sticky top-0 z-20 bg-card">
+                        <tr className="border-b">
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">#</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Login Status</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Last TOTP Time</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">TOTP Used</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Session Status</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Session Expiry</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Active Session ID</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Server URL</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Message</th>
+                          <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Error</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sessionLogs.map((log, index) => {
+                          const isExpired = log.sessionExpiry ? new Date(log.sessionExpiry) <= new Date() : true;
+                          return (
+                            <tr
+                              key={log.id}
+                              data-testid={`row-session-log-${log.id}`}
+                              className="border-b hover:bg-muted/50"
+                            >
+                              <td className="whitespace-nowrap px-2 py-2 font-mono text-muted-foreground">{sessionLogs.length - index}</td>
+                              <td className="whitespace-nowrap px-2 py-2">
+                                <div className="flex items-center gap-1">
+                                  {log.status === "success" ? (
+                                    <CheckCircle className="w-3 h-3 text-primary flex-shrink-0" />
+                                  ) : (
+                                    <XCircle className="w-3 h-3 text-destructive flex-shrink-0" />
+                                  )}
+                                  <span className={log.status === "success" ? "text-primary font-medium" : "text-destructive font-medium"}>
+                                    {log.status === "success" ? "Success" : "Failed"}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-2 font-mono">{log.loginAt}</td>
+                              <td className="whitespace-nowrap px-2 py-2 font-mono">{log.totpUsed || "—"}</td>
+                              <td className="whitespace-nowrap px-2 py-2">
+                                {log.sessionExpiry ? (
+                                  <Badge
+                                    variant={isExpired ? "destructive" : "default"}
+                                    className="text-xs font-bold"
+                                    data-testid={`badge-session-expiry-${log.id}`}
+                                  >
+                                    {isExpired ? "EXPIRED" : "ACTIVE"}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-2 font-mono">{log.sessionExpiry || "—"}</td>
+                              <td className="whitespace-nowrap px-2 py-2 font-mono" title={log.sessionId || ""}>{log.sessionId ? `${log.sessionId.slice(0, 12)}...` : "—"}</td>
+                              <td className="whitespace-nowrap px-2 py-2 font-mono">{log.baseUrl || "—"}</td>
+                              <td className="px-2 py-2 max-w-[200px] truncate" title={log.message || ""}>{log.message || "—"}</td>
+                              <td className="px-2 py-2 max-w-[200px] truncate text-destructive" title={log.errorMessage || ""}>{log.errorMessage || "—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </SheetContent>
+          </Sheet>
+        </>
+      )}
+    </>
+  );
+}
+
+export default function BrokerApi() {
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
+
+  const { data: brokerConfigs = [], isLoading } = useQuery<BrokerConfig[]>({
+    queryKey: ["/api/broker-configs"],
+  });
+
+  const { toast } = useToast();
+
+  const createMutation = useMutation({
+    mutationFn: async (data: Partial<InsertBrokerConfig>) => {
+      return apiRequest("POST", "/api/broker-configs", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
+      toast({ title: "New broker configuration created" });
+    },
+    onError: () => {
+      toast({ title: "Failed to create broker configuration", variant: "destructive" });
+    },
+  });
+
+  const handleAddBrokerConfig = () => {
+    const existingCount = brokerConfigs.length;
+    let defaultName = "Kotak Neo Credentials";
+    let defaultEnv = "prod";
+
+    if (existingCount === 0) {
+      defaultName = "Kotak Neo - Production";
+      defaultEnv = "prod";
+    } else if (existingCount === 1) {
+      const existing = brokerConfigs[0];
+      const existingEnv = existing.environment || "prod";
+      if (existingEnv === "prod") {
+        defaultName = "Kotak Neo - Sandbox";
+        defaultEnv = "uat";
+      } else {
+        defaultName = "Kotak Neo - Production";
+        defaultEnv = "prod";
+      }
+    } else {
+      defaultName = `Kotak Neo Config ${existingCount + 1}`;
+    }
+
+    createMutation.mutate({
+      name: defaultName,
+      brokerName: "kotak_neo",
+      environment: defaultEnv,
+    });
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -592,377 +1373,62 @@ export default function BrokerApi() {
           <div className="flex justify-between items-center gap-4 flex-wrap">
             <div>
               <h1 className="text-2xl font-bold text-foreground" data-testid="text-broker-title">Broker & Exchange API</h1>
-              <p className="text-muted-foreground text-sm">Manage your Kotak Neo credentials</p>
+              <p className="text-muted-foreground text-sm">Manage your broker credentials and configurations</p>
             </div>
-            <Link href="/">
-              <Button variant="outline" size="sm" data-testid="button-home">
-                <Home className="w-4 h-4 mr-2" />
-                Home
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleAddBrokerConfig}
+                disabled={createMutation.isPending}
+                data-testid="button-add-broker-config"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                {createMutation.isPending ? "Creating..." : "Add Broker Config"}
               </Button>
-            </Link>
+              <Link href="/">
+                <Button variant="outline" size="sm" data-testid="button-home">
+                  <Home className="w-4 h-4 mr-2" />
+                  Home
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
       </header>
 
       <div className="container mx-auto px-4 py-6 max-w-3xl">
-        {testResult && (
-          <Alert className={`mb-4 ${testResult.success ? "border-primary" : "border-destructive"}`}>
-            {testResult.success ? (
-              <CheckCircle className="h-4 w-4 text-primary" />
-            ) : (
-              <XCircle className="h-4 w-4 text-destructive" />
-            )}
-            <AlertDescription>
-              <strong>{testResult.message}</strong>
-              {testResult.error && <p className="text-sm mt-1">{testResult.error}</p>}
-            </AlertDescription>
-          </Alert>
-        )}
-
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
+        ) : brokerConfigs.length === 0 ? (
+          <Card className="text-center py-12">
+            <CardContent>
+              <Key className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Broker Configurations</h3>
+              <p className="text-muted-foreground mb-4">Add your first broker configuration to get started</p>
+              <Button
+                onClick={handleAddBrokerConfig}
+                disabled={createMutation.isPending}
+                data-testid="button-add-first-broker"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Broker Config
+              </Button>
+            </CardContent>
+          </Card>
         ) : (
-          <>
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex justify-between items-start gap-4 flex-wrap">
-                  <div>
-                    <CardTitle className="flex items-center gap-2 flex-wrap">
-                      <Key className="w-5 h-5" />
-                      Kotak Neo Credentials
-                      {kotakConfig && (
-                        <>
-                          <Badge variant={kotakConfig.isConnected ? "default" : "secondary"}>
-                            {kotakConfig.isConnected ? "Active" : "Saved"}
-                          </Badge>
-                          <Badge
-                            variant="outline"
-                            className={`text-xs font-bold ${kotakConfig.environment === "uat" ? "text-amber-400 border-amber-500/50" : "text-emerald-400 border-emerald-500/50"}`}
-                            data-testid="badge-broker-environment"
-                          >
-                            {kotakConfig.environment === "uat" ? "UAT" : "PROD"}
-                          </Badge>
-                        </>
-                      )}
-                      {kotakConfig?.accessToken && (() => {
-                        try {
-                          const parts = kotakConfig.accessToken!.split('.');
-                          if (parts.length === 3) {
-                            const payload = JSON.parse(atob(parts[1]));
-                            if (payload.exp) {
-                              const expiryDate = new Date(payload.exp * 1000);
-                              const now = new Date();
-                              const isExpired = expiryDate <= now;
-                              const diffMs = expiryDate.getTime() - now.getTime();
-                              const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
-                              const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-                              return (
-                                <Badge
-                                  variant={isExpired ? "destructive" : "default"}
-                                  className="text-xs font-bold"
-                                  data-testid="badge-session-expiry-header"
-                                >
-                                  <Clock className="w-3 h-3 mr-1" />
-                                  {isExpired
-                                    ? "SESSION EXPIRED"
-                                    : `Expires in ${diffHrs}h ${diffMins}m`}
-                                </Badge>
-                              );
-                            }
-                          }
-                        } catch { /* JWT parsing failed */ }
-                        return null;
-                      })()}
-                    </CardTitle>
-                    <CardDescription>
-                      {kotakConfig ? (
-                        kotakConfig.isConnected ? (
-                          <span className="flex flex-col gap-0.5 mt-1">
-                            <span className="flex items-center gap-1 text-primary">
-                              <CheckCircle className="w-4 h-4" />
-                              Connected - Session Active
-                            </span>
-                            {kotakConfig.accessToken && (() => {
-                              try {
-                                const parts = kotakConfig.accessToken!.split('.');
-                                if (parts.length === 3) {
-                                  const payload = JSON.parse(atob(parts[1]));
-                                  if (payload.exp) {
-                                    const expiryDate = new Date(payload.exp * 1000);
-                                    return (
-                                      <span className="text-xs font-mono text-muted-foreground">
-                                        Expires: {expiryDate.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "medium" })} IST
-                                      </span>
-                                    );
-                                  }
-                                }
-                              } catch { /* JWT parsing failed */ }
-                              return null;
-                            })()}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground mt-1">
-                            Credentials saved - Enter TOTP to login
-                          </span>
-                        )
-                      ) : (
-                        "Enter your credentials to connect"
-                      )}
-                    </CardDescription>
-                  </div>
-                  {kotakConfig && (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsTestLogSheetOpen(true)}
-                        data-testid="button-view-test-logs"
-                      >
-                        <RefreshCw className="w-4 h-4 mr-1" />
-                        Tests ({testLogs.length})
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsSessionLogSheetOpen(true)}
-                        data-testid="button-view-session-logs"
-                      >
-                        <LogIn className="w-4 h-4 mr-1" />
-                        Sessions ({sessionLogs.length})
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-3">
-                  {kotakConfig && (
-                    <button
-                      type="button"
-                      className="flex items-center gap-2 text-sm text-muted-foreground hover-elevate rounded-md px-2 py-1.5 -mx-2 w-fit"
-                      onClick={() => setShowCredentials(!showCredentials)}
-                      data-testid="button-toggle-credentials"
-                    >
-                      {showCredentials ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                      {showCredentials ? "Hide Credentials" : "Show / Edit Credentials"}
-                    </button>
-                  )}
-
-                  {(!kotakConfig || showCredentials) && (
-                    <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
-                      <div className="space-y-3">
-                        <div>
-                          <Label className="mb-1 block">Environment</Label>
-                          <div className="flex items-center gap-3" data-testid="container-environment-toggle">
-                            <div className="flex items-center rounded-md border border-border overflow-visible">
-                              <button
-                                type="button"
-                                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                                  formData.environment === "uat"
-                                    ? "bg-amber-600 text-white"
-                                    : "text-muted-foreground hover-elevate"
-                                }`}
-                                onClick={() => setFormData({ ...formData, environment: "uat" })}
-                                data-testid="button-env-uat"
-                              >
-                                UAT / Sandbox
-                              </button>
-                              <button
-                                type="button"
-                                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                                  formData.environment === "prod"
-                                    ? "bg-emerald-600 text-white"
-                                    : "text-muted-foreground hover-elevate"
-                                }`}
-                                onClick={() => setFormData({ ...formData, environment: "prod" })}
-                                data-testid="button-env-prod"
-                              >
-                                Production
-                              </button>
-                            </div>
-                            <span className={`text-xs font-medium ${formData.environment === "uat" ? "text-amber-400" : "text-emerald-400"}`} data-testid="text-env-label">
-                              {formData.environment === "uat" ? "Paper trading mode — orders are simulated" : "Live trading — real orders will be placed"}
-                            </span>
-                          </div>
-                        </div>
-                        <div>
-                          <Label>Consumer Key (API Token)</Label>
-                          <Input
-                            value={formData.consumerKey || ""}
-                            onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
-                            placeholder="From Neo Dashboard > Invest > Trade API"
-                            data-testid="input-consumer-key"
-                          />
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div>
-                            <div className="flex items-center gap-1 mb-1">
-                              <Label className="mb-0">Mobile #</Label>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-mobile-info" />
-                                </TooltipTrigger>
-                                <TooltipContent side="top" className="max-w-xs text-xs">
-                                  Add mobile number with country code. Eg. +91
-                                </TooltipContent>
-                              </Tooltip>
-                            </div>
-                            <Input
-                              value={formData.mobileNumber || ""}
-                              onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
-                              placeholder="+919876543210"
-                              data-testid="input-mobile-number"
-                            />
-                          </div>
-
-                          <div>
-                            <div className="flex items-center gap-1 mb-1">
-                              <Label className="mb-0">UCC</Label>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-ucc-info" />
-                                </TooltipTrigger>
-                                <TooltipContent side="top" className="max-w-xs text-xs">
-                                  Unique Client Code — Your trading account identifier provided by the broker
-                                </TooltipContent>
-                              </Tooltip>
-                            </div>
-                            <Input
-                              value={formData.ucc || ""}
-                              onChange={(e) => setFormData({ ...formData, ucc: e.target.value })}
-                              placeholder="Client code"
-                              data-testid="input-ucc"
-                            />
-                          </div>
-
-                          <div>
-                            <div className="flex items-center gap-1 mb-1">
-                              <Label className="mb-0">MPIN</Label>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-mpin-info" />
-                                </TooltipTrigger>
-                                <TooltipContent side="top" className="max-w-xs text-xs">
-                                  The Mobile PIN you use to log in to the mobile app of the broker
-                                </TooltipContent>
-                              </Tooltip>
-                            </div>
-                            <Input
-                              type="password"
-                              maxLength={6}
-                              value={formData.mpin || ""}
-                              onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
-                              placeholder="6-digit"
-                              data-testid="input-mpin"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="hidden md:flex flex-col items-center justify-end gap-1">
-                        <Button
-                          variant="outline"
-                          onClick={handleSaveCredentials}
-                          disabled={!isFormValid || isSaving}
-                          className="w-full"
-                          data-testid="button-save"
-                        >
-                          <Save className="w-4 h-4 mr-2" />
-                          {isSaving ? "Saving..." : "Save Credentials"}
-                        </Button>
-                        {kotakConfig && (
-                          <>
-                            <ArrowDown className="w-4 h-4 text-muted-foreground" />
-                            <Button
-                              variant="outline"
-                              onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
-                              disabled={testConnectionMutation.isPending}
-                              className="w-full"
-                              data-testid="button-test"
-                            >
-                              <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
-                              Test Connection
-                            </Button>
-                          </>
-                        )}
-                      </div>
-
-                      <div className="flex flex-col gap-2 md:hidden">
-                        <Button
-                          variant="outline"
-                          onClick={handleSaveCredentials}
-                          disabled={!isFormValid || isSaving}
-                          data-testid="button-save-mobile"
-                        >
-                          <Save className="w-4 h-4 mr-2" />
-                          {isSaving ? "Saving..." : "Save Credentials"}
-                        </Button>
-                        {kotakConfig && (
-                          <Button
-                            variant="outline"
-                            onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
-                            disabled={testConnectionMutation.isPending}
-                            data-testid="button-test-mobile"
-                          >
-                            <RefreshCw className={`w-4 h-4 mr-2 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
-                            Test Connection
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Label className="mb-0">TOTP (from Authenticator App)</Label>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" data-testid="tooltip-totp-info" />
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-xs text-xs">
-                            Your credentials are stored securely in the database and never shared. TOTP codes expire every 30 seconds and must be entered fresh each login.
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <Input
-                        type="text"
-                        maxLength={6}
-                        value={totp}
-                        onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
-                        placeholder="123456"
-                        className="font-mono tracking-widest"
-                        data-testid="input-totp"
-                      />
-                    </div>
-                    <Button
-                      onClick={handleSaveAndLogin}
-                      disabled={!canLogin || authenticateMutation.isPending || isSaving}
-                      data-testid="button-save-and-login"
-                    >
-                      <LogIn className="w-4 h-4 mr-2" />
-                      {authenticateMutation.isPending ? "Logging in..." : "Save & Login with TOTP"}
-                    </Button>
-                  </div>
-
-                  {kotakConfig?.connectionError && (
-                    <Alert variant="destructive">
-                      <XCircle className="h-4 w-4" />
-                      <AlertDescription>{kotakConfig.connectionError}</AlertDescription>
-                    </Alert>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-
-            <div className="mt-6">
-              <ApiFieldsReference />
-            </div>
-          </>
+          <div className="space-y-6">
+            {brokerConfigs.map((config) => (
+              <BrokerConfigCard key={config.id} config={config} />
+            ))}
+          </div>
         )}
+
+        <div className="mt-6">
+          <ApiFieldsReference />
+        </div>
 
         <Card className="mt-6">
           <CardHeader
@@ -1025,277 +1491,11 @@ export default function BrokerApi() {
         <Alert className="mt-6">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            <strong>Security Note:</strong> Your credentials are stored securely in the database and never shared. 
-            TOTP codes expire every 30 seconds and must be entered fresh each login.
+            <strong>Security Note:</strong> Your credentials are stored securely in the database and never shared.
+            TOTP codes are time-sensitive and expire every 30 seconds.
           </AlertDescription>
         </Alert>
       </div>
-
-      <Sheet open={isTestLogSheetOpen} onOpenChange={setIsTestLogSheetOpen}>
-        <SheetContent className={`${testExpandedView ? "w-full sm:max-w-full" : "w-full max-w-[800px]"} h-full max-h-screen overflow-hidden flex flex-col`} side="right">
-          <SheetHeader>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <SheetTitle>Test Connection Data: Kotak Neo</SheetTitle>
-                <SheetDescription>
-                  History of all API connectivity test results
-                </SheetDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                {kotakConfig && (
-                  <Button
-                    onClick={() => testConnectionMutation.mutate(kotakConfig.id)}
-                    disabled={testConnectionMutation.isPending}
-                    size="sm"
-                    data-testid="button-test-connection-sheet"
-                  >
-                    <RefreshCw className={`w-4 h-4 mr-1 ${testConnectionMutation.isPending ? "animate-spin" : ""}`} />
-                    {testConnectionMutation.isPending ? "Testing..." : "Test Connection"}
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setTestExpandedView(!testExpandedView)}
-                  data-testid="button-expand-test-data"
-                  title={testExpandedView ? "Collapse" : "Expand"}
-                >
-                  <ExternalLink className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          </SheetHeader>
-          <div className="mt-6 flex-1 min-h-0 flex flex-col">
-            <div className="flex items-center justify-between flex-shrink-0 gap-2 flex-wrap mb-3">
-              <div className="flex items-center gap-2">
-                <h4 className="font-medium text-sm">Test Logs</h4>
-                <Badge variant="secondary" className="text-xs">{testLogs.length} entries</Badge>
-              </div>
-              {kotakConfig && testLogs.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      data-testid="button-clear-test-data"
-                      disabled={clearTestLogsMutation.isPending}
-                    >
-                      <Trash2 className="w-4 h-4 mr-1" />
-                      Clear
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate(1)} data-testid="clear-test-data-1-day">
-                      Older than 1 day
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate(7)} data-testid="clear-test-data-7-days">
-                      Older than 7 days
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate(30)} data-testid="clear-test-data-30-days">
-                      Older than 30 days
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => clearTestLogsMutation.mutate("all")} data-testid="clear-test-data-all" className="text-destructive">
-                      Clear All Data
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
-            {isLoadingTestLogs ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-                <span className="ml-2 text-sm text-muted-foreground">Loading test logs...</span>
-              </div>
-            ) : testLogs.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">No test logs yet. Click "Test Connection" to run your first test.</p>
-            ) : (
-              <div
-                className="overflow-auto flex-1 min-h-0"
-                data-testid="test-logs-scroll-container"
-              >
-                <table className="w-full text-xs border-collapse">
-                  <thead className="sticky top-0 z-20 bg-card">
-                    <tr className="border-b">
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">#</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Status</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Tested At</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Response Time</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Message</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Error</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {testLogs.map((log, index) => (
-                      <tr
-                        key={log.id}
-                        data-testid={`row-test-log-${log.id}`}
-                        className="border-b hover:bg-muted/50"
-                      >
-                        <td className="whitespace-nowrap px-2 py-2 font-mono text-muted-foreground">{testLogs.length - index}</td>
-                        <td className="whitespace-nowrap px-2 py-2">
-                          <div className="flex items-center gap-1">
-                            {log.status === "success" ? (
-                              <CheckCircle className="w-3 h-3 text-primary flex-shrink-0" />
-                            ) : (
-                              <XCircle className="w-3 h-3 text-destructive flex-shrink-0" />
-                            )}
-                            <span className={log.status === "success" ? "text-primary font-medium" : "text-destructive font-medium"}>
-                              {log.status === "success" ? "Success" : "Failed"}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap px-2 py-2 font-mono">{log.testedAt}</td>
-                        <td className="whitespace-nowrap px-2 py-2 font-mono">{log.responseTime ? `${log.responseTime}ms` : "—"}</td>
-                        <td className="px-2 py-2 max-w-[200px] truncate" title={log.message || ""}>{log.message || "—"}</td>
-                        <td className="px-2 py-2 max-w-[200px] truncate text-destructive" title={log.errorMessage || ""}>{log.errorMessage || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet open={isSessionLogSheetOpen} onOpenChange={setIsSessionLogSheetOpen}>
-        <SheetContent className={`${sessionExpandedView ? "w-full sm:max-w-full" : "w-full max-w-[800px]"} h-full max-h-screen overflow-hidden flex flex-col`} side="right">
-          <SheetHeader>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <SheetTitle>Session Data: Kotak Neo</SheetTitle>
-                <SheetDescription>
-                  {sessionLogs.length} session records from login history
-                </SheetDescription>
-              </div>
-              <div className="flex gap-1">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setSessionExpandedView(!sessionExpandedView)}
-                  data-testid="button-expand-session-data"
-                  title={sessionExpandedView ? "Collapse" : "Expand"}
-                >
-                  <ExternalLink className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          </SheetHeader>
-          <div className="mt-6 flex-1 min-h-0 flex flex-col">
-            <div className="flex items-center justify-between flex-shrink-0 gap-2 flex-wrap mb-3">
-              <div className="flex items-center gap-2">
-                <h4 className="font-medium text-sm">Session Logs</h4>
-                <Badge variant="secondary" className="text-xs">{sessionLogs.length} entries</Badge>
-              </div>
-              {kotakConfig && sessionLogs.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      data-testid="button-clear-session-data"
-                      disabled={clearSessionLogsMutation.isPending}
-                    >
-                      <Trash2 className="w-4 h-4 mr-1" />
-                      Clear
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate(1)} data-testid="clear-session-data-1-day">
-                      Older than 1 day
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate(7)} data-testid="clear-session-data-7-days">
-                      Older than 7 days
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate(30)} data-testid="clear-session-data-30-days">
-                      Older than 30 days
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => clearSessionLogsMutation.mutate("all")} data-testid="clear-session-data-all" className="text-destructive">
-                      Clear All Data
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
-            {isLoadingSessionLogs ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-                <span className="ml-2 text-sm text-muted-foreground">Loading session data...</span>
-              </div>
-            ) : sessionLogs.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">No session data yet. Use "Save & Login with TOTP" to start your first session.</p>
-            ) : (
-              <div
-                className="overflow-auto flex-1 min-h-0"
-                data-testid="session-logs-scroll-container"
-              >
-                <table className="w-full text-xs border-collapse">
-                  <thead className="sticky top-0 z-20 bg-card">
-                    <tr className="border-b">
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">#</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Login Status</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Last TOTP Time</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">TOTP Used</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Session Status</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Session Expiry</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Active Session ID</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Server URL</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Message</th>
-                      <th className="sticky top-0 z-20 bg-card whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">Error</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sessionLogs.map((log, index) => {
-                      const isExpired = log.sessionExpiry ? new Date(log.sessionExpiry) <= new Date() : true;
-                      return (
-                        <tr
-                          key={log.id}
-                          data-testid={`row-session-log-${log.id}`}
-                          className="border-b hover:bg-muted/50"
-                        >
-                          <td className="whitespace-nowrap px-2 py-2 font-mono text-muted-foreground">{sessionLogs.length - index}</td>
-                          <td className="whitespace-nowrap px-2 py-2">
-                            <div className="flex items-center gap-1">
-                              {log.status === "success" ? (
-                                <CheckCircle className="w-3 h-3 text-primary flex-shrink-0" />
-                              ) : (
-                                <XCircle className="w-3 h-3 text-destructive flex-shrink-0" />
-                              )}
-                              <span className={log.status === "success" ? "text-primary font-medium" : "text-destructive font-medium"}>
-                                {log.status === "success" ? "Success" : "Failed"}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 font-mono">{log.loginAt}</td>
-                          <td className="whitespace-nowrap px-2 py-2 font-mono">{log.totpUsed || "—"}</td>
-                          <td className="whitespace-nowrap px-2 py-2">
-                            {log.sessionExpiry ? (
-                              <Badge
-                                variant={isExpired ? "destructive" : "default"}
-                                className="text-xs font-bold"
-                                data-testid={`badge-session-expiry-${log.id}`}
-                              >
-                                {isExpired ? "EXPIRED" : "ACTIVE"}
-                              </Badge>
-                            ) : (
-                              <span className="text-muted-foreground">—</span>
-                            )}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 font-mono">{log.sessionExpiry || "—"}</td>
-                          <td className="whitespace-nowrap px-2 py-2 font-mono" title={log.sessionId || ""}>{log.sessionId ? `${log.sessionId.slice(0, 12)}...` : "—"}</td>
-                          <td className="whitespace-nowrap px-2 py-2 font-mono">{log.baseUrl || "—"}</td>
-                          <td className="px-2 py-2 max-w-[200px] truncate" title={log.message || ""}>{log.message || "—"}</td>
-                          <td className="px-2 py-2 max-w-[200px] truncate text-destructive" title={log.errorMessage || ""}>{log.errorMessage || "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }
