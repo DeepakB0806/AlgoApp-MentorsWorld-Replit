@@ -384,7 +384,7 @@ export type AppSetting = typeof appSettings.$inferSelect;
 export const brokerConfigs = pgTable("broker_configs", {
   id: varchar("id", { length: 36 }).primaryKey(),
   name: text("name").default("Kotak Neo Credentials"),
-  brokerName: text("broker_name").notNull(), // "kotak_neo", "zerodha", "angel"
+  brokerName: text("broker_name").notNull(), // "kotak_neo", "binance", "zerodha", "angel"
   consumerKey: text("consumer_key"),
   consumerSecret: text("consumer_secret"),
   mobileNumber: text("mobile_number"),

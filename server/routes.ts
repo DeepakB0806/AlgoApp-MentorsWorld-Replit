@@ -19,6 +19,15 @@ import {
   getLimits as getKotakLimits,
   type KotakNeoSession
 } from "./kotak-neo-api";
+import {
+  testBinanceConnectivity,
+  authenticateBinance,
+  getPositions as getBinancePositions,
+  getOrderBook as getBinanceOrders,
+  getHoldings as getBinanceHoldings,
+  getAccountBalance as getBinanceBalance,
+  type BinanceSession
+} from "./binance-api";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -1325,6 +1334,8 @@ export async function registerRoutes(
       const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
       const startTime = Date.now();
 
+      let result: { success: boolean; message: string; error?: string };
+
       if (config.brokerName === "kotak_neo") {
         if (!config.consumerKey) {
           return res.status(400).json({ 
@@ -1332,10 +1343,17 @@ export async function registerRoutes(
             error: "Consumer Key (API Token) is required for Kotak Neo" 
           });
         }
+        result = await testKotakNeoConnectivity(config.consumerKey);
+      } else if (config.brokerName === "binance") {
+        const isTestnet = config.environment !== "prod";
+        result = await testBinanceConnectivity(config.consumerKey || "", isTestnet);
+      } else {
+        result = { success: false, message: "Broker not yet supported for live connectivity test" };
+      }
 
-        const result = await testKotakNeoConnectivity(config.consumerKey);
-        const responseTime = Date.now() - startTime;
-        
+      const responseTime = Date.now() - startTime;
+
+      if (result.success || config.brokerName === "kotak_neo" || config.brokerName === "binance") {
         const updated = await storage.updateBrokerConfig(req.params.id, {
           isConnected: result.success,
           lastConnected: result.success ? now : config.lastConnected,
@@ -1365,8 +1383,8 @@ export async function registerRoutes(
         });
       }
 
-      const responseTime = Date.now() - startTime;
-      const updated = await storage.updateBrokerConfig(req.params.id, {
+      // Fallback for unsupported brokers
+      const updated2 = await storage.updateBrokerConfig(req.params.id, {
         isConnected: false,
         connectionError: "Broker not yet supported for live connectivity test",
         lastTestTime: now,
@@ -1385,7 +1403,7 @@ export async function registerRoutes(
         testedAt: now,
       });
 
-      res.json({ success: false, message: "Broker not yet supported", config: updated });
+      res.json({ success: false, message: "Broker not yet supported", config: updated2 });
     } catch (error) {
       res.status(500).json({ error: "Connection test failed", details: error instanceof Error ? error.message : "Unknown error" });
     }
@@ -1400,9 +1418,57 @@ export async function registerRoutes(
 
       const { totp } = req.body;
       const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+      if (config.brokerName === "binance") {
+        if (!config.consumerKey || !config.consumerSecret) {
+          return res.status(400).json({ 
+            error: "API Key and Secret Key are required for Binance authentication" 
+          });
+        }
+
+        const isTestnet = config.environment !== "prod";
+        const result = await authenticateBinance({
+          api_key: config.consumerKey,
+          api_secret: config.consumerSecret,
+          is_testnet: isTestnet,
+        });
+
+        const updated = await storage.updateBrokerConfig(req.params.id, {
+          isConnected: result.success,
+          lastConnected: result.success ? now : config.lastConnected,
+          connectionError: result.success ? null : result.error,
+          accessToken: result.accessToken || null,
+          sessionId: result.sessionId || null,
+          baseUrl: result.baseUrl || null,
+          totalLogins: (config.totalLogins || 0) + 1,
+          successfulLogins: result.success ? (config.successfulLogins || 0) + 1 : (config.successfulLogins || 0),
+          failedLogins: result.success ? (config.failedLogins || 0) : (config.failedLogins || 0) + 1,
+          updatedAt: now,
+        });
+
+        await storage.createBrokerSessionLog({
+          brokerConfigId: req.params.id,
+          status: result.success ? "success" : "failed",
+          message: result.message || null,
+          errorMessage: result.error || null,
+          totpUsed: null,
+          accessToken: result.accessToken || null,
+          sessionId: result.sessionId || null,
+          baseUrl: result.baseUrl || null,
+          sessionExpiry: null,
+          loginAt: now,
+        });
+
+        return res.json({ 
+          success: result.success, 
+          message: result.message,
+          error: result.error,
+          config: updated 
+        });
+      }
       
       if (config.brokerName !== "kotak_neo") {
-        return res.status(400).json({ error: "Authentication only supported for Kotak Neo" });
+        return res.status(400).json({ error: "Authentication not yet supported for this broker" });
       }
 
       if (!config.consumerKey || !config.mobileNumber || !config.ucc || !config.mpin) {
@@ -1424,7 +1490,6 @@ export async function registerRoutes(
         environment: config.environment || "prod",
       });
 
-      // Extract session expiry from JWT token
       let sessionExpiry: string | null = null;
       if (result.accessToken) {
         try {
@@ -1527,10 +1592,33 @@ export async function registerRoutes(
     };
   }
 
+  function getBinanceSessionFromConfig(config: { consumerKey: string | null; consumerSecret: string | null; environment: string | null }): BinanceSession | null {
+    if (!config.consumerKey || !config.consumerSecret) return null;
+    return {
+      apiKey: config.consumerKey,
+      apiSecret: config.consumerSecret,
+      isTestnet: config.environment !== "prod",
+    };
+  }
+
   // Broker-config-scoped positions endpoint
   app.get("/api/positions/:brokerConfigId", async (req, res) => {
     try {
       const { brokerConfigId } = req.params;
+      const brokerConfig = await storage.getBrokerConfig(brokerConfigId);
+      if (!brokerConfig || !brokerConfig.isConnected) {
+        return res.status(400).json({ error: "Broker not connected or session expired" });
+      }
+
+      if (brokerConfig.brokerName === "binance") {
+        const binanceSession = getBinanceSessionFromConfig(brokerConfig);
+        if (!binanceSession) {
+          return res.status(400).json({ error: "Binance API credentials missing" });
+        }
+        const result = await getBinancePositions(binanceSession);
+        return res.json(result.success && result.data ? result.data : []);
+      }
+
       const auth = await getAuthenticatedSessionByConfigId(brokerConfigId);
       if (!auth) {
         return res.status(400).json({ error: "Broker not connected or session expired" });
@@ -1959,13 +2047,19 @@ export async function registerRoutes(
   // API to check broker session status
   app.get("/api/broker-session-status", async (req, res) => {
     try {
+      const configs = await storage.getBrokerConfigs();
+      const connectedBrokers = configs
+        .filter(c => c.isConnected)
+        .map(c => ({ id: c.id, broker: c.brokerName, name: c.name, environment: c.environment }));
+
       const auth = await getAuthenticatedSession();
       res.json({
-        isAuthenticated: !!auth,
-        broker: auth ? "kotak_neo" : null,
+        isAuthenticated: !!auth || connectedBrokers.length > 0,
+        broker: auth ? "kotak_neo" : (connectedBrokers.length > 0 ? connectedBrokers[0].broker : null),
+        connectedBrokers,
       });
     } catch (error) {
-      res.json({ isAuthenticated: false, broker: null });
+      res.json({ isAuthenticated: false, broker: null, connectedBrokers: [] });
     }
   });
 
