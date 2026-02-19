@@ -1215,7 +1215,7 @@ function TradePlanning() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <Label className="text-xs text-muted-foreground">Exit Time (HH:MM)</Label>
+                      <Label className="text-xs text-muted-foreground">Exit Time on Expiry Day (HH:MM)</Label>
                       <Input
                         type="time"
                         value={timeLogic.exitTime}
