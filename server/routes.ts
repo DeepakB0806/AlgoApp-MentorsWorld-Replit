@@ -2015,6 +2015,7 @@ export async function registerRoutes(
           // - stkPrc: Strike price for options
           // - exDt: Expiry date
           // - realisedprofitloss/unrealisedprofitloss: Realised/Unrealised P&L
+          console.log("First Kotak position item:", JSON.stringify(result.data[0], null, 2));
           const positions = (result.data as unknown[]).map((pos: unknown) => {
             const p = pos as Record<string, unknown>;
             const buyQty = Number(p.flBuyQty || 0);
@@ -2064,6 +2065,7 @@ export async function registerRoutes(
         const result = await getKotakOrders(auth.session);
         if (result.success && result.data) {
           // Transform Kotak Neo response to our format
+          console.log("First Kotak order item:", JSON.stringify(result.data[0], null, 2));
           const orders = (result.data as unknown[]).map((ord: unknown) => {
             const o = ord as Record<string, unknown>;
             return {
