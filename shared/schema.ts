@@ -86,6 +86,8 @@ export type TimeLogicConfig = {
   weeklyStartDay?: string;
   weeklyEndDay?: string;
   monthStartDate?: number;
+  monthlyExpiryDate?: string;
+  expiryWeekOffset?: number;
 };
 
 export type TradeParams = {
