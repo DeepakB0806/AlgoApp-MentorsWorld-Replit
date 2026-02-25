@@ -53,7 +53,7 @@ Standard Operating Process for adding any new broker. Stored as a reusable skill
 
 **Principle**: Broker is the boss. Every field the broker API exposes must be mapped. Zero gaps tolerated before TL build.
 
-**Current Status**: Kotak Neo V3 at Step 4 — 103/103 fields mapped to Universal Layer (33 holdings + 15 positions + 9 orders + 46 request fields), all using actual Kotak raw API field names (verified from live API logs). Dashboard oriented to show all broker fields.
+**Current Status**: Kotak Neo V3 at Step 4 — 192/192 fields mapped to Universal Layer (33 holdings + 36 positions + 77 orders + 46 request fields), all using actual Kotak raw API field names (verified from live API logs). Dashboard oriented to show all broker fields.
 
 ### Dashboard — Broker-Oriented Field Display
 Dashboard tables are oriented to display every field the broker provides:
