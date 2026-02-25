@@ -1821,13 +1821,13 @@ export async function registerRoutes(
       if (result.success && result.data) {
         const positions = (result.data as unknown[]).map((pos: unknown) => {
           const p = pos as Record<string, unknown>;
-          const buyQty = Number(p.flBuyQty || p.buyQty || 0);
-          const sellQty = Number(p.flSellQty || p.sellQty || 0);
+          const buyQty = Number(p.flBuyQty || 0);
+          const sellQty = Number(p.flSellQty || 0);
           const buyAmt = Number(p.buyAmt || 0);
           const sellAmt = Number(p.sellAmt || 0);
           return {
-            trading_symbol: String(p.trdSym || p.tradingSymbol || ""),
-            exchange: String(p.exSeg || p.exchange || "NSE"),
+            trading_symbol: String(p.trdSym || ""),
+            exchange: String(p.exSeg || ""),
             quantity: buyQty - sellQty,
             buy_qty: buyQty,
             sell_qty: sellQty,
@@ -1835,15 +1835,15 @@ export async function registerRoutes(
             sell_avg: sellQty > 0 ? sellAmt / sellQty : 0,
             buy_amt: buyAmt,
             sell_amt: sellAmt,
-            pnl: Number(p.mtm || p.pnl || 0),
+            pnl: Number(p.mtm || 0),
             ltp: Number(p.ltp || 0),
-            product_type: String(p.prod || p.productType || "NRML"),
+            product_type: String(p.prod || ""),
             option_type: p.optTp ? String(p.optTp) : undefined,
             strike_price: p.stkPrc ? Number(p.stkPrc) : undefined,
             expiry: p.exDt ? String(p.exDt) : undefined,
-            realised_pnl: Number(p.realisedprofitloss || p.realisedPnl || 0),
-            unrealised_pnl: Number(p.unrealisedprofitloss || p.unrealisedPnl || 0),
-            token: String(p.tok || p.token || ""),
+            realised_pnl: Number(p.realisedprofitloss || 0),
+            unrealised_pnl: Number(p.unrealisedprofitloss || 0),
+            token: String(p.tok || ""),
           };
         });
         return res.json(positions);
@@ -2017,25 +2017,30 @@ export async function registerRoutes(
           // - realisedprofitloss/unrealisedprofitloss: Realised/Unrealised P&L
           const positions = (result.data as unknown[]).map((pos: unknown) => {
             const p = pos as Record<string, unknown>;
-            const buyQty = Number(p.flBuyQty || p.buyQty || 0);
-            const sellQty = Number(p.flSellQty || p.sellQty || 0);
+            const buyQty = Number(p.flBuyQty || 0);
+            const sellQty = Number(p.flSellQty || 0);
             const buyAmt = Number(p.buyAmt || 0);
             const sellAmt = Number(p.sellAmt || 0);
             
             return {
-              trading_symbol: String(p.trdSym || p.tradingSymbol || ""),
-              exchange: String(p.exSeg || p.exchange || "NSE"),
+              trading_symbol: String(p.trdSym || ""),
+              exchange: String(p.exSeg || ""),
               quantity: buyQty - sellQty,
+              buy_qty: buyQty,
+              sell_qty: sellQty,
               buy_avg: buyQty > 0 ? buyAmt / buyQty : 0,
               sell_avg: sellQty > 0 ? sellAmt / sellQty : 0,
-              pnl: Number(p.mtm || p.pnl || 0),
+              buy_amt: buyAmt,
+              sell_amt: sellAmt,
+              pnl: Number(p.mtm || 0),
               ltp: Number(p.ltp || 0),
-              product_type: String(p.prod || p.productType || "NRML"),
+              product_type: String(p.prod || ""),
               option_type: p.optTp ? String(p.optTp) : undefined,
               strike_price: p.stkPrc ? Number(p.stkPrc) : undefined,
               expiry: p.exDt ? String(p.exDt) : undefined,
-              realised_pnl: Number(p.realisedprofitloss || p.realisedPnl || 0),
-              unrealised_pnl: Number(p.unrealisedprofitloss || p.unrealisedPnl || 0),
+              realised_pnl: Number(p.realisedprofitloss || 0),
+              unrealised_pnl: Number(p.unrealisedprofitloss || 0),
+              token: String(p.tok || ""),
             };
           });
           return res.json(positions);
@@ -2062,15 +2067,15 @@ export async function registerRoutes(
           const orders = (result.data as unknown[]).map((ord: unknown) => {
             const o = ord as Record<string, unknown>;
             return {
-              order_id: String(o.nOrdNo || o.orderId || ""),
-              trading_symbol: String(o.trdSym || o.tradingSymbol || ""),
-              transaction_type: String(o.trnsTp || o.transactionType || "B"),
-              quantity: Number(o.qty || o.quantity || 0),
-              price: Number(o.prc || o.price || 0),
-              status: String(o.ordSt || o.status || "PENDING"),
-              order_type: String(o.prcTp || o.orderType || "L"),
-              exchange: String(o.exSeg || o.exchange || "NSE"),
-              timestamp: String(o.ordDtTm || o.timestamp || new Date().toISOString()),
+              order_id: String(o.nOrdNo || ""),
+              trading_symbol: String(o.trdSym || ""),
+              transaction_type: String(o.trnsTp || ""),
+              quantity: Number(o.qty || 0),
+              price: Number(o.prc || 0),
+              status: String(o.ordSt || ""),
+              order_type: String(o.prcTp || ""),
+              exchange: String(o.exSeg || ""),
+              timestamp: String(o.ordDtTm || ""),
             };
           });
           return res.json(orders);
@@ -2114,33 +2119,20 @@ export async function registerRoutes(
           // Fields: displaySymbol, symbol, quantity, averagePrice, mktValue, closingPrice, unrealisedGainLoss, prevDayLtp
           const holdings = (result.data as unknown[]).map((hld: unknown) => {
             const h = hld as Record<string, unknown>;
-            const qty = Number(h.quantity || h.holdQty || h.qty || 0);
-            const avgPrice = Number(h.averagePrice || h.avgPrc || h.avgPrice || 0);
-            const prevClose = Number(h.closingPrice || h.prevDayLtp || h.prevClose || 0);
-            
-            // Current price: use mktValue/qty if available, else closingPrice
-            let currentPrice = avgPrice;
-            if (h.mktValue && qty > 0) {
-              currentPrice = Number(h.mktValue) / qty;
-            } else if (h.closingPrice && Number(h.closingPrice) > 0) {
-              currentPrice = Number(h.closingPrice);
-            }
-            
-            // Calculate values
-            const investedValue = avgPrice * qty;
-            const currentValue = Number(h.mktValue || currentPrice * qty);
-            const pnl = Number(h.unrealisedGainLoss || h.unrealisedPnl || (currentPrice - avgPrice) * qty);
-            const pnlPercent = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
-            
-            // Today's P/L: difference from previous close
+            const qty = Number(h.quantity || 0);
+            const avgPrice = Number(h.averagePrice || 0);
+            const prevClose = Number(h.closingPrice || 0);
+            const mktValue = Number(h.mktValue || 0);
+            const currentPrice = qty > 0 ? mktValue / qty : prevClose;
+            const investedValue = Number(h.holdingCost || avgPrice * qty);
+            const currentValue = mktValue;
+            const pnl = Number(h.unrealisedGainLoss || 0);
+            const pnlPercent = investedValue > 0 ? (pnl / investedValue) * 100 : 0;
             const todayPnl = prevClose > 0 ? (currentPrice - prevClose) * qty : 0;
             const todayPnlPercent = prevClose > 0 ? ((currentPrice - prevClose) / prevClose) * 100 : 0;
             
-            // Symbol: Kotak Neo uses displaySymbol or symbol
-            const symbol = String(h.displaySymbol || h.dispSym || h.symbol || h.scrip || h.trdSym || h.tradingSymbol || h.scripName || "Unknown");
-            
             return {
-              trading_symbol: symbol,
+              trading_symbol: String(h.displaySymbol || ""),
               quantity: qty,
               average_price: avgPrice,
               current_price: currentPrice,
@@ -2180,23 +2172,20 @@ export async function registerRoutes(
         let totalPnL = 0;
         let availableMargin = 0;
         
-        // Calculate from holdings
+        // Calculate from holdings using verified Kotak field names
         if (holdingsResult.success && holdingsResult.data) {
           (holdingsResult.data as unknown[]).forEach((h: unknown) => {
             const hld = h as Record<string, unknown>;
-            const qty = Number(hld.holdQty || hld.quantity || 0);
-            const avgPrice = Number(hld.avgPrc || hld.averagePrice || 0);
-            const currentPrice = Number(hld.ltp || hld.currentPrice || avgPrice);
-            totalValue += currentPrice * qty;
-            totalPnL += (currentPrice - avgPrice) * qty;
+            totalValue += Number(hld.mktValue || 0);
+            totalPnL += Number(hld.unrealisedGainLoss || 0);
           });
         }
         
-        // Calculate day P&L from positions
+        // Calculate day P&L from positions using verified Kotak field names
         if (positionsResult.success && positionsResult.data) {
           (positionsResult.data as unknown[]).forEach((p: unknown) => {
             const pos = p as Record<string, unknown>;
-            dayPnL += Number(pos.mtm || pos.dayPnL || 0);
+            dayPnL += Number(pos.mtm || 0);
           });
         }
         
