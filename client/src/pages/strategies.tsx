@@ -377,15 +377,16 @@ function MotherConfigurator() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="auto">Auto-detect</SelectItem>
-                    {exchangeOptions.map((ex) => (
-                      <SelectItem key={ex} value={ex}>{ex}</SelectItem>
-                    ))}
-                    {!exchangeOptions.includes("NSE") && <SelectItem value="NSE">NSE</SelectItem>}
-                    {!exchangeOptions.includes("BSE") && <SelectItem value="BSE">BSE</SelectItem>}
-                    {!exchangeOptions.includes("MCX") && <SelectItem value="MCX">MCX</SelectItem>}
-                    {!exchangeOptions.includes("NFO") && <SelectItem value="NFO">NFO</SelectItem>}
-                    {!exchangeOptions.includes("BFO") && <SelectItem value="BFO">BFO</SelectItem>}
-                    {!exchangeOptions.includes("CDS") && <SelectItem value="CDS">CDS</SelectItem>}
+                    {exchangeOptions.map((ex) => {
+                      const fullNames: Record<string, string> = { NSE: "National Stock Exchange", BSE: "Bombay Stock Exchange", NFO: "NSE Futures & Options", BFO: "BSE Futures & Options", MCX: "Multi Commodity Exchange", CDS: "Currency Derivatives" };
+                      return <SelectItem key={ex} value={ex}>{ex}{fullNames[ex] ? ` (${fullNames[ex]})` : ""}</SelectItem>;
+                    })}
+                    {!exchangeOptions.includes("NSE") && <SelectItem value="NSE">NSE (National Stock Exchange)</SelectItem>}
+                    {!exchangeOptions.includes("BSE") && <SelectItem value="BSE">BSE (Bombay Stock Exchange)</SelectItem>}
+                    {!exchangeOptions.includes("MCX") && <SelectItem value="MCX">MCX (Multi Commodity Exchange)</SelectItem>}
+                    {!exchangeOptions.includes("NFO") && <SelectItem value="NFO">NFO (NSE Futures & Options)</SelectItem>}
+                    {!exchangeOptions.includes("BFO") && <SelectItem value="BFO">BFO (BSE Futures & Options)</SelectItem>}
+                    {!exchangeOptions.includes("CDS") && <SelectItem value="CDS">CDS (Currency Derivatives)</SelectItem>}
                   </SelectContent>
                 </Select>
               </div>
@@ -956,12 +957,12 @@ function TradePlanning() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="auto">Auto-detect</SelectItem>
-                    <SelectItem value="NSE">NSE</SelectItem>
-                    <SelectItem value="BSE">BSE</SelectItem>
-                    <SelectItem value="NFO">NFO</SelectItem>
-                    <SelectItem value="BFO">BFO</SelectItem>
-                    <SelectItem value="MCX">MCX</SelectItem>
-                    <SelectItem value="CDS">CDS</SelectItem>
+                    <SelectItem value="NSE">NSE (National Stock Exchange)</SelectItem>
+                    <SelectItem value="BSE">BSE (Bombay Stock Exchange)</SelectItem>
+                    <SelectItem value="NFO">NFO (NSE Futures & Options)</SelectItem>
+                    <SelectItem value="BFO">BFO (BSE Futures & Options)</SelectItem>
+                    <SelectItem value="MCX">MCX (Multi Commodity Exchange)</SelectItem>
+                    <SelectItem value="CDS">CDS (Currency Derivatives)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
