@@ -40,6 +40,27 @@ The application is structured into `client/`, `server/`, and `shared/` directori
 - **Exchange & Ticker Fields**: `exchange` and `ticker` fields on strategy_plans for broker API order params. Exchange selector (NSE/BSE/NFO/BFO/MCX/CDS) and ticker text input in Trade Planning form. Displayed in plan cards and broker linking headers.
 - **Enhanced Time Logic**: TimeLogicConfig expanded with `expiryType` (weekly/monthly/custom), `weeklyStartDay`, `weeklyEndDay`, `monthStartDate`. Weekly mode auto-calculates exitAfterDays from day span. Monthly defaults to 30 days. Custom mode allows manual entry for Crypto/Forex. Exit After Days field disabled when auto-calculated.
 
+### SOP-BOP: Broker Onboarding Process
+Standard Operating Process for adding any new broker. Stored as a reusable skill at `.agents/skills/sop-bop/SKILL.md`. The 8-step process:
+1. Broker SDK Adding → `server/{broker}-api.ts`
+2. API Field Analysis → Document all fields in `ApiFieldsReference` component
+3. API Field Databasing → Map to Universal Layer in `broker_field_mappings` table
+4. Dashboard Orientation → Dashboard tables show ALL broker-provided fields
+5. Verify field matching (checklist)
+6. Identify gaps
+7. Mitigate gaps
+8. Build Translation Layer → `TL_{BrokerName}`
+
+**Principle**: Broker is the boss. Every field the broker API exposes must be mapped. Zero gaps tolerated before TL build.
+
+**Current Status**: Kotak Neo V3 at Step 4 — 79/79 fields mapped to Universal Layer, Dashboard oriented to show all broker fields.
+
+### Dashboard — Broker-Oriented Field Display
+Dashboard tables are oriented to display every field the broker provides:
+- **Positions** (13 columns): Symbol, Exchange, Product, Qty, Buy Avg, Sell Avg, LTP, Option, Strike, Expiry, P&L, Realised, Unrealised
+- **Orders** (9 columns): Order ID, Symbol, Exchange, Type, Product, Qty, Price, Status, Time
+- **Holdings** (9 columns): Name, Quantity, Avg cost, LTP, Current value, Invested, Profit/loss (%), Today's P/L (%), Prev Close
+
 ## Future Development Plans
 
 ### Tradetron Alike Development Plan

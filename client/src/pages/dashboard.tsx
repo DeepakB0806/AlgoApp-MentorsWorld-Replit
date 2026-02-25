@@ -223,6 +223,7 @@ export default function Dashboard() {
                 {filteredHoldings.length === 0 ? (
                   <p className="text-muted-foreground text-center py-8" data-testid="text-no-holdings">No holdings found</p>
                 ) : (
+                  <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
@@ -234,6 +235,7 @@ export default function Dashboard() {
                         <TableHead className="text-right">Invested</TableHead>
                         <TableHead className="text-right">Profit/loss (%)</TableHead>
                         <TableHead className="text-right">Today's P/L (%)</TableHead>
+                        <TableHead className="text-right">Prev Close</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -257,10 +259,14 @@ export default function Dashboard() {
                           <TableCell className={`text-right font-medium ${(holding.today_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
                             {(holding.today_pnl || 0) >= 0 ? "+" : ""}{(holding.today_pnl || 0).toFixed(0)} ({(holding.today_pnl_percent || 0) >= 0 ? "+" : ""}{(holding.today_pnl_percent || 0).toFixed(2)}%)
                           </TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground">
+                            {(holding.prev_close || 0) > 0 ? (holding.prev_close || 0).toFixed(2) : "—"}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -318,47 +324,77 @@ export default function Dashboard() {
                 {filteredPositions.length === 0 ? (
                   <p className="text-muted-foreground text-center py-8" data-testid="text-no-positions">No open positions</p>
                 ) : (
+                  <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
-                        <TableHead>Name</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Quantity</TableHead>
-                        <TableHead>Avg.cost</TableHead>
-                        <TableHead>LTP</TableHead>
-                        <TableHead className="text-right">Profit/loss</TableHead>
+                        <TableHead>Symbol</TableHead>
+                        <TableHead>Exchange</TableHead>
+                        <TableHead>Product</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead className="text-right">Buy Avg</TableHead>
+                        <TableHead className="text-right">Sell Avg</TableHead>
+                        <TableHead className="text-right">LTP</TableHead>
+                        <TableHead>Option</TableHead>
+                        <TableHead className="text-right">Strike</TableHead>
+                        <TableHead>Expiry</TableHead>
+                        <TableHead className="text-right">P&L</TableHead>
+                        <TableHead className="text-right">Realised</TableHead>
+                        <TableHead className="text-right">Unrealised</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredPositions.map((position, index) => (
+                      {filteredPositions.map((position, index) => {
+                        const unrealisedPnl = position.unrealised_pnl ?? ((position.ltp - position.buy_avg) * position.quantity);
+                        return (
                         <TableRow key={index} data-testid={`row-position-${index}`}>
                           <TableCell>
                             <div className="font-medium" data-testid={`text-position-symbol-${index}`}>
                               {position.trading_symbol}
-                              {position.option_type && (
-                                <Badge variant="outline" className="ml-2 text-xs" data-testid={`badge-option-${index}`}>
-                                  {position.strike_price} {position.option_type} {position.expiry}
-                                </Badge>
-                              )}
                             </div>
-                            <div className="text-xs text-muted-foreground">{position.exchange}</div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs" data-testid={`badge-exchange-${index}`}>
+                              {position.exchange}
+                            </Badge>
                           </TableCell>
                           <TableCell>
                             <span className="text-sm" data-testid={`text-product-type-${index}`}>{position.product_type || "NRML"}</span>
                           </TableCell>
+                          <TableCell className="text-right">{Math.abs(position.quantity)}</TableCell>
+                          <TableCell className="text-right">{position.buy_avg.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{(position.sell_avg || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{position.ltp.toFixed(2)}</TableCell>
                           <TableCell>
-                            <div>{Math.abs(position.quantity)}</div>
-                            <div className="text-xs text-muted-foreground">shares</div>
+                            {position.option_type ? (
+                              <Badge variant="outline" className="text-xs" data-testid={`badge-option-${index}`}>
+                                {position.option_type}
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
                           </TableCell>
-                          <TableCell>{position.buy_avg.toFixed(2)}</TableCell>
-                          <TableCell>{position.ltp.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">
+                            {position.strike_price ? position.strike_price : <span className="text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-xs">{position.expiry || "—"}</span>
+                          </TableCell>
                           <TableCell className={`text-right font-medium ${position.pnl >= 0 ? "text-primary" : "text-destructive"}`}>
                             {position.pnl >= 0 ? "+" : ""}{position.pnl.toFixed(2)}
                           </TableCell>
+                          <TableCell className={`text-right text-xs ${(position.realised_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {(position.realised_pnl || 0) >= 0 ? "+" : ""}{(position.realised_pnl || 0).toFixed(2)}
+                          </TableCell>
+                          <TableCell className={`text-right text-xs ${unrealisedPnl >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {unrealisedPnl >= 0 ? "+" : ""}{unrealisedPnl.toFixed(2)}
+                          </TableCell>
                         </TableRow>
-                      ))}
+                        );
+                      })}
                     </TableBody>
                   </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -374,14 +410,17 @@ export default function Dashboard() {
                 {orders.length === 0 ? (
                   <p className="text-muted-foreground text-center py-8" data-testid="text-no-orders">No orders found</p>
                 ) : (
+                  <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
+                        <TableHead>Order ID</TableHead>
                         <TableHead>Symbol</TableHead>
+                        <TableHead>Exchange</TableHead>
                         <TableHead>Type</TableHead>
                         <TableHead>Product</TableHead>
-                        <TableHead>Qty</TableHead>
-                        <TableHead>Price</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead className="text-right">Price</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Time</TableHead>
                       </TableRow>
@@ -390,8 +429,13 @@ export default function Dashboard() {
                       {orders.map((order) => (
                         <TableRow key={order.order_id} data-testid={`row-order-${order.order_id}`}>
                           <TableCell>
+                            <code className="text-xs text-muted-foreground font-mono" data-testid={`text-order-id-${order.order_id}`}>{order.order_id}</code>
+                          </TableCell>
+                          <TableCell>
                             <div className="font-medium">{order.trading_symbol}</div>
-                            <div className="text-xs text-muted-foreground">{order.exchange}</div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs">{order.exchange}</Badge>
                           </TableCell>
                           <TableCell>
                             <Badge variant={order.transaction_type === "B" ? "default" : "destructive"}>
@@ -399,8 +443,8 @@ export default function Dashboard() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-sm">{order.order_type}</TableCell>
-                          <TableCell>{order.quantity}</TableCell>
-                          <TableCell>{order.price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{order.quantity}</TableCell>
+                          <TableCell className="text-right">{order.price.toFixed(2)}</TableCell>
                           <TableCell>
                             <Badge 
                               variant={order.status === "COMPLETE" ? "default" : order.status === "CANCELLED" ? "destructive" : "secondary"}
@@ -413,6 +457,7 @@ export default function Dashboard() {
                       ))}
                     </TableBody>
                   </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
