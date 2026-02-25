@@ -2226,6 +2226,122 @@ export async function registerRoutes(
     }
   });
 
+  // ====== BROKER FIELD MAPPINGS ======
+  const UNIVERSAL_FIELD_MAP: Record<string, string> = {
+    ts: "tradingSymbol", es: "exchange", tt: "transactionType", qt: "quantity",
+    pr: "price", pt: "orderType", pc: "productType", rt: "validity", tp: "triggerPrice",
+    am: "afterMarketOrder", dq: "disclosedQuantity", mp: "marketProtection", pf: "priceFlag",
+    no: "orderNo", on: "orderNo", vd: "validity", nOrdNo: "orderNo",
+    mobileNumber: "mobileNumber", ucc: "ucc", totp: "totp", mpin: "mpin",
+    trdSym: "tradingSymbol", exSeg: "exchange", flBuyQty: "buyQuantity",
+    flSellQty: "sellQuantity", buyAmt: "buyAmount", sellAmt: "sellAmount",
+    mtm: "mtmPnl", ltp: "lastTradedPrice", prod: "productType",
+    optTp: "optionType", stkPrc: "strikePrice", exDt: "expiryDate",
+    realisedprofitloss: "realisedPnl",
+    displaySymbol: "displaySymbol", symbol: "symbol", quantity: "quantity",
+    averagePrice: "averagePrice", mktValue: "marketValue", closingPrice: "closingPrice",
+    unrealisedGainLoss: "unrealisedPnl", prevDayLtp: "prevDayLtp",
+    holdQty: "holdingQuantity", avgPrc: "averagePriceAlt", dispSym: "displaySymbolAlt",
+    brkName: "brokerName", brnchId: "branchId", prc: "price", prcTp: "priceType",
+    qty: "quantity", tok: "token", trnsTp: "transactionType",
+    exch: "exchange", seg: "segment",
+    order_id: "orderId", trading_symbol: "tradingSymbol", transaction_type: "transactionType",
+    price: "price", status: "orderStatus", order_type: "orderType",
+    exchange: "exchange", token: "token", timestamp: "orderTimestamp",
+    average_price: "averagePrice", current_price: "currentPrice",
+    invested_value: "investedValue", current_value: "currentValue",
+    pnl: "pnl", pnl_percent: "pnlPercent", today_pnl: "todayPnl",
+    today_pnl_percent: "todayPnlPercent", prev_close: "prevClose",
+    buy_avg: "buyAverage", sell_avg: "sellAverage", product_type: "productType",
+    option_type: "optionType", strike_price: "strikePrice", expiry: "expiryDate",
+    realised_pnl: "realisedPnl", unrealised_pnl: "unrealisedPnl",
+  };
+
+  app.post("/api/broker-field-mappings/build", async (req, res) => {
+    try {
+      const { brokerName, sections } = req.body;
+      if (!brokerName || !sections || !Array.isArray(sections)) {
+        return res.status(400).json({ error: "brokerName and sections[] required" });
+      }
+
+      const fields: any[] = [];
+      let sortOrder = 0;
+
+      for (const section of sections) {
+        const category = section.key;
+        for (const sub of (section.subsections || [])) {
+          const endpoint = sub.endpoint || "";
+          const direction = endpoint.startsWith("GET") ? "response" : "request";
+          for (const f of (sub.fields || [])) {
+            const universalName = UNIVERSAL_FIELD_MAP[f.field] || null;
+            const matchStatus = universalName ? "matched" : "pending";
+            fields.push({
+              brokerName,
+              category,
+              fieldCode: f.field,
+              fieldName: f.field,
+              fieldType: f.type || "string",
+              fieldDescription: f.desc || null,
+              direction,
+              endpoint: endpoint.replace(/^(GET|POST|PUT|DELETE|PATCH)\s+/, ""),
+              universalFieldName: universalName,
+              matchStatus,
+              allowedValues: null,
+              defaultValue: null,
+              isRequired: false,
+              sortOrder: sortOrder++,
+              notes: null,
+            });
+          }
+        }
+      }
+
+      const results = await storage.upsertBrokerFieldMappings(fields);
+      const stats = await storage.getBrokerFieldMappingStats(brokerName);
+
+      res.json({
+        success: true,
+        total: results.length,
+        stats,
+        fields: results,
+      });
+    } catch (error) {
+      console.error("Failed to build broker field mappings:", error);
+      res.status(500).json({ error: "Failed to build broker field mappings" });
+    }
+  });
+
+  app.get("/api/broker-field-mappings/:brokerName", async (req, res) => {
+    try {
+      const { category } = req.query;
+      const fields = await storage.getBrokerFieldMappings(req.params.brokerName, category as string | undefined);
+      res.json(fields);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch broker field mappings" });
+    }
+  });
+
+  app.get("/api/broker-field-mappings/:brokerName/stats", async (req, res) => {
+    try {
+      const stats = await storage.getBrokerFieldMappingStats(req.params.brokerName);
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch broker field mapping stats" });
+    }
+  });
+
+  app.patch("/api/broker-field-mappings/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+      const updated = await storage.updateBrokerFieldMapping(id, req.body);
+      if (!updated) return res.status(404).json({ error: "Mapping not found" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update broker field mapping" });
+    }
+  });
+
   // Broker Test Logs
   app.get("/api/broker-configs/:id/test-logs", async (req, res) => {
     try {

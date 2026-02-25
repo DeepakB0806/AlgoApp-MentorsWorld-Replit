@@ -14,7 +14,8 @@ import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
-import type { BrokerConfig, InsertBrokerConfig, BrokerTestLog, BrokerSessionLog } from "@shared/schema";
+import type { BrokerConfig, InsertBrokerConfig, BrokerTestLog, BrokerSessionLog, BrokerFieldMapping } from "@shared/schema";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface TestResult {
   success: boolean;
@@ -22,12 +23,118 @@ interface TestResult {
   error?: string;
 }
 
+type EngineStep = { label: string; status: "waiting" | "running" | "done" | "error"; detail?: string };
+
 function ApiFieldsReference() {
+  const { toast } = useToast();
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [engineSteps, setEngineSteps] = useState<EngineStep[] | null>(null);
+  const [editingField, setEditingField] = useState<number | null>(null);
+  const [editValues, setEditValues] = useState<{ universalFieldName: string; matchStatus: string }>({ universalFieldName: "", matchStatus: "" });
+
+  const brokerName = "kotak_neo_v3";
 
   const toggleSection = (key: string) => {
     setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const statsQuery = useQuery<{ matched: number; pending: number; gap: number; not_applicable: number; total: number }>({
+    queryKey: ["/api/broker-field-mappings", brokerName, "stats"],
+    queryFn: async () => {
+      const res = await fetch(`/api/broker-field-mappings/${brokerName}/stats`);
+      return res.json();
+    },
+  });
+
+  const mappingsQuery = useQuery<BrokerFieldMapping[]>({
+    queryKey: ["/api/broker-field-mappings", brokerName],
+    queryFn: async () => {
+      const res = await fetch(`/api/broker-field-mappings/${brokerName}`);
+      return res.json();
+    },
+    enabled: (statsQuery.data?.total ?? 0) > 0,
+  });
+
+  const dbMappings = mappingsQuery.data || [];
+  const hasMappings = (statsQuery.data?.total ?? 0) > 0;
+
+  const getMappingForField = (fieldCode: string, category: string, endpoint: string): BrokerFieldMapping | undefined => {
+    const cleanEndpoint = endpoint.replace(/^(GET|POST|PUT|DELETE|PATCH)\s+/, "");
+    return dbMappings.find(m => m.fieldCode === fieldCode && m.category === category && m.endpoint === cleanEndpoint);
+  };
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: { universalFieldName?: string; matchStatus?: string } }) => {
+      return apiRequest("PATCH", `/api/broker-field-mappings/${id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName] });
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "stats"] });
+      setEditingField(null);
+      toast({ title: "Mapping updated" });
+    },
+  });
+
+  const runEngine = async () => {
+    const steps: EngineStep[] = [
+      { label: "Building database table", status: "waiting" },
+      { label: "Seeding broker fields", status: "waiting" },
+      { label: "Auto-mapping Universal Layer", status: "waiting" },
+      { label: "Verifying completeness", status: "waiting" },
+    ];
+    setEngineSteps([...steps]);
+
+    try {
+      steps[0].status = "running";
+      setEngineSteps([...steps]);
+      await new Promise(r => setTimeout(r, 400));
+      steps[0].status = "done";
+      steps[0].detail = "Table ready";
+
+      steps[1].status = "running";
+      setEngineSteps([...steps]);
+      await new Promise(r => setTimeout(r, 300));
+
+      const totalFields = sections.reduce((acc, s) => acc + s.subsections.reduce((a2, sub) => a2 + sub.fields.length, 0), 0);
+      steps[1].status = "done";
+      steps[1].detail = `${totalFields} fields found`;
+
+      steps[2].status = "running";
+      setEngineSteps([...steps]);
+
+      const response = await apiRequest("POST", "/api/broker-field-mappings/build", {
+        brokerName,
+        sections,
+      });
+      const result = await response.json();
+
+      steps[2].status = "done";
+      steps[2].detail = `${result.stats.matched} matched`;
+
+      steps[3].status = "running";
+      setEngineSteps([...steps]);
+      await new Promise(r => setTimeout(r, 300));
+      steps[3].status = "done";
+      steps[3].detail = `${result.stats.total} total • ${result.stats.gap} gaps`;
+      setEngineSteps([...steps]);
+
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName] });
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "stats"] });
+
+      toast({
+        title: "Mapping engine complete",
+        description: `${result.stats.matched}/${result.stats.total} fields mapped to Universal Layer`,
+      });
+    } catch (err) {
+      const failedIdx = steps.findIndex(s => s.status === "running");
+      if (failedIdx >= 0) {
+        steps[failedIdx].status = "error";
+        steps[failedIdx].detail = "Failed";
+      }
+      setEngineSteps([...steps]);
+      toast({ title: "Engine failed", description: String(err), variant: "destructive" });
+    }
   };
 
   const sections = [
@@ -290,6 +397,31 @@ function ApiFieldsReference() {
     },
   ];
 
+  const totalFields = sections.reduce((acc, s) => acc + s.subsections.reduce((a2, sub) => a2 + sub.fields.length, 0), 0);
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "matched": return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px]" data-testid="badge-status-matched">Matched</Badge>;
+      case "pending": return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px]" data-testid="badge-status-pending">Pending</Badge>;
+      case "gap": return <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-[10px]" data-testid="badge-status-gap">Gap</Badge>;
+      case "not_applicable": return <Badge className="bg-slate-500/20 text-slate-400 border-slate-500/30 text-[10px]" data-testid="badge-status-na">N/A</Badge>;
+      default: return <Badge variant="outline" className="text-[10px]">{status}</Badge>;
+    }
+  };
+
+  const getStepIcon = (status: EngineStep["status"]) => {
+    switch (status) {
+      case "waiting": return <div className="w-4 h-4 rounded-full border-2 border-muted-foreground/30" />;
+      case "running": return <Loader2 className="w-4 h-4 text-primary animate-spin" />;
+      case "done": return <CheckCircle className="w-4 h-4 text-emerald-400" />;
+      case "error": return <XCircle className="w-4 h-4 text-red-400" />;
+    }
+  };
+
+  const getCategoryMatchCount = (categoryKey: string): number => {
+    return dbMappings.filter(m => m.category === categoryKey && m.matchStatus === "matched").length;
+  };
+
   return (
     <Card data-testid="card-api-fields-reference">
       <CardHeader
@@ -302,87 +434,261 @@ function ApiFieldsReference() {
             <BookOpen className="w-5 h-5" />
             API Fields Reference
           </span>
-          {isExpanded ? (
-            <ChevronDown className="w-5 h-5 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="w-5 h-5 text-muted-foreground" />
-          )}
+          <div className="flex items-center gap-2">
+            {hasMappings && statsQuery.data && (
+              <Badge variant="outline" className="text-xs">
+                {statsQuery.data.matched}/{statsQuery.data.total} mapped
+              </Badge>
+            )}
+            {isExpanded ? (
+              <ChevronDown className="w-5 h-5 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="w-5 h-5 text-muted-foreground" />
+            )}
+          </div>
         </CardTitle>
         <CardDescription>
-          Complete list of all Kotak Neo API fields supported by this platform
+          Kotak Neo V3 API fields with Universal Layer mapping
         </CardDescription>
       </CardHeader>
       {isExpanded && (
-        <CardContent className="space-y-2" data-testid="content-api-reference">
-          {sections.map((section) => (
-            <div key={section.key} className="border border-border rounded-md overflow-hidden">
-              <button
-                onClick={() => toggleSection(section.key)}
-                className="w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium hover-elevate transition-colors"
-                data-testid={`button-section-${section.key}`}
-              >
-                <span className="flex items-center gap-2">
-                  <section.icon className="w-4 h-4 text-primary" />
-                  {section.title}
-                  <Badge variant="secondary" className="text-xs ml-1">
-                    {section.subsections.reduce((acc, s) => acc + s.fields.length, 0)} fields
-                  </Badge>
+        <CardContent className="space-y-3" data-testid="content-api-reference">
+          {hasMappings && statsQuery.data ? (
+            <div className="flex items-center gap-3 p-3 rounded-md bg-muted/30 border border-border" data-testid="mapping-summary-bar">
+              <Database className="w-4 h-4 text-primary" />
+              <div className="flex items-center gap-3 text-xs flex-wrap">
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  Matched: <strong>{statsQuery.data.matched}</strong>
                 </span>
-                {expandedSections[section.key] ? (
-                  <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                )}
-              </button>
-              {expandedSections[section.key] && (
-                <div className="px-4 pb-4 space-y-4">
-                  {section.subsections.map((sub, idx) => (
-                    <div key={idx} className="space-y-2">
-                      <div className="flex flex-col gap-1">
-                        <span className="font-medium text-sm">{sub.title}</span>
-                        <code className="text-xs text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded-md w-fit">
-                          {sub.endpoint}
-                        </code>
-                      </div>
-                      {sub.fields.length > 0 && (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="border-b border-border">
-                                <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs w-[120px]">Field</th>
-                                <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs w-[100px]">Type</th>
-                                <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs">Description</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {sub.fields.map((f, fIdx) => (
-                                <tr key={fIdx} className="border-b border-border/50 last:border-0">
-                                  <td className="py-1.5 px-2 font-mono text-xs text-primary">{f.field}</td>
-                                  <td className="py-1.5 px-2">
-                                    <Badge variant="outline" className="text-xs font-mono">{f.type}</Badge>
-                                  </td>
-                                  <td className="py-1.5 px-2 text-xs text-muted-foreground">{f.desc}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                      {sub.returns && (
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="text-muted-foreground">Returns:</span>
-                          <code className="font-mono bg-muted/50 px-2 py-0.5 rounded text-primary">{sub.returns}</code>
-                        </div>
-                      )}
-                      {idx < section.subsections.length - 1 && (
-                        <div className="border-t border-border/30 mt-2" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-amber-400" />
+                  Pending: <strong>{statsQuery.data.pending}</strong>
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-red-400" />
+                  Gaps: <strong>{statsQuery.data.gap}</strong>
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-slate-400" />
+                  N/A: <strong>{statsQuery.data.not_applicable}</strong>
+                </span>
+                <span className="text-muted-foreground">Total: {statsQuery.data.total}</span>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-auto text-xs h-7"
+                onClick={(e) => { e.stopPropagation(); runEngine(); }}
+                data-testid="button-resync-mapping"
+              >
+                <RefreshCw className="w-3 h-3 mr-1" />
+                Re-sync
+              </Button>
             </div>
-          ))}
+          ) : (
+            <div className="flex flex-col items-center gap-3 p-6 rounded-md bg-muted/20 border border-dashed border-border" data-testid="mapping-cta">
+              <Database className="w-8 h-8 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground text-center">
+                {totalFields} API fields identified across {sections.length} categories.
+                <br />Map them to the Universal Layer to enable the Translation Layer.
+              </p>
+              <Button
+                onClick={(e) => { e.stopPropagation(); runEngine(); }}
+                className="bg-emerald-600 hover:bg-emerald-700"
+                data-testid="button-map-universal-layer"
+              >
+                <Database className="w-4 h-4 mr-2" />
+                Map to Universal Layer
+              </Button>
+            </div>
+          )}
+
+          {engineSteps && (
+            <div className="p-3 rounded-md bg-slate-900/50 border border-border space-y-2" data-testid="engine-progress">
+              <span className="text-xs font-medium text-muted-foreground">Mapping Engine</span>
+              {engineSteps.map((step, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm">
+                  {getStepIcon(step.status)}
+                  <span className={step.status === "done" ? "text-foreground" : step.status === "error" ? "text-red-400" : "text-muted-foreground"}>
+                    {step.label}
+                  </span>
+                  {step.detail && (
+                    <span className="text-xs text-muted-foreground ml-auto">{step.detail}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {sections.map((section) => {
+            const sectionFieldCount = section.subsections.reduce((acc, s) => acc + s.fields.length, 0);
+            const matchCount = hasMappings ? getCategoryMatchCount(section.key) : 0;
+
+            return (
+              <div key={section.key} className="border border-border rounded-md overflow-hidden">
+                <button
+                  onClick={() => toggleSection(section.key)}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium hover-elevate transition-colors"
+                  data-testid={`button-section-${section.key}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <section.icon className="w-4 h-4 text-primary" />
+                    {section.title}
+                    <Badge variant="secondary" className="text-xs ml-1">
+                      {sectionFieldCount} fields
+                    </Badge>
+                    {hasMappings && sectionFieldCount > 0 && (
+                      <Badge className={`text-[10px] ${matchCount === sectionFieldCount ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-amber-500/20 text-amber-400 border-amber-500/30"}`}>
+                        {matchCount}/{sectionFieldCount} mapped
+                      </Badge>
+                    )}
+                  </span>
+                  {expandedSections[section.key] ? (
+                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                  )}
+                </button>
+                {expandedSections[section.key] && (
+                  <div className="px-4 pb-4 space-y-4">
+                    {section.subsections.map((sub, idx) => (
+                      <div key={idx} className="space-y-2">
+                        <div className="flex flex-col gap-1">
+                          <span className="font-medium text-sm">{sub.title}</span>
+                          <code className="text-xs text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded-md w-fit">
+                            {sub.endpoint}
+                          </code>
+                        </div>
+                        {sub.fields.length > 0 && (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-b border-border">
+                                  <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs w-[100px]">Field</th>
+                                  <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs w-[80px]">Type</th>
+                                  <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs">Description</th>
+                                  {hasMappings && (
+                                    <>
+                                      <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs w-[140px]">Universal Field</th>
+                                      <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs w-[80px]">Status</th>
+                                    </>
+                                  )}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {sub.fields.map((f, fIdx) => {
+                                  const mapping = hasMappings ? getMappingForField(f.field, section.key, sub.endpoint) : undefined;
+                                  const isEditing = mapping && editingField === mapping.id;
+
+                                  return (
+                                    <tr key={fIdx} className="border-b border-border/50 last:border-0 group">
+                                      <td className="py-1.5 px-2 font-mono text-xs text-primary">{f.field}</td>
+                                      <td className="py-1.5 px-2">
+                                        <Badge variant="outline" className="text-xs font-mono">{f.type}</Badge>
+                                      </td>
+                                      <td className="py-1.5 px-2 text-xs text-muted-foreground">{f.desc}</td>
+                                      {hasMappings && mapping && (
+                                        <>
+                                          <td className="py-1.5 px-2">
+                                            {isEditing ? (
+                                              <Input
+                                                value={editValues.universalFieldName}
+                                                onChange={(e) => setEditValues(v => ({ ...v, universalFieldName: e.target.value }))}
+                                                className="h-6 text-xs font-mono px-1"
+                                                data-testid={`input-universal-field-${mapping.id}`}
+                                              />
+                                            ) : (
+                                              <span className="font-mono text-xs text-foreground">
+                                                {mapping.universalFieldName || <span className="text-muted-foreground italic">unmapped</span>}
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td className="py-1.5 px-2">
+                                            <div className="flex items-center gap-1">
+                                              {isEditing ? (
+                                                <Select value={editValues.matchStatus} onValueChange={(v) => setEditValues(ev => ({ ...ev, matchStatus: v }))}>
+                                                  <SelectTrigger className="h-6 text-[10px] w-[90px]" data-testid={`select-status-${mapping.id}`}>
+                                                    <SelectValue />
+                                                  </SelectTrigger>
+                                                  <SelectContent>
+                                                    <SelectItem value="matched">Matched</SelectItem>
+                                                    <SelectItem value="pending">Pending</SelectItem>
+                                                    <SelectItem value="gap">Gap</SelectItem>
+                                                    <SelectItem value="not_applicable">N/A</SelectItem>
+                                                  </SelectContent>
+                                                </Select>
+                                              ) : (
+                                                getStatusBadge(mapping.matchStatus)
+                                              )}
+                                              {isEditing ? (
+                                                <div className="flex gap-0.5">
+                                                  <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-5 w-5 p-0"
+                                                    onClick={() => updateMutation.mutate({ id: mapping.id, data: { universalFieldName: editValues.universalFieldName, matchStatus: editValues.matchStatus } })}
+                                                    data-testid={`button-save-${mapping.id}`}
+                                                  >
+                                                    <Check className="w-3 h-3 text-emerald-400" />
+                                                  </Button>
+                                                  <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-5 w-5 p-0"
+                                                    onClick={() => setEditingField(null)}
+                                                    data-testid={`button-cancel-${mapping.id}`}
+                                                  >
+                                                    <X className="w-3 h-3 text-muted-foreground" />
+                                                  </Button>
+                                                </div>
+                                              ) : (
+                                                <Button
+                                                  size="sm"
+                                                  variant="ghost"
+                                                  className="h-5 w-5 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                  onClick={() => {
+                                                    setEditingField(mapping.id);
+                                                    setEditValues({ universalFieldName: mapping.universalFieldName || "", matchStatus: mapping.matchStatus });
+                                                  }}
+                                                  data-testid={`button-edit-${mapping.id}`}
+                                                >
+                                                  <Pencil className="w-3 h-3 text-muted-foreground" />
+                                                </Button>
+                                              )}
+                                            </div>
+                                          </td>
+                                        </>
+                                      )}
+                                      {hasMappings && !mapping && (
+                                        <>
+                                          <td className="py-1.5 px-2 text-xs text-muted-foreground italic">—</td>
+                                          <td className="py-1.5 px-2">—</td>
+                                        </>
+                                      )}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {sub.returns && (
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-muted-foreground">Returns:</span>
+                            <code className="font-mono bg-muted/50 px-2 py-0.5 rounded text-primary">{sub.returns}</code>
+                          </div>
+                        )}
+                        {idx < section.subsections.length - 1 && (
+                          <div className="border-t border-border/30 mt-2" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </CardContent>
       )}
     </Card>

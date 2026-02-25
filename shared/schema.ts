@@ -1,4 +1,4 @@
-import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp, jsonb, index, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -579,6 +579,34 @@ export interface OrderParams {
   pf?: string;
   trigger_price?: string;
 }
+
+// ====== BROKER FIELD MAPPINGS TABLE ======
+export const broker_field_mappings = pgTable("broker_field_mappings", {
+  id: serial("id").primaryKey(),
+  brokerName: text("broker_name").notNull(),
+  category: text("category").notNull(),
+  fieldCode: text("field_code").notNull(),
+  fieldName: text("field_name").notNull(),
+  fieldType: text("field_type").notNull(),
+  fieldDescription: text("field_description"),
+  direction: text("direction").notNull(),
+  endpoint: text("endpoint"),
+  universalFieldName: text("universal_field_name"),
+  matchStatus: text("match_status").notNull().default("pending"),
+  allowedValues: text("allowed_values"),
+  defaultValue: text("default_value"),
+  isRequired: boolean("is_required").default(false),
+  sortOrder: integer("sort_order").default(0),
+  isActive: boolean("is_active").default(true),
+  notes: text("notes"),
+}, (table) => [
+  index("idx_bfm_broker_name").on(table.brokerName),
+  index("idx_bfm_broker_category").on(table.brokerName, table.category),
+]);
+
+export const insertBrokerFieldMappingSchema = createInsertSchema(broker_field_mappings).omit({ id: true });
+export type InsertBrokerFieldMapping = z.infer<typeof insertBrokerFieldMappingSchema>;
+export type BrokerFieldMapping = typeof broker_field_mappings.$inferSelect;
 
 // ====== BROKER FIELD CORRELATION MAP ======
 // Maps strategy/plan parameters to Kotak Neo API field codes

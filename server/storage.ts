@@ -1,9 +1,10 @@
 import { randomUUID, randomBytes } from "crypto";
-import { eq, desc, and, lt } from "drizzle-orm";
+import { eq, desc, and, lt, sql } from "drizzle-orm";
 import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
   brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades, strategyDailyPnl,
+  broker_field_mappings,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -18,6 +19,7 @@ import {
   type StrategyPlan, type InsertStrategyPlan,
   type StrategyTrade, type InsertStrategyTrade,
   type StrategyDailyPnl, type InsertStrategyDailyPnl,
+  type BrokerFieldMapping, type InsertBrokerFieldMapping,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -133,6 +135,13 @@ export interface IStorage {
   updateStrategyDailyPnl(id: string, entry: Partial<InsertStrategyDailyPnl>): Promise<StrategyDailyPnl | undefined>;
   deleteStrategyDailyPnlByPlan(planId: string, olderThanDays?: number): Promise<number>;
   deleteAllStrategyDailyPnlByPlan(planId: string): Promise<number>;
+
+  // Broker Field Mappings
+  getBrokerFieldMappings(brokerName: string, category?: string): Promise<BrokerFieldMapping[]>;
+  getBrokerFieldMappingStats(brokerName: string): Promise<{ matched: number; pending: number; gap: number; not_applicable: number; total: number }>;
+  upsertBrokerFieldMappings(fields: InsertBrokerFieldMapping[]): Promise<BrokerFieldMapping[]>;
+  updateBrokerFieldMapping(id: number, data: Partial<InsertBrokerFieldMapping>): Promise<BrokerFieldMapping | undefined>;
+  deleteBrokerFieldMappings(brokerName: string): Promise<number>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -1084,6 +1093,81 @@ export class DatabaseStorage implements IStorage {
       totalPnL: 185000,
       availableMargin: 450000,
     };
+  }
+
+  // Broker Field Mappings - PERSISTENT in PostgreSQL
+  async getBrokerFieldMappings(brokerName: string, category?: string): Promise<BrokerFieldMapping[]> {
+    if (category) {
+      return db.select().from(broker_field_mappings)
+        .where(and(eq(broker_field_mappings.brokerName, brokerName), eq(broker_field_mappings.category, category)))
+        .orderBy(broker_field_mappings.sortOrder);
+    }
+    return db.select().from(broker_field_mappings)
+      .where(eq(broker_field_mappings.brokerName, brokerName))
+      .orderBy(broker_field_mappings.sortOrder);
+  }
+
+  async getBrokerFieldMappingStats(brokerName: string): Promise<{ matched: number; pending: number; gap: number; not_applicable: number; total: number }> {
+    const rows = await db.select({
+      status: broker_field_mappings.matchStatus,
+      count: sql<number>`count(*)::int`,
+    }).from(broker_field_mappings)
+      .where(eq(broker_field_mappings.brokerName, brokerName))
+      .groupBy(broker_field_mappings.matchStatus);
+    const stats = { matched: 0, pending: 0, gap: 0, not_applicable: 0, total: 0 };
+    for (const r of rows) {
+      const key = r.status as keyof typeof stats;
+      if (key in stats) stats[key] = r.count;
+      stats.total += r.count;
+    }
+    return stats;
+  }
+
+  async upsertBrokerFieldMappings(fields: InsertBrokerFieldMapping[]): Promise<BrokerFieldMapping[]> {
+    const results: BrokerFieldMapping[] = [];
+    for (const field of fields) {
+      const existing = await db.select().from(broker_field_mappings)
+        .where(and(
+          eq(broker_field_mappings.brokerName, field.brokerName),
+          eq(broker_field_mappings.category, field.category),
+          eq(broker_field_mappings.fieldCode, field.fieldCode),
+          eq(broker_field_mappings.endpoint, field.endpoint || ""),
+        ))
+        .limit(1);
+      if (existing.length > 0) {
+        const [updated] = await db.update(broker_field_mappings)
+          .set({
+            fieldName: field.fieldName,
+            fieldType: field.fieldType,
+            fieldDescription: field.fieldDescription,
+            direction: field.direction,
+            universalFieldName: field.universalFieldName,
+            matchStatus: field.matchStatus,
+            allowedValues: field.allowedValues,
+            defaultValue: field.defaultValue,
+            isRequired: field.isRequired,
+            sortOrder: field.sortOrder,
+            notes: field.notes,
+          })
+          .where(eq(broker_field_mappings.id, existing[0].id))
+          .returning();
+        results.push(updated);
+      } else {
+        const [inserted] = await db.insert(broker_field_mappings).values(field).returning();
+        results.push(inserted);
+      }
+    }
+    return results;
+  }
+
+  async updateBrokerFieldMapping(id: number, data: Partial<InsertBrokerFieldMapping>): Promise<BrokerFieldMapping | undefined> {
+    const [updated] = await db.update(broker_field_mappings).set(data).where(eq(broker_field_mappings.id, id)).returning();
+    return updated;
+  }
+
+  async deleteBrokerFieldMappings(brokerName: string): Promise<number> {
+    const deleted = await db.delete(broker_field_mappings).where(eq(broker_field_mappings.brokerName, brokerName)).returning();
+    return deleted.length;
   }
 }
 
