@@ -2231,30 +2231,35 @@ export async function registerRoutes(
     ts: "tradingSymbol", es: "exchange", tt: "transactionType", qt: "quantity",
     pr: "price", pt: "orderType", pc: "productType", rt: "validity", tp: "triggerPrice",
     am: "afterMarketOrder", dq: "disclosedQuantity", mp: "marketProtection", pf: "priceFlag",
-    no: "orderNo", on: "orderNo", vd: "validity", nOrdNo: "orderNo",
+    no: "orderNo", on: "orderNo", vd: "validity",
     mobileNumber: "mobileNumber", ucc: "ucc", totp: "totp", mpin: "mpin",
+    holdQty: "holdingQuantity", avgPrc: "averagePriceAlt", dispSym: "displaySymbolAlt",
+    brkName: "brokerName", brnchId: "branchId",
+    exch: "exchange", seg: "segment", exchange: "exchange", token: "token",
+    optType: "optionType", strikePrice: "strikePrice",
+    instrumentType: "instrumentType", sector: "sector", instrumentToken: "instrumentToken",
+    commonScripCode: "scripCode", instrumentName: "instrumentName",
+    quantity: "quantity", averagePrice: "averagePrice", holdingCost: "investedValue",
+    closingPrice: "closingPrice", mktValue: "marketValue",
+    scripId: "scripId", isAlternateScrip: "isAlternateScrip",
+    unrealisedGainLoss: "unrealisedPnl", sqGainLoss: "squareOffPnl", delGainLoss: "deliveryPnl",
+    subTotal: "subTotal", prevDayLtp: "prevDayLtp", subType: "subType",
+    instrumentStatus: "instrumentStatus", marketLot: "marketLot",
+    expiryDate: "expiryDate",
+    symbol: "symbol", displaySymbol: "displaySymbol",
+    exchangeSegment: "exchange", series: "series",
+    exchangeIdentifier: "exchangeIdentifier", sellableQuantity: "sellableQuantity",
+    securityType: "securityType", securitySubType: "securitySubType",
+    logoUrl: "logoUrl", cmotCode: "cmotCode",
     trdSym: "tradingSymbol", exSeg: "exchange", flBuyQty: "buyQuantity",
     flSellQty: "sellQuantity", buyAmt: "buyAmount", sellAmt: "sellAmount",
     mtm: "mtmPnl", ltp: "lastTradedPrice", prod: "productType",
     optTp: "optionType", stkPrc: "strikePrice", exDt: "expiryDate",
-    realisedprofitloss: "realisedPnl",
-    displaySymbol: "displaySymbol", symbol: "symbol", quantity: "quantity",
-    averagePrice: "averagePrice", mktValue: "marketValue", closingPrice: "closingPrice",
-    unrealisedGainLoss: "unrealisedPnl", prevDayLtp: "prevDayLtp",
-    holdQty: "holdingQuantity", avgPrc: "averagePriceAlt", dispSym: "displaySymbolAlt",
-    brkName: "brokerName", brnchId: "branchId", prc: "price", prcTp: "priceType",
-    qty: "quantity", tok: "token", trnsTp: "transactionType",
-    exch: "exchange", seg: "segment",
-    order_id: "orderId", trading_symbol: "tradingSymbol", transaction_type: "transactionType",
-    price: "price", status: "orderStatus", order_type: "orderType",
-    exchange: "exchange", token: "token", timestamp: "orderTimestamp",
-    average_price: "averagePrice", current_price: "currentPrice",
-    invested_value: "investedValue", current_value: "currentValue",
-    pnl: "pnl", pnl_percent: "pnlPercent", today_pnl: "todayPnl",
-    today_pnl_percent: "todayPnlPercent", prev_close: "prevClose",
-    buy_avg: "buyAverage", sell_avg: "sellAverage", product_type: "productType",
-    option_type: "optionType", strike_price: "strikePrice", expiry: "expiryDate",
-    realised_pnl: "realisedPnl", unrealised_pnl: "unrealisedPnl",
+    realisedprofitloss: "realisedPnl", unrealisedprofitloss: "unrealisedPnl",
+    tok: "token",
+    nOrdNo: "orderNo", trnsTp: "transactionType", qty: "quantity",
+    prc: "price", ordSt: "orderStatus", prcTp: "priceType",
+    ordDtTm: "orderTimestamp",
   };
 
   app.post("/api/broker-field-mappings/build", async (req, res) => {
@@ -2296,6 +2301,7 @@ export async function registerRoutes(
         }
       }
 
+      await storage.deleteBrokerFieldMappings(brokerName);
       const results = await storage.upsertBrokerFieldMappings(fields);
       const stats = await storage.getBrokerFieldMappingStats(brokerName);
 
