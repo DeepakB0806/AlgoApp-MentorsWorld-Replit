@@ -145,6 +145,7 @@ app.use((req, res, next) => {
   function startListening() {
     httpServer.listen({ port, host: "0.0.0.0" }, () => {
       log(`serving on port ${port}`);
+      setInterval(() => log('heartbeat'), 30000);
     });
   }
 
