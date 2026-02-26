@@ -67,6 +67,19 @@ function ApiFieldsReference() {
     },
   });
 
+  type CrossRefData = {
+    broker: { total: number; matched: number; unmatched: number; unmatchedFields: { fieldCode: string; category: string; endpoint: string }[] };
+    universal: { total: number; covered: number; uncovered: number; uncoveredFields: { fieldName: string; category: string; displayName: string }[] };
+  };
+  const crossRefQuery = useQuery<CrossRefData>({
+    queryKey: ["/api/broker-field-mappings", brokerName, "cross-reference"],
+    queryFn: async () => {
+      const res = await fetch(`/api/broker-field-mappings/${brokerName}/cross-reference`);
+      return res.json();
+    },
+    enabled: (statsQuery.data?.total ?? 0) > 0,
+  });
+
   const mappingsQuery = useQuery<BrokerFieldMapping[]>({
     queryKey: ["/api/broker-field-mappings", brokerName],
     queryFn: async () => {
@@ -91,6 +104,7 @@ function ApiFieldsReference() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName] });
       queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "cross-reference"] });
       setEditingField(null);
       toast({ title: "Mapping updated" });
     },
@@ -141,6 +155,7 @@ function ApiFieldsReference() {
 
       queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName] });
       queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "cross-reference"] });
 
       toast({
         title: "Mapping engine complete",
@@ -574,9 +589,16 @@ function ApiFieldsReference() {
           </span>
           <div className="flex items-center gap-2">
             {hasMappings && statsQuery.data && (
-              <Badge variant="outline" className="text-xs">
-                {statsQuery.data.matched}/{statsQuery.data.total} mapped
-              </Badge>
+              <div className="flex items-center gap-1.5">
+                <Badge variant="outline" className="text-xs">
+                  {statsQuery.data.matched}/{statsQuery.data.total} broker
+                </Badge>
+                {crossRefQuery.data && (
+                  <Badge variant="outline" className="text-xs border-purple-500/30 text-purple-400">
+                    {crossRefQuery.data.universal.covered}/{crossRefQuery.data.universal.total} universal
+                  </Badge>
+                )}
+              </div>
             )}
             {isExpanded ? (
               <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -592,37 +614,106 @@ function ApiFieldsReference() {
       {isExpanded && (
         <CardContent className="space-y-3" data-testid="content-api-reference">
           {hasMappings && statsQuery.data ? (
-            <div className="flex items-center gap-3 p-3 rounded-md bg-muted/30 border border-border" data-testid="mapping-summary-bar">
-              <Database className="w-4 h-4 text-primary" />
-              <div className="flex items-center gap-3 text-xs flex-wrap">
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  Matched: <strong>{statsQuery.data.matched}</strong>
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-amber-400" />
-                  Pending: <strong>{statsQuery.data.pending}</strong>
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-red-400" />
-                  Gaps: <strong>{statsQuery.data.gap}</strong>
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-slate-400" />
-                  N/A: <strong>{statsQuery.data.not_applicable}</strong>
-                </span>
-                <span className="text-muted-foreground">Total: {statsQuery.data.total}</span>
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="mapping-cross-reference">
+                <div className="p-3 rounded-md bg-muted/30 border border-border" data-testid="panel-broker-db">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Database className="w-4 h-4 text-blue-400" />
+                    <span className="text-xs font-medium">Broker API Database</span>
+                    <Badge variant="outline" className="text-[10px] ml-auto">{statsQuery.data.total} fields</Badge>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs flex-wrap">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                      Matched: <strong>{statsQuery.data.matched}</strong>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-amber-400" />
+                      Pending: <strong>{statsQuery.data.pending}</strong>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-red-400" />
+                      Gaps: <strong>{statsQuery.data.gap}</strong>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-slate-400" />
+                      N/A: <strong>{statsQuery.data.not_applicable}</strong>
+                    </span>
+                  </div>
+                  {statsQuery.data.total > 0 && (
+                    <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500 rounded-full transition-all"
+                        style={{ width: `${(statsQuery.data.matched / statsQuery.data.total) * 100}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3 rounded-md bg-muted/30 border border-border" data-testid="panel-universal-db">
+                  <div className="flex items-center gap-2 mb-2">
+                    <ArrowRightLeft className="w-4 h-4 text-purple-400" />
+                    <span className="text-xs font-medium">Universal Fields Database</span>
+                    <Badge variant="outline" className="text-[10px] ml-auto">{crossRefQuery.data?.universal.total ?? "—"} fields</Badge>
+                  </div>
+                  {crossRefQuery.data ? (
+                    <>
+                      <div className="flex items-center gap-3 text-xs flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                          Covered: <strong>{crossRefQuery.data.universal.covered}</strong>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-amber-400" />
+                          Uncovered: <strong>{crossRefQuery.data.universal.uncovered}</strong>
+                        </span>
+                      </div>
+                      {crossRefQuery.data.universal.total > 0 && (
+                        <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className="h-full bg-purple-500 rounded-full transition-all"
+                            style={{ width: `${(crossRefQuery.data.universal.covered / crossRefQuery.data.universal.total) * 100}%` }}
+                          />
+                        </div>
+                      )}
+                      {crossRefQuery.data.universal.uncovered > 0 && (
+                        <details className="mt-2">
+                          <summary className="text-[10px] text-amber-400 cursor-pointer hover:text-amber-300">
+                            {crossRefQuery.data.universal.uncovered} universal fields not yet covered by broker
+                          </summary>
+                          <div className="mt-1 max-h-32 overflow-y-auto">
+                            {crossRefQuery.data.universal.uncoveredFields.map((uf, i) => (
+                              <div key={i} className="text-[10px] text-muted-foreground py-0.5 flex gap-2" data-testid={`uncovered-field-${i}`}>
+                                <span className="font-mono text-foreground/70">{uf.fieldName}</span>
+                                <span className="text-muted-foreground">({uf.category})</span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Loading...</span>
+                  )}
+                </div>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-auto text-xs h-7"
-                onClick={(e) => { e.stopPropagation(); runEngine(); }}
-                data-testid="button-resync-mapping"
-              >
-                <RefreshCw className="w-3 h-3 mr-1" />
-                Re-sync
-              </Button>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Database-validated matching — status verified against universal_fields table</span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs h-7"
+                  onClick={(e) => { e.stopPropagation(); runEngine(); }}
+                  data-testid="button-resync-mapping"
+                >
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                  Re-sync
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-3 p-6 rounded-md bg-muted/20 border border-dashed border-border" data-testid="mapping-cta">

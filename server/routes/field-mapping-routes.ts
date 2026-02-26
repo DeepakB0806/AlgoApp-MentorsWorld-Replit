@@ -88,6 +88,55 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.get("/api/broker-field-mappings/:brokerName/cross-reference", async (req, res) => {
+    try {
+      const brokerName = req.params.brokerName;
+      const [brokerMappings, universalFields] = await Promise.all([
+        storage.getBrokerFieldMappings(brokerName),
+        storage.getUniversalFields(),
+      ]);
+
+      const matchedUniversalNames = new Set<string>();
+      const unmatchedBrokerFields: { fieldCode: string; category: string; endpoint: string }[] = [];
+
+      for (const m of brokerMappings) {
+        if (m.matchStatus === "matched" && m.universalFieldName) {
+          matchedUniversalNames.add(m.universalFieldName);
+        } else {
+          unmatchedBrokerFields.push({ fieldCode: m.fieldCode, category: m.category, endpoint: m.endpoint || "" });
+        }
+      }
+
+      const coveredUniversal: { fieldName: string; category: string }[] = [];
+      const uncoveredUniversal: { fieldName: string; category: string; displayName: string }[] = [];
+
+      for (const uf of universalFields) {
+        if (matchedUniversalNames.has(uf.fieldName)) {
+          coveredUniversal.push({ fieldName: uf.fieldName, category: uf.category });
+        } else {
+          uncoveredUniversal.push({ fieldName: uf.fieldName, category: uf.category, displayName: uf.displayName });
+        }
+      }
+
+      res.json({
+        broker: {
+          total: brokerMappings.length,
+          matched: brokerMappings.filter(m => m.matchStatus === "matched").length,
+          unmatched: unmatchedBrokerFields.length,
+          unmatchedFields: unmatchedBrokerFields,
+        },
+        universal: {
+          total: universalFields.length,
+          covered: coveredUniversal.length,
+          uncovered: uncoveredUniversal.length,
+          uncoveredFields: uncoveredUniversal,
+        },
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch cross-reference data" });
+    }
+  });
+
   app.patch("/api/broker-field-mappings/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
