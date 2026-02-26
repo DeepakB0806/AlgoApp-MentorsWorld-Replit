@@ -139,6 +139,7 @@ export interface IStorage {
 
   // Broker Field Mappings
   getBrokerFieldMappings(brokerName: string, category?: string): Promise<BrokerFieldMapping[]>;
+  getBrokerFieldMappingById(id: number): Promise<BrokerFieldMapping | undefined>;
   getBrokerFieldMappingStats(brokerName: string): Promise<{ matched: number; pending: number; gap: number; not_applicable: number; total: number }>;
   upsertBrokerFieldMappings(fields: InsertBrokerFieldMapping[]): Promise<BrokerFieldMapping[]>;
   updateBrokerFieldMapping(id: number, data: Partial<InsertBrokerFieldMapping>): Promise<BrokerFieldMapping | undefined>;
@@ -1117,6 +1118,11 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(broker_field_mappings)
       .where(eq(broker_field_mappings.brokerName, brokerName))
       .orderBy(broker_field_mappings.sortOrder);
+  }
+
+  async getBrokerFieldMappingById(id: number): Promise<BrokerFieldMapping | undefined> {
+    const [row] = await db.select().from(broker_field_mappings).where(eq(broker_field_mappings.id, id));
+    return row;
   }
 
   async getBrokerFieldMappingStats(brokerName: string): Promise<{ matched: number; pending: number; gap: number; not_applicable: number; total: number }> {

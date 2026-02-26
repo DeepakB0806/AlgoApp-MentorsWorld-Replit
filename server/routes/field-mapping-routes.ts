@@ -9,6 +9,9 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: "brokerName and sections[] required" });
       }
 
+      const universalFields = await storage.getUniversalFields();
+      const validUniversalNames = new Set(universalFields.map(f => f.fieldName));
+
       const existingMappings = await storage.getBrokerFieldMappings(brokerName);
       const existingByFieldCode: Record<string, string> = {};
       for (const m of existingMappings) {
@@ -27,7 +30,8 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
           const direction = endpoint.startsWith("GET") ? "response" : "request";
           for (const f of (sub.fields || [])) {
             const universalName = existingByFieldCode[f.field] || null;
-            const matchStatus = universalName ? "matched" : "pending";
+            const isValidMatch = universalName && validUniversalNames.has(universalName);
+            const matchStatus = isValidMatch ? "matched" : "pending";
             fields.push({
               brokerName,
               category,
@@ -37,7 +41,7 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
               fieldDescription: f.desc || null,
               direction,
               endpoint: endpoint.replace(/^(GET|POST|PUT|DELETE|PATCH)\s+/, ""),
-              universalFieldName: universalName,
+              universalFieldName: isValidMatch ? universalName : null,
               matchStatus,
               allowedValues: null,
               defaultValue: null,
@@ -88,6 +92,29 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+
+      const { universalFieldName, matchStatus } = req.body;
+
+      if (universalFieldName !== undefined || matchStatus === "matched") {
+        const universalFields = await storage.getUniversalFields();
+        const validNames = new Set(universalFields.map(f => f.fieldName));
+
+        if (universalFieldName && !validNames.has(universalFieldName)) {
+          return res.status(400).json({ error: `Universal field "${universalFieldName}" does not exist in the universal_fields table` });
+        }
+
+        if (matchStatus === "matched") {
+          let nameToCheck = universalFieldName;
+          if (!nameToCheck) {
+            const current = await storage.getBrokerFieldMappingById(id);
+            nameToCheck = current?.universalFieldName || null;
+          }
+          if (!nameToCheck || !validNames.has(nameToCheck)) {
+            return res.status(400).json({ error: `Cannot set status to "matched": universal field "${nameToCheck || ''}" does not exist in the universal_fields table` });
+          }
+        }
+      }
+
       const updated = await storage.updateBrokerFieldMapping(id, req.body);
       if (!updated) return res.status(404).json({ error: "Mapping not found" });
       res.json(updated);

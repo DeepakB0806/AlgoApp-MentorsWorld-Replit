@@ -754,7 +754,7 @@ function ApiFieldsReference() {
                                                               key={uf.id}
                                                               value={uf.fieldName}
                                                               onSelect={(val) => {
-                                                                setEditValues(v => ({ ...v, universalFieldName: val }));
+                                                                setEditValues(v => ({ ...v, universalFieldName: val, matchStatus: val ? "matched" : "pending" }));
                                                                 setUfComboOpen(false);
                                                               }}
                                                               className="text-xs"
