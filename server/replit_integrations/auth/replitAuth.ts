@@ -26,8 +26,16 @@ export function getSession() {
     createTableIfMissing: false,
     ttl: sessionTtl,
     tableName: "sessions",
+    errorLog: (err: Error) => {
+      console.error("Session store error (non-fatal):", err.message);
+    },
   });
-  return session({
+
+  sessionStore.on("error", (err: Error) => {
+    console.error("Session store connection error (non-fatal):", err.message);
+  });
+
+  const sessionMiddleware = session({
     secret: process.env.SESSION_SECRET!,
     store: sessionStore,
     resave: false,
@@ -38,6 +46,16 @@ export function getSession() {
       maxAge: sessionTtl,
     },
   });
+
+  return (req: any, res: any, next: any) => {
+    sessionMiddleware(req, res, (err: any) => {
+      if (err) {
+        console.error("Session middleware error (non-fatal):", err.message);
+        return next();
+      }
+      next();
+    });
+  };
 }
 
 function updateUserSession(
