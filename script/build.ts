@@ -36,8 +36,13 @@ const allowlist = [
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
-  console.log("syncing database schema...");
-  execSync("npx drizzle-kit push --force", { stdio: "inherit" });
+  try {
+    console.log("syncing database schema...");
+    execSync("npx drizzle-kit push --force", { stdio: "inherit" });
+  } catch (err) {
+    console.warn("WARNING: database schema sync failed (non-fatal during build):", (err as Error).message);
+    console.warn("Schema will need to be synced separately if there are pending changes.");
+  }
 
   console.log("building client...");
   await viteBuild();
