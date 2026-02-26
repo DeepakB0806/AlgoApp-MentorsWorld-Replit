@@ -36,7 +36,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "NODE_OPTIONS='--max-old-space-size=512' NODE_ENV=development npx tsx server/index.ts"
+args = "npm run dev"
 waitForPort = 5000
 
 [workflows.workflow.metadata]
