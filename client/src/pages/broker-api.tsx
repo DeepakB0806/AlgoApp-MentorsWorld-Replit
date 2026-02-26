@@ -37,7 +37,6 @@ function ApiFieldsReference() {
     broker: { total: number; matched: number; pending: number; updated: number; corrections: { fieldCode: string; from: string; to: string }[] };
     universal: { total: number; covered: number; uncovered: number; uncoveredFields: { fieldName: string; category: string; displayName: string }[] };
   } | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
   const [editingField, setEditingField] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<{ universalFieldName: string; matchStatus: string }>({ universalFieldName: "", matchStatus: "" });
 
@@ -229,27 +228,6 @@ function ApiFieldsReference() {
     }
   };
 
-  const runSyncToProduction = async () => {
-    setIsSyncing(true);
-    try {
-      const response = await apiRequest("POST", "/api/broker-field-mappings/sync-to-production", { brokerName });
-      const result = await response.json();
-
-      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName] });
-      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "cross-reference"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/universal-fields"] });
-
-      toast({
-        title: "Sync to Production complete",
-        description: `${result.synced} broker field mappings synced. Matched: ${result.stats?.matched ?? 0}, Pending: ${result.stats?.pending ?? 0}`,
-      });
-    } catch (err) {
-      toast({ title: "Sync failed", description: String(err), variant: "destructive" });
-    } finally {
-      setIsSyncing(false);
-    }
-  };
 
   const sections = [
     {
@@ -783,17 +761,6 @@ function ApiFieldsReference() {
                   <span>Database-validated matching — status verified against universal_fields table</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs h-7"
-                    onClick={(e) => { e.stopPropagation(); runSyncToProduction(); }}
-                    disabled={isSyncing}
-                    data-testid="button-sync-production"
-                  >
-                    <RefreshCw className={`w-3 h-3 mr-1 ${isSyncing ? 'animate-spin' : ''}`} />
-                    {isSyncing ? "Syncing..." : "Sync to Production"}
-                  </Button>
                   <Button
                     size="sm"
                     variant="outline"

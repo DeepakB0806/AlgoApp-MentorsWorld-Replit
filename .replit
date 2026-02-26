@@ -44,3 +44,8 @@ outputType = "webview"
 
 [agent]
 integrations = ["javascript_database:1.0.0", "javascript_log_in_with_replit:2.0.0"]
+
+[userenv]
+
+[userenv.production]
+SHARED_DATABASE_URL = "postgresql://postgres:password@helium/heliumdb?sslmode=disable"
