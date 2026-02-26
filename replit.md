@@ -14,6 +14,7 @@ The backend routes are split into focused modules in `server/routes/`:
 - `broker-routes.ts` (~844 lines) — Broker configs, auth, session helpers, positions/orders/holdings/portfolio, deployment, trades, daily-pnl, test logs, session logs
 - `strategy-routes.ts` (~238 lines) — Strategy CRUD, strategy configs, strategy plans
 - `field-mapping-routes.ts` (~90 lines) — Broker field mapping routes (database-driven matching, no hardcoded constants)
+- `universal-field-routes.ts` (~70 lines) — Universal field CRUD (master reference table for the Universal Layer)
 - `admin-routes.ts` (~148 lines) — Settings, email, webhook-logs, admin sync
 - `helpers.ts` (~41 lines) — Shared auth helpers (getUserFromRequest, requireSuperAdmin, requireTeamOrSuperAdmin, parseNumeric)
 - `routes.ts` (~21 lines) — Thin orchestrator that imports and calls each module
@@ -53,7 +54,7 @@ The frontend uses React with Vite, TypeScript, TailwindCSS, and shadcn/ui. The b
 - **Performance Optimization**: Features a unified trade engine, an in-memory TTL-based cache layer with invalidation, hot/cold path separation for webhook handling, and database indexes for hot path queries.
 
 ### System Design Choices
-The application adheres to a principle where every field exposed by a broker's API must be mapped to a universal layer. This includes an 8-step Standard Operating Procedure (SOP) for broker onboarding, ensuring comprehensive field mapping and gap mitigation before building translation layers. Dashboard tables are oriented to display all broker-provided fields for positions, orders, and holdings.
+The application adheres to a principle where every field must be in the database — no exceptions. The Universal Layer fields are stored in the `universal_fields` database table (130 fields), serving as the single source of truth. Broker API fields are stored in the `broker_field_mappings` table. The API Field Reference UI shows the 1:1 matching between these two database tables, with a searchable dropdown for selecting universal fields (no hardcoded values). The 8-step SOP-BOP ensures comprehensive field mapping and gap mitigation before building translation layers. Dashboard tables are oriented to display all broker-provided fields for positions, orders, and holdings.
 
 ### Route Ordering Notes
 - `/api/webhooks/default-fields` must be registered BEFORE `/api/webhooks/:id` to prevent Express from treating "default-fields" as an ID parameter. This is handled by the webhook-routes module.

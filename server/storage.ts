@@ -4,7 +4,7 @@ import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
   brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades, strategyDailyPnl,
-  broker_field_mappings,
+  broker_field_mappings, universal_fields,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -20,6 +20,7 @@ import {
   type StrategyTrade, type InsertStrategyTrade,
   type StrategyDailyPnl, type InsertStrategyDailyPnl,
   type BrokerFieldMapping, type InsertBrokerFieldMapping,
+  type UniversalField, type InsertUniversalField,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -142,6 +143,13 @@ export interface IStorage {
   upsertBrokerFieldMappings(fields: InsertBrokerFieldMapping[]): Promise<BrokerFieldMapping[]>;
   updateBrokerFieldMapping(id: number, data: Partial<InsertBrokerFieldMapping>): Promise<BrokerFieldMapping | undefined>;
   deleteBrokerFieldMappings(brokerName: string): Promise<number>;
+
+  // Universal Fields
+  getUniversalFields(category?: string): Promise<UniversalField[]>;
+  getUniversalField(id: number): Promise<UniversalField | undefined>;
+  createUniversalField(field: InsertUniversalField): Promise<UniversalField>;
+  updateUniversalField(id: number, data: Partial<InsertUniversalField>): Promise<UniversalField | undefined>;
+  deleteUniversalField(id: number): Promise<boolean>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -1172,6 +1180,37 @@ export class DatabaseStorage implements IStorage {
   async deleteBrokerFieldMappings(brokerName: string): Promise<number> {
     const deleted = await db.delete(broker_field_mappings).where(eq(broker_field_mappings.brokerName, brokerName)).returning();
     return deleted.length;
+  }
+
+  // Universal Fields - PERSISTENT in PostgreSQL
+  async getUniversalFields(category?: string): Promise<UniversalField[]> {
+    if (category) {
+      return db.select().from(universal_fields)
+        .where(eq(universal_fields.category, category))
+        .orderBy(universal_fields.category, universal_fields.fieldName);
+    }
+    return db.select().from(universal_fields)
+      .orderBy(universal_fields.category, universal_fields.fieldName);
+  }
+
+  async getUniversalField(id: number): Promise<UniversalField | undefined> {
+    const [field] = await db.select().from(universal_fields).where(eq(universal_fields.id, id)).limit(1);
+    return field;
+  }
+
+  async createUniversalField(field: InsertUniversalField): Promise<UniversalField> {
+    const [created] = await db.insert(universal_fields).values(field).returning();
+    return created;
+  }
+
+  async updateUniversalField(id: number, data: Partial<InsertUniversalField>): Promise<UniversalField | undefined> {
+    const [updated] = await db.update(universal_fields).set(data).where(eq(universal_fields.id, id)).returning();
+    return updated;
+  }
+
+  async deleteUniversalField(id: number): Promise<boolean> {
+    const deleted = await db.delete(universal_fields).where(eq(universal_fields.id, id)).returning();
+    return deleted.length > 0;
   }
 }
 

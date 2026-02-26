@@ -623,6 +623,23 @@ export const insertBrokerFieldMappingSchema = createInsertSchema(broker_field_ma
 export type InsertBrokerFieldMapping = z.infer<typeof insertBrokerFieldMappingSchema>;
 export type BrokerFieldMapping = typeof broker_field_mappings.$inferSelect;
 
+// ====== UNIVERSAL FIELDS TABLE ======
+export const universal_fields = pgTable("universal_fields", {
+  id: serial("id").primaryKey(),
+  fieldName: text("field_name").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  category: text("category").notNull(),
+  dataType: text("data_type").notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").default(true),
+}, (table) => [
+  index("idx_uf_category").on(table.category),
+]);
+
+export const insertUniversalFieldSchema = createInsertSchema(universal_fields).omit({ id: true });
+export type InsertUniversalField = z.infer<typeof insertUniversalFieldSchema>;
+export type UniversalField = typeof universal_fields.$inferSelect;
+
 // ====== BROKER FIELD CORRELATION MAP ======
 // Maps strategy/plan parameters to Kotak Neo API field codes
 // Reference: broker-api.tsx order placement fields

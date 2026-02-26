@@ -5,6 +5,7 @@ import { registerWebhookRoutes } from "./routes/webhook-routes";
 import { registerStrategyRoutes } from "./routes/strategy-routes";
 import { registerBrokerRoutes } from "./routes/broker-routes";
 import { registerFieldMappingRoutes } from "./routes/field-mapping-routes";
+import { registerUniversalFieldRoutes } from "./routes/universal-field-routes";
 import { registerAdminRoutes } from "./routes/admin-routes";
 
 export async function registerRoutes(
@@ -16,6 +17,7 @@ export async function registerRoutes(
   registerWebhookRoutes(app, storage);
   registerBrokerRoutes(app, storage);
   registerFieldMappingRoutes(app, storage);
+  registerUniversalFieldRoutes(app, storage);
 
   return httpServer;
 }

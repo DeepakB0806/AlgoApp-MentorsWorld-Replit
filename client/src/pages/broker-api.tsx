@@ -14,8 +14,11 @@ import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
-import type { BrokerConfig, InsertBrokerConfig, BrokerTestLog, BrokerSessionLog, BrokerFieldMapping } from "@shared/schema";
+import type { BrokerConfig, InsertBrokerConfig, BrokerTestLog, BrokerSessionLog, BrokerFieldMapping, UniversalField } from "@shared/schema";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface TestResult {
   success: boolean;
@@ -38,6 +41,23 @@ function ApiFieldsReference() {
   const toggleSection = (key: string) => {
     setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
   };
+
+  const [ufComboOpen, setUfComboOpen] = useState(false);
+
+  const universalFieldsQuery = useQuery<UniversalField[]>({
+    queryKey: ["/api/universal-fields"],
+    queryFn: async () => {
+      const res = await fetch("/api/universal-fields");
+      return res.json();
+    },
+  });
+
+  const universalFieldsList = universalFieldsQuery.data || [];
+  const universalFieldsByCategory = universalFieldsList.reduce<Record<string, UniversalField[]>>((acc, f) => {
+    if (!acc[f.category]) acc[f.category] = [];
+    acc[f.category].push(f);
+    return acc;
+  }, {});
 
   const statsQuery = useQuery<{ matched: number; pending: number; gap: number; not_applicable: number; total: number }>({
     queryKey: ["/api/broker-field-mappings", brokerName, "stats"],
@@ -710,12 +730,45 @@ function ApiFieldsReference() {
                                         <>
                                           <td className="py-1.5 px-2">
                                             {isEditing ? (
-                                              <Input
-                                                value={editValues.universalFieldName}
-                                                onChange={(e) => setEditValues(v => ({ ...v, universalFieldName: e.target.value }))}
-                                                className="h-6 text-xs font-mono px-1"
-                                                data-testid={`input-universal-field-${mapping.id}`}
-                                              />
+                                              <Popover open={ufComboOpen} onOpenChange={setUfComboOpen}>
+                                                <PopoverTrigger asChild>
+                                                  <Button
+                                                    variant="outline"
+                                                    role="combobox"
+                                                    className="h-6 w-[180px] justify-between text-xs font-mono px-1.5 truncate"
+                                                    data-testid={`input-universal-field-${mapping.id}`}
+                                                  >
+                                                    {editValues.universalFieldName || "Select field..."}
+                                                    <ChevronDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
+                                                  </Button>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-[240px] p-0" align="start">
+                                                  <Command>
+                                                    <CommandInput placeholder="Search universal fields..." className="h-8 text-xs" />
+                                                    <CommandList>
+                                                      <CommandEmpty>No field found.</CommandEmpty>
+                                                      {Object.entries(universalFieldsByCategory).map(([cat, fields]) => (
+                                                        <CommandGroup key={cat} heading={cat.charAt(0).toUpperCase() + cat.slice(1)}>
+                                                          {fields.map((uf) => (
+                                                            <CommandItem
+                                                              key={uf.id}
+                                                              value={uf.fieldName}
+                                                              onSelect={(val) => {
+                                                                setEditValues(v => ({ ...v, universalFieldName: val }));
+                                                                setUfComboOpen(false);
+                                                              }}
+                                                              className="text-xs"
+                                                            >
+                                                              <span className="font-mono">{uf.fieldName}</span>
+                                                              <span className="ml-1 text-muted-foreground">({uf.displayName})</span>
+                                                            </CommandItem>
+                                                          ))}
+                                                        </CommandGroup>
+                                                      ))}
+                                                    </CommandList>
+                                                  </Command>
+                                                </PopoverContent>
+                                              </Popover>
                                             ) : (
                                               <span className="font-mono text-xs text-foreground">
                                                 {mapping.universalFieldName || <span className="text-muted-foreground italic">unmapped</span>}
