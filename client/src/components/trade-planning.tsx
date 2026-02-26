@@ -17,7 +17,7 @@ import { format, differenceInDays } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { StrategyConfig, StrategyPlan } from "@shared/schema";
-import type { PlanTradeLeg, TradeParams, StoplossConfig, ProfitTargetConfig, TrailingStoplossConfig, TimeLogicConfig } from "@shared/schema";
+import type { PlanTradeLeg, TradeParams, BlockConfig, StoplossConfig, ProfitTargetConfig, TrailingStoplossConfig, TimeLogicConfig } from "@shared/schema";
 import type { BrokerConfig } from "@shared/schema";
 
 function generateStrikeOptions(): string[] {
@@ -66,6 +66,10 @@ export function TradePlanning() {
   const [uptrendLegs, setUptrendLegs] = useState<PlanTradeLeg[]>([]);
   const [downtrendLegs, setDowntrendLegs] = useState<PlanTradeLeg[]>([]);
   const [neutralLegs, setNeutralLegs] = useState<PlanTradeLeg[]>([]);
+  const defaultBlockConfig: BlockConfig = { productMode: "MIS" };
+  const [uptrendConfig, setUptrendConfig] = useState<BlockConfig>(defaultBlockConfig);
+  const [downtrendConfig, setDowntrendConfig] = useState<BlockConfig>(defaultBlockConfig);
+  const [neutralConfig, setNeutralConfig] = useState<BlockConfig>(defaultBlockConfig);
   const [stoploss, setStoploss] = useState<StoplossConfig>({ enabled: false, mode: "amount", value: 0 });
   const [profitTarget, setProfitTarget] = useState<ProfitTargetConfig>({ enabled: false, mode: "amount", value: 0 });
   const [trailingSL, setTrailingSL] = useState<TrailingStoplossConfig>({ enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
@@ -86,7 +90,7 @@ export function TradePlanning() {
   const activeConfigs = configs.filter((c) => c.status === "active" || c.status === "draft");
   const selectedConfig = configs.find((c) => c.id === configId);
   const allLegsFlat = [...uptrendLegs, ...downtrendLegs, ...neutralLegs];
-  const hasMISLegs = allLegsFlat.some((l) => l.orderType === "MIS");
+  const hasMISLegs = uptrendConfig.productMode === "MIS" || downtrendConfig.productMode === "MIS" || neutralConfig.productMode === "MIS";
 
   useEffect(() => {
     if (selectedConfig && !editingPlan) {
@@ -176,6 +180,9 @@ export function TradePlanning() {
     setUptrendLegs([]);
     setDowntrendLegs([]);
     setNeutralLegs([]);
+    setUptrendConfig({ productMode: "MIS" });
+    setDowntrendConfig({ productMode: "MIS" });
+    setNeutralConfig({ productMode: "MIS" });
     setStoploss({ enabled: false, mode: "amount", value: 0 });
     setProfitTarget({ enabled: false, mode: "amount", value: 0 });
     setTrailingSL({ enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
@@ -192,9 +199,19 @@ export function TradePlanning() {
     setPlanExchange(plan.exchange || "");
     setPlanTicker(plan.ticker || "");
     const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [], uptrendLegs: [], downtrendLegs: [], neutralLegs: [] });
-    setUptrendLegs(tp.uptrendLegs || tp.legs || []);
-    setDowntrendLegs(tp.downtrendLegs || []);
-    setNeutralLegs(tp.neutralLegs || []);
+    const loadedUptrend = tp.uptrendLegs || tp.legs || [];
+    const loadedDowntrend = tp.downtrendLegs || [];
+    const loadedNeutral = tp.neutralLegs || [];
+    setUptrendLegs(loadedUptrend);
+    setDowntrendLegs(loadedDowntrend);
+    setNeutralLegs(loadedNeutral);
+    const deriveMode = (legs: PlanTradeLeg[]): "MIS" | "NRML" => {
+      if (legs.length > 0 && legs.every((l) => l.orderType === "NRML")) return "NRML";
+      return "MIS";
+    };
+    setUptrendConfig(tp.uptrendConfig || { productMode: deriveMode(loadedUptrend) });
+    setDowntrendConfig(tp.downtrendConfig || { productMode: deriveMode(loadedDowntrend) });
+    setNeutralConfig(tp.neutralConfig || { productMode: deriveMode(loadedNeutral) });
     setStoploss(tp.stoploss || { enabled: false, mode: "amount", value: 0 });
     setProfitTarget(tp.profitTarget || { enabled: false, mode: "amount", value: 0 });
     setTrailingSL(tp.trailingSL || { enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
@@ -216,7 +233,7 @@ export function TradePlanning() {
       description: planDescription.trim() || null,
       configId,
       selectedIndicators: planIndicators,
-      tradeParams: JSON.stringify({ legs: [], uptrendLegs, downtrendLegs, neutralLegs, stoploss, profitTarget, trailingSL, timeLogic }),
+      tradeParams: JSON.stringify({ legs: [], uptrendLegs, downtrendLegs, neutralLegs, uptrendConfig, downtrendConfig, neutralConfig, stoploss, profitTarget, trailingSL, timeLogic }),
       status: planStatus,
       exchange: planExchange || null,
       ticker: planTicker || null,
@@ -382,17 +399,28 @@ export function TradePlanning() {
               <div className="space-y-4">
                 <Label>Execution Blocks</Label>
                 {([
-                  { key: "uptrend" as const, label: "UPTREND BLOCK", legs: uptrendLegs, setter: setUptrendLegs, borderColor: "border-emerald-500", textColor: "text-emerald-400" },
-                  { key: "downtrend" as const, label: "DOWNTREND BLOCK", legs: downtrendLegs, setter: setDowntrendLegs, borderColor: "border-red-500", textColor: "text-red-400" },
-                  { key: "neutral" as const, label: "NEUTRAL BLOCK", legs: neutralLegs, setter: setNeutralLegs, borderColor: "border-blue-500", textColor: "text-blue-400" },
+                  { key: "uptrend" as const, label: "UPTREND BLOCK", legs: uptrendLegs, setter: setUptrendLegs, config: uptrendConfig, configSetter: setUptrendConfig, borderColor: "border-emerald-500", textColor: "text-emerald-400" },
+                  { key: "downtrend" as const, label: "DOWNTREND BLOCK", legs: downtrendLegs, setter: setDowntrendLegs, config: downtrendConfig, configSetter: setDowntrendConfig, borderColor: "border-red-500", textColor: "text-red-400" },
+                  { key: "neutral" as const, label: "NEUTRAL BLOCK", legs: neutralLegs, setter: setNeutralLegs, config: neutralConfig, configSetter: setNeutralConfig, borderColor: "border-blue-500", textColor: "text-blue-400" },
                 ] as const).map((block) => (
                   <div key={block.key} className={`border-2 ${block.borderColor} rounded-md p-3 space-y-2`} data-testid={`card-plan-block-${block.key}`}>
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <h4 className={`font-bold text-xs ${block.textColor}`}>{block.label}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className={`font-bold text-xs ${block.textColor}`}>{block.label}</h4>
+                        <Select value={block.config.productMode} onValueChange={(v) => block.configSetter((prev) => ({ ...prev, productMode: v as "MIS" | "NRML", bracketOrder: v === "NRML" ? undefined : prev.bracketOrder }))}>
+                          <SelectTrigger className="w-20 h-6 text-xs" data-testid={`select-product-mode-${block.key}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="MIS">MIS</SelectItem>
+                            <SelectItem value="NRML">NRML</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => block.setter((prev: PlanTradeLeg[]) => [...prev, { type: "CE", action: "BUY", strike: "ATM", lots: 1, orderType: "MIS" }])}
+                        onClick={() => block.setter((prev: PlanTradeLeg[]) => [...prev, { type: "CE", action: "BUY", strike: "ATM", lots: 1 }])}
                         data-testid={`button-add-plan-leg-${block.key}`}
                       >
                         <Plus className="w-3 h-3 mr-1" /> Add Leg
@@ -434,16 +462,6 @@ export function TradePlanning() {
                               ))}
                             </SelectContent>
                           </Select>
-                          <Select value={leg.orderType} onValueChange={(v) => block.setter((prev: PlanTradeLeg[]) => prev.map((l, i) => i === idx ? { ...l, orderType: v as PlanTradeLeg["orderType"] } : l))}>
-                            <SelectTrigger className="w-20" data-testid={`select-plan-leg-order-${block.key}-${idx}`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="MIS">MIS</SelectItem>
-                              <SelectItem value="NRML">NRML</SelectItem>
-                              <SelectItem value="CNC">CNC</SelectItem>
-                            </SelectContent>
-                          </Select>
                           <Input
                             type="number"
                             min={1}
@@ -453,6 +471,40 @@ export function TradePlanning() {
                             data-testid={`input-plan-leg-lots-${block.key}-${idx}`}
                           />
                           <span className="text-xs text-muted-foreground">lots</span>
+                          <TooltipProvider delayDuration={200}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={0.1}
+                                  placeholder="SL%"
+                                  value={leg.slPercent ?? ""}
+                                  onChange={(e) => block.setter((prev: PlanTradeLeg[]) => prev.map((l, i) => i === idx ? { ...l, slPercent: e.target.value ? parseFloat(e.target.value) : undefined } : l))}
+                                  className="w-16"
+                                  data-testid={`input-plan-leg-sl-${block.key}-${idx}`}
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent side="top"><p>StopLoss %</p></TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider delayDuration={200}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={0.1}
+                                  placeholder="P%"
+                                  value={leg.profitPercent ?? ""}
+                                  onChange={(e) => block.setter((prev: PlanTradeLeg[]) => prev.map((l, i) => i === idx ? { ...l, profitPercent: e.target.value ? parseFloat(e.target.value) : undefined } : l))}
+                                  className="w-16"
+                                  data-testid={`input-plan-leg-profit-${block.key}-${idx}`}
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent side="top"><p>Profit %</p></TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                           <Button
                             variant="ghost"
                             size="icon"
@@ -464,6 +516,65 @@ export function TradePlanning() {
                         </div>
                       ))}
                     </div>
+                    {block.config.productMode === "MIS" && (
+                      <div className="border border-border/50 rounded-md p-2 space-y-2 bg-muted/20">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Target className="w-3 h-3 text-orange-400" />
+                            <span className="text-xs font-medium">Bracket Order</span>
+                            <InfoTip text="Bracket Order places 3 legs: Entry + Stoploss + Target. MIS only. Uses absolute price spreads." />
+                          </div>
+                          <Switch
+                            checked={block.config.bracketOrder?.enabled || false}
+                            onCheckedChange={(v) => block.configSetter((prev) => ({ ...prev, bracketOrder: { enabled: v, stoplossSpread: prev.bracketOrder?.stoplossSpread, targetSpread: prev.bracketOrder?.targetSpread, trailingSL: prev.bracketOrder?.trailingSL } }))}
+                            data-testid={`switch-bo-${block.key}`}
+                          />
+                        </div>
+                        {block.config.bracketOrder?.enabled && (
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <div className="flex items-center gap-1">
+                              <Label className="text-xs whitespace-nowrap">SL Spread</Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                step={0.05}
+                                placeholder="0.00"
+                                value={block.config.bracketOrder.stoplossSpread ?? ""}
+                                onChange={(e) => block.configSetter((prev) => ({ ...prev, bracketOrder: { ...prev.bracketOrder!, stoplossSpread: e.target.value ? parseFloat(e.target.value) : undefined } }))}
+                                className="w-20"
+                                data-testid={`input-bo-sl-spread-${block.key}`}
+                              />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Label className="text-xs whitespace-nowrap">Target Spread</Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                step={0.05}
+                                placeholder="0.00"
+                                value={block.config.bracketOrder.targetSpread ?? ""}
+                                onChange={(e) => block.configSetter((prev) => ({ ...prev, bracketOrder: { ...prev.bracketOrder!, targetSpread: e.target.value ? parseFloat(e.target.value) : undefined } }))}
+                                className="w-20"
+                                data-testid={`input-bo-target-spread-${block.key}`}
+                              />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Label className="text-xs whitespace-nowrap">Trailing SL</Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                step={0.05}
+                                placeholder="0.00"
+                                value={block.config.bracketOrder.trailingSL ?? ""}
+                                onChange={(e) => block.configSetter((prev) => ({ ...prev, bracketOrder: { ...prev.bracketOrder!, trailingSL: e.target.value ? parseFloat(e.target.value) : undefined } }))}
+                                className="w-20"
+                                data-testid={`input-bo-trailing-sl-${block.key}`}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -893,19 +1004,19 @@ export function TradePlanning() {
                   {plan.tradeParams && (() => {
                     const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [], uptrendLegs: [], downtrendLegs: [], neutralLegs: [] });
                     const allLegs = [
-                      ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400" }] : [],
-                      ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400" }] : [],
-                      ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400" }] : [],
-                      ...(tp.legs || []).length > 0 ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground" }] : [],
+                      ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400", mode: tp.uptrendConfig?.productMode || "MIS" }] : [],
+                      ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400", mode: tp.downtrendConfig?.productMode || "MIS" }] : [],
+                      ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400", mode: tp.neutralConfig?.productMode || "MIS" }] : [],
+                      ...(tp.legs || []).length > 0 ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground", mode: "MIS" }] : [],
                     ];
                     return allLegs.length > 0 ? (
                       <div className="space-y-1" data-testid={`container-plan-legs-${plan.id}`}>
                         {allLegs.map((group) => (
                           <div key={group.label} className="flex items-center gap-1 flex-wrap">
-                            <span className={`text-xs font-medium ${group.color}`}>{group.label}:</span>
+                            <span className={`text-xs font-medium ${group.color}`}>{group.label} ({group.mode}):</span>
                             {group.legs.map((leg, i) => (
                               <Badge key={i} variant="outline" className="text-xs font-mono">
-                                {leg.action} {leg.type} {leg.strike} x{leg.lots} ({leg.orderType})
+                                {leg.action} {leg.type} {leg.strike} x{leg.lots}{leg.slPercent ? ` SL${leg.slPercent}%` : ""}{leg.profitPercent ? ` P${leg.profitPercent}%` : ""}
                               </Badge>
                             ))}
                           </div>

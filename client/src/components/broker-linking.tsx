@@ -963,10 +963,10 @@ export function BrokerLinking() {
                     const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [], uptrendLegs: [], downtrendLegs: [], neutralLegs: [] });
                     const parentConfig = configs.find((c) => c.id === plan.configId);
                     const blockGroups = [
-                      ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400" }] : [],
-                      ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400" }] : [],
-                      ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400" }] : [],
-                      ...(tp.legs || []).length > 0 ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground" }] : [],
+                      ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400", productMode: tp.uptrendConfig?.productMode || "MIS" }] : [],
+                      ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400", productMode: tp.downtrendConfig?.productMode || "MIS" }] : [],
+                      ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400", productMode: tp.neutralConfig?.productMode || "MIS" }] : [],
+                      ...(tp.legs || []).length > 0 ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground", productMode: "MIS" as const }] : [],
                     ];
                     if (blockGroups.length === 0) return null;
                     return (
@@ -988,6 +988,7 @@ export function BrokerLinking() {
                                   const params = buildBrokerOrderParams(leg, {
                                     exchange: parentConfig?.exchange,
                                     ticker: parentConfig?.ticker,
+                                    productMode: group.productMode as "MIS" | "NRML",
                                   });
                                   return (
                                     <tr key={`${group.label}-${i}`} className="border-b border-border/20">

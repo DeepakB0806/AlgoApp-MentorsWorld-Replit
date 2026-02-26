@@ -13,7 +13,7 @@ The backend routes are split into focused modules in `server/routes/`:
 - `webhook-routes.ts` (~973 lines) — Webhook CRUD, receiver endpoint, webhook data, linking, registry, test
 - `broker-routes.ts` (~844 lines) — Broker configs, auth, session helpers, positions/orders/holdings/portfolio, deployment, trades, daily-pnl, test logs, session logs
 - `strategy-routes.ts` (~238 lines) — Strategy CRUD, strategy configs, strategy plans
-- `field-mapping-routes.ts` (~155 lines) — UNIVERSAL_FIELD_MAP + broker field mapping routes
+- `field-mapping-routes.ts` (~90 lines) — Broker field mapping routes (database-driven matching, no hardcoded constants)
 - `admin-routes.ts` (~148 lines) — Settings, email, webhook-logs, admin sync
 - `helpers.ts` (~41 lines) — Shared auth helpers (getUserFromRequest, requireSuperAdmin, requireTeamOrSuperAdmin, parseNumeric)
 - `routes.ts` (~21 lines) — Thin orchestrator that imports and calls each module

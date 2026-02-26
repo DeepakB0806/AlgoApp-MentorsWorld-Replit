@@ -54,8 +54,20 @@ export type PlanTradeLeg = {
   action: "BUY" | "SELL";
   strike: string;
   lots: number;
-  orderType: "MIS" | "NRML" | "CNC";
+  orderType?: "MIS" | "NRML" | "CNC";
   exchange?: string;
+  slPercent?: number;
+  profitPercent?: number;
+};
+
+export type BlockConfig = {
+  productMode: "MIS" | "NRML";
+  bracketOrder?: {
+    enabled: boolean;
+    stoplossSpread?: number;
+    targetSpread?: number;
+    trailingSL?: number;
+  };
 };
 
 export type StoplossConfig = {
@@ -95,6 +107,9 @@ export type TradeParams = {
   uptrendLegs?: PlanTradeLeg[];
   downtrendLegs?: PlanTradeLeg[];
   neutralLegs?: PlanTradeLeg[];
+  uptrendConfig?: BlockConfig;
+  downtrendConfig?: BlockConfig;
+  neutralConfig?: BlockConfig;
   stoploss?: StoplossConfig;
   profitTarget?: ProfitTargetConfig;
   trailingSL?: TrailingStoplossConfig;
@@ -651,13 +666,14 @@ export function buildTradingSymbol(ticker: string, legType: string, strike: stri
   return `${ticker}-${strikeLabel}-${legType}`;
 }
 
-export function buildBrokerOrderParams(leg: PlanTradeLeg, config: { exchange?: string | null; ticker?: string | null }): Partial<OrderParams> {
+export function buildBrokerOrderParams(leg: PlanTradeLeg, config: { exchange?: string | null; ticker?: string | null; productMode?: "MIS" | "NRML" }): Partial<OrderParams> {
   const exchange = leg.exchange || config.exchange || "NFO";
   const ticker = config.ticker || "";
   const ts = buildTradingSymbol(ticker, leg.type, leg.strike);
+  const product = leg.orderType || config.productMode || "MIS";
   return {
     transaction_type: BROKER_FIELD_MAP.transactionType.values[leg.action] || "B",
-    product: BROKER_FIELD_MAP.orderType.values[leg.orderType] || "MIS",
+    product: BROKER_FIELD_MAP.orderType.values[product] || "MIS",
     exchange_segment: BROKER_FIELD_MAP.exchange.values[exchange as keyof typeof BROKER_FIELD_MAP.exchange.values] || "nse_fo",
     quantity: String(leg.lots),
     order_type: "MKT",
