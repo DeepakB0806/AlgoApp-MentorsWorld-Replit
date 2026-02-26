@@ -13,12 +13,25 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   console.error('UNHANDLED REJECTION:', reason);
 });
-process.on('SIGTERM', () => console.error('SIGTERM received'));
-process.on('SIGINT', () => console.error('SIGINT received'));
-process.on('exit', (code) => console.error(`Process exit with code: ${code}`));
 
 const app = express();
 const httpServer = createServer(app);
+
+function gracefulShutdown(signal: string) {
+  console.error(`${signal} received, shutting down gracefully...`);
+  httpServer.close(() => {
+    console.error('HTTP server closed');
+    process.exit(0);
+  });
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 3000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('exit', (code) => console.error(`Process exit with code: ${code}`));
 
 declare module "http" {
   interface IncomingMessage {
@@ -125,19 +138,26 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
+  let retries = 0;
+  const maxRetries = 3;
+
+  function startListening() {
+    httpServer.listen({ port, host: "0.0.0.0" }, () => {
       log(`serving on port ${port}`);
-    },
-  );
+    });
+  }
+
+  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE' && retries < maxRetries) {
+      retries++;
+      log(`Port ${port} in use, retrying in 1s (attempt ${retries}/${maxRetries})...`);
+      setTimeout(startListening, 1000);
+    } else {
+      console.error(`Server error: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+  startListening();
 })();

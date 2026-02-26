@@ -36,7 +36,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run dev"
+args = "NODE_ENV=production node dist/index.cjs"
 waitForPort = 5000
 
 [workflows.workflow.metadata]

@@ -30,6 +30,12 @@ All authenticated pages are lazy-loaded in `App.tsx` using `React.lazy()` and `S
 ### UI/UX Decisions
 The platform features a dark trading theme with a slate/emerald color scheme to reduce eye strain. Emerald indicates positive P&L and primary actions, while red signifies negative P&L and sell actions. The UI is built with React, Vite, TypeScript, TailwindCSS, and shadcn/ui components, ensuring a modern and responsive user experience. It includes distinct public and authenticated home pages.
 
+### Server Lifecycle
+- **Graceful shutdown**: SIGTERM/SIGINT handlers close `httpServer` before exiting, ensuring port 5000 is released cleanly between restarts.
+- **Port retry**: If port 5000 is still in use on startup (EADDRINUSE), the server retries up to 3 times with 1-second delays.
+- **Production mode**: The workflow runs the pre-built production bundle (`NODE_ENV=production node dist/index.cjs`) to avoid tsx compilation and Vite dev server overhead. After code changes, run `npx tsx script/build.ts` to rebuild before restarting.
+- **Development mode**: Use `npm run dev` for local development with hot-reload (tsx + Vite dev server).
+
 ### Technical Implementations
 The frontend uses React with Vite, TypeScript, TailwindCSS, and shadcn/ui. The backend is an Express.js application written in TypeScript. Data is primarily stored in PostgreSQL, with in-memory storage for development and temporary data. Zod is used for schema validation on all API routes. Authentication supports Super Admin/Team Members with TOTP and Customer email/password, including email verification. The application is structured into `client/`, `server/`, and `shared/` directories. Security features include bcrypt hashing, TOTP, and HTTP-only cookie session management. Timestamp fields in the database use `bigint` to prevent overflow.
 
