@@ -8,6 +8,25 @@ I prefer iterative development, where features are built and reviewed in small, 
 
 ## System Architecture
 
+### Code Organization
+The backend routes are split into focused modules in `server/routes/`:
+- `webhook-routes.ts` (~973 lines) — Webhook CRUD, receiver endpoint, webhook data, linking, registry, test
+- `broker-routes.ts` (~844 lines) — Broker configs, auth, session helpers, positions/orders/holdings/portfolio, deployment, trades, daily-pnl, test logs, session logs
+- `strategy-routes.ts` (~238 lines) — Strategy CRUD, strategy configs, strategy plans
+- `field-mapping-routes.ts` (~155 lines) — UNIVERSAL_FIELD_MAP + broker field mapping routes
+- `admin-routes.ts` (~148 lines) — Settings, email, webhook-logs, admin sync
+- `helpers.ts` (~41 lines) — Shared auth helpers (getUserFromRequest, requireSuperAdmin, requireTeamOrSuperAdmin, parseNumeric)
+- `routes.ts` (~21 lines) — Thin orchestrator that imports and calls each module
+
+The frontend strategy components are split into lazy-loaded modules:
+- `client/src/components/strategy-config.tsx` (~648 lines) — MotherConfigurator component
+- `client/src/components/trade-planning.tsx` (~967 lines) — TradePlanning component
+- `client/src/components/broker-linking.tsx` (~1,266 lines) — BrokerLinking + sub-components (TradeTableContent, LivePositionTracker, DailyPnlTable, DailyPnlLogSheet)
+- `client/src/pages/strategies.tsx` (~55 lines) — Thin wrapper with Tabs, lazy-loads above components
+
+### Lazy Loading (React.lazy)
+All authenticated pages are lazy-loaded in `App.tsx` using `React.lazy()` and `Suspense`. This reduces Vite's peak compilation memory during development by only compiling pages when they're navigated to. The strategy page additionally lazy-loads its tab components.
+
 ### UI/UX Decisions
 The platform features a dark trading theme with a slate/emerald color scheme to reduce eye strain. Emerald indicates positive P&L and primary actions, while red signifies negative P&L and sell actions. The UI is built with React, Vite, TypeScript, TailwindCSS, and shadcn/ui components, ensuring a modern and responsive user experience. It includes distinct public and authenticated home pages.
 
@@ -29,6 +48,9 @@ The frontend uses React with Vite, TypeScript, TailwindCSS, and shadcn/ui. The b
 
 ### System Design Choices
 The application adheres to a principle where every field exposed by a broker's API must be mapped to a universal layer. This includes an 8-step Standard Operating Procedure (SOP) for broker onboarding, ensuring comprehensive field mapping and gap mitigation before building translation layers. Dashboard tables are oriented to display all broker-provided fields for positions, orders, and holdings.
+
+### Route Ordering Notes
+- `/api/webhooks/default-fields` must be registered BEFORE `/api/webhooks/:id` to prevent Express from treating "default-fields" as an ID parameter. This is handled by the webhook-routes module.
 
 ## External Dependencies
 
