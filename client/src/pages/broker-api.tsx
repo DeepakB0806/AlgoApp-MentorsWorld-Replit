@@ -845,7 +845,9 @@ function ApiFieldsReference() {
                                                               key={uf.id}
                                                               value={uf.fieldName}
                                                               onSelect={(val) => {
-                                                                setEditValues(v => ({ ...v, universalFieldName: val, matchStatus: val ? "matched" : "pending" }));
+                                                                const original = universalFieldsList.find(f => f.fieldName.toLowerCase() === val.toLowerCase());
+                                                                const fieldName = original?.fieldName || val;
+                                                                setEditValues(v => ({ ...v, universalFieldName: fieldName, matchStatus: fieldName ? "matched" : "pending" }));
                                                                 setUfComboOpen(false);
                                                               }}
                                                               className="text-xs"

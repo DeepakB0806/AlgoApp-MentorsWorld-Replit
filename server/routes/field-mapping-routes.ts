@@ -11,6 +11,7 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
 
       const universalFields = await storage.getUniversalFields();
       const validUniversalNames = new Set(universalFields.map(f => f.fieldName));
+      const lowerToOriginal = new Map(universalFields.map(f => [f.fieldName.toLowerCase(), f.fieldName]));
 
       const existingMappings = await storage.getBrokerFieldMappings(brokerName);
       const existingByFieldCode: Record<string, string> = {};
@@ -29,7 +30,11 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
           const endpoint = sub.endpoint || "";
           const direction = endpoint.startsWith("GET") ? "response" : "request";
           for (const f of (sub.fields || [])) {
-            const universalName = existingByFieldCode[f.field] || null;
+            let universalName = existingByFieldCode[f.field] || null;
+            if (universalName && !validUniversalNames.has(universalName)) {
+              const corrected = lowerToOriginal.get(universalName.toLowerCase());
+              universalName = corrected || null;
+            }
             const isValidMatch = universalName && validUniversalNames.has(universalName);
             const matchStatus = isValidMatch ? "matched" : "pending";
             fields.push({
@@ -147,18 +152,26 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
       if (universalFieldName !== undefined || matchStatus === "matched") {
         const universalFields = await storage.getUniversalFields();
         const validNames = new Set(universalFields.map(f => f.fieldName));
+        const lowerToOriginal = new Map(universalFields.map(f => [f.fieldName.toLowerCase(), f.fieldName]));
 
-        if (universalFieldName && !validNames.has(universalFieldName)) {
-          return res.status(400).json({ error: `Universal field "${universalFieldName}" does not exist in the universal_fields table` });
+        if (universalFieldName) {
+          if (!validNames.has(universalFieldName)) {
+            const corrected = lowerToOriginal.get(universalFieldName.toLowerCase());
+            if (corrected) {
+              req.body.universalFieldName = corrected;
+            } else {
+              return res.status(400).json({ error: `Universal field "${universalFieldName}" does not exist in the universal_fields table` });
+            }
+          }
         }
 
         if (matchStatus === "matched") {
-          let nameToCheck = universalFieldName;
+          let nameToCheck = req.body.universalFieldName || universalFieldName;
           if (!nameToCheck) {
             const current = await storage.getBrokerFieldMappingById(id);
             nameToCheck = current?.universalFieldName || null;
           }
-          if (!nameToCheck || !validNames.has(nameToCheck)) {
+          if (!nameToCheck || (!validNames.has(nameToCheck) && !lowerToOriginal.has(nameToCheck.toLowerCase()))) {
             return res.status(400).json({ error: `Cannot set status to "matched": universal field "${nameToCheck || ''}" does not exist in the universal_fields table` });
           }
         }
