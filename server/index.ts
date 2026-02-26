@@ -107,6 +107,17 @@ app.use((req, res, next) => {
   
   await registerRoutes(httpServer, app);
 
+  try {
+    const ufResult = await storage.ensureUniversalFields();
+    if (ufResult.inserted > 0) {
+      log(`Initialized ${ufResult.inserted} universal fields in database`);
+    } else {
+      log(`Universal fields already populated (${ufResult.existing})`);
+    }
+  } catch (err) {
+    log(`Universal fields initialization warning: ${err}`);
+  }
+
   tradingCache.warmUp(storage).catch(err => log(`Cache warm-up error: ${err}`));
 
   // Auto-cleanup old webhook logs (older than 30 days) on startup
