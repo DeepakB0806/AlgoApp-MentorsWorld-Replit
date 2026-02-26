@@ -151,6 +151,7 @@ export interface IStorage {
   createUniversalField(field: InsertUniversalField): Promise<UniversalField>;
   updateUniversalField(id: number, data: Partial<InsertUniversalField>): Promise<UniversalField | undefined>;
   deleteUniversalField(id: number): Promise<boolean>;
+  ensureUniversalFields(): Promise<{ inserted: number; existing: number }>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
