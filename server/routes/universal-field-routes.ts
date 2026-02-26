@@ -63,4 +63,92 @@ export function registerUniversalFieldRoutes(app: Express, storage: IStorage) {
       res.status(500).json({ error: "Failed to delete universal field" });
     }
   });
+
+  app.post("/api/universal-fields/sync-to-production", async (req, res) => {
+    try {
+      const domainSetting = await storage.getSetting("domain_name");
+      if (!domainSetting || !domainSetting.value) {
+        return res.status(400).json({ error: "Production domain not configured. Set domain name in settings." });
+      }
+
+      const devUniversalFields = await storage.getUniversalFields();
+      if (devUniversalFields.length === 0) {
+        return res.status(404).json({ error: "No universal fields found in development" });
+      }
+
+      console.log(`[sync-uf] Sending ${devUniversalFields.length} universal fields to production`);
+
+      const productionUrl = `https://${domainSetting.value}/api/universal-fields/sync-receive`;
+
+      const response = await fetch(productionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-sync-key": process.env.SESSION_SECRET || "",
+        },
+        body: JSON.stringify({ universalFields: devUniversalFields }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        return res.status(502).json({ error: `Production sync failed: ${response.status} ${errText}` });
+      }
+
+      const result = await response.json();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Failed to sync universal fields to production:", error);
+      res.status(500).json({ error: `Sync failed: ${error.message}` });
+    }
+  });
+
+  app.post("/api/universal-fields/sync-receive", async (req, res) => {
+    try {
+      const syncKey = req.headers["x-sync-key"];
+      if (syncKey !== process.env.SESSION_SECRET) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const { universalFields } = req.body;
+      if (!universalFields || !Array.isArray(universalFields)) {
+        return res.status(400).json({ error: "universalFields[] required" });
+      }
+
+      console.log(`[sync-uf-receive] Received ${universalFields.length} universal fields`);
+
+      const { db: database } = await import("../db");
+      const schema = await import("@shared/schema");
+      const { sql } = await import("drizzle-orm");
+
+      const existingCount = await database.select({ count: sql<number>`count(*)` }).from(schema.universal_fields);
+      console.log(`[sync-uf-receive] Existing universal fields in production: ${existingCount[0].count}`);
+
+      await database.delete(schema.universal_fields).execute();
+      console.log(`[sync-uf-receive] Deleted all existing universal fields`);
+
+      let inserted = 0;
+      for (const uf of universalFields) {
+        await database.insert(schema.universal_fields).values({
+          fieldName: uf.fieldName || uf.field_name,
+          displayName: uf.displayName || uf.display_name,
+          category: uf.category,
+          dataType: uf.dataType || uf.data_type || "string",
+          description: uf.description || null,
+        }).execute();
+        inserted++;
+      }
+
+      console.log(`[sync-uf-receive] Inserted ${inserted} universal fields`);
+
+      res.json({
+        success: true,
+        synced: inserted,
+        message: `${inserted} universal fields synced to production`,
+      });
+    } catch (error: any) {
+      console.error("Failed to receive universal fields sync:", error);
+      res.status(500).json({ error: `Sync receive failed: ${error.message}` });
+    }
+  });
 }

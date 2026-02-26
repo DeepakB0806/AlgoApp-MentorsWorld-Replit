@@ -228,10 +228,11 @@ function ApiFieldsReference() {
     }
   };
 
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingBroker, setIsSyncingBroker] = useState(false);
+  const [isSyncingUF, setIsSyncingUF] = useState(false);
 
-  const runSyncToProduction = async () => {
-    setIsSyncing(true);
+  const runSyncBrokerToProduction = async () => {
+    setIsSyncingBroker(true);
     try {
       const response = await apiRequest("POST", "/api/broker-field-mappings/sync-to-production", { brokerName });
       const result = await response.json();
@@ -239,16 +240,34 @@ function ApiFieldsReference() {
       queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName] });
       queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "cross-reference"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/universal-fields"] });
 
       toast({
-        title: "Sync to Production complete",
+        title: "Broker Fields synced to Production",
         description: `${result.synced} broker field mappings synced. Matched: ${result.stats?.matched ?? 0}, Pending: ${result.stats?.pending ?? 0}`,
       });
     } catch (err) {
-      toast({ title: "Sync failed", description: String(err), variant: "destructive" });
+      toast({ title: "Broker sync failed", description: String(err), variant: "destructive" });
     } finally {
-      setIsSyncing(false);
+      setIsSyncingBroker(false);
+    }
+  };
+
+  const runSyncUFToProduction = async () => {
+    setIsSyncingUF(true);
+    try {
+      const response = await apiRequest("POST", "/api/universal-fields/sync-to-production", {});
+      const result = await response.json();
+
+      queryClient.invalidateQueries({ queryKey: ["/api/universal-fields"] });
+
+      toast({
+        title: "Universal Fields synced to Production",
+        description: `${result.synced} universal fields synced to production database.`,
+      });
+    } catch (err) {
+      toast({ title: "Universal Fields sync failed", description: String(err), variant: "destructive" });
+    } finally {
+      setIsSyncingUF(false);
     }
   };
 
@@ -783,17 +802,28 @@ function ApiFieldsReference() {
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Database-validated matching — status verified against universal_fields table</span>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <Button
                     size="sm"
                     variant="outline"
                     className="text-xs h-7"
-                    onClick={(e) => { e.stopPropagation(); runSyncToProduction(); }}
-                    disabled={isSyncing}
-                    data-testid="button-sync-production"
+                    onClick={(e) => { e.stopPropagation(); runSyncBrokerToProduction(); }}
+                    disabled={isSyncingBroker}
+                    data-testid="button-sync-broker-production"
                   >
-                    <RefreshCw className={`w-3 h-3 mr-1 ${isSyncing ? 'animate-spin' : ''}`} />
-                    {isSyncing ? "Syncing..." : "Sync to Production"}
+                    <Send className={`w-3 h-3 mr-1 ${isSyncingBroker ? 'animate-spin' : ''}`} />
+                    {isSyncingBroker ? "Syncing..." : "Sync Broker Fields"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-7"
+                    onClick={(e) => { e.stopPropagation(); runSyncUFToProduction(); }}
+                    disabled={isSyncingUF}
+                    data-testid="button-sync-uf-production"
+                  >
+                    <ArrowRightLeft className={`w-3 h-3 mr-1 ${isSyncingUF ? 'animate-spin' : ''}`} />
+                    {isSyncingUF ? "Syncing..." : "Sync Universal Fields"}
                   </Button>
                   <Button
                     size="sm"
