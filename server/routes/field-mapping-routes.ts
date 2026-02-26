@@ -160,8 +160,10 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
       let updated = 0;
       let matched = 0;
       let pending = 0;
+      let unmapped = 0;
       const corrections: { fieldCode: string; from: string; to: string }[] = [];
       const matchedUniversalNames = new Set<string>();
+      const unverifiedFields: { fieldCode: string; universalFieldName: string; category: string }[] = [];
 
       for (const m of brokerMappings) {
         let newStatus = m.matchStatus;
@@ -178,11 +180,12 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
               corrections.push({ fieldCode: m.fieldCode, from: m.universalFieldName, to: corrected });
             } else {
               newStatus = "pending";
-              newUniversalName = null;
+              unverifiedFields.push({ fieldCode: m.fieldCode, universalFieldName: m.universalFieldName, category: m.category });
             }
           }
-        } else if (m.matchStatus === "matched") {
+        } else {
           newStatus = "pending";
+          unmapped++;
         }
 
         if (newStatus !== m.matchStatus || newUniversalName !== m.universalFieldName) {
@@ -214,6 +217,9 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
           total: brokerMappings.length,
           matched,
           pending,
+          unmapped,
+          unverified: unverifiedFields.length,
+          unverifiedFields,
           updated,
           corrections,
         },
