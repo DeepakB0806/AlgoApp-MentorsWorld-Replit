@@ -73,7 +73,7 @@ export interface IStorage {
   deleteOldLogsGlobally(daysToKeep: number): Promise<number>;
 
   // Webhook Data - stores incoming JSON data for strategy access
-  getWebhookData(): Promise<WebhookData[]>;
+  getWebhookData(limit?: number): Promise<WebhookData[]>;
   getWebhookDataByWebhook(webhookId: string): Promise<WebhookData[]>;
   getWebhookDataByStrategy(strategyId: string): Promise<WebhookData[]>;
   getLatestWebhookData(webhookId: string): Promise<WebhookData | undefined>;
@@ -492,8 +492,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Webhook Data - PERSISTENT in PostgreSQL database
-  async getWebhookData(): Promise<WebhookData[]> {
-    return await db.select().from(webhookData).orderBy(desc(webhookData.receivedAt));
+  async getWebhookData(maxRows?: number): Promise<WebhookData[]> {
+    const query = db.select().from(webhookData).orderBy(desc(webhookData.receivedAt));
+    if (maxRows) {
+      return await query.limit(maxRows);
+    }
+    return await query;
   }
 
   async getWebhookDataByWebhook(webhookId: string): Promise<WebhookData[]> {

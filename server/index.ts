@@ -7,6 +7,16 @@ import cookieParser from "cookie-parser";
 import { storage } from "./storage";
 import { tradingCache } from "./cache";
 
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION:', err.stack || err.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED REJECTION:', reason);
+});
+process.on('SIGTERM', () => console.error('SIGTERM received'));
+process.on('SIGINT', () => console.error('SIGINT received'));
+process.on('exit', (code) => console.error(`Process exit with code: ${code}`));
+
 const app = express();
 const httpServer = createServer(app);
 
@@ -42,11 +52,20 @@ export function log(message: string, source = "express") {
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  let capturedSnippet: string | undefined = undefined;
 
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
+    try {
+      if (Array.isArray(bodyJson)) {
+        capturedSnippet = `[Array(${bodyJson.length})]`;
+      } else if (bodyJson && typeof bodyJson === 'object') {
+        const keys = Object.keys(bodyJson).slice(0, 5).join(',');
+        capturedSnippet = `{${keys}}`;
+      } else {
+        capturedSnippet = String(bodyJson).substring(0, 200);
+      }
+    } catch { capturedSnippet = '[response]'; }
     return originalResJson.apply(res, [bodyJson, ...args]);
   };
 
@@ -54,11 +73,9 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        const jsonStr = JSON.stringify(capturedJsonResponse);
-        logLine += ` :: ${jsonStr.length > 500 ? jsonStr.substring(0, 500) + '...[truncated]' : jsonStr}`;
+      if (capturedSnippet) {
+        logLine += ` :: ${capturedSnippet}`;
       }
-
       log(logLine);
     }
   });

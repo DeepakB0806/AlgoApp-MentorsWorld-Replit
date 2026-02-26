@@ -922,7 +922,8 @@ export async function registerRoutes(
   // Webhook Data - stored JSON data for strategy access
   app.get("/api/webhook-data", async (req, res) => {
     try {
-      const data = await storage.getWebhookData();
+      const limit = parseInt(req.query.limit as string) || 50;
+      const data = await storage.getWebhookData(limit);
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch webhook data" });
