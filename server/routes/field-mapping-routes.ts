@@ -292,21 +292,30 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: "brokerName and mappings[] required" });
       }
 
+      const { db: database } = await import("../db");
+      const schema = await import("@shared/schema");
+
+      let ufSynced = 0;
       if (incomingUniversalFields && Array.isArray(incomingUniversalFields)) {
-        const { db: database } = await import("../db");
-        const schema = await import("@shared/schema");
         for (const uf of incomingUniversalFields) {
-          await database.insert(schema.universal_fields).values({
+          const inserted = await database.insert(schema.universal_fields).values({
             fieldName: uf.fieldName || uf.field_name,
             displayName: uf.displayName || uf.display_name,
             category: uf.category,
             dataType: uf.dataType || uf.data_type || "string",
             description: uf.description || null,
-          }).onConflictDoNothing().execute();
+          }).onConflictDoNothing().returning();
+          if (inserted.length > 0) ufSynced++;
         }
+        console.log(`[sync-receive] Universal fields: ${incomingUniversalFields.length} received, ${ufSynced} new`);
       }
 
-      await storage.deleteBrokerFieldMappings(brokerName);
+      const deleted = await storage.deleteBrokerFieldMappings(brokerName);
+      console.log(`[sync-receive] Deleted ${deleted} existing broker mappings for ${brokerName}`);
+
+      const withUniversal = mappings.filter((m: any) => m.universalFieldName || m.universal_field_name).length;
+      const withMatched = mappings.filter((m: any) => (m.matchStatus || m.match_status) === "matched").length;
+      console.log(`[sync-receive] Incoming: ${mappings.length} mappings, ${withUniversal} with universalFieldName, ${withMatched} matched`);
 
       const fields = mappings.map((m: any, i: number) => ({
         brokerName: m.brokerName || m.broker_name || brokerName,
@@ -326,12 +335,22 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
         notes: m.notes || null,
       }));
 
-      const results = await storage.upsertBrokerFieldMappings(fields);
+      const results: any[] = [];
+      for (const field of fields) {
+        const [inserted] = await database.insert(schema.broker_field_mappings).values(field).returning();
+        results.push(inserted);
+      }
+
+      const finalWithUniversal = results.filter((r: any) => r.universalFieldName).length;
+      const finalMatched = results.filter((r: any) => r.matchStatus === "matched").length;
+      console.log(`[sync-receive] Inserted: ${results.length} rows, ${finalWithUniversal} with universalFieldName, ${finalMatched} matched`);
+
       const stats = await storage.getBrokerFieldMappingStats(brokerName);
 
       res.json({
         success: true,
         synced: results.length,
+        universalFieldsSynced: ufSynced,
         stats,
       });
     } catch (error: any) {
