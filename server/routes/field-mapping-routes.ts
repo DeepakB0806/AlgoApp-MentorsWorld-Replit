@@ -236,6 +236,128 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.post("/api/broker-field-mappings/sync-to-production", async (req, res) => {
+    try {
+      const { brokerName } = req.body;
+      if (!brokerName) {
+        return res.status(400).json({ error: "brokerName required" });
+      }
+
+      const domainSetting = await storage.getSetting("domain_name");
+      if (!domainSetting || !domainSetting.value) {
+        return res.status(400).json({ error: "Production domain not configured. Set domain name in settings." });
+      }
+
+      const devMappings = await storage.getBrokerFieldMappings(brokerName);
+      if (devMappings.length === 0) {
+        return res.status(404).json({ error: "No broker field mappings found in development" });
+      }
+
+      const devUniversalFields = await storage.getUniversalFields();
+
+      const productionUrl = `https://${domainSetting.value}/api/broker-field-mappings/sync-receive`;
+
+      const response = await fetch(productionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-sync-key": process.env.SESSION_SECRET || "",
+        },
+        body: JSON.stringify({ brokerName, mappings: devMappings, universalFields: devUniversalFields }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        return res.status(502).json({ error: `Production sync failed: ${response.status} ${errText}` });
+      }
+
+      const result = await response.json();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Failed to sync to production:", error);
+      res.status(500).json({ error: `Sync failed: ${error.message}` });
+    }
+  });
+
+  app.post("/api/broker-field-mappings/sync-receive", async (req, res) => {
+    try {
+      const syncKey = req.headers["x-sync-key"];
+      if (syncKey !== process.env.SESSION_SECRET) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const { brokerName, mappings, universalFields: incomingUniversalFields } = req.body;
+      if (!brokerName || !mappings || !Array.isArray(mappings)) {
+        return res.status(400).json({ error: "brokerName and mappings[] required" });
+      }
+
+      const { db: database } = await import("../db");
+      const schema = await import("@shared/schema");
+
+      let ufSynced = 0;
+      if (incomingUniversalFields && Array.isArray(incomingUniversalFields)) {
+        for (const uf of incomingUniversalFields) {
+          const inserted = await database.insert(schema.universal_fields).values({
+            fieldName: uf.fieldName || uf.field_name,
+            displayName: uf.displayName || uf.display_name,
+            category: uf.category,
+            dataType: uf.dataType || uf.data_type || "string",
+            description: uf.description || null,
+          }).onConflictDoNothing().returning();
+          if (inserted.length > 0) ufSynced++;
+        }
+        console.log(`[sync-receive] Universal fields: ${incomingUniversalFields.length} received, ${ufSynced} new`);
+      }
+
+      const deleted = await storage.deleteBrokerFieldMappings(brokerName);
+      console.log(`[sync-receive] Deleted ${deleted} existing broker mappings for ${brokerName}`);
+
+      const withUniversal = mappings.filter((m: any) => m.universalFieldName || m.universal_field_name).length;
+      const withMatched = mappings.filter((m: any) => (m.matchStatus || m.match_status) === "matched").length;
+      console.log(`[sync-receive] Incoming: ${mappings.length} mappings, ${withUniversal} with universalFieldName, ${withMatched} matched`);
+
+      const fields = mappings.map((m: any, i: number) => ({
+        brokerName: m.brokerName || m.broker_name || brokerName,
+        category: m.category,
+        fieldCode: m.fieldCode || m.field_code,
+        fieldName: m.fieldName || m.field_name,
+        fieldType: m.fieldType || m.field_type || "string",
+        fieldDescription: m.fieldDescription || m.field_description || null,
+        direction: m.direction || "request",
+        endpoint: m.endpoint || null,
+        universalFieldName: m.universalFieldName || m.universal_field_name || null,
+        matchStatus: m.matchStatus || m.match_status || "pending",
+        allowedValues: m.allowedValues || m.allowed_values || null,
+        defaultValue: m.defaultValue || m.default_value || null,
+        isRequired: m.isRequired ?? m.is_required ?? false,
+        sortOrder: m.sortOrder ?? m.sort_order ?? i,
+        notes: m.notes || null,
+      }));
+
+      const results: any[] = [];
+      for (const field of fields) {
+        const [inserted] = await database.insert(schema.broker_field_mappings).values(field).returning();
+        results.push(inserted);
+      }
+
+      const finalWithUniversal = results.filter((r: any) => r.universalFieldName).length;
+      const finalMatched = results.filter((r: any) => r.matchStatus === "matched").length;
+      console.log(`[sync-receive] Inserted: ${results.length} rows, ${finalWithUniversal} with universalFieldName, ${finalMatched} matched`);
+
+      const stats = await storage.getBrokerFieldMappingStats(brokerName);
+
+      res.json({
+        success: true,
+        synced: results.length,
+        universalFieldsSynced: ufSynced,
+        stats,
+      });
+    } catch (error: any) {
+      console.error("Failed to receive sync:", error);
+      res.status(500).json({ error: `Sync receive failed: ${error.message}` });
+    }
+  });
 
   app.patch("/api/broker-field-mappings/:id", async (req, res) => {
     try {
