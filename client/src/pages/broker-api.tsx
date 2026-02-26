@@ -33,6 +33,10 @@ function ApiFieldsReference() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [engineSteps, setEngineSteps] = useState<EngineStep[] | null>(null);
+  const [resyncReport, setResyncReport] = useState<{
+    broker: { total: number; matched: number; pending: number; updated: number; corrections: { fieldCode: string; from: string; to: string }[] };
+    universal: { total: number; covered: number; uncovered: number; uncoveredFields: { fieldName: string; category: string; displayName: string }[] };
+  } | null>(null);
   const [editingField, setEditingField] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<{ universalFieldName: string; matchStatus: string }>({ universalFieldName: "", matchStatus: "" });
 
@@ -110,7 +114,7 @@ function ApiFieldsReference() {
     },
   });
 
-  const runEngine = async () => {
+  const runInitialBuild = async () => {
     const steps: EngineStep[] = [
       { label: "Building database table", status: "waiting" },
       { label: "Seeding broker fields", status: "waiting" },
@@ -169,6 +173,58 @@ function ApiFieldsReference() {
       }
       setEngineSteps([...steps]);
       toast({ title: "Engine failed", description: String(err), variant: "destructive" });
+    }
+  };
+
+  const runReSync = async () => {
+    const steps: EngineStep[] = [
+      { label: "Reading broker fields from database", status: "waiting" },
+      { label: "Cross-referencing universal fields database", status: "waiting" },
+      { label: "Updating match status", status: "waiting" },
+    ];
+    setEngineSteps([...steps]);
+
+    try {
+      steps[0].status = "running";
+      setEngineSteps([...steps]);
+
+      const response = await apiRequest("POST", `/api/broker-field-mappings/${brokerName}/revalidate`);
+      const result = await response.json();
+
+      steps[0].status = "done";
+      steps[0].detail = `${result.broker.total} broker fields`;
+
+      steps[1].status = "running";
+      setEngineSteps([...steps]);
+      await new Promise(r => setTimeout(r, 300));
+      steps[1].status = "done";
+      steps[1].detail = `${result.universal.total} universal fields`;
+
+      steps[2].status = "running";
+      setEngineSteps([...steps]);
+      await new Promise(r => setTimeout(r, 200));
+      steps[2].status = "done";
+      steps[2].detail = `${result.broker.matched} matched • ${result.broker.pending} pending • ${result.broker.updated} updated`;
+      setEngineSteps([...steps]);
+
+      setResyncReport(result);
+
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName] });
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-field-mappings", brokerName, "cross-reference"] });
+
+      toast({
+        title: "Re-sync complete",
+        description: `DB-to-DB: ${result.broker.matched}/${result.broker.total} broker fields matched, ${result.universal.covered}/${result.universal.total} universal fields covered`,
+      });
+    } catch (err) {
+      const failedIdx = steps.findIndex(s => s.status === "running");
+      if (failedIdx >= 0) {
+        steps[failedIdx].status = "error";
+        steps[failedIdx].detail = "Failed";
+      }
+      setEngineSteps([...steps]);
+      toast({ title: "Re-sync failed", description: String(err), variant: "destructive" });
     }
   };
 
@@ -707,7 +763,7 @@ function ApiFieldsReference() {
                   size="sm"
                   variant="outline"
                   className="text-xs h-7"
-                  onClick={(e) => { e.stopPropagation(); runEngine(); }}
+                  onClick={(e) => { e.stopPropagation(); runReSync(); }}
                   data-testid="button-resync-mapping"
                 >
                   <RefreshCw className="w-3 h-3 mr-1" />
@@ -723,7 +779,7 @@ function ApiFieldsReference() {
                 <br />Map them to the Universal Layer to enable the Translation Layer.
               </p>
               <Button
-                onClick={(e) => { e.stopPropagation(); runEngine(); }}
+                onClick={(e) => { e.stopPropagation(); runInitialBuild(); }}
                 className="bg-emerald-600 hover:bg-emerald-700"
                 data-testid="button-map-universal-layer"
               >
@@ -747,6 +803,80 @@ function ApiFieldsReference() {
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {resyncReport && (
+            <div className="p-3 rounded-md bg-slate-900/50 border border-border space-y-3" data-testid="resync-report">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-emerald-400 flex items-center gap-1.5">
+                  <Database className="w-3.5 h-3.5" />
+                  Database-to-Database Match Report
+                </span>
+                <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => setResyncReport(null)} data-testid="button-close-report">
+                  <X className="w-3 h-3 text-muted-foreground" />
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-medium text-blue-400 uppercase tracking-wider">Broker API Fields DB</span>
+                  <div className="text-xs space-y-0.5">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Total fields</span><strong>{resyncReport.broker.total}</strong></div>
+                    <div className="flex justify-between"><span className="text-emerald-400">Matched</span><strong className="text-emerald-400">{resyncReport.broker.matched}</strong></div>
+                    <div className="flex justify-between"><span className="text-amber-400">Pending</span><strong className="text-amber-400">{resyncReport.broker.pending}</strong></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Updated this sync</span><strong>{resyncReport.broker.updated}</strong></div>
+                  </div>
+                  {resyncReport.broker.total > 0 && (
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${(resyncReport.broker.matched / resyncReport.broker.total) * 100}%` }} />
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-medium text-purple-400 uppercase tracking-wider">Universal Fields DB</span>
+                  <div className="text-xs space-y-0.5">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Total fields</span><strong>{resyncReport.universal.total}</strong></div>
+                    <div className="flex justify-between"><span className="text-emerald-400">Covered</span><strong className="text-emerald-400">{resyncReport.universal.covered}</strong></div>
+                    <div className="flex justify-between"><span className="text-amber-400">Uncovered</span><strong className="text-amber-400">{resyncReport.universal.uncovered}</strong></div>
+                  </div>
+                  {resyncReport.universal.total > 0 && (
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${(resyncReport.universal.covered / resyncReport.universal.total) * 100}%` }} />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {resyncReport.broker.corrections.length > 0 && (
+                <div className="text-xs">
+                  <span className="text-muted-foreground">Casing corrections applied:</span>
+                  <div className="mt-1 max-h-20 overflow-y-auto space-y-0.5">
+                    {resyncReport.broker.corrections.map((c, i) => (
+                      <div key={i} className="font-mono text-[10px] text-muted-foreground">
+                        {c.fieldCode}: <span className="text-red-400 line-through">{c.from}</span> → <span className="text-emerald-400">{c.to}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {resyncReport.universal.uncovered > 0 && (
+                <details className="text-xs">
+                  <summary className="text-amber-400 cursor-pointer hover:text-amber-300">
+                    {resyncReport.universal.uncovered} universal fields not covered by broker
+                  </summary>
+                  <div className="mt-1 max-h-32 overflow-y-auto space-y-0.5">
+                    {resyncReport.universal.uncoveredFields.map((uf, i) => (
+                      <div key={i} className="font-mono text-[10px] text-muted-foreground flex gap-2" data-testid={`report-uncovered-${i}`}>
+                        <span className="text-foreground/70">{uf.fieldName}</span>
+                        <span>({uf.displayName} • {uf.category})</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
             </div>
           )}
 

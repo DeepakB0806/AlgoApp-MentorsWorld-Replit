@@ -142,6 +142,94 @@ export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.post("/api/broker-field-mappings/:brokerName/revalidate", async (req, res) => {
+    try {
+      const brokerName = req.params.brokerName;
+      const [brokerMappings, universalFields] = await Promise.all([
+        storage.getBrokerFieldMappings(brokerName),
+        storage.getUniversalFields(),
+      ]);
+
+      if (brokerMappings.length === 0) {
+        return res.status(404).json({ error: "No broker field mappings found" });
+      }
+
+      const validNames = new Set(universalFields.map(f => f.fieldName));
+      const lowerToOriginal = new Map(universalFields.map(f => [f.fieldName.toLowerCase(), f.fieldName]));
+
+      let updated = 0;
+      let matched = 0;
+      let pending = 0;
+      const corrections: { fieldCode: string; from: string; to: string }[] = [];
+      const matchedUniversalNames = new Set<string>();
+
+      for (const m of brokerMappings) {
+        let newStatus = m.matchStatus;
+        let newUniversalName = m.universalFieldName;
+
+        if (m.universalFieldName) {
+          if (validNames.has(m.universalFieldName)) {
+            newStatus = "matched";
+          } else {
+            const corrected = lowerToOriginal.get(m.universalFieldName.toLowerCase());
+            if (corrected) {
+              newUniversalName = corrected;
+              newStatus = "matched";
+              corrections.push({ fieldCode: m.fieldCode, from: m.universalFieldName, to: corrected });
+            } else {
+              newStatus = "pending";
+              newUniversalName = null;
+            }
+          }
+        } else if (m.matchStatus === "matched") {
+          newStatus = "pending";
+        }
+
+        if (newStatus !== m.matchStatus || newUniversalName !== m.universalFieldName) {
+          await storage.updateBrokerFieldMapping(m.id, {
+            matchStatus: newStatus,
+            universalFieldName: newUniversalName,
+          } as any);
+          updated++;
+        }
+
+        if (newStatus === "matched" && newUniversalName) {
+          matched++;
+          matchedUniversalNames.add(newUniversalName);
+        } else {
+          pending++;
+        }
+      }
+
+      const uncoveredUniversal: { fieldName: string; category: string; displayName: string }[] = [];
+      for (const uf of universalFields) {
+        if (!matchedUniversalNames.has(uf.fieldName)) {
+          uncoveredUniversal.push({ fieldName: uf.fieldName, category: uf.category, displayName: uf.displayName });
+        }
+      }
+
+      res.json({
+        success: true,
+        broker: {
+          total: brokerMappings.length,
+          matched,
+          pending,
+          updated,
+          corrections,
+        },
+        universal: {
+          total: universalFields.length,
+          covered: matchedUniversalNames.size,
+          uncovered: uncoveredUniversal.length,
+          uncoveredFields: uncoveredUniversal,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to revalidate broker field mappings:", error);
+      res.status(500).json({ error: "Failed to revalidate broker field mappings" });
+    }
+  });
+
   app.patch("/api/broker-field-mappings/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
