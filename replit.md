@@ -65,7 +65,22 @@ The Translation Layer (`server/tl-kotak-neo-v3.ts`) is an independent engine tha
 - `reload()` — refreshes mappings from database without server restart
 - `getStatus()` — returns health, field counts, categories, load time
 - Status endpoint: `GET /api/tl/kotak_neo_v3/status`, Reload endpoint: `POST /api/tl/kotak_neo_v3/reload`
-The TL reads from the production database at runtime. Zero hardcoded field names. The EL (`server/kotak-neo-api.ts`) calls the TL for all field translations. Dev and production have separate databases; use "Sync Broker Fields" and "Sync Universal Fields" buttons to push data from dev to production.
+The TL reads from the production database at runtime. Zero hardcoded field names.
+
+### Execution Layer (EL)
+The Execution Layer (`server/el-kotak-neo-v3.ts`) is an independent, database-driven engine that handles all broker API communication. It loads endpoints, headers, and exchange mappings from 3 database tables on startup:
+- `broker_api_endpoints` (15 Kotak endpoints) — endpoint paths, HTTP methods, body formats, auth types
+- `broker_exchange_maps` (6 exchange mappings) — universal code to broker code translation (NSE→nse_cm, NFO→nse_fo, etc.)
+- `broker_headers` (11 header templates) — header resolution by auth type (static values or config field lookups)
+- Seed file: `server/seed-broker-el.ts` — `ensureBrokerEndpoints()` auto-populates tables on startup
+The EL provides: `authenticate()`, `placeOrder()`, `modifyOrder()`, `cancelOrder()`, `getPositions()`, `getHoldings()`, `getOrderBook()`, `getTradeBook()`, `getOrderHistory()`, `checkMargin()`, `getLimits()`, `getQuotes()`, `mapExchange()`, `testConnectivity()`
+- `reload()` — refreshes from database without server restart
+- `getStatus()` — returns endpoint/exchange/header counts, categories, health
+- Status endpoint: `GET /api/el/kotak_neo_v3/status`, Reload endpoint: `POST /api/el/kotak_neo_v3/reload`
+The EL calls TL for all field translations. Zero hardcoded URLs, field codes, or headers. Architecture: Trade Engine → EL → TL → Production DB.
+
+### Data Flow
+Dev and production have separate databases; use "Sync Broker Fields" and "Sync Universal Fields" buttons to push data from dev to production. The 3 EL tables (broker_api_endpoints, broker_exchange_maps, broker_headers) also need sync after publish.
 
 ### Route Ordering Notes
 - `/api/webhooks/default-fields` must be registered BEFORE `/api/webhooks/:id` to prevent Express from treating "default-fields" as an ID parameter. This is handled by the webhook-routes module.

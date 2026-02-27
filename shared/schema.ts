@@ -640,42 +640,65 @@ export const insertUniversalFieldSchema = createInsertSchema(universal_fields).o
 export type InsertUniversalField = z.infer<typeof insertUniversalFieldSchema>;
 export type UniversalField = typeof universal_fields.$inferSelect;
 
-// ====== BROKER FIELD CORRELATION MAP ======
-// Maps strategy/plan parameters to Kotak Neo API field codes
-// Reference: broker-api.tsx order placement fields
+// ====== BROKER API ENDPOINTS TABLE ======
+export const broker_api_endpoints = pgTable("broker_api_endpoints", {
+  id: serial("id").primaryKey(),
+  brokerName: text("broker_name").notNull(),
+  category: text("category").notNull(),
+  endpointName: text("endpoint_name").notNull(),
+  endpointPath: text("endpoint_path").notNull(),
+  httpMethod: text("http_method").notNull(),
+  baseUrlType: text("base_url_type").notNull(),
+  contentType: text("content_type").notNull(),
+  bodyFormat: text("body_format").notNull(),
+  authType: text("auth_type").notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").default(true),
+  sortOrder: integer("sort_order").default(0),
+}, (table) => [
+  index("idx_bae_broker_name").on(table.brokerName),
+  index("idx_bae_broker_category").on(table.brokerName, table.category),
+]);
 
-export const BROKER_FIELD_MAP = {
-  // Transaction Type: BUY/SELL → tt: B/S
-  transactionType: {
-    brokerField: "tt",
-    values: { BUY: "B", SELL: "S" },
-  },
-  // Product Code: MIS/NRML/CNC → pc
-  orderType: {
-    brokerField: "pc",
-    values: { MIS: "MIS", NRML: "NRML", CNC: "CNC" },
-  },
-  // Exchange Segment: NSE/BSE/NFO/MCX → es
-  exchange: {
-    brokerField: "es",
-    values: {
-      NSE: "nse_cm",
-      BSE: "bse_cm",
-      NFO: "nse_fo",
-      BFO: "bse_fo",
-      MCX: "mcx_fo",
-      CDS: "cde_fo",
-    },
-  },
-  // Option Type mapping for symbol construction
-  optionType: {
-    brokerField: "ts",
-    values: { CE: "CE", PE: "PE", FUT: "XX" },
-  },
-} as const;
+export const insertBrokerApiEndpointSchema = createInsertSchema(broker_api_endpoints).omit({ id: true });
+export type InsertBrokerApiEndpoint = z.infer<typeof insertBrokerApiEndpointSchema>;
+export type BrokerApiEndpoint = typeof broker_api_endpoints.$inferSelect;
 
-export type BrokerFieldMapKey = keyof typeof BROKER_FIELD_MAP;
+// ====== BROKER EXCHANGE MAPS TABLE ======
+export const broker_exchange_maps = pgTable("broker_exchange_maps", {
+  id: serial("id").primaryKey(),
+  brokerName: text("broker_name").notNull(),
+  universalCode: text("universal_code").notNull(),
+  brokerCode: text("broker_code").notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").default(true),
+}, (table) => [
+  index("idx_bem_broker_name").on(table.brokerName),
+]);
 
+export const insertBrokerExchangeMapSchema = createInsertSchema(broker_exchange_maps).omit({ id: true });
+export type InsertBrokerExchangeMap = z.infer<typeof insertBrokerExchangeMapSchema>;
+export type BrokerExchangeMap = typeof broker_exchange_maps.$inferSelect;
+
+// ====== BROKER HEADERS TABLE ======
+export const broker_headers = pgTable("broker_headers", {
+  id: serial("id").primaryKey(),
+  brokerName: text("broker_name").notNull(),
+  authType: text("auth_type").notNull(),
+  headerName: text("header_name").notNull(),
+  headerSource: text("header_source").notNull(),
+  headerValue: text("header_value").notNull(),
+  sortOrder: integer("sort_order").default(0),
+  isActive: boolean("is_active").default(true),
+}, (table) => [
+  index("idx_bh_broker_name").on(table.brokerName),
+]);
+
+export const insertBrokerHeaderSchema = createInsertSchema(broker_headers).omit({ id: true });
+export type InsertBrokerHeader = z.infer<typeof insertBrokerHeaderSchema>;
+export type BrokerHeader = typeof broker_headers.$inferSelect;
+
+// ====== HELPER FUNCTIONS ======
 export function buildTradingSymbol(ticker: string, legType: string, strike: string): string {
   if (!ticker) return "";
   if (legType === "FUT") return `${ticker}-FUT`;
@@ -684,14 +707,16 @@ export function buildTradingSymbol(ticker: string, legType: string, strike: stri
 }
 
 export function buildBrokerOrderParams(leg: PlanTradeLeg, config: { exchange?: string | null; ticker?: string | null; productMode?: "MIS" | "NRML" }): Partial<OrderParams> {
+  const exchangeMap: Record<string, string> = { NSE: "nse_cm", BSE: "bse_cm", NFO: "nse_fo", BFO: "bse_fo", MCX: "mcx_fo", CDS: "cde_fo" };
+  const txMap: Record<string, string> = { BUY: "B", SELL: "S" };
   const exchange = leg.exchange || config.exchange || "NFO";
   const ticker = config.ticker || "";
   const ts = buildTradingSymbol(ticker, leg.type, leg.strike);
   const product = leg.orderType || config.productMode || "MIS";
   return {
-    transaction_type: BROKER_FIELD_MAP.transactionType.values[leg.action] || "B",
-    product: BROKER_FIELD_MAP.orderType.values[product] || "MIS",
-    exchange_segment: BROKER_FIELD_MAP.exchange.values[exchange as keyof typeof BROKER_FIELD_MAP.exchange.values] || "nse_fo",
+    transaction_type: txMap[leg.action] || "B",
+    product: product,
+    exchange_segment: exchangeMap[exchange as string] || "nse_fo",
     quantity: String(leg.lots),
     order_type: "MKT",
     validity: "DAY",

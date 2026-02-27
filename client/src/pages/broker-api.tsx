@@ -77,6 +77,28 @@ function ApiFieldsReference() {
     },
   });
 
+  interface ELStatusData {
+    isReady: boolean;
+    brokerName: string;
+    endpointCount: number;
+    exchangeMapCount: number;
+    headerCount: number;
+    categories: string[];
+    endpointNames: string[];
+    lastLoadTime: string | null;
+    lastLoadDurationMs: number | null;
+    initError: string | null;
+    tlReady: boolean;
+  }
+
+  const elStatusQuery = useQuery<ELStatusData>({
+    queryKey: ["/api/el/kotak_neo_v3/status"],
+    queryFn: async () => {
+      const res = await fetch("/api/el/kotak_neo_v3/status");
+      return res.json();
+    },
+  });
+
   const [isReloadingTL, setIsReloadingTL] = useState(false);
   const reloadTL = async () => {
     setIsReloadingTL(true);
@@ -88,6 +110,20 @@ function ApiFieldsReference() {
       toast({ title: "TL reload failed", description: String(err), variant: "destructive" });
     } finally {
       setIsReloadingTL(false);
+    }
+  };
+
+  const [isReloadingEL, setIsReloadingEL] = useState(false);
+  const reloadEL = async () => {
+    setIsReloadingEL(true);
+    try {
+      await apiRequest("POST", "/api/el/kotak_neo_v3/reload", {});
+      queryClient.invalidateQueries({ queryKey: ["/api/el/kotak_neo_v3/status"] });
+      toast({ title: "Execution Layer reloaded", description: "Endpoints, headers, and exchange maps refreshed from database." });
+    } catch (err) {
+      toast({ title: "EL reload failed", description: String(err), variant: "destructive" });
+    } finally {
+      setIsReloadingEL(false);
     }
   };
 
@@ -849,6 +885,17 @@ function ApiFieldsReference() {
                         : "TL Not Ready"}
                     </Badge>
                   )}
+                  {elStatusQuery.data && (
+                    <Badge
+                      variant={elStatusQuery.data.isReady ? "default" : "destructive"}
+                      className={`text-[10px] px-1.5 py-0 h-5 ${elStatusQuery.data.isReady ? "bg-blue-600 hover:bg-blue-700" : ""}`}
+                      data-testid="badge-el-status"
+                    >
+                      {elStatusQuery.data.isReady
+                        ? `EL Active: ${elStatusQuery.data.endpointCount} endpoints, ${elStatusQuery.data.exchangeMapCount} exchanges`
+                        : "EL Not Ready"}
+                    </Badge>
+                  )}
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
                   <div className="flex flex-col items-center gap-0.5">
@@ -907,6 +954,21 @@ function ApiFieldsReference() {
                     >
                       <Database className={`w-3 h-3 mr-1 ${isReloadingTL ? 'animate-spin' : ''}`} />
                       {isReloadingTL ? "Reloading..." : "Reload TL"}
+                    </Button>
+                  </div>
+                  <span className="text-muted-foreground/40 text-xs mt-3">›</span>
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Step 5</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7"
+                      onClick={(e) => { e.stopPropagation(); reloadEL(); }}
+                      disabled={isReloadingEL}
+                      data-testid="button-reload-el"
+                    >
+                      <Activity className={`w-3 h-3 mr-1 ${isReloadingEL ? 'animate-spin' : ''}`} />
+                      {isReloadingEL ? "Reloading..." : "Reload EL"}
                     </Button>
                   </div>
                 </div>

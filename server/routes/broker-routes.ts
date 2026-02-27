@@ -2,15 +2,7 @@ import type { Express } from "express";
 import type { IStorage } from "../storage";
 import { insertBrokerConfigSchema } from "@shared/schema";
 import { tradingCache } from "../cache";
-import { 
-  testKotakNeoConnectivity, 
-  authenticateKotakNeo,
-  getPositions as getKotakPositions,
-  getOrderBook as getKotakOrders,
-  getHoldings as getKotakHoldings,
-  getLimits as getKotakLimits,
-  type KotakNeoSession
-} from "../kotak-neo-api";
+import EL from "../el-kotak-neo-v3";
 import {
   testBinanceConnectivity,
   authenticateBinance,
@@ -21,51 +13,6 @@ import {
   getProxyStatus as getBinanceProxyStatus,
   type BinanceSession
 } from "../binance-api";
-
-async function getAuthenticatedSession(storage: IStorage): Promise<{ session: KotakNeoSession; consumerKey: string; brokerId: string } | null> {
-  const configs = await storage.getBrokerConfigs();
-  const kotakConfig = configs.find(c => 
-    c.brokerName === "kotak_neo" && 
-    c.isConnected && 
-    c.accessToken && 
-    c.sessionId && 
-    c.baseUrl
-  );
-  
-  if (!kotakConfig || !kotakConfig.accessToken || !kotakConfig.sessionId || !kotakConfig.baseUrl || !kotakConfig.consumerKey) {
-    return null;
-  }
-  
-  return {
-    session: {
-      viewToken: "",
-      sidView: "",
-      sessionToken: kotakConfig.accessToken,
-      sidSession: kotakConfig.sessionId,
-      baseUrl: kotakConfig.baseUrl,
-    },
-    consumerKey: kotakConfig.consumerKey,
-    brokerId: kotakConfig.id,
-  };
-}
-
-async function getAuthenticatedSessionByConfigId(storage: IStorage, configId: string): Promise<{ session: KotakNeoSession; consumerKey: string; brokerId: string } | null> {
-  const config = await storage.getBrokerConfig(configId);
-  if (!config || !config.isConnected || !config.accessToken || !config.sessionId || !config.baseUrl || !config.consumerKey) {
-    return null;
-  }
-  return {
-    session: {
-      viewToken: "",
-      sidView: "",
-      sessionToken: config.accessToken,
-      sidSession: config.sessionId,
-      baseUrl: config.baseUrl,
-    },
-    consumerKey: config.consumerKey,
-    brokerId: config.id,
-  };
-}
 
 function getBinanceSessionFromConfig(config: { consumerKey: string | null; consumerSecret: string | null; environment: string | null }): BinanceSession | null {
   if (!config.consumerKey || !config.consumerSecret) return null;
@@ -154,7 +101,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
       const startTime = Date.now();
 
-      let result: { success: boolean; message: string; error?: string };
+      let result: { success: boolean; message?: string; error?: string };
 
       if (config.brokerName === "paper_trade") {
         result = { success: true, message: "Paper Trade engine is ready — no external connection needed" };
@@ -165,7 +112,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
             error: "Consumer Key (API Token) is required for Kotak Neo" 
           });
         }
-        result = await testKotakNeoConnectivity(config.consumerKey);
+        result = await EL.testConnectivity(config.consumerKey);
       } else if (config.brokerName === "binance") {
         const isTestnet = config.environment !== "prod";
         result = await testBinanceConnectivity(config.consumerKey || "", config.consumerSecret || "", isTestnet);
@@ -326,19 +273,12 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: "TOTP is required for authentication" });
       }
 
-      const result = await authenticateKotakNeo({
-        consumer_key: config.consumerKey,
-        mobile_number: config.mobileNumber,
-        ucc: config.ucc,
-        mpin: config.mpin,
-        totp: totp,
-        environment: config.environment || "prod",
-      });
+      const result = await EL.authenticate(config, totp);
 
       let sessionExpiry: string | null = null;
-      if (result.accessToken) {
+      if (result.success && result.data?.sessionToken) {
         try {
-          const parts = result.accessToken.split('.');
+          const parts = result.data.sessionToken.split('.');
           if (parts.length === 3) {
             const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
             if (payload.exp) {
@@ -353,9 +293,11 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         isConnected: result.success,
         lastConnected: result.success ? now : config.lastConnected,
         connectionError: result.success ? null : result.error,
-        accessToken: result.accessToken || null,
-        sessionId: result.sessionId || null,
-        baseUrl: result.baseUrl || null,
+        accessToken: result.data?.sessionToken || null,
+        sessionId: result.data?.sidSession || null,
+        baseUrl: result.data?.baseUrl || null,
+        viewToken: result.data?.viewToken || null,
+        sidView: result.data?.sidView || null,
         lastTotpUsed: totp,
         lastTotpTime: now,
         totalLogins: (config.totalLogins || 0) + 1,
@@ -370,9 +312,9 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         message: result.message || null,
         errorMessage: result.error || null,
         totpUsed: totp,
-        accessToken: result.accessToken || null,
-        sessionId: result.sessionId || null,
-        baseUrl: result.baseUrl || null,
+        accessToken: result.data?.sessionToken || null,
+        sessionId: result.data?.sidSession || null,
+        baseUrl: result.data?.baseUrl || null,
         sessionExpiry,
         loginAt: now,
       });
@@ -406,42 +348,8 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.json(result.success && result.data ? result.data : []);
       }
 
-      const auth = await getAuthenticatedSessionByConfigId(storage, brokerConfigId);
-      if (!auth) {
-        return res.status(400).json({ error: "Broker not connected or session expired" });
-      }
-      const result = await getKotakPositions(auth.session);
-      if (result.success && result.data) {
-        const positions = (result.data as unknown[]).map((pos: unknown) => {
-          const p = pos as Record<string, unknown>;
-          const buyQty = Number(p.flBuyQty || 0);
-          const sellQty = Number(p.flSellQty || 0);
-          const buyAmt = Number(p.buyAmt || 0);
-          const sellAmt = Number(p.sellAmt || 0);
-          return {
-            trading_symbol: String(p.trdSym || ""),
-            exchange: String(p.exSeg || ""),
-            quantity: buyQty - sellQty,
-            buy_qty: buyQty,
-            sell_qty: sellQty,
-            buy_avg: buyQty > 0 ? buyAmt / buyQty : 0,
-            sell_avg: sellQty > 0 ? sellAmt / sellQty : 0,
-            buy_amt: buyAmt,
-            sell_amt: sellAmt,
-            pnl: Number(p.mtm || 0),
-            ltp: Number(p.ltp || 0),
-            product_type: String(p.prod || ""),
-            option_type: p.optTp ? String(p.optTp) : undefined,
-            strike_price: p.stkPrc ? Number(p.stkPrc) : undefined,
-            expiry: p.exDt ? String(p.exDt) : undefined,
-            realised_pnl: Number(p.realisedprofitloss || 0),
-            unrealised_pnl: Number(p.unrealisedprofitloss || 0),
-            token: String(p.tok || ""),
-          };
-        });
-        return res.json(positions);
-      }
-      res.json([]);
+      const result = await EL.getPositions(brokerConfig);
+      return res.json(result.success && result.data ? result.data : []);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch positions for broker config" });
     }
@@ -585,41 +493,12 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
 
   app.get("/api/positions", async (req, res) => {
     try {
-      const auth = await getAuthenticatedSession(storage);
+      const kotakConfig = await findConnectedKotak(storage);
       
-      if (auth) {
-        const result = await getKotakPositions(auth.session);
+      if (kotakConfig) {
+        const result = await EL.getPositions(kotakConfig);
         if (result.success && result.data) {
-          console.log("First Kotak position item:", JSON.stringify(result.data[0], null, 2));
-          const positions = (result.data as unknown[]).map((pos: unknown) => {
-            const p = pos as Record<string, unknown>;
-            const buyQty = Number(p.flBuyQty || 0);
-            const sellQty = Number(p.flSellQty || 0);
-            const buyAmt = Number(p.buyAmt || 0);
-            const sellAmt = Number(p.sellAmt || 0);
-            
-            return {
-              trading_symbol: String(p.trdSym || ""),
-              exchange: String(p.exSeg || ""),
-              quantity: buyQty - sellQty,
-              buy_qty: buyQty,
-              sell_qty: sellQty,
-              buy_avg: buyQty > 0 ? buyAmt / buyQty : 0,
-              sell_avg: sellQty > 0 ? sellAmt / sellQty : 0,
-              buy_amt: buyAmt,
-              sell_amt: sellAmt,
-              pnl: Number(p.mtm || 0),
-              ltp: Number(p.ltp || 0),
-              product_type: String(p.prod || ""),
-              option_type: p.optTp ? String(p.optTp) : undefined,
-              strike_price: p.stkPrc ? Number(p.stkPrc) : undefined,
-              expiry: p.exDt ? String(p.exDt) : undefined,
-              realised_pnl: Number(p.realisedprofitloss || 0),
-              unrealised_pnl: Number(p.unrealisedprofitloss || 0),
-              token: String(p.tok || ""),
-            };
-          });
-          return res.json(positions);
+          return res.json(result.data);
         }
       }
       
@@ -632,27 +511,12 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
 
   app.get("/api/orders", async (req, res) => {
     try {
-      const auth = await getAuthenticatedSession(storage);
+      const kotakConfig = await findConnectedKotak(storage);
       
-      if (auth) {
-        const result = await getKotakOrders(auth.session);
+      if (kotakConfig) {
+        const result = await EL.getOrderBook(kotakConfig);
         if (result.success && result.data) {
-          console.log("First Kotak order item:", JSON.stringify(result.data[0], null, 2));
-          const orders = (result.data as unknown[]).map((ord: unknown) => {
-            const o = ord as Record<string, unknown>;
-            return {
-              order_id: String(o.nOrdNo || ""),
-              trading_symbol: String(o.trdSym || ""),
-              transaction_type: String(o.trnsTp || ""),
-              quantity: Number(o.qty || 0),
-              price: Number(o.prc || 0),
-              status: String(o.ordSt || ""),
-              order_type: String(o.prcTp || ""),
-              exchange: String(o.exSeg || ""),
-              timestamp: String(o.ordDtTm || ""),
-            };
-          });
-          return res.json(orders);
+          return res.json(result.data);
         }
       }
       
@@ -665,14 +529,14 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
 
   app.get("/api/holdings", async (req, res) => {
     try {
-      const auth = await getAuthenticatedSession(storage);
+      const kotakConfig = await findConnectedKotak(storage);
       
-      if (auth) {
-        const result = await getKotakHoldings(auth.session);
+      if (kotakConfig) {
+        const result = await EL.getHoldings(kotakConfig);
         
         if (result.sessionExpired) {
-          console.log("Session expired, clearing tokens for broker:", auth.brokerId);
-          await storage.updateBrokerConfig(auth.brokerId, {
+          console.log("Session expired, clearing tokens for broker:", kotakConfig.id);
+          await storage.updateBrokerConfig(kotakConfig.id, {
             accessToken: null,
             sessionId: null,
             baseUrl: null,
@@ -681,37 +545,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         }
         
         if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
-          console.log("First Kotak holding item:", JSON.stringify(result.data[0], null, 2));
-          
-          const holdings = (result.data as unknown[]).map((hld: unknown) => {
-            const h = hld as Record<string, unknown>;
-            const qty = Number(h.quantity || 0);
-            const avgPrice = Number(h.averagePrice || 0);
-            const prevClose = Number(h.closingPrice || 0);
-            const mktValue = Number(h.mktValue || 0);
-            const currentPrice = qty > 0 ? mktValue / qty : prevClose;
-            const investedValue = Number(h.holdingCost || avgPrice * qty);
-            const currentValue = mktValue;
-            const pnl = Number(h.unrealisedGainLoss || 0);
-            const pnlPercent = investedValue > 0 ? (pnl / investedValue) * 100 : 0;
-            const todayPnl = prevClose > 0 ? (currentPrice - prevClose) * qty : 0;
-            const todayPnlPercent = prevClose > 0 ? ((currentPrice - prevClose) / prevClose) * 100 : 0;
-            
-            return {
-              trading_symbol: String(h.displaySymbol || ""),
-              quantity: qty,
-              average_price: avgPrice,
-              current_price: currentPrice,
-              invested_value: investedValue,
-              current_value: currentValue,
-              pnl: pnl,
-              pnl_percent: pnlPercent,
-              today_pnl: todayPnl,
-              today_pnl_percent: todayPnlPercent,
-              prev_close: prevClose,
-            };
-          });
-          return res.json(holdings);
+          return res.json(result.data);
         }
       }
       
@@ -724,12 +558,14 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
 
   app.get("/api/portfolio-summary", async (req, res) => {
     try {
-      const auth = await getAuthenticatedSession(storage);
+      const kotakConfig = await findConnectedKotak(storage);
       
-      if (auth) {
-        const limitsResult = await getKotakLimits(auth.session);
-        const holdingsResult = await getKotakHoldings(auth.session);
-        const positionsResult = await getKotakPositions(auth.session);
+      if (kotakConfig) {
+        const [limitsResult, holdingsResult, positionsResult] = await Promise.all([
+          EL.getLimits(kotakConfig),
+          EL.getHoldings(kotakConfig),
+          EL.getPositions(kotakConfig),
+        ]);
         
         let totalValue = 0;
         let dayPnL = 0;
@@ -737,17 +573,15 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         let availableMargin = 0;
         
         if (holdingsResult.success && holdingsResult.data) {
-          (holdingsResult.data as unknown[]).forEach((h: unknown) => {
-            const hld = h as Record<string, unknown>;
-            totalValue += Number(hld.mktValue || 0);
-            totalPnL += Number(hld.unrealisedGainLoss || 0);
+          (holdingsResult.data as any[]).forEach((h: any) => {
+            totalValue += Number(h.mktValue || h.marketValue || 0);
+            totalPnL += Number(h.unrealisedGainLoss || h.unrealizedPnl || 0);
           });
         }
         
         if (positionsResult.success && positionsResult.data) {
-          (positionsResult.data as unknown[]).forEach((p: unknown) => {
-            const pos = p as Record<string, unknown>;
-            dayPnL += Number(pos.mtm || 0);
+          (positionsResult.data as any[]).forEach((p: any) => {
+            dayPnL += Number(p.mtm || p.markToMarket || 0);
           });
         }
         
@@ -759,12 +593,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
           }
         }
         
-        return res.json({
-          totalValue,
-          dayPnL,
-          totalPnL,
-          availableMargin,
-        });
+        return res.json({ totalValue, dayPnL, totalPnL, availableMargin });
       }
       
       const summary = await storage.getPortfolioSummary();
@@ -831,14 +660,25 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         .filter(c => c.isConnected)
         .map(c => ({ id: c.id, broker: c.brokerName, name: c.name, environment: c.environment }));
 
-      const auth = await getAuthenticatedSession(storage);
+      const kotakConfig = await findConnectedKotak(storage);
       res.json({
-        isAuthenticated: !!auth || connectedBrokers.length > 0,
-        broker: auth ? "kotak_neo" : (connectedBrokers.length > 0 ? connectedBrokers[0].broker : null),
+        isAuthenticated: !!kotakConfig || connectedBrokers.length > 0,
+        broker: kotakConfig ? "kotak_neo" : (connectedBrokers.length > 0 ? connectedBrokers[0].broker : null),
         connectedBrokers,
       });
     } catch (error) {
       res.json({ isAuthenticated: false, broker: null, connectedBrokers: [] });
     }
   });
+}
+
+async function findConnectedKotak(storage: IStorage) {
+  const configs = await storage.getBrokerConfigs();
+  return configs.find(c => 
+    c.brokerName === "kotak_neo" && 
+    c.isConnected && 
+    c.accessToken && 
+    c.sessionId && 
+    c.baseUrl
+  ) || null;
 }

@@ -1,7 +1,7 @@
 import type { IStorage } from "./storage";
 import type { StrategyPlan, StrategyTrade, StrategyConfig, BrokerConfig, WebhookData, ActionMapperEntry } from "@shared/schema";
 import { tradingCache } from "./cache";
-import { placeOrder as placeKotakOrder, type KotakNeoSession, type OrderParams as KotakOrderParams } from "./kotak-neo-api";
+import EL from "./el-kotak-neo-v3";
 import { placeOrder as placeBinanceOrder, type BinanceSession, type BinanceOrderParams } from "./binance-api";
 
 export interface SignalContext {
@@ -53,17 +53,6 @@ export function resolveSignalFromActionMapper(
   return { signalType: fallbackType, blockType: fallbackType === "buy" ? "uptrendLegs" : fallbackType === "sell" ? "downtrendLegs" : "neutralLegs" };
 }
 
-function buildKotakNeoSession(config: BrokerConfig): KotakNeoSession | null {
-  if (!config.isConnected || !config.accessToken || !config.sessionId || !config.baseUrl) return null;
-  return {
-    viewToken: "",
-    sidView: "",
-    sessionToken: config.accessToken,
-    sidSession: config.sessionId,
-    baseUrl: config.baseUrl,
-  };
-}
-
 function buildBinanceSession(config: BrokerConfig): BinanceSession | null {
   if (!config.consumerKey || !config.consumerSecret) return null;
   return {
@@ -71,15 +60,6 @@ function buildBinanceSession(config: BrokerConfig): BinanceSession | null {
     apiSecret: config.consumerSecret,
     isTestnet: config.environment !== "prod",
   };
-}
-
-function mapExchangeForKotak(exchange?: string | null): string {
-  const mapping: Record<string, string> = {
-    "NSE": "nse_cm", "BSE": "bse_cm",
-    "NFO": "nse_fo", "BFO": "bse_fo",
-    "MCX": "mcx_fo", "CDS": "cds_fo",
-  };
-  return mapping[exchange?.toUpperCase() || ""] || "nse_cm";
 }
 
 export async function processTradeSignal(
@@ -209,18 +189,24 @@ async function executeBuySignal(
   let productType = "PAPER";
 
   if (broker === "kotak_neo") {
-    const session = buildKotakNeoSession(brokerConfig);
-    if (!session) return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
+    if (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl) {
+      return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
+    }
 
-    const orderResult = await placeKotakOrder(session, {
+    const orderResult = await EL.placeOrder(brokerConfig, {
       tradingSymbol: ctx.ticker,
-      exchange: mapExchangeForKotak(ctx.exchange),
+      exchangeSegment: EL.mapExchange(ctx.exchange),
       transactionType: "B",
-      quantity,
-      price: 0,
-      orderType: "MKT",
-      productType: "MIS",
+      quantity: String(quantity),
+      price: "0",
+      priceType: "MKT",
+      productCode: "MIS",
       validity: "DAY",
+      afterMarketOrder: "NO",
+      disclosedQuantity: "0",
+      marketProtection: "0",
+      priceFillFlag: "N",
+      triggerPrice: "0",
     });
 
     if (!orderResult.success) {
@@ -316,18 +302,24 @@ async function executeSellSignal(
   let productType = "PAPER";
 
   if (broker === "kotak_neo") {
-    const session = buildKotakNeoSession(brokerConfig);
-    if (!session) return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
+    if (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl) {
+      return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
+    }
 
-    const orderResult = await placeKotakOrder(session, {
+    const orderResult = await EL.placeOrder(brokerConfig, {
       tradingSymbol: ctx.ticker,
-      exchange: mapExchangeForKotak(ctx.exchange),
+      exchangeSegment: EL.mapExchange(ctx.exchange),
       transactionType: "S",
-      quantity,
-      price: 0,
-      orderType: "MKT",
-      productType: "MIS",
+      quantity: String(quantity),
+      price: "0",
+      priceType: "MKT",
+      productCode: "MIS",
       validity: "DAY",
+      afterMarketOrder: "NO",
+      disclosedQuantity: "0",
+      marketProtection: "0",
+      priceFillFlag: "N",
+      triggerPrice: "0",
     });
 
     if (!orderResult.success) {

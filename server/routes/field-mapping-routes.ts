@@ -1,8 +1,28 @@
 import type { Express } from "express";
 import type { IStorage } from "../storage";
 import TL from "../tl-kotak-neo-v3";
+import EL from "../el-kotak-neo-v3";
 
 export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
+  app.get("/api/el/kotak_neo_v3/status", async (_req, res) => {
+    try {
+      const status = EL.getStatus();
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ error: `Failed to get EL status: ${error.message}` });
+    }
+  });
+
+  app.post("/api/el/kotak_neo_v3/reload", async (_req, res) => {
+    try {
+      await EL.reload();
+      const status = EL.getStatus();
+      res.json({ success: true, message: "Execution Layer reloaded", ...status });
+    } catch (error: any) {
+      res.status(500).json({ error: `Failed to reload EL: ${error.message}` });
+    }
+  });
+
   app.get("/api/tl/kotak_neo_v3/status", async (_req, res) => {
     try {
       const status = TL.getStatus();
