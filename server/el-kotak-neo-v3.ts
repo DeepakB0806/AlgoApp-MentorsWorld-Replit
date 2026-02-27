@@ -330,8 +330,8 @@ class ExecutionLayer {
       const totpBody = TL.isReady()
         ? TL.translateRequest("auth", {
             mobileNumber: config.mobileNumber,
-            userCredentialCode: config.ucc,
-            totpCode: totp,
+            ucc: config.ucc,
+            totp: totp,
           }).payload
         : { mobileNumber: config.mobileNumber, ucc: config.ucc, totp };
 
