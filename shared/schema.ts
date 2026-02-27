@@ -162,6 +162,7 @@ export const strategyPlans = pgTable("strategy_plans", {
   lotMultiplier: integer("lot_multiplier").default(1),
   deployStoploss: real("deploy_stoploss"),
   deployProfitTarget: real("deploy_profit_target"),
+  awaitingCleanEntry: boolean("awaiting_clean_entry").default(true),
   createdBy: varchar("created_by", { length: 36 }),
   createdAt: text("created_at"),
   updatedAt: text("updated_at"),

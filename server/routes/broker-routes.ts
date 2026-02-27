@@ -382,6 +382,9 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: `Cannot transition from '${currentStatus}' to '${deploymentStatus}'. Allowed: ${allowed.join(", ")}` });
       }
       const updateData: Record<string, unknown> = { deploymentStatus, updatedAt: new Date().toISOString() };
+      if (deploymentStatus === "active") {
+        updateData.awaitingCleanEntry = true;
+      }
       if (deploymentStatus === "deployed") {
         const parentConfig = await storage.getStrategyConfig(plan.configId);
         if (parentConfig) {

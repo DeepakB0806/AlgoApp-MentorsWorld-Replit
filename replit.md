@@ -50,7 +50,7 @@ The frontend uses React with Vite, TypeScript, TailwindCSS, and shadcn/ui. The b
 - **Config Versioning**: Tracks strategy configuration versions and indicates when new versions are available for deployed strategies.
 - **Exchange & Ticker Fields**: Supports `exchange` and `ticker` fields on strategy plans for broker API order parameters.
 - **Time Logic Configuration**: Enhanced time logic with `expiryType` (weekly/monthly/custom) and associated day calculations.
-- **Signal Processing Pipeline**: Actively uses `actionMapper` to resolve signals from webhooks, supporting exchange/ticker inheritance and correct `blockType` propagation.
+- **Signal Processing Pipeline**: Actively uses `actionMapper` to resolve signals from webhooks, supporting exchange/ticker inheritance and correct `blockType` propagation. Features **clean entry logic** via `awaitingCleanEntry` flag on strategy plans — when a plan is activated/re-activated, pure SELL signals with no open position are skipped until a clean BUY entry occurs. BUY signals (direct or from compound signals) always execute. Flag clears after first successful entry.
 - **Performance Optimization**: Features a unified trade engine, an in-memory TTL-based cache layer with invalidation, hot/cold path separation for webhook handling, and database indexes for hot path queries.
 
 ### System Design Choices

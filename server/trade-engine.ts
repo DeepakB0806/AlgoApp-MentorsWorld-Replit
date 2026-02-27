@@ -145,6 +145,9 @@ async function executeTradeForPlan(
   }
 
   if (signalType === "sell") {
+    if (plan.awaitingCleanEntry && openTrades.length === 0) {
+      return { success: true, action: "hold", broker, planId: plan.id, message: "Awaiting clean entry — no position to sell, skipping", executionTimeMs: Date.now() - startTime };
+    }
     return executeSellSignal(storage, plan, brokerConfig, { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime });
   }
 
@@ -263,6 +266,11 @@ async function executeBuySignal(
   });
 
   tradingCache.invalidateOpenTrades(plan.id);
+
+  if (plan.awaitingCleanEntry) {
+    await storage.updateStrategyPlan(plan.id, { awaitingCleanEntry: false });
+    if (plan.configId) tradingCache.invalidatePlans(plan.configId);
+  }
 
   return {
     success: true,
