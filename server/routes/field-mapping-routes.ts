@@ -1,7 +1,27 @@
 import type { Express } from "express";
 import type { IStorage } from "../storage";
+import TL from "../tl-kotak-neo-v3";
 
 export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
+  app.get("/api/tl/kotak_neo_v3/status", async (_req, res) => {
+    try {
+      const status = TL.getStatus();
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ error: `Failed to get TL status: ${error.message}` });
+    }
+  });
+
+  app.post("/api/tl/kotak_neo_v3/reload", async (_req, res) => {
+    try {
+      await TL.reload();
+      const status = TL.getStatus();
+      res.json({ success: true, message: "Translation Layer reloaded", ...status });
+    } catch (error: any) {
+      res.status(500).json({ error: `Failed to reload TL: ${error.message}` });
+    }
+  });
+
   app.post("/api/broker-field-mappings/build", async (req, res) => {
     try {
       const { brokerName, sections } = req.body;

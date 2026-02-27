@@ -56,6 +56,41 @@ function ApiFieldsReference() {
     },
   });
 
+  interface TLStatusData {
+    isReady: boolean;
+    brokerName: string;
+    brokerFieldCount: number;
+    universalFieldCount: number;
+    categories: string[];
+    directions: string[];
+    lastLoadTime: string | null;
+    lastLoadDurationMs: number | null;
+    matchedCount: number;
+    unmatchedCount: number;
+  }
+
+  const tlStatusQuery = useQuery<TLStatusData>({
+    queryKey: ["/api/tl/kotak_neo_v3/status"],
+    queryFn: async () => {
+      const res = await fetch("/api/tl/kotak_neo_v3/status");
+      return res.json();
+    },
+  });
+
+  const [isReloadingTL, setIsReloadingTL] = useState(false);
+  const reloadTL = async () => {
+    setIsReloadingTL(true);
+    try {
+      await apiRequest("POST", "/api/tl/kotak_neo_v3/reload", {});
+      queryClient.invalidateQueries({ queryKey: ["/api/tl/kotak_neo_v3/status"] });
+      toast({ title: "Translation Layer reloaded", description: "Mappings refreshed from database." });
+    } catch (err) {
+      toast({ title: "TL reload failed", description: String(err), variant: "destructive" });
+    } finally {
+      setIsReloadingTL(false);
+    }
+  };
+
   const universalFieldsList = universalFieldsQuery.data || [];
   const universalFieldsByCategory = universalFieldsList.reduce<Record<string, UniversalField[]>>((acc, f) => {
     if (!acc[f.category]) acc[f.category] = [];
@@ -798,9 +833,22 @@ function ApiFieldsReference() {
               </div>
 
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Database-validated matching — status verified against universal_fields table</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Database-validated matching</span>
+                  </div>
+                  {tlStatusQuery.data && (
+                    <Badge
+                      variant={tlStatusQuery.data.isReady ? "default" : "destructive"}
+                      className={`text-[10px] px-1.5 py-0 h-5 ${tlStatusQuery.data.isReady ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
+                      data-testid="badge-tl-status"
+                    >
+                      {tlStatusQuery.data.isReady
+                        ? `TL Active: ${tlStatusQuery.data.brokerFieldCount} fields, ${tlStatusQuery.data.categories.length} categories`
+                        : "TL Not Ready"}
+                    </Badge>
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <Button
@@ -834,6 +882,17 @@ function ApiFieldsReference() {
                   >
                     <RefreshCw className="w-3 h-3 mr-1" />
                     Re-sync
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-7"
+                    onClick={(e) => { e.stopPropagation(); reloadTL(); }}
+                    disabled={isReloadingTL}
+                    data-testid="button-reload-tl"
+                  >
+                    <Database className={`w-3 h-3 mr-1 ${isReloadingTL ? 'animate-spin' : ''}`} />
+                    {isReloadingTL ? "Reloading..." : "Reload TL"}
                   </Button>
                 </div>
               </div>

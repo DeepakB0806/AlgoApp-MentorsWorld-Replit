@@ -56,6 +56,17 @@ The frontend uses React with Vite, TypeScript, TailwindCSS, and shadcn/ui. The b
 ### System Design Choices
 The application adheres to a principle where every field must be in the database — no exceptions. The Universal Layer fields are stored in the `universal_fields` database table (130 fields), serving as the single source of truth. Broker API fields are stored in the `broker_field_mappings` table. The API Field Reference UI shows the 1:1 matching between these two database tables, with a searchable dropdown for selecting universal fields (no hardcoded values). The 8-step SOP-BOP ensures comprehensive field mapping and gap mitigation before building translation layers. Dashboard tables are oriented to display all broker-provided fields for positions, orders, and holdings. On server startup, `ensureUniversalFields()` checks if the `universal_fields` table is empty and auto-populates all 130 fields — this ensures dev and production databases always have identical reference data. The Re-sync (`/revalidate`) endpoint performs pure DB-to-DB matching: reads `broker_field_mappings`, validates each `universalFieldName` against `universal_fields`, updates match status, and returns a correlation report.
 
+### Translation Layer (TL)
+The Translation Layer (`server/tl-kotak-neo-v3.ts`) is an independent engine that sits on top of the database. It loads all field mappings from `broker_field_mappings` (192 fields) and `universal_fields` (130 fields) on startup and builds internal lookup maps for fast translation. The TL provides:
+- `translateRequest(category, universalPayload)` — converts universal field names to broker field codes for outgoing API requests
+- `translateResponse(category, brokerPayload)` — converts broker field codes to universal field names for incoming responses
+- `getBrokerFieldCode(universalFieldName)` / `getUniversalFieldName(brokerFieldCode)` — single field lookups
+- `buildRequestPayload(category, payload, includeDefaults)` — builds broker-format payload with optional defaults from DB
+- `reload()` — refreshes mappings from database without server restart
+- `getStatus()` — returns health, field counts, categories, load time
+- Status endpoint: `GET /api/tl/kotak_neo_v3/status`, Reload endpoint: `POST /api/tl/kotak_neo_v3/reload`
+The TL reads from the production database at runtime. Zero hardcoded field names. The EL (`server/kotak-neo-api.ts`) calls the TL for all field translations. Dev and production have separate databases; use "Sync Broker Fields" and "Sync Universal Fields" buttons to push data from dev to production.
+
 ### Route Ordering Notes
 - `/api/webhooks/default-fields` must be registered BEFORE `/api/webhooks/:id` to prevent Express from treating "default-fields" as an ID parameter. This is handled by the webhook-routes module.
 

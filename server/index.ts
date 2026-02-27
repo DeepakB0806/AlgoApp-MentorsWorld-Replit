@@ -6,6 +6,7 @@ import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import cookieParser from "cookie-parser";
 import { storage } from "./storage";
 import { tradingCache } from "./cache";
+import TL from "./tl-kotak-neo-v3";
 
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err.stack || err.message || err);
@@ -116,6 +117,12 @@ app.use((req, res, next) => {
     }
   } catch (err) {
     log(`Universal fields initialization warning: ${err}`);
+  }
+
+  try {
+    await TL.init();
+  } catch (err) {
+    log(`Translation Layer initialization warning: ${err}`);
   }
 
   tradingCache.warmUp(storage).catch(err => log(`Cache warm-up error: ${err}`));
