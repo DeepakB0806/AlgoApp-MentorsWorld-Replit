@@ -1420,7 +1420,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
       if (data.success) {
         toast({ title: data.message || "Connection test successful" });
       } else {
-        toast({ title: data.message || "Connection test failed", description: data.error, variant: "destructive" });
+        toast({ title: data.message || "Connection test failed", description: typeof data.error === 'object' ? JSON.stringify(data.error) : String(data.error || ''), variant: "destructive" });
       }
     },
     onError: (error: Error) => {
@@ -1482,7 +1482,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
       if (data.success) {
         toast({ title: isBinance ? "Authentication successful! API key validated." : "Login successful! Trading session is now active." });
       } else {
-        toast({ title: isBinance ? "Authentication failed" : "Login failed", description: data.error, variant: "destructive" });
+        toast({ title: isBinance ? "Authentication failed" : "Login failed", description: typeof data.error === 'object' ? JSON.stringify(data.error) : String(data.error || ''), variant: "destructive" });
       }
     },
     onError: (error: Error) => {
@@ -2074,7 +2074,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
               ) : (
                 <Alert variant="destructive">
                   <XCircle className="h-4 w-4" />
-                  <AlertDescription>{config.connectionError}</AlertDescription>
+                  <AlertDescription>{typeof config.connectionError === 'object' ? JSON.stringify(config.connectionError) : String(config.connectionError || '')}</AlertDescription>
                 </Alert>
               )
             )}

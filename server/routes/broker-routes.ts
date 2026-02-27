@@ -139,7 +139,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
           brokerConfigId: req.params.id,
           status: result.success ? "success" : "failed",
           message: result.message || null,
-          errorMessage: result.error || null,
+          errorMessage: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
           responseTime,
           testedAt: now,
         });
@@ -147,7 +147,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.json({ 
           success: result.success, 
           message: result.message,
-          error: result.error,
+          error: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
           config: updated 
         });
       }
@@ -242,7 +242,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
           brokerConfigId: req.params.id,
           status: result.success ? "success" : "failed",
           message: result.message || null,
-          errorMessage: result.error || null,
+          errorMessage: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
           totpUsed: null,
           accessToken: result.accessToken || null,
           sessionId: result.sessionId || null,
@@ -254,7 +254,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.json({ 
           success: result.success, 
           message: result.message,
-          error: result.error,
+          error: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
           config: updated 
         });
       }
@@ -310,7 +310,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         brokerConfigId: req.params.id,
         status: result.success ? "success" : "failed",
         message: result.message || null,
-        errorMessage: result.error || null,
+        errorMessage: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
         totpUsed: totp,
         accessToken: result.data?.sessionToken || null,
         sessionId: result.data?.sidSession || null,
@@ -322,7 +322,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       res.json({ 
         success: result.success, 
         message: result.message,
-        error: result.error,
+        error: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
         sessionExpiry,
         config: updated 
       });

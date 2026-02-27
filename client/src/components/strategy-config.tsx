@@ -623,7 +623,7 @@ export function MotherConfigurator() {
                     {config.exchange && <Badge variant="outline" data-testid={`badge-exchange-${config.id}`}>{config.exchange}</Badge>}
                     {config.ticker && <Badge variant="outline" data-testid={`badge-ticker-${config.id}`}>{config.ticker}</Badge>}
                   </div>
-                  {config.indicators && config.indicators.length > 0 && (
+                  {Array.isArray(config.indicators) && config.indicators.length > 0 && (
                     <div className="flex flex-wrap gap-1" data-testid={`container-config-indicators-${config.id}`}>
                       {config.indicators.map((ind) => (
                         <Badge key={ind} variant="secondary" className="text-xs">
