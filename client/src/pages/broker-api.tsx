@@ -850,50 +850,65 @@ function ApiFieldsReference() {
                     </Badge>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs h-7"
-                    onClick={(e) => { e.stopPropagation(); runSyncBrokerToProduction(); }}
-                    disabled={isSyncingBroker}
-                    data-testid="button-sync-broker-production"
-                  >
-                    <Send className={`w-3 h-3 mr-1 ${isSyncingBroker ? 'animate-spin' : ''}`} />
-                    {isSyncingBroker ? "Syncing..." : "Sync Broker Fields"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs h-7"
-                    onClick={(e) => { e.stopPropagation(); runSyncUFToProduction(); }}
-                    disabled={isSyncingUF}
-                    data-testid="button-sync-uf-production"
-                  >
-                    <ArrowRightLeft className={`w-3 h-3 mr-1 ${isSyncingUF ? 'animate-spin' : ''}`} />
-                    {isSyncingUF ? "Syncing..." : "Sync Universal Fields"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs h-7"
-                    onClick={(e) => { e.stopPropagation(); runReSync(); }}
-                    data-testid="button-resync-mapping"
-                  >
-                    <RefreshCw className="w-3 h-3 mr-1" />
-                    Re-sync
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs h-7"
-                    onClick={(e) => { e.stopPropagation(); reloadTL(); }}
-                    disabled={isReloadingTL}
-                    data-testid="button-reload-tl"
-                  >
-                    <Database className={`w-3 h-3 mr-1 ${isReloadingTL ? 'animate-spin' : ''}`} />
-                    {isReloadingTL ? "Reloading..." : "Reload TL"}
-                  </Button>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Step 1</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7"
+                      onClick={(e) => { e.stopPropagation(); runSyncBrokerToProduction(); }}
+                      disabled={isSyncingBroker}
+                      data-testid="button-sync-broker-production"
+                    >
+                      <Send className={`w-3 h-3 mr-1 ${isSyncingBroker ? 'animate-spin' : ''}`} />
+                      {isSyncingBroker ? "Syncing..." : "Sync Broker Fields"}
+                    </Button>
+                  </div>
+                  <span className="text-muted-foreground/40 text-xs mt-3">›</span>
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Step 2</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7"
+                      onClick={(e) => { e.stopPropagation(); runSyncUFToProduction(); }}
+                      disabled={isSyncingUF}
+                      data-testid="button-sync-uf-production"
+                    >
+                      <ArrowRightLeft className={`w-3 h-3 mr-1 ${isSyncingUF ? 'animate-spin' : ''}`} />
+                      {isSyncingUF ? "Syncing..." : "Sync Universal Fields"}
+                    </Button>
+                  </div>
+                  <span className="text-muted-foreground/40 text-xs mt-3">›</span>
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Step 3</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7"
+                      onClick={(e) => { e.stopPropagation(); runReSync(); }}
+                      data-testid="button-resync-mapping"
+                    >
+                      <RefreshCw className="w-3 h-3 mr-1" />
+                      Re-sync
+                    </Button>
+                  </div>
+                  <span className="text-muted-foreground/40 text-xs mt-3">›</span>
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Step 4</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7"
+                      onClick={(e) => { e.stopPropagation(); reloadTL(); }}
+                      disabled={isReloadingTL}
+                      data-testid="button-reload-tl"
+                    >
+                      <Database className={`w-3 h-3 mr-1 ${isReloadingTL ? 'animate-spin' : ''}`} />
+                      {isReloadingTL ? "Reloading..." : "Reload TL"}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
