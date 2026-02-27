@@ -85,6 +85,37 @@ Dev and production have separate databases; use "Sync Broker Fields" and "Sync U
 ### Route Ordering Notes
 - `/api/webhooks/default-fields` must be registered BEFORE `/api/webhooks/:id` to prevent Express from treating "default-fields" as an ID parameter. This is handled by the webhook-routes module.
 
+## Future Plans
+
+### Team Members Rights — Role-Based Access with Admin Dashboard
+**Status: Planned — Not Yet Implemented**
+
+A two-layer permission system with an Admin Dashboard (DB browser + File Manager) and a refined 3-tier role structure:
+
+**Role tiers:**
+- `team_member` → Strategies (create trade plans), Dashboard, Broker API (own configs)
+- `developer` → Everything team_member has + Field Mappings + EL/TL controls + Admin Dashboard with full read-write DB browser + File Manager (browse, read, edit, create files). A developer can work entirely from the production UI without needing Replit access.
+- `super_admin` → Everything developer has + User Management + Settings + Mother Config create/edit + can promote team_member → developer
+
+**Key features:**
+1. **3-tier role system** — `team_member`, `developer`, `super_admin`
+2. **Role promotion** — Only super_admin can promote/demote team_member ↔ developer from User Management page
+3. **Admin Dashboard — Database tab** — Browse 10 system tables (broker_field_mappings, broker_api_endpoints, broker_exchange_maps, broker_headers, universal_fields, broker_configs, strategy_configs, strategy_plans, webhooks, webhook_data), paginated table viewer with search/sort, row detail/edit dialog, CSV export
+4. **Admin Dashboard — Files tab** — File tree browser (server/, client/, shared/), read/edit/create/delete files, syntax-highlighted code editor, security guardrails (no .env, node_modules, .git access)
+5. **Route permission refinement** — Field mappings and EL/TL controls restricted to developer+, User Management and Settings restricted to super_admin only
+6. **Hub card visibility** — UserHome cards filtered by role, role badge displayed next to user info
+
+**Implementation tasks (9 total):**
+- T001: Add `developer` role to schema and auth system
+- T002: Add role promotion controls to User Management page
+- T003: Refine route-level permissions for 3-tier roles
+- T004: Build Admin Dashboard backend — DB browser API
+- T005: Build Admin Dashboard backend — File Manager API
+- T006: Build Admin Dashboard frontend — DB browser tab
+- T007: Build Admin Dashboard frontend — File Manager tab
+- T008: Update UserHome hub cards for role visibility
+- T009: Test and verify
+
 ## External Dependencies
 
 - **Kotak Neo Trade API**: Broker services, authentication, order management, trading data.
