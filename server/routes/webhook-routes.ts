@@ -276,7 +276,7 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
         tradingCache.setConfigByWebhookId(webhookId, linkedConfig);
       }
 
-      const { signalType, blockType: directBlockType } = resolveSignalFromActionMapper(parsedData, linkedConfig?.actionMapper);
+      const { signalType, blockType: directBlockType, resolvedAction } = resolveSignalFromActionMapper(parsedData, linkedConfig?.actionMapper);
       timing.signal_resolve_ms = Date.now() - t2;
 
       const t3 = Date.now();
@@ -300,6 +300,7 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
         try {
           tradeResults = await processTradeSignal(storage, webhookDataForTrade as any, strategyConfigId, {
             blockType: directBlockType,
+            resolvedAction,
             parentExchange: linkedConfig?.exchange,
             parentTicker: linkedConfig?.ticker,
           });
@@ -534,7 +535,7 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
       const results: any[] = [];
 
       for (const signal of newSignals) {
-        const { signalType, blockType } = resolveSignalFromActionMapper(signal, strategyConfig.actionMapper);
+        const { signalType, blockType, resolvedAction } = resolveSignalFromActionMapper(signal, strategyConfig.actionMapper);
         if (signalType !== "buy" && signalType !== "sell") continue;
 
         let enrichedPayload = signal.rawPayload || "{}";
@@ -576,7 +577,7 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
         });
 
         try {
-          const tradeResults = await processTradeSignal(storage, localEntry, strategyConfig.id, { blockType, parentExchange: strategyConfig.exchange, parentTicker: strategyConfig.ticker });
+          const tradeResults = await processTradeSignal(storage, localEntry, strategyConfig.id, { blockType, resolvedAction, parentExchange: strategyConfig.exchange, parentTicker: strategyConfig.ticker });
           results.push({ signal: signalType, blockType, price: signal.price, time: signal.localTime, trades: tradeResults });
         } catch (ptErr) {
           console.error("Trade execution error for signal:", ptErr);

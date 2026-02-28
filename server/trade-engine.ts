@@ -6,6 +6,7 @@ import { placeOrder as placeBinanceOrder, type BinanceSession, type BinanceOrder
 
 export interface SignalContext {
   blockType?: string;
+  resolvedAction?: "ENTRY" | "EXIT" | "HOLD";
   parentExchange?: string | null;
   parentTicker?: string | null;
 }
@@ -25,7 +26,7 @@ export interface TradeResult {
 export function resolveSignalFromActionMapper(
   signalData: Record<string, any>,
   actionMapperJson: string | null | undefined
-): { signalType: string; blockType: string } {
+): { signalType: string; blockType: string; resolvedAction: "ENTRY" | "EXIT" | "HOLD" } {
   let actionMapper: ActionMapperEntry[] = [];
   try {
     actionMapper = JSON.parse(actionMapperJson || "[]");
@@ -36,21 +37,22 @@ export function resolveSignalFromActionMapper(
       const fieldKey = entry.fieldKey || "alert";
       const fieldValue = signalData[fieldKey];
       if (fieldValue !== undefined && fieldValue !== null && String(fieldValue) === entry.signalValue) {
-        if (entry.uptrend === "ENTRY") return { signalType: "buy", blockType: "uptrendLegs" };
-        if (entry.uptrend === "EXIT") return { signalType: "sell", blockType: "uptrendLegs" };
-        if (entry.downtrend === "ENTRY") return { signalType: "sell", blockType: "downtrendLegs" };
-        if (entry.downtrend === "EXIT") return { signalType: "buy", blockType: "downtrendLegs" };
-        if (entry.neutral === "ENTRY") return { signalType: "hold", blockType: "neutralLegs" };
-        if (entry.neutral === "EXIT") return { signalType: "hold", blockType: "neutralLegs" };
+        if (entry.uptrend === "ENTRY") return { signalType: "buy", blockType: "uptrendLegs", resolvedAction: "ENTRY" };
+        if (entry.uptrend === "EXIT") return { signalType: "sell", blockType: "uptrendLegs", resolvedAction: "EXIT" };
+        if (entry.downtrend === "ENTRY") return { signalType: "sell", blockType: "downtrendLegs", resolvedAction: "ENTRY" };
+        if (entry.downtrend === "EXIT") return { signalType: "buy", blockType: "downtrendLegs", resolvedAction: "EXIT" };
+        if (entry.neutral === "ENTRY") return { signalType: "hold", blockType: "neutralLegs", resolvedAction: "ENTRY" };
+        if (entry.neutral === "EXIT") return { signalType: "hold", blockType: "neutralLegs", resolvedAction: "EXIT" };
         if (entry.uptrend === "HOLD" || entry.downtrend === "HOLD" || entry.neutral === "HOLD") {
-          return { signalType: "hold", blockType: "neutralLegs" };
+          return { signalType: "hold", blockType: "neutralLegs", resolvedAction: "HOLD" };
         }
       }
     }
   }
 
   const fallbackType = signalData.signalType || (signalData.actionBinary === 1 ? "buy" : signalData.actionBinary === 0 ? "sell" : "hold");
-  return { signalType: fallbackType, blockType: fallbackType === "buy" ? "uptrendLegs" : fallbackType === "sell" ? "downtrendLegs" : "neutralLegs" };
+  const fallbackAction = fallbackType === "buy" ? "ENTRY" : fallbackType === "sell" ? "EXIT" : "HOLD";
+  return { signalType: fallbackType, blockType: fallbackType === "buy" ? "uptrendLegs" : fallbackType === "sell" ? "downtrendLegs" : "neutralLegs", resolvedAction: fallbackAction as "ENTRY" | "EXIT" | "HOLD" };
 }
 
 function buildBinanceSession(config: BrokerConfig): BinanceSession | null {
@@ -145,8 +147,9 @@ async function executeTradeForPlan(
   }
 
   if (signalType === "sell") {
-    if (plan.awaitingCleanEntry && openTrades.length === 0) {
-      return { success: true, action: "hold", broker, planId: plan.id, message: "Awaiting clean entry — no position to sell, skipping", executionTimeMs: Date.now() - startTime };
+    const resolvedAction = signalContext?.resolvedAction || "EXIT";
+    if (plan.awaitingCleanEntry && resolvedAction === "EXIT" && openTrades.length === 0) {
+      return { success: true, action: "hold", broker, planId: plan.id, message: "Awaiting clean entry — no position to exit, skipping", executionTimeMs: Date.now() - startTime };
     }
     return executeSellSignal(storage, plan, brokerConfig, { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime });
   }
@@ -385,6 +388,11 @@ async function executeSellSignal(
 
   tradingCache.invalidateOpenTrades(plan.id);
 
+  if (plan.awaitingCleanEntry) {
+    await storage.updateStrategyPlan(plan.id, { awaitingCleanEntry: false });
+    if (plan.configId) tradingCache.invalidatePlans(plan.configId);
+  }
+
   return {
     success: true,
     action: "open",
@@ -421,6 +429,15 @@ async function closeTrade(
     exitedAt: now,
     updatedAt: now,
   });
+
+  tradingCache.invalidateOpenTrades(trade.planId);
+
+  const remainingOpen = await storage.getOpenTradesByPlan(trade.planId);
+  if (remainingOpen.length === 0) {
+    await storage.updateStrategyPlan(trade.planId, { awaitingCleanEntry: true });
+    const plan = await storage.getStrategyPlan(trade.planId);
+    if (plan?.configId) tradingCache.invalidatePlans(plan.configId);
+  }
 
   return updated || trade;
 }
