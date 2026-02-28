@@ -116,6 +116,95 @@ A two-layer permission system with an Admin Dashboard (DB browser + File Manager
 - T008: Update UserHome hub cards for role visibility
 - T009: Test and verify
 
+## QC Function Reference (15 Files)
+**Checkpoint**: `191f2ab` | **Date**: February 28, 2026
+
+### File 1: `server/trade-engine.ts` (487 lines)
+Core trade execution engine — signal resolution, clean entry guard, buy/sell execution, trade closing, daily P&L tracking.
+
+**Interfaces**: `SignalContext` (blockType, resolvedAction, parentExchange, parentTicker), `TradeResult` (success, action, broker, planId, trade, orderId, pnl, message, executionTimeMs), `TradeContext` (ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime)
+
+**Functions (8)**:
+1. `resolveSignalFromActionMapper(signalData, actionMapperJson)` — Matches signal against action mapper → returns `{signalType, blockType, resolvedAction}`. Falls back to signalType/actionBinary.
+2. `buildBinanceSession(config)` — Extracts Binance credentials → BinanceSession or null.
+3. `processTradeSignal(storage, webhookData, strategyConfigId, signalContext?)` — Main entry. Finds active plans, loads broker configs, executes in parallel via Promise.allSettled.
+4. `executeTradeForPlan(storage, plan, brokerConfig, data, signalContext?)` — Single plan orchestration. Clean entry guard: awaitingCleanEntry + resolvedAction===EXIT + no open trades → skip.
+5. `executeBuySignal(storage, plan, brokerConfig, ctx)` — BUY execution. Duplicate check, reversal close, order placement (Kotak/Binance/paper), clears awaitingCleanEntry.
+6. `executeSellSignal(storage, plan, brokerConfig, ctx)` — SELL execution. Duplicate check, reversal close, order placement, clears awaitingCleanEntry.
+7. `closeTrade(storage, trade, exitPrice, now)` — Closes trade with P&L. If zero remaining open trades → resets awaitingCleanEntry=true.
+8. `deferDailyPnlUpdate(storage, planId, date, tradePnl)` — Non-blocking daily P&L update via setImmediate.
+
+### File 2: `server/el-kotak-neo-v3.ts` (796 lines)
+Execution Layer — DB-driven Kotak Neo API client. Loads endpoints, exchange maps, headers from database.
+
+**Internal State**: endpoints, endpointsByCategory, endpointByName, exchangeMap, reverseExchangeMap, headersByAuthType
+
+**Functions (29)**: init, buildMaps, reload, isReady, getStatus, mapExchange, reverseMapExchange, getEndpoint, buildHeaders, buildHeadersForEndpoint, resolveUrl, formatBody, executeRequest, authenticate (2-step TOTP→MPIN), placeOrder, modifyOrder, cancelOrder, getOrderBook, getTradeBook, getPositions, getHoldings, getOrderHistory, checkMargin, getLimits, getQuotes, testConnectivity, executeGetRequest, extractArray, isSessionError
+
+### File 3: `server/tl-kotak-neo-v3.ts` (434 lines)
+Translation Layer — DB-driven field mapper. Bidirectional: universal names ↔ broker field codes.
+
+**Functions (23)**: init, buildMaps, reload, isReady, getStatus, translateRequest, translateResponse, getBrokerField, getBrokerFieldCode, getUniversalField, getUniversalFieldName, getFieldsByCategory, getFieldsByDirection, getFieldsByCategoryAndDirection, getCategories, getAllowedValues, getDefaultValue, getUniversalFieldMetadata, getRequestFields, getResponseFields, buildRequestPayload, parseResponsePayload, castValue
+
+### File 4: `server/routes/webhook-routes.ts` (975 lines)
+Webhook routes — receiving TradingView alerts, signal storage, webhook management, production linking, signal replay.
+
+**Route Handlers (32)**: GET/POST/PATCH/DELETE webhooks CRUD, POST /api/webhook/:id (HOT PATH — receives alerts, resolves signal, triggers trade execution, responds immediately, logs async), webhook-registry sync, webhook-data CRUD/cleanup, POST process-production-signals (signal replay with dedup), link/unlink dev↔production, webhook-signals field discovery, webhook-field-values
+
+### File 5: `shared/schema.ts` (730 lines)
+Single source of truth — all database tables, types, data models. Drizzle ORM + PostgreSQL.
+
+**Types (11)**: PredefinedIndicator, ActionMapperEntry, TradeLeg, ExecutionBlock, PlanTradeLeg, BlockConfig, StoplossConfig, ProfitTargetConfig, TrailingStoplossConfig, TimeLogicConfig, TradeParams
+**Tables (18+)**: strategy_configs, strategy_plans, strategy_trades, strategy_daily_pnl, strategies, webhook_registry, webhooks, webhook_logs, webhook_status_logs, webhook_data, app_settings, broker_configs, broker_test_logs, broker_session_logs, broker_field_mappings, universal_fields, broker_api_endpoints, broker_exchange_maps, broker_headers
+**Interfaces**: Position, Order, Holding, PortfolioSummary, LoginCredentials, KotakNeoAuthResponse, OrderParams
+
+### File 6: `server/storage.ts` (1367 lines)
+Storage interface + PostgreSQL implementation. All DB CRUD operations (~80 methods).
+
+**Method Groups**: Strategy CRUD (6), Plan CRUD (5), Trade CRUD (5), Daily P&L (3), Webhook CRUD (10+), Webhook Data (8), Broker Config (5), Broker Logs (4), Field Mapping (4), Settings (2)
+
+### File 7: `server/routes/broker-routes.ts` (688 lines)
+Broker management routes — config CRUD, authentication, connectivity testing, deployment, portfolio data.
+
+**Route Handlers (28)**: broker-configs CRUD, /authenticate, /test, positions, orders, holdings, portfolio-summary, strategy-plans deployment, strategy-trades CRUD, strategy-daily-pnl CRUD, broker-session-status, test-logs, session-logs
+
+### File 8: `server/cache.ts` (157 lines)
+In-memory TTL cache for hot path optimization.
+
+**TTLs**: HOT_PATH 2min (webhooks, configs), BROKER_SESSION 5min, OPEN_TRADES 10sec
+**TradingCache (14 methods)**: get/set/invalidate for Webhook, ConfigByWebhookId, ConfigById, BrokerConfig, ActivePlansByConfigId, OpenTradesByPlanId + invalidateAll + warmUp
+
+### File 9: `server/seed-broker-el.ts` (80 lines)
+Seeds EL database tables on first run. `ensureBrokerEndpoints()` → 15 endpoints, 6 exchange mappings, 11 header templates.
+
+### File 10: `client/src/pages/broker-api.tsx` (2589 lines)
+Broker API dashboard — field reference, broker config management, authentication flow.
+
+**Components**: ApiFieldsReference (1:1 field mapping, 5-step sync/reload), BrokerConfigCard (credentials, TOTP auth, sessions), BrokerApi (main page)
+
+### File 11: `client/src/components/strategy-config.tsx` (648 lines)
+Strategy configuration — action mapper, webhook linking, indicator selection.
+
+**Components**: MotherConfigurator (config create/edit with action mapper, execution blocks)
+
+### File 12: `client/src/components/trade-planning.tsx` (1078 lines)
+Trade planning — plan create/edit, deployment lifecycle, exit conditions.
+
+**Components**: TradePlanning (legs, SL/PT/TSL, time logic, deployment lifecycle)
+
+### File 13: `server/paper-trade-engine.ts` (262 lines)
+Paper trading engine — simulated execution, no resolvedAction, no clean entry guard.
+
+**Functions (5)**: resolveSignalFromActionMapper (returns {signalType, blockType} only), processPaperTrade, executePaperTradeForPlan, closePaperTrade, updateDailyPnl
+
+### File 14: `server/routes/helpers.ts` (41 lines)
+Shared route utilities.
+
+**Functions (4)**: parseNumeric, getUserFromRequest, requireSuperAdmin, requireTeamOrSuperAdmin
+
+### File 15: `replit.md`
+Architecture documentation — project overview, features, design principles, tech stack, file structure, QC function reference.
+
 ## External Dependencies
 
 - **Kotak Neo Trade API**: Broker services, authentication, order management, trading data.
