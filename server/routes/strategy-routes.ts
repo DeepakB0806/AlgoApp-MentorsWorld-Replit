@@ -235,4 +235,76 @@ export function registerStrategyRoutes(app: Express, storage: IStorage) {
       res.status(500).json({ error: "Failed to delete strategy plan" });
     }
   });
+
+  app.post("/api/strategy-configs/sync-receive", async (req, res) => {
+    try {
+      const syncKey = req.headers["x-sync-key"];
+      if (syncKey !== process.env.SESSION_SECRET) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const { configId, updates } = req.body;
+      if (!configId || !updates) {
+        return res.status(400).json({ error: "configId and updates required" });
+      }
+      const existing = await storage.getStrategyConfig(configId);
+      if (!existing) {
+        return res.status(404).json({ error: "Strategy config not found" });
+      }
+      const updateData = { ...updates, configVersion: (existing.configVersion || 1) + 1 };
+      const config = await storage.updateStrategyConfig(configId, updateData);
+      if (!config) {
+        return res.status(500).json({ error: "Failed to update strategy config" });
+      }
+      tradingCache.invalidateConfig(configId);
+      if (existing.webhookId) tradingCache.invalidateWebhook(existing.webhookId);
+      res.json({ success: true, configId, configVersion: config.configVersion });
+    } catch (error: any) {
+      console.error("Strategy config sync-receive error:", error);
+      res.status(500).json({ error: `Sync failed: ${error.message}` });
+    }
+  });
+
+  app.post("/api/strategy-configs/sync-to-production", async (req: any, res) => {
+    try {
+      const user = requireSuperAdmin(req, res);
+      if (!user) return;
+      const { configId } = req.body;
+      if (!configId) {
+        return res.status(400).json({ error: "configId required" });
+      }
+      const config = await storage.getStrategyConfig(configId);
+      if (!config) {
+        return res.status(404).json({ error: "Strategy config not found in development" });
+      }
+      const domainSetting = await storage.getSetting("domain_name");
+      if (!domainSetting || !domainSetting.value) {
+        return res.status(400).json({ error: "Production domain not configured" });
+      }
+      const productionUrl = `https://${domainSetting.value}/api/strategy-configs/sync-receive`;
+      const updates: Record<string, any> = {};
+      if (config.actionMapper) updates.actionMapper = config.actionMapper;
+      if (config.uptrendBlock) updates.uptrendBlock = config.uptrendBlock;
+      if (config.downtrendBlock) updates.downtrendBlock = config.downtrendBlock;
+      if (config.neutralBlock) updates.neutralBlock = config.neutralBlock;
+
+      const response = await fetch(productionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-sync-key": process.env.SESSION_SECRET || "",
+        },
+        body: JSON.stringify({ configId, updates }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        return res.status(502).json({ error: `Production sync failed: ${response.status} ${errText}` });
+      }
+      const result = await response.json();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Strategy config sync-to-production error:", error);
+      res.status(500).json({ error: `Sync failed: ${error.message}` });
+    }
+  });
 }
