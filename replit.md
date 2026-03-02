@@ -126,8 +126,8 @@ A two-layer permission system with an Admin Dashboard (DB browser + File Manager
 ## QC Function Reference (15 Files)
 **Checkpoint**: `191f2ab` | **Date**: February 28, 2026
 
-### File 1: `server/trade-engine.ts` (~537 lines)
-Core trade execution engine — fully DB-driven. Reads trade legs from `strategy_plans.trade_params`, instrument configs from `instrument_configs` table, builds option symbols dynamically. Zero hardcoded tradingSymbol, quantity, or productCode.
+### File 1: `server/te-kotak-neo-v3.ts` (~537 lines)
+Trade Engine (TE_KotakNeoV3) — fully DB-driven, matching TL/EL naming convention. Reads trade legs from `strategy_plans.trade_params`, instrument configs from `instrument_configs` table, builds option symbols dynamically. Zero hardcoded tradingSymbol, quantity, or productCode. Architecture: TE → EL → TL → Production DB.
 
 **Interfaces**: `SignalContext` (blockType, resolvedAction, parentExchange, parentTicker), `TradeResult` (success, action, broker, planId, trade, orderId, pnl, message, executionTimeMs), `TradeContext` (ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, blockConfig, instrumentConfig)
 

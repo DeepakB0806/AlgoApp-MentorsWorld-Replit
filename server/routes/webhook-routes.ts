@@ -2,7 +2,7 @@ import type { Express } from "express";
 import type { IStorage } from "../storage";
 import { insertWebhookSchema } from "@shared/schema";
 import { tradingCache } from "../cache";
-import { resolveSignalFromActionMapper, processTradeSignal } from "../trade-engine";
+import { resolveSignalFromActionMapper, processTradeSignal } from "../te-kotak-neo-v3";
 import { getBaseUrlFromRequest } from "../services/email";
 import { parseNumeric } from "./helpers";
 
