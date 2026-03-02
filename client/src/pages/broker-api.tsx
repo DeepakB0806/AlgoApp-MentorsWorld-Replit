@@ -1351,7 +1351,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
       return res.json();
     },
     enabled: !!config && isKotakNeo && !!config.isConnected,
-    refetchInterval: 30000,
+    refetchInterval: 20000,
   });
 
   useEffect(() => {
