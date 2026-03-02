@@ -1342,6 +1342,18 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
     enabled: !!config,
   });
 
+  const isKotakNeo = brokerName === "kotak_neo";
+  const { data: teReadiness } = useQuery<{ ready: boolean; instrumentCount: number; error: string | null }>({
+    queryKey: ["/api/te/readiness", config?.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/te/readiness/${config!.id}`);
+      if (!res.ok) throw new Error("Failed to check trade readiness");
+      return res.json();
+    },
+    enabled: !!config && isKotakNeo && !!config.isConnected,
+    refetchInterval: 30000,
+  });
+
   useEffect(() => {
     if (config) {
       setFormData({
@@ -1643,9 +1655,24 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                 {config ? (
                   config.isConnected ? (
                     <span className="flex flex-col gap-0.5 mt-1">
-                      <span className="flex items-center gap-1 text-primary">
-                        <CheckCircle className="w-4 h-4" />
-                        {isPaperTrade ? "Always Connected — Simulated Trading Engine" : isBinance ? "Authenticated - API Key Validated" : "Connected - Session Active"}
+                      <span className="flex items-center gap-2 flex-wrap">
+                        <span className="flex items-center gap-1 text-primary">
+                          <CheckCircle className="w-4 h-4" />
+                          {isPaperTrade ? "Always Connected — Simulated Trading Engine" : isBinance ? "Authenticated - API Key Validated" : "Connected - Session Active"}
+                        </span>
+                        {isKotakNeo && teReadiness && (
+                          teReadiness.ready ? (
+                            <span className="flex items-center gap-1 text-emerald-500" data-testid="te-readiness-ready">
+                              <CheckCircle className="w-4 h-4" />
+                              You are ready to trade
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-destructive" data-testid="te-readiness-not-ready">
+                              <XCircle className="w-4 h-4" />
+                              You are NOT ready to trade — {teReadiness.error}
+                            </span>
+                          )
+                        )}
                       </span>
                       {!isBinance && config.accessToken && (() => {
                         try {

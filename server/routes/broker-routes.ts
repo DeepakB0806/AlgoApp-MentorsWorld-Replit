@@ -685,6 +685,39 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       res.json({ isAuthenticated: false, broker: null, connectedBrokers: [] });
     }
   });
+
+  app.get("/api/te/readiness/:brokerConfigId", async (req, res) => {
+    try {
+      const { brokerConfigId } = req.params;
+      const brokerConfig = await storage.getBrokerConfig(brokerConfigId);
+      if (!brokerConfig) {
+        return res.status(404).json({ ready: false, instrumentCount: 0, error: "Broker config not found" });
+      }
+
+      if (brokerConfig.brokerName !== "kotak_neo") {
+        return res.json({ ready: true, instrumentCount: 0, error: null });
+      }
+
+      const instrumentConfigs = await storage.getInstrumentConfigs();
+      const nfoConfigs = instrumentConfigs.filter(ic => ic.exchange === "NFO");
+
+      if (nfoConfigs.length === 0) {
+        return res.json({
+          ready: false,
+          instrumentCount: 0,
+          error: "Scrip master file not downloaded — login with TOTP to sync"
+        });
+      }
+
+      return res.json({
+        ready: true,
+        instrumentCount: nfoConfigs.length,
+        error: null
+      });
+    } catch (error) {
+      res.status(500).json({ ready: false, instrumentCount: 0, error: "Failed to check trade readiness" });
+    }
+  });
 }
 
 async function findConnectedKotak(storage: IStorage) {
