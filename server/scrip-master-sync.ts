@@ -1,6 +1,7 @@
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
 import EL from "./el-kotak-neo-v3";
+import { tradingCache } from "./cache";
 
 const LOG_PREFIX = "[SCRIP-MASTER]";
 
@@ -17,7 +18,7 @@ interface ParsedInstrument {
 
 function inferStrikeInterval(strikes: number[]): number {
   if (strikes.length < 2) return 50;
-  const sorted = [...new Set(strikes)].sort((a, b) => a - b);
+  const sorted = Array.from(new Set(strikes)).sort((a, b) => a - b);
   const diffs: number[] = [];
   for (let i = 1; i < sorted.length && i < 20; i++) {
     diffs.push(sorted[i] - sorted[i - 1]);
@@ -29,7 +30,7 @@ function inferStrikeInterval(strikes: number[]): number {
   }
   let maxFreq = 0;
   let mode = 50;
-  for (const [val, count] of freq) {
+  for (const [val, count] of Array.from(freq.entries())) {
     if (count > maxFreq && val > 0) {
       maxFreq = count;
       mode = val;
@@ -111,8 +112,8 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
   }
 
   const results: ParsedInstrument[] = [];
-  for (const [ticker, data] of tickerData) {
-    const lotSizes = [...data.lotSizes];
+  for (const [ticker, data] of Array.from(tickerData.entries())) {
+    const lotSizes = Array.from(data.lotSizes);
     const lotSize = lotSizes.length > 0 ? Math.min(...lotSizes) : 1;
     const strikeInterval = inferStrikeInterval(data.strikes);
 
@@ -223,8 +224,10 @@ export async function runScripMasterSync(
       synced++;
     }
 
+    tradingCache.invalidateInstrumentConfigs();
+
     const elapsed = Date.now() - startTime;
-    console.log(`${LOG_PREFIX} Sync complete: ${synced} instruments updated in ${elapsed}ms`);
+    console.log(`${LOG_PREFIX} Sync complete: ${synced} instruments updated in ${elapsed}ms, cache invalidated`);
     return { success: true, synced };
 
   } catch (error: any) {

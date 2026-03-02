@@ -126,20 +126,24 @@ A two-layer permission system with an Admin Dashboard (DB browser + File Manager
 ## QC Function Reference (15 Files)
 **Checkpoint**: `191f2ab` | **Date**: February 28, 2026
 
-### File 1: `server/trade-engine.ts` (487 lines)
-Core trade execution engine — signal resolution, clean entry guard, buy/sell execution, trade closing, daily P&L tracking.
+### File 1: `server/trade-engine.ts` (~537 lines)
+Core trade execution engine — fully DB-driven. Reads trade legs from `strategy_plans.trade_params`, instrument configs from `instrument_configs` table, builds option symbols dynamically. Zero hardcoded tradingSymbol, quantity, or productCode.
 
-**Interfaces**: `SignalContext` (blockType, resolvedAction, parentExchange, parentTicker), `TradeResult` (success, action, broker, planId, trade, orderId, pnl, message, executionTimeMs), `TradeContext` (ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime)
+**Interfaces**: `SignalContext` (blockType, resolvedAction, parentExchange, parentTicker), `TradeResult` (success, action, broker, planId, trade, orderId, pnl, message, executionTimeMs), `TradeContext` (ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, blockConfig, instrumentConfig)
 
-**Functions (8)**:
+**Functions (11)**:
 1. `resolveSignalFromActionMapper(signalData, actionMapperJson)` — Matches signal against action mapper → returns `{signalType, blockType, resolvedAction}`. Falls back to signalType/actionBinary.
 2. `buildBinanceSession(config)` — Extracts Binance credentials → BinanceSession or null.
 3. `processTradeSignal(storage, webhookData, strategyConfigId, signalContext?)` — Main entry. Finds active plans, loads broker configs, executes in parallel via Promise.allSettled.
-4. `executeTradeForPlan(storage, plan, brokerConfig, data, signalContext?)` — Single plan orchestration. Clean entry guard: awaitingCleanEntry + resolvedAction===EXIT + no open trades → skip.
-5. `executeBuySignal(storage, plan, brokerConfig, ctx)` — BUY execution. Duplicate check, reversal close, order placement (Kotak/Binance/paper), clears awaitingCleanEntry.
-6. `executeSellSignal(storage, plan, brokerConfig, ctx)` — SELL execution. Duplicate check, reversal close, order placement, clears awaitingCleanEntry.
-7. `closeTrade(storage, trade, exitPrice, now)` — Closes trade with P&L. If zero remaining open trades → resets awaitingCleanEntry=true.
-8. `deferDailyPnlUpdate(storage, planId, date, tradePnl)` — Non-blocking daily P&L update via setImmediate.
+4. `parseTradeParams(plan)` — Parses plan.tradeParams JSON. Returns null if missing/invalid.
+5. `selectLegs(tradeParams, blockType)` — Selects leg array by blockType (uptrendLegs/downtrendLegs/neutralLegs), falls back to generic legs array.
+6. `getBlockConfig(tradeParams, blockType)` — Extracts block-specific config (e.g. uptrendConfig) from tradeParams.
+7. `executeTradeForPlan(storage, plan, brokerConfig, data, signalContext?)` — Single plan orchestration. Parses legs from DB, looks up instrument_configs (cached), builds TradeContext with legs/blockConfig/instrumentConfig.
+8. `resolveOrderParams(leg, ctx)` — DB-driven order param resolution: builds Kotak option symbol from spot price + strike spec, calculates quantity (lots × lotSize × lotMultiplier), reads productCode from leg/blockConfig.
+9. `executeBuySignal(storage, plan, brokerConfig, ctx)` — BUY execution using resolveOrderParams. Duplicate check, reversal close, order placement.
+10. `executeSellSignal(storage, plan, brokerConfig, ctx)` — SELL execution using resolveOrderParams. Duplicate check, reversal close, order placement.
+11. `closeTrade(storage, trade, exitPrice, now)` — Closes trade with P&L. If zero remaining open trades → resets awaitingCleanEntry=true.
+12. `deferDailyPnlUpdate(storage, planId, date, tradePnl)` — Non-blocking daily P&L update via setImmediate.
 
 ### File 2: `server/el-kotak-neo-v3.ts` (796 lines)
 Execution Layer — DB-driven Kotak Neo API client. Loads endpoints, exchange maps, headers from database.
@@ -175,11 +179,11 @@ Broker management routes — config CRUD, authentication, connectivity testing, 
 
 **Route Handlers (28)**: broker-configs CRUD, /authenticate, /test, positions, orders, holdings, portfolio-summary, strategy-plans deployment, strategy-trades CRUD, strategy-daily-pnl CRUD, broker-session-status, test-logs, session-logs
 
-### File 8: `server/cache.ts` (157 lines)
+### File 8: `server/cache.ts` (~170 lines)
 In-memory TTL cache for hot path optimization.
 
-**TTLs**: HOT_PATH 2min (webhooks, configs), BROKER_SESSION 5min, OPEN_TRADES 10sec
-**TradingCache (14 methods)**: get/set/invalidate for Webhook, ConfigByWebhookId, ConfigById, BrokerConfig, ActivePlansByConfigId, OpenTradesByPlanId + invalidateAll + warmUp
+**TTLs**: HOT_PATH 2min (webhooks, configs, instrument configs), BROKER_SESSION 5min, OPEN_TRADES 10sec
+**TradingCache (17 methods)**: get/set/invalidate for Webhook, ConfigByWebhookId, ConfigById, BrokerConfig, ActivePlansByConfigId, OpenTradesByPlanId, InstrumentConfig + invalidateInstrumentConfigs + invalidateAll + warmUp
 
 ### File 9: `server/seed-broker-el.ts` (80 lines)
 Seeds EL database tables on first run. `ensureBrokerEndpoints()` → 15 endpoints, 6 exchange mappings, 11 header templates.

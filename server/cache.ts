@@ -1,4 +1,4 @@
-import type { Webhook, StrategyConfig, BrokerConfig, StrategyPlan } from "@shared/schema";
+import type { Webhook, StrategyConfig, BrokerConfig, StrategyPlan, InstrumentConfig } from "@shared/schema";
 import type { IStorage } from "./storage";
 
 interface CacheEntry<T> {
@@ -17,6 +17,7 @@ class TradingCache {
   private brokerConfigs = new Map<string, CacheEntry<BrokerConfig>>();
   private activePlansByConfigId = new Map<string, CacheEntry<StrategyPlan[]>>();
   private openTradesByPlanId = new Map<string, CacheEntry<any[]>>();
+  private instrumentConfigs = new Map<string, CacheEntry<InstrumentConfig>>();
 
   private isValid<T>(entry: CacheEntry<T> | undefined): entry is CacheEntry<T> {
     return !!entry && Date.now() < entry.expiresAt;
@@ -81,6 +82,21 @@ class TradingCache {
     this.openTradesByPlanId.delete(planId);
   }
 
+  getInstrumentConfig(ticker: string, exchange: string): InstrumentConfig | undefined {
+    const key = `${ticker}:${exchange}`;
+    const entry = this.instrumentConfigs.get(key);
+    return this.isValid(entry) ? entry.data : undefined;
+  }
+
+  setInstrumentConfig(ticker: string, exchange: string, config: InstrumentConfig): void {
+    const key = `${ticker}:${exchange}`;
+    this.instrumentConfigs.set(key, { data: config, expiresAt: Date.now() + HOT_PATH_TTL_MS });
+  }
+
+  invalidateInstrumentConfigs(): void {
+    this.instrumentConfigs.clear();
+  }
+
   invalidateWebhook(id: string): void {
     this.webhooks.delete(id);
   }
@@ -111,6 +127,7 @@ class TradingCache {
     this.brokerConfigs.clear();
     this.activePlansByConfigId.clear();
     this.openTradesByPlanId.clear();
+    this.instrumentConfigs.clear();
   }
 
   async warmUp(storage: IStorage): Promise<void> {

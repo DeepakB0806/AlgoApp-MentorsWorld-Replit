@@ -1,8 +1,9 @@
 import type { IStorage } from "./storage";
-import type { StrategyPlan, StrategyTrade, StrategyConfig, BrokerConfig, WebhookData, ActionMapperEntry } from "@shared/schema";
+import type { StrategyPlan, StrategyTrade, StrategyConfig, BrokerConfig, WebhookData, ActionMapperEntry, PlanTradeLeg, InstrumentConfig } from "@shared/schema";
 import { tradingCache } from "./cache";
 import EL from "./el-kotak-neo-v3";
 import { placeOrder as placeBinanceOrder, type BinanceSession, type BinanceOrderParams } from "./binance-api";
+import { buildKotakOptionSymbol, isOptionExchange, isStrikeSpec } from "./option-symbol-builder";
 
 export interface SignalContext {
   blockType?: string;
@@ -114,6 +115,27 @@ export async function processTradeSignal(
   return results.length > 0 ? results : [{ success: false, action: "hold", broker: "none", planId: "", message: "No broker plans matched" }];
 }
 
+function parseTradeParams(plan: StrategyPlan): Record<string, any> | null {
+  if (!plan.tradeParams) return null;
+  try {
+    return typeof plan.tradeParams === "string" ? JSON.parse(plan.tradeParams) : plan.tradeParams;
+  } catch { return null; }
+}
+
+function selectLegs(tradeParams: Record<string, any> | null, blockType: string): PlanTradeLeg[] {
+  if (!tradeParams) return [];
+  const legs = tradeParams[blockType];
+  if (Array.isArray(legs) && legs.length > 0) return legs;
+  if (Array.isArray(tradeParams.legs) && tradeParams.legs.length > 0) return tradeParams.legs;
+  return [];
+}
+
+function getBlockConfig(tradeParams: Record<string, any> | null, blockType: string): Record<string, any> {
+  if (!tradeParams) return {};
+  const configKey = blockType.replace("Legs", "Config");
+  return tradeParams[configKey] || {};
+}
+
 async function executeTradeForPlan(
   storage: IStorage,
   plan: StrategyPlan,
@@ -125,8 +147,8 @@ async function executeTradeForPlan(
   const broker = brokerConfig.brokerName;
   const signalType = data.signalType;
   const price = data.price || 0;
-  const ticker = data.indices || plan.ticker || signalContext?.parentTicker || "UNKNOWN";
-  const exchange = data.exchange || plan.exchange || signalContext?.parentExchange || "NFO";
+  const ticker = plan.ticker || data.indices || signalContext?.parentTicker || "UNKNOWN";
+  const exchange = plan.exchange || data.exchange || signalContext?.parentExchange || "NFO";
   const resolvedBlockType = signalContext?.blockType || (signalType === "buy" ? "uptrendLegs" : signalType === "sell" ? "downtrendLegs" : "neutralLegs");
   const now = new Date().toISOString();
   const today = now.split("T")[0];
@@ -136,14 +158,39 @@ async function executeTradeForPlan(
     return { success: true, action: "hold", broker, planId: plan.id, message: "Hold signal — no action taken", executionTimeMs: Date.now() - startTime };
   }
 
+  const tradeParams = parseTradeParams(plan);
+  const legs = selectLegs(tradeParams, resolvedBlockType);
+  const blockConfig = getBlockConfig(tradeParams, resolvedBlockType);
+
+  if (legs.length === 0) {
+    console.log(`[TRADE] No legs found for ${resolvedBlockType} in plan ${plan.id} — holding`);
+    return { success: true, action: "hold", broker, planId: plan.id, message: `No legs configured for ${resolvedBlockType}`, executionTimeMs: Date.now() - startTime };
+  }
+
+  let instrumentConfig: InstrumentConfig | undefined;
+  if (isOptionExchange(exchange)) {
+    instrumentConfig = tradingCache.getInstrumentConfig(ticker, exchange);
+    if (!instrumentConfig) {
+      instrumentConfig = await storage.getInstrumentConfig(ticker, exchange);
+      if (instrumentConfig) tradingCache.setInstrumentConfig(ticker, exchange, instrumentConfig);
+    }
+    if (instrumentConfig) {
+      console.log(`[TRADE] Instrument config: ${ticker}/${exchange} lot_size=${instrumentConfig.lotSize} strike_interval=${instrumentConfig.strikeInterval}`);
+    } else {
+      console.log(`[TRADE] No instrument config found for ${ticker}/${exchange} — using defaults`);
+    }
+  }
+
   let openTrades = tradingCache.getOpenTradesByPlanId(plan.id);
   if (!openTrades) {
     openTrades = await storage.getOpenTradesByPlan(plan.id);
     tradingCache.setOpenTradesByPlanId(plan.id, openTrades);
   }
 
+  const ctx: TradeContext = { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, blockConfig, instrumentConfig };
+
   if (signalType === "buy") {
-    return executeBuySignal(storage, plan, brokerConfig, { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime });
+    return executeBuySignal(storage, plan, brokerConfig, ctx);
   }
 
   if (signalType === "sell") {
@@ -151,7 +198,7 @@ async function executeTradeForPlan(
     if (plan.awaitingCleanEntry && resolvedAction === "EXIT" && openTrades.length === 0) {
       return { success: true, action: "hold", broker, planId: plan.id, message: "Awaiting clean entry — no position to exit, skipping", executionTimeMs: Date.now() - startTime };
     }
-    return executeSellSignal(storage, plan, brokerConfig, { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime });
+    return executeSellSignal(storage, plan, brokerConfig, ctx);
   }
 
   return { success: false, action: "error", broker, planId: plan.id, message: `Unknown signal type: ${signalType}`, executionTimeMs: Date.now() - startTime };
@@ -169,6 +216,40 @@ interface TradeContext {
   openTrades: StrategyTrade[];
   signalContext?: SignalContext;
   startTime: number;
+  legs: PlanTradeLeg[];
+  blockConfig: Record<string, any>;
+  instrumentConfig?: InstrumentConfig;
+}
+
+function resolveOrderParams(leg: PlanTradeLeg, ctx: TradeContext, legIndex: number): { tradingSymbol: string; quantity: number; productCode: string; transactionType: string } | { error: string } {
+  const isOption = isOptionExchange(ctx.exchange) && (leg.type === "CE" || leg.type === "PE");
+
+  if (isOption && !ctx.instrumentConfig) {
+    return { error: `Missing instrument_config for ${ctx.ticker}/${ctx.exchange} — cannot trade options without lot_size/strike_interval` };
+  }
+
+  const lotSize = ctx.instrumentConfig?.lotSize || 1;
+  const strikeInterval = ctx.instrumentConfig?.strikeInterval || 50;
+  const expiryDay = ctx.instrumentConfig?.expiryDay || "Thursday";
+  const expiryType = ctx.instrumentConfig?.expiryType || "weekly";
+
+  let tradingSymbol = ctx.ticker;
+  if (isOption && isStrikeSpec(leg.strike) && (leg.type === "CE" || leg.type === "PE")) {
+    tradingSymbol = buildKotakOptionSymbol(
+      ctx.ticker, ctx.price, leg.strike, leg.type, strikeInterval, expiryDay, expiryType
+    );
+  } else if (leg.type === "FUT") {
+    tradingSymbol = `${ctx.ticker}-FUT`;
+  }
+
+  const quantity = (leg.lots || 1) * lotSize * ctx.lotMultiplier;
+  const productCode = leg.orderType || ctx.blockConfig.productMode || "MIS";
+  const txMap: Record<string, string> = { BUY: "B", SELL: "S" };
+  const transactionType = txMap[leg.action] || "B";
+
+  console.log(`[TRADE] Leg[${legIndex}] order params: symbol=${tradingSymbol} qty=${quantity} (${leg.lots}×${lotSize}×${ctx.lotMultiplier}) product=${productCode} tx=${transactionType} [${leg.type} ${leg.strike} ${leg.action}]`);
+
+  return { tradingSymbol, quantity, productCode, transactionType };
 }
 
 async function executeBuySignal(
@@ -190,83 +271,97 @@ async function executeBuySignal(
     deferDailyPnlUpdate(storage, plan.id, ctx.today, closedTrade.pnl || 0);
   }
 
-  const quantity = ctx.lotMultiplier;
-  let orderId: string | undefined;
-  let productType = "PAPER";
-
-  if (broker === "kotak_neo") {
-    if (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl) {
-      return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
-    }
-
-    const orderResult = await EL.placeOrder(brokerConfig, {
-      tradingSymbol: ctx.ticker,
-      exchangeSegment: EL.mapExchange(ctx.exchange),
-      transactionType: "B",
-      quantity: String(quantity),
-      price: "0",
-      priceType: "MKT",
-      productCode: "MIS",
-      validity: "DAY",
-      afterMarketOrder: "NO",
-      disclosedQuantity: "0",
-      marketProtection: "0",
-      priceFillFlag: "N",
-      triggerPrice: "0",
-    });
-
-    if (!orderResult.success) {
-      return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
-    }
-    orderId = orderResult.data?.orderNo;
-    productType = "MIS";
-  } else if (broker === "binance") {
-    const session = buildBinanceSession(brokerConfig);
-    if (!session) return { success: false, action: "error", broker, planId: plan.id, message: "Binance credentials missing", executionTimeMs: Date.now() - ctx.startTime };
-
-    const orderResult = await placeBinanceOrder(session, {
-      symbol: ctx.ticker.replace("-", "").replace("/", ""),
-      side: "BUY",
-      type: "MARKET",
-      quantity,
-    });
-
-    if (!orderResult.success) {
-      return { success: false, action: "error", broker, planId: plan.id, message: `Binance order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
-    }
-    orderId = orderResult.data?.orderNo;
-    productType = "SPOT";
-  } else {
-    orderId = `PT-${Date.now()}`;
-    productType = "PAPER";
+  if (broker === "kotak_neo" && (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl)) {
+    return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
   }
 
-  const trade = await storage.createStrategyTrade({
-    planId: plan.id,
-    orderId: orderId || `${broker.toUpperCase()}-${Date.now()}`,
-    tradingSymbol: ctx.ticker,
-    exchange: ctx.exchange,
-    quantity,
-    price: ctx.price,
-    action: "BUY",
-    blockType: ctx.resolvedBlockType,
-    legIndex: 0,
-    orderType: "MKT",
-    productType,
-    status: "open",
-    pnl: 0,
-    ltp: ctx.price,
-    executedAt: ctx.now,
-    createdAt: ctx.now,
-    updatedAt: ctx.now,
-    timeUnix: ctx.data.timeUnix || null,
-    ticker: ctx.data.indices || ctx.ticker,
-    indicator: ctx.data.indicator || null,
-    alert: ctx.data.alert || null,
-    localTime: ctx.data.localTime || null,
-    mode: ctx.data.mode || null,
-    modeDesc: ctx.data.modeDesc || null,
-  });
+  const trades: any[] = [];
+  const orderIds: string[] = [];
+
+  for (let i = 0; i < ctx.legs.length; i++) {
+    const leg = ctx.legs[i];
+    const resolved = resolveOrderParams(leg, ctx, i);
+    if ("error" in resolved) {
+      return { success: false, action: "error", broker, planId: plan.id, message: resolved.error, executionTimeMs: Date.now() - ctx.startTime };
+    }
+    const params = resolved;
+
+    let orderId: string | undefined;
+    let productType = "PAPER";
+
+    if (broker === "kotak_neo") {
+      const orderResult = await EL.placeOrder(brokerConfig, {
+        tradingSymbol: params.tradingSymbol,
+        exchangeSegment: EL.mapExchange(ctx.exchange),
+        transactionType: params.transactionType,
+        quantity: String(params.quantity),
+        price: "0",
+        priceType: "MKT",
+        productCode: params.productCode,
+        validity: "DAY",
+        afterMarketOrder: "NO",
+        disclosedQuantity: "0",
+        marketProtection: "0",
+        priceFillFlag: "N",
+        triggerPrice: "0",
+      });
+
+      if (!orderResult.success) {
+        return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo leg[${i}] order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
+      }
+      orderId = orderResult.data?.orderNo;
+      productType = params.productCode;
+    } else if (broker === "binance") {
+      const session = buildBinanceSession(brokerConfig);
+      if (!session) return { success: false, action: "error", broker, planId: plan.id, message: "Binance credentials missing", executionTimeMs: Date.now() - ctx.startTime };
+
+      const orderResult = await placeBinanceOrder(session, {
+        symbol: ctx.ticker.replace("-", "").replace("/", ""),
+        side: "BUY",
+        type: "MARKET",
+        quantity: params.quantity,
+      });
+
+      if (!orderResult.success) {
+        return { success: false, action: "error", broker, planId: plan.id, message: `Binance leg[${i}] order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
+      }
+      orderId = orderResult.data?.orderNo;
+      productType = "SPOT";
+    } else {
+      orderId = `PT-${Date.now()}-L${i}`;
+      productType = "PAPER";
+    }
+
+    const trade = await storage.createStrategyTrade({
+      planId: plan.id,
+      orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${i}`,
+      tradingSymbol: params.tradingSymbol,
+      exchange: ctx.exchange,
+      quantity: params.quantity,
+      price: ctx.price,
+      action: "BUY",
+      blockType: ctx.resolvedBlockType,
+      legIndex: i,
+      orderType: "MKT",
+      productType,
+      status: "open",
+      pnl: 0,
+      ltp: ctx.price,
+      executedAt: ctx.now,
+      createdAt: ctx.now,
+      updatedAt: ctx.now,
+      timeUnix: ctx.data.timeUnix || null,
+      ticker: ctx.data.indices || ctx.ticker,
+      indicator: ctx.data.indicator || null,
+      alert: ctx.data.alert || null,
+      localTime: ctx.data.localTime || null,
+      mode: ctx.data.mode || null,
+      modeDesc: ctx.data.modeDesc || null,
+    });
+
+    trades.push(trade);
+    if (orderId) orderIds.push(orderId);
+  }
 
   tradingCache.invalidateOpenTrades(plan.id);
 
@@ -275,14 +370,16 @@ async function executeBuySignal(
     if (plan.configId) tradingCache.invalidatePlans(plan.configId);
   }
 
+  const legSummary = ctx.legs.map((l, i) => `L${i}:${l.type}/${l.strike}/${l.action}`).join(", ");
+
   return {
     success: true,
     action: "open",
     broker,
     planId: plan.id,
-    trade,
-    orderId,
-    message: `${broker.toUpperCase()} BUY: ${quantity} ${ctx.ticker} @ ${ctx.price} [${ctx.resolvedBlockType}]`,
+    trade: trades[0],
+    orderId: orderIds[0],
+    message: `${broker.toUpperCase()} BUY ${ctx.legs.length} leg(s) [${legSummary}] @ ${ctx.price} [${ctx.resolvedBlockType}]`,
     executionTimeMs: Date.now() - ctx.startTime,
   };
 }
@@ -308,83 +405,97 @@ async function executeSellSignal(
     return { success: true, action: "hold", broker, planId: plan.id, message: "Sell position already open — holding", pnl: closePnl, executionTimeMs: Date.now() - ctx.startTime };
   }
 
-  const quantity = ctx.lotMultiplier;
-  let orderId: string | undefined;
-  let productType = "PAPER";
-
-  if (broker === "kotak_neo") {
-    if (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl) {
-      return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
-    }
-
-    const orderResult = await EL.placeOrder(brokerConfig, {
-      tradingSymbol: ctx.ticker,
-      exchangeSegment: EL.mapExchange(ctx.exchange),
-      transactionType: "S",
-      quantity: String(quantity),
-      price: "0",
-      priceType: "MKT",
-      productCode: "MIS",
-      validity: "DAY",
-      afterMarketOrder: "NO",
-      disclosedQuantity: "0",
-      marketProtection: "0",
-      priceFillFlag: "N",
-      triggerPrice: "0",
-    });
-
-    if (!orderResult.success) {
-      return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
-    }
-    orderId = orderResult.data?.orderNo;
-    productType = "MIS";
-  } else if (broker === "binance") {
-    const session = buildBinanceSession(brokerConfig);
-    if (!session) return { success: false, action: "error", broker, planId: plan.id, message: "Binance credentials missing", executionTimeMs: Date.now() - ctx.startTime };
-
-    const orderResult = await placeBinanceOrder(session, {
-      symbol: ctx.ticker.replace("-", "").replace("/", ""),
-      side: "SELL",
-      type: "MARKET",
-      quantity,
-    });
-
-    if (!orderResult.success) {
-      return { success: false, action: "error", broker, planId: plan.id, message: `Binance order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
-    }
-    orderId = orderResult.data?.orderNo;
-    productType = "SPOT";
-  } else {
-    orderId = `PT-${Date.now()}`;
-    productType = "PAPER";
+  if (broker === "kotak_neo" && (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl)) {
+    return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
   }
 
-  const trade = await storage.createStrategyTrade({
-    planId: plan.id,
-    orderId: orderId || `${broker.toUpperCase()}-${Date.now()}`,
-    tradingSymbol: ctx.ticker,
-    exchange: ctx.exchange,
-    quantity,
-    price: ctx.price,
-    action: "SELL",
-    blockType: ctx.resolvedBlockType,
-    legIndex: 0,
-    orderType: "MKT",
-    productType,
-    status: "open",
-    pnl: 0,
-    ltp: ctx.price,
-    executedAt: ctx.now,
-    createdAt: ctx.now,
-    updatedAt: ctx.now,
-    timeUnix: ctx.data.timeUnix || null,
-    ticker: ctx.data.indices || ctx.ticker,
-    indicator: ctx.data.indicator || null,
-    alert: ctx.data.alert || null,
-    localTime: ctx.data.localTime || null,
-    mode: ctx.data.mode || null,
-    modeDesc: ctx.data.modeDesc || null,
-  });
+  const trades: any[] = [];
+  const orderIds: string[] = [];
+
+  for (let i = 0; i < ctx.legs.length; i++) {
+    const leg = ctx.legs[i];
+    const resolved = resolveOrderParams(leg, ctx, i);
+    if ("error" in resolved) {
+      return { success: false, action: "error", broker, planId: plan.id, message: resolved.error, executionTimeMs: Date.now() - ctx.startTime };
+    }
+    const params = resolved;
+
+    let orderId: string | undefined;
+    let productType = "PAPER";
+
+    if (broker === "kotak_neo") {
+      const orderResult = await EL.placeOrder(brokerConfig, {
+        tradingSymbol: params.tradingSymbol,
+        exchangeSegment: EL.mapExchange(ctx.exchange),
+        transactionType: params.transactionType,
+        quantity: String(params.quantity),
+        price: "0",
+        priceType: "MKT",
+        productCode: params.productCode,
+        validity: "DAY",
+        afterMarketOrder: "NO",
+        disclosedQuantity: "0",
+        marketProtection: "0",
+        priceFillFlag: "N",
+        triggerPrice: "0",
+      });
+
+      if (!orderResult.success) {
+        return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo leg[${i}] order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
+      }
+      orderId = orderResult.data?.orderNo;
+      productType = params.productCode;
+    } else if (broker === "binance") {
+      const session = buildBinanceSession(brokerConfig);
+      if (!session) return { success: false, action: "error", broker, planId: plan.id, message: "Binance credentials missing", executionTimeMs: Date.now() - ctx.startTime };
+
+      const orderResult = await placeBinanceOrder(session, {
+        symbol: ctx.ticker.replace("-", "").replace("/", ""),
+        side: "SELL",
+        type: "MARKET",
+        quantity: params.quantity,
+      });
+
+      if (!orderResult.success) {
+        return { success: false, action: "error", broker, planId: plan.id, message: `Binance leg[${i}] order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
+      }
+      orderId = orderResult.data?.orderNo;
+      productType = "SPOT";
+    } else {
+      orderId = `PT-${Date.now()}-L${i}`;
+      productType = "PAPER";
+    }
+
+    const trade = await storage.createStrategyTrade({
+      planId: plan.id,
+      orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${i}`,
+      tradingSymbol: params.tradingSymbol,
+      exchange: ctx.exchange,
+      quantity: params.quantity,
+      price: ctx.price,
+      action: "SELL",
+      blockType: ctx.resolvedBlockType,
+      legIndex: i,
+      orderType: "MKT",
+      productType,
+      status: "open",
+      pnl: 0,
+      ltp: ctx.price,
+      executedAt: ctx.now,
+      createdAt: ctx.now,
+      updatedAt: ctx.now,
+      timeUnix: ctx.data.timeUnix || null,
+      ticker: ctx.data.indices || ctx.ticker,
+      indicator: ctx.data.indicator || null,
+      alert: ctx.data.alert || null,
+      localTime: ctx.data.localTime || null,
+      mode: ctx.data.mode || null,
+      modeDesc: ctx.data.modeDesc || null,
+    });
+
+    trades.push(trade);
+    if (orderId) orderIds.push(orderId);
+  }
 
   tradingCache.invalidateOpenTrades(plan.id);
 
@@ -393,15 +504,17 @@ async function executeSellSignal(
     if (plan.configId) tradingCache.invalidatePlans(plan.configId);
   }
 
+  const legSummary = ctx.legs.map((l, i) => `L${i}:${l.type}/${l.strike}/${l.action}`).join(", ");
+
   return {
     success: true,
     action: "open",
     broker,
     planId: plan.id,
-    trade,
-    orderId,
+    trade: trades[0],
+    orderId: orderIds[0],
     pnl: closePnl,
-    message: `${broker.toUpperCase()} SELL: ${quantity} ${ctx.ticker} @ ${ctx.price} [${ctx.resolvedBlockType}]`,
+    message: `${broker.toUpperCase()} SELL ${ctx.legs.length} leg(s) [${legSummary}] @ ${ctx.price} [${ctx.resolvedBlockType}]`,
     executionTimeMs: Date.now() - ctx.startTime,
   };
 }
