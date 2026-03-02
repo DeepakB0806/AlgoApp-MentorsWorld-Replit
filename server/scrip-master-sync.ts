@@ -65,7 +65,8 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
   const headerLine = lines[0];
   const headers = parseCSVLine(headerLine).map(h => h.toLowerCase().replace(/[^a-z0-9_]/g, ''));
 
-  const symbolIdx = headers.findIndex(h => h === 'psymbol' || h === 'symbol' || h === 'tsym' || h === 'tradingsymbol' || h === 'psymname');
+  const symbolNameIdx = headers.findIndex(h => h === 'psymbolname' || h === 'symbolname' || h === 'symbol_name');
+  const symbolIdx = symbolNameIdx >= 0 ? symbolNameIdx : headers.findIndex(h => h === 'psymbol' || h === 'symbol' || h === 'tsym' || h === 'tradingsymbol' || h === 'psymname');
   const lotIdx = headers.findIndex(h => h === 'lotsize' || h === 'lot_size' || h === 'brdlotqty' || h === 'boardlotqty' || h === 'pbrdlotqty' || h === 'plotsize' || h === 'llotsize' || h === 'ilotsize' || h === 'iboardlotqty');
   const strikeIdx = headers.findIndex(h => h === 'strikeprice' || h === 'strike_price' || h === 'strkprc' || h === 'pstrikeprice' || h === 'pstrkprc' || h === 'dstrikeprice');
   const instTypeIdx = headers.findIndex(h => h === 'instrumenttype' || h === 'instrument_type' || h === 'insttype' || h === 'instype' || h === 'pinsttype' || h === 'pinstrumenttype');
