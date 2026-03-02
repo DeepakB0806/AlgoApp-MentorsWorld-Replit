@@ -131,7 +131,7 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
 }
 
 async function downloadFile(url: string): Promise<string> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(60000) });
+  const response = await fetch(url, { signal: AbortSignal.timeout(180000) });
   if (!response.ok) throw new Error(`Download failed: ${response.status} ${response.statusText}`);
   return await response.text();
 }
