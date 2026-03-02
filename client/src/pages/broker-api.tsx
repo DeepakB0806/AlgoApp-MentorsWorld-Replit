@@ -1344,6 +1344,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
 
   const isKotakNeo = brokerName === "kotak_neo";
   const [readinessCountdown, setReadinessCountdown] = useState(20);
+  const [isTradeReady, setIsTradeReady] = useState(false);
   const { data: teReadiness } = useQuery<{ ready: boolean; instrumentCount: number; error: string | null }>({
     queryKey: ["/api/te/readiness", config?.id],
     queryFn: async () => {
@@ -1353,16 +1354,20 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
       return res.json();
     },
     enabled: !!config && isKotakNeo && !!config.isConnected,
-    refetchInterval: teReadiness?.ready ? false : 20000,
+    refetchInterval: isTradeReady ? false : 20000,
   });
 
   useEffect(() => {
-    if (!config || !isKotakNeo || !config.isConnected || teReadiness?.ready) return;
+    if (teReadiness?.ready) setIsTradeReady(true);
+  }, [teReadiness?.ready]);
+
+  useEffect(() => {
+    if (!config || !isKotakNeo || !config.isConnected || isTradeReady) return;
     const timer = setInterval(() => {
       setReadinessCountdown((prev) => (prev <= 1 ? 20 : prev - 1));
     }, 1000);
     return () => clearInterval(timer);
-  }, [config, isKotakNeo, teReadiness?.ready]);
+  }, [config, isKotakNeo, isTradeReady]);
 
   useEffect(() => {
     if (config) {
