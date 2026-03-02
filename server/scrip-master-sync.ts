@@ -66,11 +66,11 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
   const headers = parseCSVLine(headerLine).map(h => h.toLowerCase().replace(/[^a-z0-9_]/g, ''));
 
   const symbolIdx = headers.findIndex(h => h === 'psymbol' || h === 'symbol' || h === 'tsym' || h === 'tradingsymbol' || h === 'psymname');
-  const lotIdx = headers.findIndex(h => h === 'lotsize' || h === 'lot_size' || h === 'brdlotqty' || h === 'boardlotqty');
-  const strikeIdx = headers.findIndex(h => h === 'strikeprice' || h === 'strike_price' || h === 'strkprc');
-  const instTypeIdx = headers.findIndex(h => h === 'instrumenttype' || h === 'instrument_type' || h === 'insttype' || h === 'instype');
+  const lotIdx = headers.findIndex(h => h === 'lotsize' || h === 'lot_size' || h === 'brdlotqty' || h === 'boardlotqty' || h === 'pbrdlotqty' || h === 'plotsize');
+  const strikeIdx = headers.findIndex(h => h === 'strikeprice' || h === 'strike_price' || h === 'strkprc' || h === 'pstrikeprice' || h === 'pstrkprc');
+  const instTypeIdx = headers.findIndex(h => h === 'instrumenttype' || h === 'instrument_type' || h === 'insttype' || h === 'instype' || h === 'pinsttype' || h === 'pinstrumenttype');
   const tokenIdx = headers.findIndex(h => h === 'token' || h === 'pscriprefkey' || h === 'scripcode');
-  const optTypeIdx = headers.findIndex(h => h === 'optiontype' || h === 'option_type' || h === 'optype' || h === 'opttype');
+  const optTypeIdx = headers.findIndex(h => h === 'optiontype' || h === 'option_type' || h === 'optype' || h === 'opttype' || h === 'poptiontype' || h === 'popttype');
 
   console.log(`${LOG_PREFIX} CSV headers (${headers.length}): ${headers.slice(0, 15).join(', ')}...`);
   console.log(`${LOG_PREFIX} Column indices: symbol=${symbolIdx}, lot=${lotIdx}, strike=${strikeIdx}, instType=${instTypeIdx}, token=${tokenIdx}, optType=${optTypeIdx}`);
