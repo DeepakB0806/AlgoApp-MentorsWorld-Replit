@@ -60,8 +60,8 @@ async function resolveBaseUrl(providedBaseUrl?: string): Promise<string> {
 
 // Mailjet API client
 function getMailjetClient() {
-  const apiKey = process.env.MAILJET_API_KEY?.trim().replace(/[^a-f0-9]/gi, '');
-  const secretKey = process.env.MAILJET_SECRET_KEY?.trim().replace(/[^a-f0-9]/gi, '');
+  const apiKey = process.env.MAILJET_API_KEY?.trim().replace(/[,;'"\s]+$/g, '');
+  const secretKey = process.env.MAILJET_SECRET_KEY?.trim().replace(/[,;'"\s]+$/g, '');
   
   if (!apiKey || !secretKey) {
     throw new Error("Mailjet credentials not configured");
@@ -109,8 +109,12 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
     return true;
   } catch (error: any) {
     console.error("Failed to send email:", error.message || error);
-    if (error.response) {
-      console.error("Mailjet error response:", JSON.stringify(error.response.body || error.response));
+    if (error.response?.body) {
+      try {
+        console.error("Mailjet error response:", JSON.stringify(error.response.body));
+      } catch {
+        console.error("Mailjet error response (non-serializable):", error.response.statusCode || error.response.status);
+      }
     }
     return false;
   }
