@@ -1343,16 +1343,26 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
   });
 
   const isKotakNeo = brokerName === "kotak_neo";
+  const [readinessCountdown, setReadinessCountdown] = useState(20);
   const { data: teReadiness } = useQuery<{ ready: boolean; instrumentCount: number; error: string | null }>({
     queryKey: ["/api/te/readiness", config?.id],
     queryFn: async () => {
       const res = await fetch(`/api/te/readiness/${config!.id}`);
       if (!res.ok) throw new Error("Failed to check trade readiness");
+      setReadinessCountdown(20);
       return res.json();
     },
     enabled: !!config && isKotakNeo && !!config.isConnected,
     refetchInterval: 20000,
   });
+
+  useEffect(() => {
+    if (!config || !isKotakNeo || !config.isConnected) return;
+    const timer = setInterval(() => {
+      setReadinessCountdown((prev) => (prev <= 1 ? 20 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [config, isKotakNeo]);
 
   useEffect(() => {
     if (config) {
@@ -1665,11 +1675,13 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                             <span className="flex items-center gap-1 text-emerald-500" data-testid="te-readiness-ready">
                               <CheckCircle className="w-4 h-4" />
                               You are ready to trade
+                              <span className="text-xs text-muted-foreground ml-1" data-testid="te-readiness-countdown">({readinessCountdown}s)</span>
                             </span>
                           ) : (
                             <span className="flex items-center gap-1 text-destructive" data-testid="te-readiness-not-ready">
                               <XCircle className="w-4 h-4" />
                               You are NOT ready to trade — {teReadiness.error}
+                              <span className="text-xs text-muted-foreground ml-1" data-testid="te-readiness-countdown">({readinessCountdown}s)</span>
                             </span>
                           )
                         )}
