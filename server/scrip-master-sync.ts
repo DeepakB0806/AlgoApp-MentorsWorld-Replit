@@ -174,10 +174,11 @@ export async function runScripMasterSync(
         }
       }
     } else if (data && typeof data === 'object') {
-      if (data.filesPaths && Array.isArray(data.filesPaths)) {
-        for (const item of data.filesPaths) {
-          const path = item.filePath || item.path || item.url || "";
-          const name = item.fileName || item.name || item.exchange || "";
+      const filesPaths = data.filesPaths || data.data?.filesPaths;
+      if (filesPaths && Array.isArray(filesPaths)) {
+        for (const item of filesPaths) {
+          const path = typeof item === 'string' ? item : (item.filePath || item.path || item.url || "");
+          const name = typeof item === 'string' ? item : (item.fileName || item.name || item.exchange || "");
           if (path && (name.toLowerCase().includes("nfo") || name.toLowerCase().includes("nse_fo") || path.toLowerCase().includes("nfo") || path.toLowerCase().includes("nse_fo"))) {
             nfoFileUrl = path;
             break;
