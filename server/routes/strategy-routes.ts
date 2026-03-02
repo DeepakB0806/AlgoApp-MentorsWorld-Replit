@@ -307,4 +307,43 @@ export function registerStrategyRoutes(app: Express, storage: IStorage) {
       res.status(500).json({ error: `Sync failed: ${error.message}` });
     }
   });
+
+  app.get("/api/instrument-configs", async (req, res) => {
+    try {
+      const configs = await storage.getInstrumentConfigs();
+      res.json(configs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch instrument configs" });
+    }
+  });
+
+  app.get("/api/instrument-configs/:ticker", async (req, res) => {
+    try {
+      const exchange = (req.query.exchange as string) || "NFO";
+      const config = await storage.getInstrumentConfig(req.params.ticker, exchange);
+      if (!config) return res.status(404).json({ error: "Instrument config not found" });
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch instrument config" });
+    }
+  });
+
+  app.post("/api/instrument-configs/sync", async (req, res) => {
+    try {
+      const { brokerConfigId } = req.body;
+      if (!brokerConfigId) return res.status(400).json({ error: "brokerConfigId is required" });
+
+      const brokerConfig = await storage.getBrokerConfig(brokerConfigId);
+      if (!brokerConfig) return res.status(404).json({ error: "Broker config not found" });
+      if (!brokerConfig.isConnected || !brokerConfig.accessToken) {
+        return res.status(400).json({ error: "Broker not connected. Please login first." });
+      }
+
+      const { runScripMasterSync } = await import("../scrip-master-sync");
+      const result = await runScripMasterSync(storage, brokerConfig);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: `Sync failed: ${error.message}` });
+    }
+  });
 }

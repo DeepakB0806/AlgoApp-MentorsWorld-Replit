@@ -703,6 +703,33 @@ class ExecutionLayer {
     }
   }
 
+  async getScripMasterFilePaths(
+    config: BrokerConfig,
+  ): Promise<ApiResponse<any>> {
+    if (!this.ready) return { success: false, error: "EL not ready" };
+
+    try {
+      const endpoint = this.getEndpoint("scrip_master_file_paths");
+      if (!endpoint) return { success: false, error: "scrip_master_file_paths endpoint not configured" };
+
+      const headers = this.buildHeadersForEndpoint(endpoint, {
+        accessToken: config.accessToken,
+        sessionId: config.sessionId,
+      });
+
+      const url = config.baseUrl
+        ? `${config.baseUrl}${endpoint.endpointPath}`
+        : endpoint.endpointPath;
+
+      const response = await fetch(url, { method: "GET", headers });
+      const data = await response.json();
+
+      return { success: true, data };
+    } catch (error: any) {
+      return { success: false, error: error.message || "Scrip master file paths error" };
+    }
+  }
+
   async testConnectivity(consumerKey?: string): Promise<ApiResponse> {
     try {
       const totpEndpoint = this.getEndpoint("totp_login");

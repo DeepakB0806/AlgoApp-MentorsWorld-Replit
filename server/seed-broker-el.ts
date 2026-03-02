@@ -10,9 +10,19 @@ export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exch
   const existingExchanges = await db.select().from(broker_exchange_maps).where(eq(broker_exchange_maps.brokerName, BROKER_NAME));
   const existingHeaders = await db.select().from(broker_headers).where(eq(broker_headers.brokerName, BROKER_NAME));
 
+  const existingEndpointNames = new Set(existingEndpoints.map(e => e.endpointName));
+  const missingEndpoints: { brokerName: string; category: string; endpointName: string; endpointPath: string; httpMethod: string; baseUrlType: string; contentType: string; bodyFormat: string; authType: string; description: string; sortOrder: number }[] = [];
+  if (!existingEndpointNames.has("scrip_master_file_paths")) {
+    missingEndpoints.push({ brokerName: BROKER_NAME, category: "data_get", endpointName: "scrip_master_file_paths", endpointPath: "/script-details/1.0/masterscrip/file-paths", httpMethod: "GET", baseUrlType: "trading", contentType: "application/json", bodyFormat: "none", authType: "session", description: "Get scrip master file download URLs", sortOrder: 16 });
+  }
+  if (missingEndpoints.length > 0) {
+    const added = await db.insert(broker_api_endpoints).values(missingEndpoints).returning();
+    console.log(`${LOG_PREFIX} Added ${added.length} missing endpoints: ${added.map(e => e.endpointName).join(', ')}`);
+  }
+
   if (existingEndpoints.length > 0 && existingExchanges.length > 0 && existingHeaders.length > 0) {
-    console.log(`${LOG_PREFIX} Already populated (${existingEndpoints.length} endpoints, ${existingExchanges.length} exchanges, ${existingHeaders.length} headers)`);
-    return { endpoints: existingEndpoints.length, exchanges: existingExchanges.length, headers: existingHeaders.length };
+    console.log(`${LOG_PREFIX} Already populated (${existingEndpoints.length + missingEndpoints.length} endpoints, ${existingExchanges.length} exchanges, ${existingHeaders.length} headers)`);
+    return { endpoints: existingEndpoints.length + missingEndpoints.length, exchanges: existingExchanges.length, headers: existingHeaders.length };
   }
 
   let endpointCount = 0;
@@ -36,6 +46,7 @@ export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exch
       { brokerName: BROKER_NAME, category: "margin", endpointName: "check_margin", endpointPath: "/quick/user/check-margin", httpMethod: "POST", baseUrlType: "trading", contentType: "application/x-www-form-urlencoded", bodyFormat: "jdata_urlencoded", authType: "session", description: "Check margin requirement", sortOrder: 13 },
       { brokerName: BROKER_NAME, category: "limits", endpointName: "limits", endpointPath: "/quick/user/limits", httpMethod: "POST", baseUrlType: "trading", contentType: "application/x-www-form-urlencoded", bodyFormat: "jdata_urlencoded", authType: "session", description: "Get available funds/limits", sortOrder: 14 },
       { brokerName: BROKER_NAME, category: "quotes", endpointName: "quotes", endpointPath: "/script-details/1.0/quotes/neosymbol/{exchange}|{token}/all", httpMethod: "GET", baseUrlType: "trading", contentType: "application/x-www-form-urlencoded", bodyFormat: "none", authType: "consumer_key", description: "Get live quotes", sortOrder: 15 },
+      { brokerName: BROKER_NAME, category: "data_get", endpointName: "scrip_master_file_paths", endpointPath: "/script-details/1.0/masterscrip/file-paths", httpMethod: "GET", baseUrlType: "trading", contentType: "application/json", bodyFormat: "none", authType: "session", description: "Get scrip master file download URLs", sortOrder: 16 },
     ];
     const inserted = await db.insert(broker_api_endpoints).values(endpoints).returning();
     endpointCount = inserted.length;

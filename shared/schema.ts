@@ -699,6 +699,27 @@ export const insertBrokerHeaderSchema = createInsertSchema(broker_headers).omit(
 export type InsertBrokerHeader = z.infer<typeof insertBrokerHeaderSchema>;
 export type BrokerHeader = typeof broker_headers.$inferSelect;
 
+// ====== INSTRUMENT CONFIGS ======
+export const instrumentConfigs = pgTable("instrument_configs", {
+  id: serial("id").primaryKey(),
+  ticker: text("ticker").notNull(),
+  exchange: text("exchange").notNull().default("NFO"),
+  lotSize: integer("lot_size").notNull().default(1),
+  strikeInterval: integer("strike_interval").default(50),
+  expiryDay: text("expiry_day").default("Thursday"),
+  expiryType: text("expiry_type").default("weekly"),
+  token: text("token"),
+  instrumentType: text("instrument_type"),
+  updatedAt: text("updated_at"),
+  source: text("source").default("manual"),
+}, (table) => [
+  index("idx_ic_ticker_exchange").on(table.ticker, table.exchange),
+]);
+
+export const insertInstrumentConfigSchema = createInsertSchema(instrumentConfigs).omit({ id: true });
+export type InsertInstrumentConfig = z.infer<typeof insertInstrumentConfigSchema>;
+export type InstrumentConfig = typeof instrumentConfigs.$inferSelect;
+
 // ====== HELPER FUNCTIONS ======
 export function buildTradingSymbol(ticker: string, legType: string, strike: string): string {
   if (!ticker) return "";

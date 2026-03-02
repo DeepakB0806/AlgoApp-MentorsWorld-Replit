@@ -4,7 +4,7 @@ import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
   brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades, strategyDailyPnl,
-  broker_field_mappings, universal_fields,
+  broker_field_mappings, universal_fields, instrumentConfigs,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -21,6 +21,7 @@ import {
   type StrategyDailyPnl, type InsertStrategyDailyPnl,
   type BrokerFieldMapping, type InsertBrokerFieldMapping,
   type UniversalField, type InsertUniversalField,
+  type InstrumentConfig, type InsertInstrumentConfig,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -152,6 +153,11 @@ export interface IStorage {
   updateUniversalField(id: number, data: Partial<InsertUniversalField>): Promise<UniversalField | undefined>;
   deleteUniversalField(id: number): Promise<boolean>;
   ensureUniversalFields(): Promise<{ inserted: number; existing: number }>;
+
+  // Instrument Configs
+  getInstrumentConfigs(): Promise<InstrumentConfig[]>;
+  getInstrumentConfig(ticker: string, exchange: string): Promise<InstrumentConfig | undefined>;
+  upsertInstrumentConfig(data: InsertInstrumentConfig): Promise<InstrumentConfig>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -1361,6 +1367,31 @@ export class DatabaseStorage implements IStorage {
 
     const inserted = await db.insert(universal_fields).values(UNIVERSAL_FIELDS_DATA).onConflictDoNothing().returning();
     return { inserted: inserted.length, existing: 0 };
+  }
+
+  async getInstrumentConfigs(): Promise<InstrumentConfig[]> {
+    return await db.select().from(instrumentConfigs).orderBy(instrumentConfigs.ticker);
+  }
+
+  async getInstrumentConfig(ticker: string, exchange: string): Promise<InstrumentConfig | undefined> {
+    const [result] = await db.select().from(instrumentConfigs)
+      .where(and(eq(instrumentConfigs.ticker, ticker), eq(instrumentConfigs.exchange, exchange)));
+    return result;
+  }
+
+  async upsertInstrumentConfig(data: InsertInstrumentConfig): Promise<InstrumentConfig> {
+    const existing = await this.getInstrumentConfig(data.ticker, data.exchange || "NFO");
+    if (existing) {
+      const [updated] = await db.update(instrumentConfigs)
+        .set({ ...data, updatedAt: new Date().toISOString() })
+        .where(eq(instrumentConfigs.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(instrumentConfigs)
+      .values({ ...data, updatedAt: new Date().toISOString() })
+      .returning();
+    return created;
   }
 }
 

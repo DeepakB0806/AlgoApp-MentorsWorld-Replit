@@ -326,6 +326,18 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         sessionExpiry,
         config: updated 
       });
+
+      if (result.success && updated) {
+        setImmediate(async () => {
+          try {
+            const { runScripMasterSync } = await import("../scrip-master-sync");
+            const syncResult = await runScripMasterSync(storage, updated);
+            console.log(`[BROKER-AUTH] Post-login scrip master sync: ${syncResult.success ? `${syncResult.synced} instruments synced` : syncResult.error}`);
+          } catch (err: any) {
+            console.error(`[BROKER-AUTH] Post-login scrip master sync error: ${err.message}`);
+          }
+        });
+      }
     } catch (error) {
       res.status(500).json({ error: "Authentication failed", details: error instanceof Error ? error.message : "Unknown error" });
     }
