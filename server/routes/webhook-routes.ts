@@ -909,6 +909,11 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
         }
       }
 
+      if (fieldKeys.has("action")) {
+        fieldKeys.delete("action");
+        fieldKeys.add("alert");
+      }
+
       res.json(Array.from(fieldKeys).sort());
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch webhook signals" });
