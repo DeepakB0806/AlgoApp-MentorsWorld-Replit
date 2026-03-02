@@ -1353,16 +1353,16 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
       return res.json();
     },
     enabled: !!config && isKotakNeo && !!config.isConnected,
-    refetchInterval: 20000,
+    refetchInterval: teReadiness?.ready ? false : 20000,
   });
 
   useEffect(() => {
-    if (!config || !isKotakNeo || !config.isConnected) return;
+    if (!config || !isKotakNeo || !config.isConnected || teReadiness?.ready) return;
     const timer = setInterval(() => {
       setReadinessCountdown((prev) => (prev <= 1 ? 20 : prev - 1));
     }, 1000);
     return () => clearInterval(timer);
-  }, [config, isKotakNeo]);
+  }, [config, isKotakNeo, teReadiness?.ready]);
 
   useEffect(() => {
     if (config) {
@@ -1672,10 +1672,9 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                         </span>
                         {isKotakNeo && teReadiness && (
                           teReadiness.ready ? (
-                            <span className="flex items-center gap-1 text-emerald-500" data-testid="te-readiness-ready">
-                              <CheckCircle className="w-4 h-4" />
+                            <span className="flex items-center gap-1 text-muted-foreground" data-testid="te-readiness-ready">
+                              <CheckCircle className="w-4 h-4 text-emerald-500" />
                               You are ready to trade
-                              <span className="text-xs text-muted-foreground ml-1" data-testid="te-readiness-countdown">({readinessCountdown}s)</span>
                             </span>
                           ) : (
                             <span className="flex items-center gap-1 text-destructive" data-testid="te-readiness-not-ready">
