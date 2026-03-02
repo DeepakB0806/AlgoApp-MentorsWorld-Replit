@@ -1677,8 +1677,8 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                         </span>
                         {isKotakNeo && teReadiness && (
                           teReadiness.ready ? (
-                            <span className="flex items-center gap-1 text-muted-foreground" data-testid="te-readiness-ready">
-                              <CheckCircle className="w-4 h-4 text-emerald-500" />
+                            <span className="flex items-center gap-1 text-emerald-500" data-testid="te-readiness-ready">
+                              <CheckCircle className="w-4 h-4" />
                               You are ready to trade
                             </span>
                           ) : (
