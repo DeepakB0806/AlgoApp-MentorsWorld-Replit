@@ -20,6 +20,16 @@ export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exch
     console.log(`${LOG_PREFIX} Added ${added.length} missing endpoints: ${added.map(e => e.endpointName).join(', ')}`);
   }
 
+  const existingHeaderKeys = new Set(existingHeaders.map(h => `${h.authType}::${h.headerName}`));
+  const missingHeaders: { brokerName: string; authType: string; headerName: string; headerSource: string; headerValue: string; sortOrder: number }[] = [];
+  if (!existingHeaderKeys.has("session::Authorization")) {
+    missingHeaders.push({ brokerName: BROKER_NAME, authType: "session", headerName: "Authorization", headerSource: "config_field", headerValue: "consumerKey", sortOrder: 4 });
+  }
+  if (missingHeaders.length > 0) {
+    const added = await db.insert(broker_headers).values(missingHeaders).returning();
+    console.log(`${LOG_PREFIX} Added ${added.length} missing headers: ${added.map(h => `${h.authType}::${h.headerName}`).join(', ')}`);
+  }
+
   if (existingEndpoints.length > 0 && existingExchanges.length > 0 && existingHeaders.length > 0) {
     console.log(`${LOG_PREFIX} Already populated (${existingEndpoints.length + missingEndpoints.length} endpoints, ${existingExchanges.length} exchanges, ${existingHeaders.length} headers)`);
     return { endpoints: existingEndpoints.length + missingEndpoints.length, exchanges: existingExchanges.length, headers: existingHeaders.length };
@@ -80,6 +90,7 @@ export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exch
       { brokerName: BROKER_NAME, authType: "session", headerName: "Sid", headerSource: "config_field", headerValue: "sessionId", sortOrder: 1 },
       { brokerName: BROKER_NAME, authType: "session", headerName: "Auth", headerSource: "config_field", headerValue: "accessToken", sortOrder: 2 },
       { brokerName: BROKER_NAME, authType: "session", headerName: "Content-Type", headerSource: "static", headerValue: "application/x-www-form-urlencoded", sortOrder: 3 },
+      { brokerName: BROKER_NAME, authType: "session", headerName: "Authorization", headerSource: "config_field", headerValue: "consumerKey", sortOrder: 4 },
     ];
     const inserted = await db.insert(broker_headers).values(headers).returning();
     headerCount = inserted.length;

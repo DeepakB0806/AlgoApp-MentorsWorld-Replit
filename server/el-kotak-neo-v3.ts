@@ -403,6 +403,7 @@ class ExecutionLayer {
       const headers = this.buildHeadersForEndpoint(endpoint, {
         accessToken: config.accessToken,
         sessionId: config.sessionId,
+        consumerKey: config.consumerKey,
       });
 
       let body: Record<string, any>;
@@ -449,6 +450,7 @@ class ExecutionLayer {
       const headers = this.buildHeadersForEndpoint(endpoint, {
         accessToken: config.accessToken,
         sessionId: config.sessionId,
+        consumerKey: config.consumerKey,
       });
 
       let body: Record<string, any>;
@@ -495,6 +497,7 @@ class ExecutionLayer {
       const headers = this.buildHeadersForEndpoint(endpoint, {
         accessToken: config.accessToken,
         sessionId: config.sessionId,
+        consumerKey: config.consumerKey,
       });
 
       let body: Record<string, any>;
@@ -542,6 +545,7 @@ class ExecutionLayer {
       const headers = this.buildHeadersForEndpoint(endpoint, {
         accessToken: config.accessToken,
         sessionId: config.sessionId,
+        consumerKey: config.consumerKey,
       });
 
       const data = await this.executeRequest(endpoint, headers, config.baseUrl);
@@ -583,6 +587,7 @@ class ExecutionLayer {
       const headers = this.buildHeadersForEndpoint(endpoint, {
         accessToken: config.accessToken,
         sessionId: config.sessionId,
+        consumerKey: config.consumerKey,
       });
 
       let body: Record<string, any>;
@@ -618,6 +623,7 @@ class ExecutionLayer {
       const headers = this.buildHeadersForEndpoint(endpoint, {
         accessToken: config.accessToken,
         sessionId: config.sessionId,
+        consumerKey: config.consumerKey,
       });
 
       let body: Record<string, any>;
@@ -650,6 +656,7 @@ class ExecutionLayer {
       const headers = this.buildHeadersForEndpoint(endpoint, {
         accessToken: config.accessToken,
         sessionId: config.sessionId,
+        consumerKey: config.consumerKey,
       });
 
       let body: Record<string, any>;
@@ -715,6 +722,7 @@ class ExecutionLayer {
       const headers = this.buildHeadersForEndpoint(endpoint, {
         accessToken: config.accessToken,
         sessionId: config.sessionId,
+        consumerKey: config.consumerKey,
       });
 
       const url = config.baseUrl
@@ -777,6 +785,7 @@ class ExecutionLayer {
       const headers = this.buildHeadersForEndpoint(endpoint, {
         accessToken: config.accessToken,
         sessionId: config.sessionId,
+        consumerKey: config.consumerKey,
       });
 
       const data = await this.executeRequest(endpoint, headers, config.baseUrl);
