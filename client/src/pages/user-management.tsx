@@ -387,14 +387,14 @@ export default function UserManagement() {
                           <p className="font-medium">{invitation.email}</p>
                           <div className="flex flex-wrap items-center gap-2 mt-1">
                             <span className="text-sm text-muted-foreground">
-                              Expires: {new Date(invitation.expiresAt).toLocaleDateString()}
+                              Expires: {new Date(invitation.expiresAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}
                             </span>
                             {invitation.emailSent ? (
                               <Badge variant="secondary" className="text-xs">
                                 <MailCheck className="w-3 h-3 mr-1" />
                                 Email Sent {invitation.emailSentAt && (
                                   <span className="ml-1 opacity-75">
-                                    ({new Date(invitation.emailSentAt).toLocaleDateString()})
+                                    ({new Date(invitation.emailSentAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })})
                                   </span>
                                 )}
                               </Badge>

@@ -634,7 +634,7 @@ export function MotherConfigurator() {
                   )}
                   {config.createdAt && (
                     <p className="text-xs text-muted-foreground" data-testid={`text-config-date-${config.id}`}>
-                      Created: {new Date(config.createdAt).toLocaleDateString()}
+                      Created: {new Date(config.createdAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}
                     </p>
                   )}
                 </div>

@@ -209,7 +209,7 @@ function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: Stra
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const tradesCount = trades.length;
   useEffect(() => {
-    if (tradesCount > 0 || !isLoading) setLastFetched(new Date().toLocaleTimeString());
+    if (tradesCount > 0 || !isLoading) setLastFetched(new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }));
   }, [tradesCount, isLoading]);
 
   const totalPnl = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);

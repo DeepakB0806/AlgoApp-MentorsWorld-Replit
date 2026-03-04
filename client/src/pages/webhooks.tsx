@@ -943,7 +943,7 @@ export default function Webhooks() {
                         </div>
                         <div>
                           <p className="text-muted-foreground">Last Triggered</p>
-                          <p className="font-medium text-xs">{webhook.lastTriggered ? new Date(webhook.lastTriggered).toLocaleString() : "Never"}</p>
+                          <p className="font-medium text-xs">{webhook.lastTriggered ? new Date(webhook.lastTriggered).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "Never"}</p>
                         </div>
                         <div>
                           <p className="text-muted-foreground">Secret Key</p>
@@ -1197,7 +1197,7 @@ export default function Webhooks() {
                               )}
                             </div>
                             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-nowrap">
-                              <span className="flex-shrink-0">{new Date(log.testedAt).toLocaleString()}</span>
+                              <span className="flex-shrink-0">{new Date(log.testedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</span>
                               {log.responseTime && (
                                 <span className="flex items-center gap-1 flex-shrink-0">
                                   <Timer className="w-3 h-3" />

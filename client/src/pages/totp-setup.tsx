@@ -116,7 +116,7 @@ export default function TotpSetup() {
   };
 
   const downloadBackupCodes = () => {
-    const codesText = `MentorsWorld AlgoTrading - Backup Recovery Codes\n${"=".repeat(50)}\n\nThese codes can be used to log in if you lose access to your authenticator app.\nEach code can only be used ONCE.\n\n${backupCodes.map((code, i) => `${i + 1}. ${code}`).join("\n")}\n\nGenerated: ${new Date().toLocaleString()}\n\nKeep these codes in a safe place!`;
+    const codesText = `MentorsWorld AlgoTrading - Backup Recovery Codes\n${"=".repeat(50)}\n\nThese codes can be used to log in if you lose access to your authenticator app.\nEach code can only be used ONCE.\n\n${backupCodes.map((code, i) => `${i + 1}. ${code}`).join("\n")}\n\nGenerated: ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST\n\nKeep these codes in a safe place!`;
     const blob = new Blob([codesText], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
