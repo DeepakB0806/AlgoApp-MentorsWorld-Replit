@@ -40,10 +40,10 @@ export function resolveSignalFromActionMapper(
       if (fieldValue !== undefined && fieldValue !== null && String(fieldValue) === entry.signalValue) {
         if (entry.uptrend === "ENTRY") return { signalType: "buy", blockType: "uptrendLegs", resolvedAction: "ENTRY" };
         if (entry.uptrend === "EXIT") return { signalType: "sell", blockType: "uptrendLegs", resolvedAction: "EXIT" };
-        if (entry.downtrend === "ENTRY") return { signalType: "sell", blockType: "downtrendLegs", resolvedAction: "ENTRY" };
-        if (entry.downtrend === "EXIT") return { signalType: "buy", blockType: "downtrendLegs", resolvedAction: "EXIT" };
-        if (entry.neutral === "ENTRY") return { signalType: "hold", blockType: "neutralLegs", resolvedAction: "ENTRY" };
-        if (entry.neutral === "EXIT") return { signalType: "hold", blockType: "neutralLegs", resolvedAction: "EXIT" };
+        if (entry.downtrend === "ENTRY") return { signalType: "buy", blockType: "downtrendLegs", resolvedAction: "ENTRY" };
+        if (entry.downtrend === "EXIT") return { signalType: "sell", blockType: "downtrendLegs", resolvedAction: "EXIT" };
+        if (entry.neutral === "ENTRY") return { signalType: "buy", blockType: "neutralLegs", resolvedAction: "ENTRY" };
+        if (entry.neutral === "EXIT") return { signalType: "sell", blockType: "neutralLegs", resolvedAction: "EXIT" };
         if (entry.uptrend === "HOLD" || entry.downtrend === "HOLD" || entry.neutral === "HOLD") {
           return { signalType: "hold", blockType: "neutralLegs", resolvedAction: "HOLD" };
         }
