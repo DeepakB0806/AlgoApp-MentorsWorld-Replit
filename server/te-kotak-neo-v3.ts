@@ -235,6 +235,9 @@ function resolveOrderParams(leg: PlanTradeLeg, ctx: TradeContext, legIndex: numb
 
   let tradingSymbol = ctx.ticker;
   if (isOption && isStrikeSpec(leg.strike) && (leg.type === "CE" || leg.type === "PE")) {
+    if (!ctx.price || ctx.price <= 0) {
+      return { error: `Cannot calculate ${leg.strike} strike for ${ctx.ticker} — spot price is ${ctx.price || 0}. Webhook must include a valid price field.` };
+    }
     tradingSymbol = buildKotakOptionSymbol(
       ctx.ticker, ctx.price, leg.strike, leg.type, strikeInterval, expiryDay, expiryType
     );
@@ -267,7 +270,7 @@ async function executeBuySignal(
 
   const openSell = ctx.openTrades.find(t => t.action === "SELL");
   if (openSell) {
-    const closedTrade = await closeTrade(storage, openSell, ctx.price, ctx.now);
+    const closedTrade = await closeTrade(storage, openSell, ctx.price, ctx.now, brokerConfig);
     deferDailyPnlUpdate(storage, plan.id, ctx.today, closedTrade.pnl || 0);
   }
 
@@ -395,7 +398,7 @@ async function executeSellSignal(
 
   const existingBuyToClose = ctx.openTrades.find(t => t.action === "BUY");
   if (existingBuyToClose) {
-    const closedTrade = await closeTrade(storage, existingBuyToClose, ctx.price, ctx.now);
+    const closedTrade = await closeTrade(storage, existingBuyToClose, ctx.price, ctx.now, brokerConfig);
     closePnl = closedTrade.pnl || 0;
     deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
   }
@@ -523,7 +526,8 @@ async function closeTrade(
   storage: IStorage,
   trade: StrategyTrade,
   exitPrice: number,
-  now: string
+  now: string,
+  brokerConfig?: BrokerConfig
 ): Promise<StrategyTrade> {
   const entryPrice = trade.price || 0;
   const qty = trade.quantity || 1;
@@ -532,6 +536,56 @@ async function closeTrade(
     : (entryPrice - exitPrice) * qty;
 
   const exitAction = trade.action === "BUY" ? "SELL" : "BUY";
+  const exitTxType = trade.action === "BUY" ? "S" : "B";
+
+  if (brokerConfig && brokerConfig.brokerName === "kotak_neo" && brokerConfig.isConnected && brokerConfig.accessToken && brokerConfig.sessionId && brokerConfig.baseUrl) {
+    if (!trade.tradingSymbol || !trade.exchange || !trade.productType) {
+      console.error(`[TRADE] Cannot close on broker — missing trade fields: symbol=${trade.tradingSymbol} exchange=${trade.exchange} product=${trade.productType}`);
+      const failedUpdate = await storage.updateStrategyTrade(trade.id, {
+        status: "close_failed",
+        ltp: exitPrice,
+        updatedAt: now,
+      });
+      tradingCache.invalidateOpenTrades(trade.planId);
+      return failedUpdate || trade;
+    }
+
+    const exchangeSegment = EL.mapExchange(trade.exchange);
+    const productCode = trade.productType;
+
+    console.log(`[TRADE] Closing position: ${trade.tradingSymbol} qty=${qty} tx=${exitTxType} product=${productCode} exchange=${exchangeSegment}`);
+
+    const orderResult = await EL.placeOrder(brokerConfig, {
+      tradingSymbol: trade.tradingSymbol,
+      exchangeSegment,
+      transactionType: exitTxType,
+      quantity: String(qty),
+      price: "0",
+      priceType: "MKT",
+      productCode,
+      validity: "DAY",
+      afterMarketOrder: "NO",
+      disclosedQuantity: "0",
+      marketProtection: "0",
+      priceFillFlag: "N",
+      triggerPrice: "0",
+    });
+
+    if (!orderResult.success) {
+      console.error(`[TRADE] Close order FAILED for ${trade.tradingSymbol}: ${orderResult.error}`);
+      const failedUpdate = await storage.updateStrategyTrade(trade.id, {
+        status: "close_failed",
+        ltp: exitPrice,
+        updatedAt: now,
+      });
+      tradingCache.invalidateOpenTrades(trade.planId);
+      return failedUpdate || trade;
+    }
+
+    console.log(`[TRADE] Close order placed: ${trade.tradingSymbol} orderNo=${orderResult.data?.orderNo}`);
+  } else if (brokerConfig && brokerConfig.brokerName === "kotak_neo") {
+    console.warn(`[TRADE] Cannot close position on broker — session expired. Closing DB record only for ${trade.tradingSymbol}`);
+  }
 
   const updated = await storage.updateStrategyTrade(trade.id, {
     status: "closed",
