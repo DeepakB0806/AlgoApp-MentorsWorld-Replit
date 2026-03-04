@@ -19,24 +19,28 @@ interface ParsedInstrument {
 function inferStrikeInterval(strikes: number[]): number {
   if (strikes.length < 2) return 50;
   const sorted = Array.from(new Set(strikes)).sort((a, b) => a - b);
-  const diffs: number[] = [];
-  for (let i = 1; i < sorted.length && i < 20; i++) {
-    diffs.push(sorted[i] - sorted[i - 1]);
-  }
-  if (diffs.length === 0) return 50;
   const freq = new Map<number, number>();
-  for (const d of diffs) {
-    freq.set(d, (freq.get(d) || 0) + 1);
+  for (let i = 1; i < sorted.length; i++) {
+    const d = Math.round((sorted[i] - sorted[i - 1]) * 100) / 100;
+    if (d > 0) freq.set(d, (freq.get(d) || 0) + 1);
   }
-  let maxFreq = 0;
-  let mode = 50;
+  if (freq.size === 0) return 50;
+  const totalDiffs = sorted.length - 1;
+  const minThreshold = totalDiffs * 0.15;
+  let best = 50;
+  let bestCount = 0;
   for (const [val, count] of Array.from(freq.entries())) {
-    if (count > maxFreq && val > 0) {
-      maxFreq = count;
-      mode = val;
+    if (count >= minThreshold && (bestCount === 0 || val < best)) {
+      best = val;
+      bestCount = count;
     }
   }
-  return mode;
+  if (bestCount === 0) {
+    for (const [val, count] of Array.from(freq.entries())) {
+      if (count > bestCount) { bestCount = count; best = val; }
+    }
+  }
+  return best;
 }
 
 function parseCSVLine(line: string): string[] {
@@ -100,7 +104,8 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
     if (!baseTicker) continue;
 
     const lotSize = parseInt(lotSizeStr, 10);
-    const strikePrice = parseFloat(strikePriceStr);
+    const rawStrike = parseFloat(strikePriceStr);
+    const strikePrice = rawStrike / 100;
 
     if (!tickerData.has(baseTicker)) {
       tickerData.set(baseTicker, { lotSizes: new Set(), strikes: [], instrumentType: instType, token });
