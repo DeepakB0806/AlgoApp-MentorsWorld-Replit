@@ -686,36 +686,90 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  const scripSyncInProgress = new Set<string>();
+
   app.get("/api/te/readiness/:brokerConfigId", async (req, res) => {
     try {
       const { brokerConfigId } = req.params;
       const brokerConfig = await storage.getBrokerConfig(brokerConfigId);
       if (!brokerConfig) {
-        return res.status(404).json({ ready: false, instrumentCount: 0, error: "Broker config not found" });
+        return res.status(404).json({ ready: false, instrumentCount: 0, error: "Broker config not found", stale: false, lastUpdated: null, syncing: false });
       }
 
       if (brokerConfig.brokerName !== "kotak_neo") {
-        return res.json({ ready: true, instrumentCount: 0, error: null });
+        return res.json({ ready: true, instrumentCount: 0, error: null, stale: false, lastUpdated: null, syncing: false });
       }
 
       const instrumentConfigs = await storage.getInstrumentConfigs();
       const nfoConfigs = instrumentConfigs.filter(ic => ic.exchange === "NFO");
 
       if (nfoConfigs.length === 0) {
+        const syncing = scripSyncInProgress.has(brokerConfigId);
+        if (!syncing && brokerConfig.isConnected && brokerConfig.accessToken) {
+          scripSyncInProgress.add(brokerConfigId);
+          setImmediate(async () => {
+            try {
+              const { runScripMasterSync } = await import("../scrip-master-sync");
+              const result = await runScripMasterSync(storage, brokerConfig);
+              console.log(`[TE-READINESS] Auto-sync (no data): ${result.success ? `${result.synced} instruments` : result.error}`);
+            } catch (err: any) {
+              console.error(`[TE-READINESS] Auto-sync error: ${err.message}`);
+            } finally {
+              scripSyncInProgress.delete(brokerConfigId);
+            }
+          });
+        }
         return res.json({
           ready: false,
           instrumentCount: 0,
-          error: "Scrip master file not downloaded — login with TOTP to sync"
+          error: syncing ? "Syncing scrip master..." : "Scrip master file not downloaded — login with TOTP to sync",
+          stale: false,
+          lastUpdated: null,
+          syncing: syncing || scripSyncInProgress.has(brokerConfigId),
+        });
+      }
+
+      const lastUpdated = nfoConfigs.reduce((latest, ic) => {
+        const d = ic.updatedAt ? new Date(ic.updatedAt).getTime() : 0;
+        return d > latest ? d : latest;
+      }, 0);
+
+      const toISTDate = (date: Date) => {
+        const istOffset = 5.5 * 60 * 60 * 1000;
+        const istTime = new Date(date.getTime() + istOffset);
+        return istTime.toISOString().slice(0, 10);
+      };
+      const todayIST = toISTDate(new Date());
+      const lastUpdatedDateIST = lastUpdated > 0 ? toISTDate(new Date(lastUpdated)) : null;
+
+      const stale = lastUpdatedDateIST !== todayIST;
+      const syncing = scripSyncInProgress.has(brokerConfigId);
+
+      if (stale && !syncing && brokerConfig.isConnected && brokerConfig.accessToken) {
+        scripSyncInProgress.add(brokerConfigId);
+        setImmediate(async () => {
+          try {
+            const { runScripMasterSync } = await import("../scrip-master-sync");
+            const result = await runScripMasterSync(storage, brokerConfig);
+            console.log(`[TE-READINESS] Auto-sync (stale data): ${result.success ? `${result.synced} instruments` : result.error}`);
+          } catch (err: any) {
+            console.error(`[TE-READINESS] Auto-sync error: ${err.message}`);
+          } finally {
+            scripSyncInProgress.delete(brokerConfigId);
+          }
         });
       }
 
       return res.json({
         ready: true,
         instrumentCount: nfoConfigs.length,
-        error: null
+        error: null,
+        stale,
+        lastUpdated: lastUpdated > 0 ? new Date(lastUpdated).toISOString() : null,
+        syncing: syncing || scripSyncInProgress.has(brokerConfigId),
       });
     } catch (error) {
-      res.status(500).json({ ready: false, instrumentCount: 0, error: "Failed to check trade readiness" });
+      res.status(500).json({ ready: false, instrumentCount: 0, error: "Failed to check trade readiness", stale: false, lastUpdated: null, syncing: false });
     }
   });
 }

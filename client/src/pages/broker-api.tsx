@@ -1345,7 +1345,8 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
   const isKotakNeo = brokerName === "kotak_neo";
   const [readinessCountdown, setReadinessCountdown] = useState(20);
   const [isTradeReady, setIsTradeReady] = useState(false);
-  const { data: teReadiness } = useQuery<{ ready: boolean; instrumentCount: number; error: string | null }>({
+  const [isResyncing, setIsResyncing] = useState(false);
+  const { data: teReadiness } = useQuery<{ ready: boolean; instrumentCount: number; error: string | null; stale: boolean; lastUpdated: string | null; syncing: boolean }>({
     queryKey: ["/api/te/readiness", config?.id],
     queryFn: async () => {
       const res = await fetch(`/api/te/readiness/${config!.id}`);
@@ -1354,12 +1355,13 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
       return res.json();
     },
     enabled: !!config && isKotakNeo && !!config.isConnected,
-    refetchInterval: isTradeReady ? false : 20000,
+    refetchInterval: (teReadiness?.ready && !teReadiness?.stale && !teReadiness?.syncing) ? false : 20000,
   });
 
   useEffect(() => {
-    if (teReadiness?.ready) setIsTradeReady(true);
-  }, [teReadiness?.ready]);
+    if (teReadiness?.ready && !teReadiness?.stale && !teReadiness?.syncing) setIsTradeReady(true);
+    else setIsTradeReady(false);
+  }, [teReadiness?.ready, teReadiness?.stale, teReadiness?.syncing]);
 
   useEffect(() => {
     if (!config || !isKotakNeo || !config.isConnected || isTradeReady) return;
@@ -1676,18 +1678,70 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                           {isPaperTrade ? "Always Connected — Simulated Trading Engine" : isBinance ? "Authenticated - API Key Validated" : "Connected - Session Active"}
                         </span>
                         {isKotakNeo && teReadiness && (
-                          teReadiness.ready ? (
+                          teReadiness.ready && !teReadiness.stale && !teReadiness.syncing ? (
                             <span className="flex items-center gap-1 text-emerald-500" data-testid="te-readiness-ready">
                               <CheckCircle className="w-4 h-4" />
                               You are ready to trade
+                              {teReadiness.lastUpdated && (
+                                <span className="text-[10px] text-muted-foreground ml-1">
+                                  (synced {new Date(teReadiness.lastUpdated).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })} IST)
+                                </span>
+                              )}
+                            </span>
+                          ) : teReadiness.ready && (teReadiness.stale || teReadiness.syncing) ? (
+                            <span className="flex items-center gap-1 text-amber-500" data-testid="te-readiness-stale">
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                              {teReadiness.syncing ? "Syncing scrip master..." : "Scrip data is stale — auto-resyncing..."}
+                              <span className="text-xs text-muted-foreground ml-1" data-testid="te-readiness-countdown">({readinessCountdown}s)</span>
                             </span>
                           ) : (
                             <span className="flex items-center gap-1 text-destructive" data-testid="te-readiness-not-ready">
                               <XCircle className="w-4 h-4" />
-                              You are NOT ready to trade — {teReadiness.error}
+                              You are NOT ready to trade — {teReadiness.syncing ? "Syncing scrip master..." : teReadiness.error}
                               <span className="text-xs text-muted-foreground ml-1" data-testid="te-readiness-countdown">({readinessCountdown}s)</span>
                             </span>
                           )
+                        )}
+                        {isKotakNeo && config?.isConnected && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs text-muted-foreground hover:text-primary"
+                            disabled={isResyncing || teReadiness?.syncing}
+                            data-testid="button-resync-scrip"
+                            onClick={async () => {
+                              setIsResyncing(true);
+                              try {
+                                const resp = await fetch("/api/instrument-configs/sync", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ brokerConfigId: config!.id }),
+                                });
+                                if (!resp.ok) {
+                                  const errText = await resp.text().catch(() => "Unknown error");
+                                  toast({ title: "Sync failed", description: errText, variant: "destructive" });
+                                  return;
+                                }
+                                const result = await resp.json();
+                                if (result.success) {
+                                  toast({ title: `Scrip master synced — ${result.synced} instruments updated` });
+                                  setIsTradeReady(false);
+                                  setReadinessCountdown(20);
+                                  queryClient.invalidateQueries({ queryKey: ["/api/te/readiness", config!.id] });
+                                  queryClient.invalidateQueries({ queryKey: ["/api/instrument-configs"] });
+                                } else {
+                                  toast({ title: "Sync failed", description: result.error, variant: "destructive" });
+                                }
+                              } catch {
+                                toast({ title: "Sync failed", variant: "destructive" });
+                              } finally {
+                                setIsResyncing(false);
+                              }
+                            }}
+                          >
+                            <RefreshCw className={`w-3 h-3 mr-1 ${isResyncing ? "animate-spin" : ""}`} />
+                            {isResyncing ? "Syncing..." : "Resync"}
+                          </Button>
                         )}
                       </span>
                       {!isBinance && config.accessToken && (() => {
