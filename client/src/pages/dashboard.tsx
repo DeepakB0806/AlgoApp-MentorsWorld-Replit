@@ -57,12 +57,12 @@ export default function Dashboard() {
 
   // Filter positions by search
   const filteredPositions = positions.filter(p => 
-    p.trading_symbol.toLowerCase().includes(searchPositions.toLowerCase())
+    (p.trading_symbol || "").toLowerCase().includes(searchPositions.toLowerCase())
   );
 
   // Filter holdings by search
   const filteredHoldings = holdings.filter(h => 
-    h.trading_symbol.toLowerCase().includes(searchHoldings.toLowerCase())
+    (h.trading_symbol || "").toLowerCase().includes(searchHoldings.toLowerCase())
   );
 
   // Calculate position summaries - use API fields when available, otherwise compute
