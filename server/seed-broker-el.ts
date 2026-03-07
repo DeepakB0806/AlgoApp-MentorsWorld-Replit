@@ -13,7 +13,7 @@ export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exch
   const existingEndpointNames = new Set(existingEndpoints.map(e => e.endpointName));
   const missingEndpoints: { brokerName: string; category: string; endpointName: string; endpointPath: string; httpMethod: string; baseUrlType: string; contentType: string; bodyFormat: string; authType: string; description: string; sortOrder: number }[] = [];
   if (!existingEndpointNames.has("scrip_master_file_paths")) {
-    missingEndpoints.push({ brokerName: BROKER_NAME, category: "data_get", endpointName: "scrip_master_file_paths", endpointPath: "/script-details/1.0/masterscrip/file-paths", httpMethod: "GET", baseUrlType: "trading", contentType: "application/json", bodyFormat: "none", authType: "session", description: "Get scrip master file download URLs", sortOrder: 16 });
+    missingEndpoints.push({ brokerName: BROKER_NAME, category: "data_get", endpointName: "scrip_master_file_paths", endpointPath: "/script-details/1.0/masterscrip/file-paths", httpMethod: "GET", baseUrlType: "trading", contentType: "application/json", bodyFormat: "none", authType: "consumer_key_only", description: "Get scrip master file download URLs", sortOrder: 16 });
   }
   if (missingEndpoints.length > 0) {
     const added = await db.insert(broker_api_endpoints).values(missingEndpoints).returning();
@@ -55,8 +55,8 @@ export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exch
       { brokerName: BROKER_NAME, category: "holdings", endpointName: "holdings", endpointPath: "/portfolio/v1/holdings", httpMethod: "GET", baseUrlType: "trading", contentType: "application/x-www-form-urlencoded", bodyFormat: "none", authType: "session", description: "Get portfolio holdings", sortOrder: 12 },
       { brokerName: BROKER_NAME, category: "margin", endpointName: "check_margin", endpointPath: "/quick/user/check-margin", httpMethod: "POST", baseUrlType: "trading", contentType: "application/x-www-form-urlencoded", bodyFormat: "jdata_urlencoded", authType: "session", description: "Check margin requirement", sortOrder: 13 },
       { brokerName: BROKER_NAME, category: "limits", endpointName: "limits", endpointPath: "/quick/user/limits", httpMethod: "POST", baseUrlType: "trading", contentType: "application/x-www-form-urlencoded", bodyFormat: "jdata_urlencoded", authType: "session", description: "Get available funds/limits", sortOrder: 14 },
-      { brokerName: BROKER_NAME, category: "quotes", endpointName: "quotes", endpointPath: "/script-details/1.0/quotes/neosymbol/{exchange}|{token}/all", httpMethod: "GET", baseUrlType: "trading", contentType: "application/x-www-form-urlencoded", bodyFormat: "none", authType: "consumer_key", description: "Get live quotes", sortOrder: 15 },
-      { brokerName: BROKER_NAME, category: "data_get", endpointName: "scrip_master_file_paths", endpointPath: "/script-details/1.0/masterscrip/file-paths", httpMethod: "GET", baseUrlType: "trading", contentType: "application/json", bodyFormat: "none", authType: "session", description: "Get scrip master file download URLs", sortOrder: 16 },
+      { brokerName: BROKER_NAME, category: "quotes", endpointName: "quotes", endpointPath: "/script-details/1.0/quotes/neosymbol/{exchange}|{token}/all", httpMethod: "GET", baseUrlType: "trading", contentType: "application/x-www-form-urlencoded", bodyFormat: "none", authType: "consumer_key_only", description: "Get live quotes", sortOrder: 15 },
+      { brokerName: BROKER_NAME, category: "data_get", endpointName: "scrip_master_file_paths", endpointPath: "/script-details/1.0/masterscrip/file-paths", httpMethod: "GET", baseUrlType: "trading", contentType: "application/json", bodyFormat: "none", authType: "consumer_key_only", description: "Get scrip master file download URLs", sortOrder: 16 },
     ];
     const inserted = await db.insert(broker_api_endpoints).values(endpoints).returning();
     endpointCount = inserted.length;
@@ -91,6 +91,7 @@ export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exch
       { brokerName: BROKER_NAME, authType: "session", headerName: "Auth", headerSource: "config_field", headerValue: "accessToken", sortOrder: 2 },
       { brokerName: BROKER_NAME, authType: "session", headerName: "Content-Type", headerSource: "static", headerValue: "application/x-www-form-urlencoded", sortOrder: 3 },
       { brokerName: BROKER_NAME, authType: "session", headerName: "Authorization", headerSource: "config_field", headerValue: "consumerKey", sortOrder: 4 },
+      { brokerName: BROKER_NAME, authType: "consumer_key_only", headerName: "Authorization", headerSource: "config_field", headerValue: "consumerKey", sortOrder: 1 },
     ];
     const inserted = await db.insert(broker_headers).values(headers).returning();
     headerCount = inserted.length;

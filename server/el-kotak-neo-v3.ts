@@ -252,7 +252,7 @@ class ExecutionLayer {
     configFields: Record<string, string | null>,
   ): Record<string, string> {
     const headers = this.buildHeaders(endpoint.authType, configFields);
-    if (!headers["Content-Type"] && !headers["content-type"]) {
+    if (!headers["Content-Type"] && !headers["content-type"] && endpoint.httpMethod !== "GET") {
       headers["Content-Type"] = endpoint.contentType;
     }
     return headers;
