@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { broker_api_endpoints, broker_exchange_maps, broker_headers } from "@shared/schema";
 import type { BrokerConfig } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import TL from "./tl-kotak-neo-v3";
 
 const BROKER_NAME = "kotak_neo_v3";
@@ -114,7 +114,7 @@ class ExecutionLayer {
       const rawHeaders = await db
         .select()
         .from(broker_headers)
-        .where(eq(broker_headers.brokerName, BROKER_NAME));
+        .where(and(eq(broker_headers.brokerName, BROKER_NAME), eq(broker_headers.isActive, true)));
 
       if (rawHeaders.length === 0) {
         this.ready = false;
@@ -417,7 +417,9 @@ class ExecutionLayer {
         body = universalParams;
       }
 
+      console.log(`${LOG_PREFIX} placeOrder request: ${JSON.stringify(body).slice(0, 300)}`);
       const data = await this.executeRequest(endpoint, headers, config.baseUrl, body);
+      console.log(`${LOG_PREFIX} placeOrder response: ${JSON.stringify(data).slice(0, 500)}`);
 
       if (data?.nOrdNo) {
         return {
@@ -429,7 +431,7 @@ class ExecutionLayer {
 
       return {
         success: false,
-        error: data?.message || data?.errMsg || "Order placement failed",
+        error: data?.emsg || data?.message || data?.errMsg || "Order placement failed",
         sessionExpired: this.isSessionError(data),
       };
     } catch (error: any) {

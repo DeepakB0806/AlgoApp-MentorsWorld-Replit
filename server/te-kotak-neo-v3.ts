@@ -24,10 +24,20 @@ export interface TradeResult {
   executionTimeMs?: number;
 }
 
+export type ResolvedSignal = { signalType: string; blockType: string; resolvedAction: "ENTRY" | "EXIT" | "HOLD" };
+
 export function resolveSignalFromActionMapper(
   signalData: Record<string, any>,
   actionMapperJson: string | null | undefined
-): { signalType: string; blockType: string; resolvedAction: "ENTRY" | "EXIT" | "HOLD" } {
+): ResolvedSignal {
+  const results = resolveAllSignalsFromActionMapper(signalData, actionMapperJson);
+  return results[0];
+}
+
+export function resolveAllSignalsFromActionMapper(
+  signalData: Record<string, any>,
+  actionMapperJson: string | null | undefined
+): ResolvedSignal[] {
   let actionMapper: ActionMapperEntry[] = [];
   try {
     actionMapper = JSON.parse(actionMapperJson || "[]");
@@ -38,14 +48,23 @@ export function resolveSignalFromActionMapper(
       const fieldKey = entry.fieldKey || "alert";
       const fieldValue = signalData[fieldKey];
       if (fieldValue !== undefined && fieldValue !== null && String(fieldValue) === entry.signalValue) {
-        if (entry.uptrend === "ENTRY") return { signalType: "buy", blockType: "uptrendLegs", resolvedAction: "ENTRY" };
-        if (entry.uptrend === "EXIT") return { signalType: "sell", blockType: "uptrendLegs", resolvedAction: "EXIT" };
-        if (entry.downtrend === "ENTRY") return { signalType: "buy", blockType: "downtrendLegs", resolvedAction: "ENTRY" };
-        if (entry.downtrend === "EXIT") return { signalType: "sell", blockType: "downtrendLegs", resolvedAction: "EXIT" };
-        if (entry.neutral === "ENTRY") return { signalType: "buy", blockType: "neutralLegs", resolvedAction: "ENTRY" };
-        if (entry.neutral === "EXIT") return { signalType: "sell", blockType: "neutralLegs", resolvedAction: "EXIT" };
+        const actions: ResolvedSignal[] = [];
+
+        if (entry.uptrend === "EXIT") actions.push({ signalType: "sell", blockType: "uptrendLegs", resolvedAction: "EXIT" });
+        if (entry.downtrend === "EXIT") actions.push({ signalType: "sell", blockType: "downtrendLegs", resolvedAction: "EXIT" });
+        if (entry.neutral === "EXIT") actions.push({ signalType: "sell", blockType: "neutralLegs", resolvedAction: "EXIT" });
+
+        if (entry.uptrend === "ENTRY") actions.push({ signalType: "buy", blockType: "uptrendLegs", resolvedAction: "ENTRY" });
+        if (entry.downtrend === "ENTRY") actions.push({ signalType: "buy", blockType: "downtrendLegs", resolvedAction: "ENTRY" });
+        if (entry.neutral === "ENTRY") actions.push({ signalType: "buy", blockType: "neutralLegs", resolvedAction: "ENTRY" });
+
+        if (actions.length > 0) {
+          console.log(`[SIGNAL] Resolved ${actions.length} action(s) for signal "${fieldValue}": ${actions.map(a => `${a.resolvedAction}@${a.blockType}`).join(", ")}`);
+          return actions;
+        }
+
         if (entry.uptrend === "HOLD" || entry.downtrend === "HOLD" || entry.neutral === "HOLD") {
-          return { signalType: "hold", blockType: "neutralLegs", resolvedAction: "HOLD" };
+          return [{ signalType: "hold", blockType: "neutralLegs", resolvedAction: "HOLD" }];
         }
       }
     }
@@ -53,7 +72,7 @@ export function resolveSignalFromActionMapper(
 
   const fallbackType = signalData.signalType || (signalData.actionBinary === 1 ? "buy" : signalData.actionBinary === 0 ? "sell" : "hold");
   const fallbackAction = fallbackType === "buy" ? "ENTRY" : fallbackType === "sell" ? "EXIT" : "HOLD";
-  return { signalType: fallbackType, blockType: fallbackType === "buy" ? "uptrendLegs" : fallbackType === "sell" ? "downtrendLegs" : "neutralLegs", resolvedAction: fallbackAction as "ENTRY" | "EXIT" | "HOLD" };
+  return [{ signalType: fallbackType, blockType: fallbackType === "buy" ? "uptrendLegs" : fallbackType === "sell" ? "downtrendLegs" : "neutralLegs", resolvedAction: fallbackAction as "ENTRY" | "EXIT" | "HOLD" }];
 }
 
 function buildBinanceSession(config: BrokerConfig): BinanceSession | null {

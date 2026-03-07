@@ -2,7 +2,7 @@ import type { Express } from "express";
 import type { IStorage } from "../storage";
 import { insertWebhookSchema } from "@shared/schema";
 import { tradingCache } from "../cache";
-import { resolveSignalFromActionMapper, processTradeSignal } from "../te-kotak-neo-v3";
+import { resolveSignalFromActionMapper, resolveAllSignalsFromActionMapper, processTradeSignal } from "../te-kotak-neo-v3";
 import { getBaseUrlFromRequest } from "../services/email";
 import { parseNumeric } from "./helpers";
 
@@ -276,37 +276,47 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
         tradingCache.setConfigByWebhookId(webhookId, linkedConfig);
       }
 
-      const { signalType, blockType: directBlockType, resolvedAction } = resolveSignalFromActionMapper(parsedData, linkedConfig?.actionMapper);
+      const allSignals = resolveAllSignalsFromActionMapper(parsedData, linkedConfig?.actionMapper);
+      const { signalType, blockType: directBlockType, resolvedAction } = allSignals[0];
       timing.signal_resolve_ms = Date.now() - t2;
 
       const t3 = Date.now();
       let tradeResults: any[] = [];
       const strategyConfigId = linkedConfig?.id || webhook.strategyId || null;
 
-      if (strategyConfigId && (signalType === "buy" || signalType === "sell")) {
-        const webhookDataForTrade = {
-          id: "",
-          webhookId,
-          strategyId: webhook.strategyId || null,
-          webhookName: webhook.name,
-          receivedAt: new Date().toISOString(),
-          rawPayload: JSON.stringify(payload),
-          ...parsedData,
-          signalType,
-          isProcessed: false,
-          processedAt: null,
-        };
+      if (strategyConfigId && allSignals.some(s => s.signalType === "buy" || s.signalType === "sell")) {
+        for (const signal of allSignals) {
+          if (signal.signalType !== "buy" && signal.signalType !== "sell") continue;
 
-        try {
-          tradeResults = await processTradeSignal(storage, webhookDataForTrade as any, strategyConfigId, {
-            blockType: directBlockType,
-            resolvedAction,
-            parentExchange: linkedConfig?.exchange,
-            parentTicker: linkedConfig?.ticker,
-          });
-        } catch (ptError) {
-          console.error("Trade execution error:", ptError);
-          tradeResults = [{ success: false, action: "error", message: String(ptError) }];
+          const webhookDataForTrade = {
+            id: "",
+            webhookId,
+            strategyId: webhook.strategyId || null,
+            webhookName: webhook.name,
+            receivedAt: new Date().toISOString(),
+            rawPayload: JSON.stringify(payload),
+            ...parsedData,
+            signalType: signal.signalType,
+            isProcessed: false,
+            processedAt: null,
+          };
+
+          try {
+            const results = await processTradeSignal(storage, webhookDataForTrade as any, strategyConfigId, {
+              blockType: signal.blockType,
+              resolvedAction: signal.resolvedAction,
+              parentExchange: linkedConfig?.exchange,
+              parentTicker: linkedConfig?.ticker,
+            });
+            tradeResults.push(...results);
+          } catch (ptError) {
+            console.error(`Trade execution error for ${signal.resolvedAction}@${signal.blockType}:`, ptError);
+            tradeResults.push({ success: false, action: "error", message: String(ptError) });
+          }
+        }
+
+        if (allSignals.length > 1) {
+          console.log(`[WEBHOOK ${webhookId}] Composite signal: ${allSignals.length} actions processed — ${allSignals.map(s => `${s.resolvedAction}@${s.blockType}`).join(", ")}`);
         }
       }
       timing.trade_execute_ms = Date.now() - t3;
@@ -535,8 +545,9 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
       const results: any[] = [];
 
       for (const signal of newSignals) {
-        const { signalType, blockType, resolvedAction } = resolveSignalFromActionMapper(signal, strategyConfig.actionMapper);
-        if (signalType !== "buy" && signalType !== "sell") continue;
+        const allResolvedSignals = resolveAllSignalsFromActionMapper(signal, strategyConfig.actionMapper);
+        const tradableSignals = allResolvedSignals.filter(s => s.signalType === "buy" || s.signalType === "sell");
+        if (tradableSignals.length === 0) continue;
 
         let enrichedPayload = signal.rawPayload || "{}";
         if (signal.id) {
@@ -547,41 +558,43 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
           } catch {}
         }
 
-        const localEntry = await storage.createWebhookData({
-          webhookId,
-          strategyId: strategyConfig.id,
-          webhookName: webhook.name,
-          receivedAt: signal.receivedAt || new Date().toISOString(),
-          rawPayload: enrichedPayload,
-          timeUnix: signal.timeUnix,
-          exchange: signal.exchange,
-          indices: signal.indices,
-          indicator: signal.indicator,
-          alert: signal.alert,
-          price: signal.price,
-          localTime: signal.localTime,
-          mode: signal.mode,
-          modeDesc: signal.modeDesc,
-          firstLine: signal.firstLine,
-          midLine: signal.midLine,
-          slowLine: signal.slowLine,
-          st: signal.st,
-          ht: signal.ht,
-          rsi: signal.rsi,
-          rsiScaled: signal.rsiScaled,
-          alertSystem: signal.alertSystem,
-          actionBinary: signal.actionBinary,
-          lockState: signal.lockState,
-          signalType,
-          isProcessed: false,
-        });
+        for (const resolvedSignal of tradableSignals) {
+          const localEntry = await storage.createWebhookData({
+            webhookId,
+            strategyId: strategyConfig.id,
+            webhookName: webhook.name,
+            receivedAt: signal.receivedAt || new Date().toISOString(),
+            rawPayload: enrichedPayload,
+            timeUnix: signal.timeUnix,
+            exchange: signal.exchange,
+            indices: signal.indices,
+            indicator: signal.indicator,
+            alert: signal.alert,
+            price: signal.price,
+            localTime: signal.localTime,
+            mode: signal.mode,
+            modeDesc: signal.modeDesc,
+            firstLine: signal.firstLine,
+            midLine: signal.midLine,
+            slowLine: signal.slowLine,
+            st: signal.st,
+            ht: signal.ht,
+            rsi: signal.rsi,
+            rsiScaled: signal.rsiScaled,
+            alertSystem: signal.alertSystem,
+            actionBinary: signal.actionBinary,
+            lockState: signal.lockState,
+            signalType: resolvedSignal.signalType,
+            isProcessed: false,
+          });
 
-        try {
-          const tradeResults = await processTradeSignal(storage, localEntry, strategyConfig.id, { blockType, resolvedAction, parentExchange: strategyConfig.exchange, parentTicker: strategyConfig.ticker });
-          results.push({ signal: signalType, blockType, price: signal.price, time: signal.localTime, trades: tradeResults });
-        } catch (ptErr) {
-          console.error("Trade execution error for signal:", ptErr);
-          results.push({ signal: signalType, price: signal.price, error: String(ptErr) });
+          try {
+            const tradeResults = await processTradeSignal(storage, localEntry, strategyConfig.id, { blockType: resolvedSignal.blockType, resolvedAction: resolvedSignal.resolvedAction, parentExchange: strategyConfig.exchange, parentTicker: strategyConfig.ticker });
+            results.push({ signal: resolvedSignal.signalType, blockType: resolvedSignal.blockType, price: signal.price, time: signal.localTime, trades: tradeResults });
+          } catch (ptErr) {
+            console.error(`Trade execution error for ${resolvedSignal.resolvedAction}@${resolvedSignal.blockType}:`, ptErr);
+            results.push({ signal: resolvedSignal.signalType, price: signal.price, error: String(ptErr) });
+          }
         }
       }
 

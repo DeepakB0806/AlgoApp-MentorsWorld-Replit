@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink, Trash2, Info, ArrowDown, Plus, Pencil, Check, X } from "lucide-react";
+import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink, Trash2, Info, ArrowDown, Plus, Pencil, Check, X, AlertOctagon } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Link } from "wouter";
@@ -1286,6 +1286,391 @@ function ApiFieldsReference() {
               </div>
             );
           })}
+
+          <ScripMasterPreview />
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+interface ScripMasterPreviewData {
+  headers: string[];
+  lotColumnName: string | null;
+  lotColumnIndex: number;
+  totalCsvLines: number;
+  filteredRows: number;
+  rawRows: string[][];
+  lotSizeSummary: Array<{
+    ticker: string;
+    csvMode: number;
+    csvCounts: Array<{ lotSize: number; count: number }>;
+    dbLotSize: number | null;
+    mismatch: boolean;
+  }>;
+}
+
+function ScripMasterPreview() {
+  const { toast } = useToast();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [previewData, setPreviewData] = useState<ScripMasterPreviewData | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const brokerConfigsQuery = useQuery<BrokerConfig[]>({
+    queryKey: ["/api/broker-configs"],
+  });
+
+  const kotakConfig = (brokerConfigsQuery.data || []).find(c => c.brokerName === "kotak_neo" && c.isConnected);
+
+  const loadPreview = async () => {
+    if (!kotakConfig) {
+      toast({ title: "No connected Kotak broker found", variant: "destructive" });
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/instrument-configs/scrip-master-preview/${kotakConfig.id}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setPreviewData(data);
+    } catch (err: any) {
+      setError(err.message || "Failed to load preview");
+      toast({ title: "Failed to load scrip master preview", description: err.message, variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const hasMismatch = previewData?.lotSizeSummary.some(s => s.mismatch) ?? false;
+
+  return (
+    <div className="border border-border rounded-md overflow-hidden mt-4" data-testid="scrip-master-preview">
+      <button
+        onClick={() => {
+          setIsExpanded(!isExpanded);
+          if (!isExpanded && !previewData && !isLoading) {
+            loadPreview();
+          }
+        }}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium hover-elevate transition-colors"
+        data-testid="button-toggle-scrip-master"
+      >
+        <span className="flex items-center gap-2">
+          <Database className="w-4 h-4 text-primary" />
+          Scrip Master Data (NFO Indices)
+          {hasMismatch && (
+            <Badge variant="destructive" className="text-[10px]">
+              Mismatch
+            </Badge>
+          )}
+        </span>
+        {isExpanded ? (
+          <ChevronDown className="w-4 h-4 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="w-4 h-4 text-muted-foreground" />
+        )}
+      </button>
+
+      {isExpanded && (
+        <div className="px-4 pb-4 space-y-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={loadPreview}
+              disabled={isLoading || !kotakConfig}
+              data-testid="button-refresh-scrip-master"
+            >
+              {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <RefreshCw className="w-3.5 h-3.5 mr-1.5" />}
+              {isLoading ? "Loading..." : "Refresh"}
+            </Button>
+            {!kotakConfig && (
+              <span className="text-xs text-muted-foreground">Connect a Kotak broker to load data</span>
+            )}
+            {previewData && (
+              <span className="text-xs text-muted-foreground ml-auto">
+                {previewData.totalCsvLines} total CSV rows | {previewData.filteredRows} index rows shown | Lot column: {previewData.lotColumnName || "not found"}
+              </span>
+            )}
+          </div>
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {previewData && previewData.lotSizeSummary.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Per-Ticker Lot Size Summary</span>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" data-testid="table-lot-summary">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs">Ticker</th>
+                      <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs">CSV Mode</th>
+                      <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs">CSV Distribution</th>
+                      <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs">DB Lot Size</th>
+                      <th className="text-left py-1.5 px-2 text-muted-foreground font-medium text-xs">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewData.lotSizeSummary.map((s) => (
+                      <tr key={s.ticker} className={`border-b border-border/50 last:border-0 ${s.mismatch ? "bg-destructive/10" : ""}`} data-testid={`row-lot-${s.ticker}`}>
+                        <td className="py-1.5 px-2 font-mono text-xs font-medium">{s.ticker}</td>
+                        <td className="py-1.5 px-2 font-mono text-xs">{s.csvMode}</td>
+                        <td className="py-1.5 px-2 text-xs">
+                          <div className="flex gap-1.5 flex-wrap">
+                            {s.csvCounts.map((c) => (
+                              <Badge key={c.lotSize} variant="secondary" className="text-[10px] font-mono">
+                                {c.lotSize} x{c.count}
+                              </Badge>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="py-1.5 px-2 font-mono text-xs">{s.dbLotSize !== null ? s.dbLotSize : "—"}</td>
+                        <td className="py-1.5 px-2">
+                          {s.mismatch ? (
+                            <Badge variant="destructive" className="text-[10px]">
+                              <AlertTriangle className="w-3 h-3 mr-1" />
+                              Mismatch
+                            </Badge>
+                          ) : s.dbLotSize !== null ? (
+                            <Badge className="text-[10px] bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                              Match
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-[10px]">
+                              No DB entry
+                            </Badge>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {previewData && previewData.rawRows.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Raw CSV Data (first {previewData.rawRows.length} index rows)</span>
+              <ScrollArea className="h-[300px] rounded-md border border-border">
+                <div className="overflow-x-auto">
+                  <table className="text-xs whitespace-nowrap" data-testid="table-raw-scrip-data">
+                    <thead className="sticky top-0 bg-card z-10">
+                      <tr className="border-b border-border">
+                        <th className="py-1.5 px-2 text-muted-foreground font-medium text-left">#</th>
+                        {previewData.headers.map((h, i) => (
+                          <th
+                            key={i}
+                            className={`py-1.5 px-2 text-left font-medium ${i === previewData.lotColumnIndex ? "text-primary" : "text-muted-foreground"}`}
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewData.rawRows.map((row, ri) => (
+                        <tr key={ri} className="border-b border-border/30 last:border-0">
+                          <td className="py-1 px-2 text-muted-foreground">{ri + 1}</td>
+                          {row.map((cell, ci) => (
+                            <td
+                              key={ci}
+                              className={`py-1 px-2 font-mono ${ci === previewData.lotColumnIndex ? "text-primary font-medium" : ""}`}
+                            >
+                              {cell || "—"}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </ScrollArea>
+            </div>
+          )}
+
+          {previewData && previewData.rawRows.length === 0 && !isLoading && !error && (
+            <div className="text-center py-6 text-muted-foreground text-sm">
+              No index ticker rows found in NFO scrip master CSV
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type ErrorLogEntry = {
+  id: string;
+  timestamp: string;
+  source: string;
+  category: string;
+  message: string;
+  details: string;
+};
+
+type ErrorLogResponse = {
+  errors: ErrorLogEntry[];
+  total: number;
+  kotakErrorCodes: Record<string, string>;
+};
+
+function ErrorLogCard() {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState("all");
+
+  const errorLogsQuery = useQuery<ErrorLogResponse>({
+    queryKey: ["/api/error-logs", categoryFilter],
+    queryFn: async () => {
+      const res = await fetch(`/api/error-logs?limit=50&category=${categoryFilter}`);
+      return res.json();
+    },
+  });
+
+  const errors = errorLogsQuery.data?.errors || [];
+  const total = errorLogsQuery.data?.total || 0;
+
+  const formatTimestampIST = (ts: string) => {
+    try {
+      const date = new Date(ts);
+      if (isNaN(date.getTime())) return ts;
+      return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+    } catch {
+      return ts;
+    }
+  };
+
+  const getCategoryBadge = (cat: string) => {
+    switch (cat) {
+      case "webhook":
+        return <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-400 border-blue-500/30">Webhook</Badge>;
+      case "broker_test":
+        return <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-400 border-amber-500/30">Test</Badge>;
+      case "broker_session":
+        return <Badge variant="outline" className="text-[10px] bg-red-500/10 text-red-400 border-red-500/30">Session</Badge>;
+      default:
+        return <Badge variant="outline" className="text-[10px]">{cat}</Badge>;
+    }
+  };
+
+  return (
+    <Card data-testid="card-error-log">
+      <CardHeader
+        className="cursor-pointer select-none"
+        onClick={() => setIsExpanded(!isExpanded)}
+        data-testid="button-toggle-error-log"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2">
+              <AlertOctagon className="w-5 h-5 text-destructive" />
+              Error Log
+            </CardTitle>
+            {total > 0 && (
+              <Badge variant="destructive" className="text-xs" data-testid="badge-error-count">
+                {total}
+              </Badge>
+            )}
+          </div>
+          {isExpanded ? <ChevronDown className="w-5 h-5 text-muted-foreground" /> : <ChevronRight className="w-5 h-5 text-muted-foreground" />}
+        </div>
+        <CardDescription>Recent errors from webhooks, broker tests, and sessions</CardDescription>
+      </CardHeader>
+      {isExpanded && (
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v)}>
+                <SelectTrigger className="w-[160px]" data-testid="select-error-category">
+                  <SelectValue placeholder="Filter category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  <SelectItem value="webhook">Webhook</SelectItem>
+                  <SelectItem value="broker_test">Broker Test</SelectItem>
+                  <SelectItem value="broker_session">Session</SelectItem>
+                </SelectContent>
+              </Select>
+              <Badge variant="secondary" className="text-xs" data-testid="badge-error-total">{errors.length} errors</Badge>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                queryClient.invalidateQueries({ queryKey: ["/api/error-logs", categoryFilter] });
+              }}
+              disabled={errorLogsQuery.isLoading}
+              data-testid="button-refresh-error-logs"
+            >
+              <RefreshCw className={`w-4 h-4 mr-1 ${errorLogsQuery.isLoading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          </div>
+
+          {errorLogsQuery.isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">Loading error logs...</span>
+            </div>
+          ) : errors.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground" data-testid="text-no-errors">
+              <CheckCircle className="w-8 h-8 mx-auto mb-2 text-emerald-500" />
+              <p className="text-sm">No errors found</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-border rounded-md">
+              <table className="w-full text-xs" data-testid="table-error-logs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Timestamp (IST)</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Source</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Category</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium">Message</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium">Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {errors.map((err) => (
+                    <tr key={err.id} className="border-b border-border/50 last:border-0" data-testid={`row-error-${err.id}`}>
+                      <td className="py-2 px-3 font-mono whitespace-nowrap text-muted-foreground">{formatTimestampIST(err.timestamp)}</td>
+                      <td className="py-2 px-3 whitespace-nowrap">{err.source}</td>
+                      <td className="py-2 px-3">{getCategoryBadge(err.category)}</td>
+                      <td className="py-2 px-3 max-w-[300px] truncate text-destructive" title={err.message}>{err.message}</td>
+                      <td className="py-2 px-3 max-w-[200px] truncate text-muted-foreground" title={err.details}>{err.details || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {errorLogsQuery.data?.kotakErrorCodes && (
+            <details className="text-xs">
+              <summary className="text-muted-foreground cursor-pointer hover:text-foreground" data-testid="button-toggle-error-codes">
+                Kotak Error Code Reference
+              </summary>
+              <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+                {Object.entries(errorLogsQuery.data.kotakErrorCodes).map(([code, desc]) => (
+                  <div key={code} className="flex items-center gap-1.5 text-muted-foreground">
+                    <Badge variant="outline" className="text-[10px] font-mono">{code}</Badge>
+                    <span>{desc}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </CardContent>
       )}
     </Card>
@@ -2611,6 +2996,10 @@ export default function BrokerApi() {
             <ApiFieldsReference />
           </div>
         )}
+
+        <div className="mt-6">
+          <ErrorLogCard />
+        </div>
 
         {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
           <Card className="mt-6">

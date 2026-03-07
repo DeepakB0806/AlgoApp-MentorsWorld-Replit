@@ -328,6 +328,166 @@ export function registerStrategyRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.get("/api/instrument-configs/scrip-master-preview/:brokerId", async (req, res) => {
+    try {
+      const brokerConfig = await storage.getBrokerConfig(req.params.brokerId);
+      if (!brokerConfig) return res.status(404).json({ error: "Broker config not found" });
+      if (!brokerConfig.isConnected || !brokerConfig.accessToken) {
+        return res.status(400).json({ error: "Broker not connected. Please login first." });
+      }
+
+      const { default: EL } = await import("../el-kotak-neo-v3");
+      const filePathsResult = await EL.getScripMasterFilePaths(brokerConfig);
+      if (!filePathsResult.success) {
+        return res.status(502).json({ error: filePathsResult.error || "Failed to get file paths" });
+      }
+
+      const data = filePathsResult.data;
+      let nfoFileUrl: string | null = null;
+
+      if (Array.isArray(data)) {
+        for (const item of data) {
+          const path = item.filePath || item.path || item.url || item.fileUrl || "";
+          const name = item.fileName || item.name || item.exchange || "";
+          if (path && (name.toLowerCase().includes("nfo") || name.toLowerCase().includes("nse_fo") || path.toLowerCase().includes("nfo") || path.toLowerCase().includes("nse_fo"))) {
+            nfoFileUrl = path;
+            break;
+          }
+        }
+        if (!nfoFileUrl && data.length > 0) {
+          for (const item of data) {
+            const path = item.filePath || item.path || item.url || item.fileUrl || "";
+            if (path) { nfoFileUrl = path; break; }
+          }
+        }
+      } else if (data && typeof data === 'object') {
+        const filesPaths = data.filesPaths || data.data?.filesPaths;
+        if (filesPaths && Array.isArray(filesPaths)) {
+          for (const item of filesPaths) {
+            const path = typeof item === 'string' ? item : (item.filePath || item.path || item.url || "");
+            const name = typeof item === 'string' ? item : (item.fileName || item.name || item.exchange || "");
+            if (path && (name.toLowerCase().includes("nfo") || name.toLowerCase().includes("nse_fo") || path.toLowerCase().includes("nfo") || path.toLowerCase().includes("nse_fo"))) {
+              nfoFileUrl = path;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!nfoFileUrl) {
+        return res.status(404).json({ error: "Could not find NFO scrip master file URL in response" });
+      }
+
+      const csvResponse = await fetch(nfoFileUrl, { signal: AbortSignal.timeout(60000) });
+      if (!csvResponse.ok) {
+        return res.status(502).json({ error: `Download failed: ${csvResponse.status}` });
+      }
+      const csvText = await csvResponse.text();
+      const lines = csvText.split('\n').filter((l: string) => l.trim());
+      if (lines.length < 2) {
+        return res.status(422).json({ error: "CSV has no data rows" });
+      }
+
+      const parseCSVLine = (line: string): string[] => {
+        const result: string[] = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') { inQuotes = !inQuotes; }
+          else if (ch === ',' && !inQuotes) { result.push(current.trim()); current = ""; }
+          else { current += ch; }
+        }
+        result.push(current.trim());
+        return result;
+      };
+
+      const INDEX_TICKERS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"];
+      const csvHeaders = parseCSVLine(lines[0]);
+      const headersLower = csvHeaders.map((h: string) => h.toLowerCase().replace(/[^a-z0-9_]/g, ''));
+
+      const symbolIdx = headersLower.findIndex((h: string) => h === 'psymbolname' || h === 'symbolname' || h === 'symbol_name' || h === 'psymbol' || h === 'symbol' || h === 'tsym' || h === 'tradingsymbol' || h === 'psymname');
+      const preferredLotNames = ['lotsize', 'lot_size', 'plotsize', 'llotsize', 'ilotsize'];
+      const fallbackLotNames = ['brdlotqty', 'boardlotqty', 'pbrdlotqty', 'iboardlotqty'];
+      let lotIdx = headersLower.findIndex((h: string) => preferredLotNames.includes(h));
+      if (lotIdx < 0) lotIdx = headersLower.findIndex((h: string) => fallbackLotNames.includes(h));
+      const instTypeIdx = headersLower.findIndex((h: string) => h === 'instrumenttype' || h === 'instrument_type' || h === 'insttype' || h === 'instype' || h === 'pinsttype' || h === 'pinstrumenttype');
+
+      const rawRows: string[][] = [];
+      const tickerLotSizes = new Map<string, Map<number, number>>();
+      const MAX_RAW_ROWS = 200;
+
+      for (let i = 1; i < lines.length; i++) {
+        const cols = parseCSVLine(lines[i]);
+        if (cols.length < 3) continue;
+
+        const symbol = symbolIdx >= 0 ? cols[symbolIdx] : "";
+        const instType = instTypeIdx >= 0 ? cols[instTypeIdx] : "";
+        if (!instType.includes("OPT") && !instType.includes("FUT")) continue;
+
+        let baseTicker = "";
+        for (const idx of INDEX_TICKERS) {
+          if (symbol.startsWith(idx)) { baseTicker = idx; break; }
+        }
+        if (!baseTicker) continue;
+
+        if (rawRows.length < MAX_RAW_ROWS) {
+          rawRows.push(cols.slice(0, csvHeaders.length));
+        }
+
+        const lotSizeStr = lotIdx >= 0 ? cols[lotIdx] : "";
+        const lotSize = parseInt(lotSizeStr, 10);
+        if (!isNaN(lotSize) && lotSize > 0) {
+          if (!tickerLotSizes.has(baseTicker)) tickerLotSizes.set(baseTicker, new Map());
+          const freq = tickerLotSizes.get(baseTicker)!;
+          freq.set(lotSize, (freq.get(lotSize) || 0) + 1);
+        }
+      }
+
+      const dbConfigs = await storage.getInstrumentConfigs();
+      const dbConfigMap = new Map(dbConfigs.map(c => [c.ticker, c]));
+
+      const lotSizeSummary: Array<{
+        ticker: string;
+        csvMode: number;
+        csvCounts: Array<{ lotSize: number; count: number }>;
+        dbLotSize: number | null;
+        mismatch: boolean;
+      }> = [];
+
+      for (const [ticker, freqMap] of Array.from(tickerLotSizes.entries())) {
+        const counts = Array.from(freqMap.entries())
+          .map(([lotSize, count]) => ({ lotSize, count }))
+          .sort((a, b) => b.count - a.count);
+        const csvMode = counts.length > 0 ? counts[0].lotSize : 0;
+        const dbConfig = dbConfigMap.get(ticker);
+        const dbLotSize = dbConfig ? dbConfig.lotSize : null;
+        lotSizeSummary.push({
+          ticker,
+          csvMode,
+          csvCounts: counts,
+          dbLotSize,
+          mismatch: dbLotSize !== null && dbLotSize !== csvMode,
+        });
+      }
+
+      lotSizeSummary.sort((a, b) => a.ticker.localeCompare(b.ticker));
+
+      res.json({
+        headers: csvHeaders,
+        lotColumnName: lotIdx >= 0 ? csvHeaders[lotIdx] : null,
+        lotColumnIndex: lotIdx,
+        totalCsvLines: lines.length - 1,
+        filteredRows: rawRows.length,
+        rawRows,
+        lotSizeSummary,
+      });
+    } catch (error: any) {
+      console.error("Scrip master preview error:", error);
+      res.status(500).json({ error: error.message || "Failed to generate preview" });
+    }
+  });
+
   app.post("/api/instrument-configs/sync", async (req, res) => {
     try {
       const { brokerConfigId } = req.body;

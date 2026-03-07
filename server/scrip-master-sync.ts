@@ -71,16 +71,19 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
 
   const symbolNameIdx = headers.findIndex(h => h === 'psymbolname' || h === 'symbolname' || h === 'symbol_name');
   const symbolIdx = symbolNameIdx >= 0 ? symbolNameIdx : headers.findIndex(h => h === 'psymbol' || h === 'symbol' || h === 'tsym' || h === 'tradingsymbol' || h === 'psymname');
-  const lotIdx = headers.findIndex(h => h === 'lotsize' || h === 'lot_size' || h === 'brdlotqty' || h === 'boardlotqty' || h === 'pbrdlotqty' || h === 'plotsize' || h === 'llotsize' || h === 'ilotsize' || h === 'iboardlotqty');
+  const preferredLotNames = ['lotsize', 'lot_size', 'plotsize', 'llotsize', 'ilotsize'];
+  const fallbackLotNames = ['brdlotqty', 'boardlotqty', 'pbrdlotqty', 'iboardlotqty'];
+  let lotIdx = headers.findIndex(h => preferredLotNames.includes(h));
+  if (lotIdx < 0) lotIdx = headers.findIndex(h => fallbackLotNames.includes(h));
   const strikeIdx = headers.findIndex(h => h === 'strikeprice' || h === 'strike_price' || h === 'strkprc' || h === 'pstrikeprice' || h === 'pstrkprc' || h === 'dstrikeprice');
   const instTypeIdx = headers.findIndex(h => h === 'instrumenttype' || h === 'instrument_type' || h === 'insttype' || h === 'instype' || h === 'pinsttype' || h === 'pinstrumenttype');
   const tokenIdx = headers.findIndex(h => h === 'token' || h === 'pscriprefkey' || h === 'scripcode');
   const optTypeIdx = headers.findIndex(h => h === 'optiontype' || h === 'option_type' || h === 'optype' || h === 'opttype' || h === 'poptiontype' || h === 'popttype');
 
   console.log(`${LOG_PREFIX} CSV headers (${headers.length}): ${headers.slice(0, 15).join(', ')}...`);
-  console.log(`${LOG_PREFIX} Column indices: symbol=${symbolIdx}, lot=${lotIdx}, strike=${strikeIdx}, instType=${instTypeIdx}, token=${tokenIdx}, optType=${optTypeIdx}`);
+  console.log(`${LOG_PREFIX} Column indices: symbol=${symbolIdx}, lot=${lotIdx}(${lotIdx >= 0 ? headers[lotIdx] : 'none'}), strike=${strikeIdx}, instType=${instTypeIdx}, token=${tokenIdx}, optType=${optTypeIdx}`);
 
-  const tickerData = new Map<string, { lotSizes: Set<number>; strikes: number[]; instrumentType: string; token: string | null }>();
+  const tickerData = new Map<string, { lotSizes: number[]; strikes: number[]; instrumentType: string; token: string | null }>();
 
   for (let i = 1; i < lines.length; i++) {
     const cols = parseCSVLine(lines[i]);
@@ -108,19 +111,31 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
     const strikePrice = rawStrike / 100;
 
     if (!tickerData.has(baseTicker)) {
-      tickerData.set(baseTicker, { lotSizes: new Set(), strikes: [], instrumentType: instType, token });
+      tickerData.set(baseTicker, { lotSizes: [], strikes: [], instrumentType: instType, token });
     }
 
     const td = tickerData.get(baseTicker)!;
-    if (!isNaN(lotSize) && lotSize > 0) td.lotSizes.add(lotSize);
+    if (!isNaN(lotSize) && lotSize > 0) td.lotSizes.push(lotSize);
     if (!isNaN(strikePrice) && strikePrice > 0) td.strikes.push(strikePrice);
     if (instType.includes("OPT")) td.instrumentType = instType;
   }
 
   const results: ParsedInstrument[] = [];
   for (const [ticker, data] of Array.from(tickerData.entries())) {
-    const lotSizes = Array.from(data.lotSizes);
-    const lotSize = lotSizes.length > 0 ? Math.min(...lotSizes) : 1;
+    const lotSizeFreq = new Map<number, number>();
+    for (const ls of data.lotSizes) {
+      lotSizeFreq.set(ls, (lotSizeFreq.get(ls) || 0) + 1);
+    }
+
+    const freqEntries = Array.from(lotSizeFreq.entries()).sort((a, b) => b[1] - a[1]);
+    const freqLog = freqEntries.map(([val, cnt]) => `${val}(x${cnt})`).join(', ');
+    console.log(`${LOG_PREFIX} ${ticker} lot sizes: ${freqLog || 'none'} | total rows: ${data.lotSizes.length}`);
+
+    let lotSize = 1;
+    if (freqEntries.length > 0) {
+      lotSize = freqEntries[0][0];
+    }
+
     const strikeInterval = inferStrikeInterval(data.strikes);
 
     results.push({

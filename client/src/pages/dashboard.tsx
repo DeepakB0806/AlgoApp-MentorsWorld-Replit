@@ -71,17 +71,17 @@ export default function Dashboard() {
     unrealisedPnL: positions.reduce((sum, p) => {
       // Use API-provided unrealised P/L if available, otherwise compute
       if (p.unrealised_pnl !== undefined) return sum + p.unrealised_pnl;
-      return sum + ((p.ltp - p.buy_avg) * p.quantity);
+      return sum + (((p.ltp || 0) - (p.buy_avg || 0)) * (p.quantity || 0));
     }, 0),
     realisedPnL: positions.reduce((sum, p) => sum + (p.realised_pnl || 0), 0),
-    netTradedValue: positions.reduce((sum, p) => sum + (p.ltp * Math.abs(p.quantity)), 0),
+    netTradedValue: positions.reduce((sum, p) => sum + ((p.ltp || 0) * Math.abs(p.quantity || 0)), 0),
   };
 
   // Calculate holdings summaries - use API values when available
   const holdingTotals = {
     totalPnL: holdings.reduce((sum, h) => sum + (h.pnl || 0), 0),
-    investedValue: holdings.reduce((sum, h) => sum + (h.invested_value || h.average_price * h.quantity), 0),
-    currentValue: holdings.reduce((sum, h) => sum + (h.current_value || h.current_price * h.quantity), 0),
+    investedValue: holdings.reduce((sum, h) => sum + (h.invested_value || (h.average_price || 0) * (h.quantity || 0)), 0),
+    currentValue: holdings.reduce((sum, h) => sum + (h.current_value || (h.current_price || 0) * (h.quantity || 0)), 0),
     todayPnL: holdings.reduce((sum, h) => sum + (h.today_pnl || 0), 0),
   };
   
@@ -245,16 +245,16 @@ export default function Dashboard() {
                             <div className="font-medium" data-testid={`text-holding-symbol-${index}`}>{holding.trading_symbol}</div>
                           </TableCell>
                           <TableCell className="text-right">{holding.quantity}</TableCell>
-                          <TableCell className="text-right">{holding.average_price.toFixed(2)}</TableCell>
-                          <TableCell className="text-right">{holding.current_price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{(holding.average_price || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{(holding.current_price || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-right">
                             {(holding.current_value || holding.current_price * holding.quantity).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                           </TableCell>
                           <TableCell className="text-right">
                             {(holding.invested_value || holding.average_price * holding.quantity).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                           </TableCell>
-                          <TableCell className={`text-right font-medium ${holding.pnl >= 0 ? "text-primary" : "text-destructive"}`}>
-                            {holding.pnl >= 0 ? "+" : ""}{holding.pnl.toFixed(0)} ({holding.pnl_percent >= 0 ? "+" : ""}{holding.pnl_percent.toFixed(2)}%)
+                          <TableCell className={`text-right font-medium ${(holding.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {(holding.pnl || 0) >= 0 ? "+" : ""}{(holding.pnl || 0).toFixed(0)} ({(holding.pnl_percent || 0) >= 0 ? "+" : ""}{(holding.pnl_percent || 0).toFixed(2)}%)
                           </TableCell>
                           <TableCell className={`text-right font-medium ${(holding.today_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
                             {(holding.today_pnl || 0) >= 0 ? "+" : ""}{(holding.today_pnl || 0).toFixed(0)} ({(holding.today_pnl_percent || 0) >= 0 ? "+" : ""}{(holding.today_pnl_percent || 0).toFixed(2)}%)
@@ -345,7 +345,7 @@ export default function Dashboard() {
                     </TableHeader>
                     <TableBody>
                       {filteredPositions.map((position, index) => {
-                        const unrealisedPnl = position.unrealised_pnl ?? ((position.ltp - position.buy_avg) * position.quantity);
+                        const unrealisedPnl = position.unrealised_pnl ?? (((position.ltp || 0) - (position.buy_avg || 0)) * (position.quantity || 0));
                         return (
                         <TableRow key={index} data-testid={`row-position-${index}`}>
                           <TableCell>
@@ -362,9 +362,9 @@ export default function Dashboard() {
                             <span className="text-sm" data-testid={`text-product-type-${index}`}>{position.product_type || "NRML"}</span>
                           </TableCell>
                           <TableCell className="text-right">{Math.abs(position.quantity)}</TableCell>
-                          <TableCell className="text-right">{position.buy_avg.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{(position.buy_avg || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-right">{(position.sell_avg || 0).toFixed(2)}</TableCell>
-                          <TableCell className="text-right">{position.ltp.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{(position.ltp || 0).toFixed(2)}</TableCell>
                           <TableCell>
                             {position.option_type ? (
                               <Badge variant="outline" className="text-xs" data-testid={`badge-option-${index}`}>
@@ -380,8 +380,8 @@ export default function Dashboard() {
                           <TableCell>
                             <span className="text-xs">{position.expiry || "—"}</span>
                           </TableCell>
-                          <TableCell className={`text-right font-medium ${position.pnl >= 0 ? "text-primary" : "text-destructive"}`}>
-                            {position.pnl >= 0 ? "+" : ""}{position.pnl.toFixed(2)}
+                          <TableCell className={`text-right font-medium ${(position.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {(position.pnl || 0) >= 0 ? "+" : ""}{(position.pnl || 0).toFixed(2)}
                           </TableCell>
                           <TableCell className={`text-right text-xs ${(position.realised_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
                             {(position.realised_pnl || 0) >= 0 ? "+" : ""}{(position.realised_pnl || 0).toFixed(2)}
@@ -444,7 +444,7 @@ export default function Dashboard() {
                           </TableCell>
                           <TableCell className="text-sm">{order.order_type}</TableCell>
                           <TableCell className="text-right">{order.quantity}</TableCell>
-                          <TableCell className="text-right">{order.price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{(order.price || 0).toFixed(2)}</TableCell>
                           <TableCell>
                             <Badge 
                               variant={order.status === "COMPLETE" ? "default" : order.status === "CANCELLED" ? "destructive" : "secondary"}

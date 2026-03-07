@@ -1,7 +1,9 @@
 import type { Express } from "express";
 import type { IStorage } from "../storage";
-import { insertBrokerConfigSchema } from "@shared/schema";
+import { insertBrokerConfigSchema, webhookStatusLogs, brokerTestLogs, brokerSessionLogs } from "@shared/schema";
 import { tradingCache } from "../cache";
+import { db } from "../db";
+import { desc, eq, sql, or } from "drizzle-orm";
 import EL from "../el-kotak-neo-v3";
 import {
   testBinanceConnectivity,
@@ -770,6 +772,126 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       });
     } catch (error) {
       res.status(500).json({ ready: false, instrumentCount: 0, error: "Failed to check trade readiness", stale: false, lastUpdated: null, syncing: false });
+    }
+  });
+
+  const KOTAK_ERROR_CODES: Record<string, string> = {
+    "1005": "Internal Error",
+    "1006": "Invalid Exchange",
+    "1007": "Invalid Symbol",
+    "1009": "Invalid Quantity",
+    "1004": "Insufficient Balance",
+    "400": "Bad Request Format",
+    "401": "Session Expired / Unauthorized",
+    "424": "Dependency Failure",
+  };
+
+  function enrichErrorMessage(msg: string | null): string {
+    if (!msg) return "";
+    const codeMatch = msg.match(/\b(1004|1005|1006|1007|1009|400|401|424)\b/);
+    if (codeMatch && KOTAK_ERROR_CODES[codeMatch[1]]) {
+      return `${msg} [Kotak: ${KOTAK_ERROR_CODES[codeMatch[1]]}]`;
+    }
+    return msg;
+  }
+
+  app.get("/api/error-logs", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+      const category = (req.query.category as string) || "all";
+
+      type ErrorLogEntry = {
+        id: string;
+        timestamp: string;
+        source: string;
+        category: string;
+        message: string;
+        details: string;
+      };
+
+      const errors: ErrorLogEntry[] = [];
+
+      if (category === "all" || category === "webhook") {
+        const webhookErrors = await db.select()
+          .from(webhookStatusLogs)
+          .where(eq(webhookStatusLogs.status, "failed"))
+          .orderBy(desc(webhookStatusLogs.testedAt))
+          .limit(limit);
+
+        for (const log of webhookErrors) {
+          errors.push({
+            id: `wh-${log.id}`,
+            timestamp: log.testedAt,
+            source: `Webhook ${log.webhookId?.slice(0, 8) || "unknown"}`,
+            category: "webhook",
+            message: enrichErrorMessage(log.errorMessage || log.responseMessage || "Webhook test failed"),
+            details: [
+              log.statusCode ? `HTTP ${log.statusCode}` : null,
+              log.responseTime ? `${log.responseTime}ms` : null,
+              log.responseMessage,
+            ].filter(Boolean).join(" | "),
+          });
+        }
+      }
+
+      if (category === "all" || category === "broker_test") {
+        const testErrors = await db.select()
+          .from(brokerTestLogs)
+          .where(eq(brokerTestLogs.status, "failed"))
+          .orderBy(desc(brokerTestLogs.testedAt))
+          .limit(limit);
+
+        for (const log of testErrors) {
+          errors.push({
+            id: `bt-${log.id}`,
+            timestamp: log.testedAt,
+            source: `Broker Test ${log.brokerConfigId?.slice(0, 8) || "unknown"}`,
+            category: "broker_test",
+            message: enrichErrorMessage(log.errorMessage || log.message || "Connection test failed"),
+            details: [
+              log.responseTime ? `${log.responseTime}ms` : null,
+              log.message,
+            ].filter(Boolean).join(" | "),
+          });
+        }
+      }
+
+      if (category === "all" || category === "broker_session") {
+        const sessionErrors = await db.select()
+          .from(brokerSessionLogs)
+          .where(eq(brokerSessionLogs.status, "failed"))
+          .orderBy(desc(brokerSessionLogs.loginAt))
+          .limit(limit);
+
+        for (const log of sessionErrors) {
+          errors.push({
+            id: `bs-${log.id}`,
+            timestamp: log.loginAt,
+            source: `Session ${log.brokerConfigId?.slice(0, 8) || "unknown"}`,
+            category: "broker_session",
+            message: enrichErrorMessage(log.errorMessage || log.message || "Authentication failed"),
+            details: [
+              log.totpUsed ? `TOTP: ****` : null,
+              log.message,
+            ].filter(Boolean).join(" | "),
+          });
+        }
+      }
+
+      errors.sort((a, b) => {
+        const da = new Date(a.timestamp).getTime() || 0;
+        const db2 = new Date(b.timestamp).getTime() || 0;
+        return db2 - da;
+      });
+
+      res.json({
+        errors: errors.slice(0, limit),
+        total: errors.length,
+        kotakErrorCodes: KOTAK_ERROR_CODES,
+      });
+    } catch (error) {
+      console.error("[ERROR-LOGS] Failed to fetch error logs:", error);
+      res.status(500).json({ error: "Failed to fetch error logs" });
     }
   });
 }
