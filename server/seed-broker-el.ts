@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { broker_api_endpoints, broker_exchange_maps, broker_headers, broker_field_mappings } from "@shared/schema";
+import { broker_api_endpoints, broker_exchange_maps, broker_headers, broker_field_mappings, universal_fields } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
 const BROKER_NAME = "kotak_neo_v3";
@@ -86,6 +86,47 @@ async function ensureCompliance(): Promise<string[]> {
       matchStatus: "matched", defaultValue: "0", isRequired: false, sortOrder: 30, isActive: true
     });
     fixes.push("added order_modify mp field");
+  }
+
+  const existingUF = await db.select().from(universal_fields).where(eq(universal_fields.fieldName, "priceFillFlag"));
+  if (existingUF.length === 0) {
+    await db.insert(universal_fields).values({
+      fieldName: "priceFillFlag", displayName: "Price Fill Flag", category: "order",
+      dataType: "string", description: "Flag for price fill behavior", isActive: true
+    });
+    fixes.push("added universal field priceFillFlag");
+  }
+
+  const placeFields = await db.select().from(broker_field_mappings)
+    .where(and(eq(broker_field_mappings.brokerName, BROKER_NAME), eq(broker_field_mappings.category, "order_place")));
+
+  const esField = placeFields.find(f => f.fieldCode === "es" && f.universalFieldName === "exchangeSegment");
+  if (esField) {
+    await db.update(broker_field_mappings)
+      .set({ universalFieldName: "exchange", matchStatus: "matched" })
+      .where(eq(broker_field_mappings.id, esField.id));
+    fixes.push("fixed order_place es: exchangeSegment → exchange");
+  }
+
+  const pcField = placeFields.find(f => f.fieldCode === "pc" && f.universalFieldName === "productCode");
+  if (pcField) {
+    await db.update(broker_field_mappings)
+      .set({ universalFieldName: "productType", matchStatus: "matched" })
+      .where(eq(broker_field_mappings.id, pcField.id));
+    fixes.push("fixed order_place pc: productCode → productType");
+  }
+
+  const pendingWithValidUF = await db.select().from(broker_field_mappings)
+    .where(and(eq(broker_field_mappings.brokerName, BROKER_NAME), eq(broker_field_mappings.matchStatus, "pending")));
+  const allUF = await db.select().from(universal_fields);
+  const ufNames = new Set(allUF.map(u => u.fieldName));
+  for (const f of pendingWithValidUF) {
+    if (f.universalFieldName && ufNames.has(f.universalFieldName)) {
+      await db.update(broker_field_mappings)
+        .set({ matchStatus: "matched" })
+        .where(eq(broker_field_mappings.id, f.id));
+      fixes.push(`auto-matched ${f.category}::${f.fieldCode}`);
+    }
   }
 
   return fixes;
