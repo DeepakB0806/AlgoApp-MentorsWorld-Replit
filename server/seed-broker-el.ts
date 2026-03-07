@@ -88,6 +88,15 @@ async function ensureCompliance(): Promise<string[]> {
     fixes.push("added order_modify mp field");
   }
 
+  const cdsExchange = await db.select().from(broker_exchange_maps)
+    .where(and(eq(broker_exchange_maps.brokerName, BROKER_NAME), eq(broker_exchange_maps.universalCode, "CDS")));
+  if (cdsExchange.length > 0 && cdsExchange[0].brokerCode === "cds_fo") {
+    await db.update(broker_exchange_maps)
+      .set({ brokerCode: "cde_fo" })
+      .where(and(eq(broker_exchange_maps.brokerName, BROKER_NAME), eq(broker_exchange_maps.universalCode, "CDS")));
+    fixes.push("fixed CDS exchange code cds_fo → cde_fo");
+  }
+
   const existingUF = await db.select().from(universal_fields).where(eq(universal_fields.fieldName, "priceFillFlag"));
   if (existingUF.length === 0) {
     await db.insert(universal_fields).values({
@@ -192,7 +201,7 @@ export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exch
       { brokerName: BROKER_NAME, universalCode: "NFO", brokerCode: "nse_fo", description: "NSE Futures & Options" },
       { brokerName: BROKER_NAME, universalCode: "BFO", brokerCode: "bse_fo", description: "BSE Futures & Options" },
       { brokerName: BROKER_NAME, universalCode: "MCX", brokerCode: "mcx_fo", description: "MCX Commodity Futures" },
-      { brokerName: BROKER_NAME, universalCode: "CDS", brokerCode: "cds_fo", description: "Currency Derivatives" },
+      { brokerName: BROKER_NAME, universalCode: "CDS", brokerCode: "cde_fo", description: "Currency Derivatives" },
     ];
     const inserted = await db.insert(broker_exchange_maps).values(exchanges).returning();
     exchangeCount = inserted.length;
