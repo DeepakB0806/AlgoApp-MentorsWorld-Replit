@@ -1,11 +1,102 @@
 import { db } from "./db";
-import { broker_api_endpoints, broker_exchange_maps, broker_headers } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { broker_api_endpoints, broker_exchange_maps, broker_headers, broker_field_mappings } from "@shared/schema";
+import { eq, and } from "drizzle-orm";
 
 const BROKER_NAME = "kotak_neo_v3";
 const LOG_PREFIX = "[EL-Seed]";
 
+async function ensureCompliance(): Promise<string[]> {
+  const fixes: string[] = [];
+
+  const existingHeaders = await db.select().from(broker_headers).where(eq(broker_headers.brokerName, BROKER_NAME));
+  const headerKeys = new Set(existingHeaders.map(h => `${h.authType}::${h.headerName}`));
+
+  if (!headerKeys.has("consumer_key_only::Authorization")) {
+    await db.insert(broker_headers).values({ brokerName: BROKER_NAME, authType: "consumer_key_only", headerName: "Authorization", headerSource: "config_field", headerValue: "consumerKey", sortOrder: 1 });
+    fixes.push("added consumer_key_only::Authorization header");
+  }
+
+  if (!headerKeys.has("session::accept")) {
+    await db.insert(broker_headers).values({ brokerName: BROKER_NAME, authType: "session", headerName: "accept", headerSource: "static", headerValue: "application/json", sortOrder: 0 });
+    fixes.push("added session::accept header");
+  }
+
+  if (!headerKeys.has("session::neo-fin-key")) {
+    await db.insert(broker_headers).values({ brokerName: BROKER_NAME, authType: "session", headerName: "neo-fin-key", headerSource: "static", headerValue: "neotradeapi", sortOrder: 5 });
+    fixes.push("added session::neo-fin-key header");
+  }
+
+  if (!headerKeys.has("session::Authorization")) {
+    await db.insert(broker_headers).values({ brokerName: BROKER_NAME, authType: "session", headerName: "Authorization", headerSource: "config_field", headerValue: "consumerKey", sortOrder: 4, isActive: false });
+    fixes.push("added session::Authorization header (inactive)");
+  }
+
+  const sessionAuth = existingHeaders.find(h => h.authType === "session" && h.headerName === "Authorization");
+  if (sessionAuth && sessionAuth.isActive) {
+    await db.update(broker_headers)
+      .set({ isActive: false })
+      .where(and(eq(broker_headers.brokerName, BROKER_NAME), eq(broker_headers.authType, "session"), eq(broker_headers.headerName, "Authorization")));
+    fixes.push("deactivated session::Authorization header");
+  }
+
+  const existingEndpoints = await db.select().from(broker_api_endpoints).where(eq(broker_api_endpoints.brokerName, BROKER_NAME));
+  const quotesEp = existingEndpoints.find(e => e.endpointName === "quotes");
+  if (quotesEp && quotesEp.authType !== "consumer_key_only") {
+    await db.update(broker_api_endpoints)
+      .set({ authType: "consumer_key_only" })
+      .where(and(eq(broker_api_endpoints.brokerName, BROKER_NAME), eq(broker_api_endpoints.endpointName, "quotes")));
+    fixes.push("updated quotes auth_type → consumer_key_only");
+  }
+
+  const scripEp = existingEndpoints.find(e => e.endpointName === "scrip_master_file_paths");
+  if (scripEp && scripEp.authType !== "consumer_key_only") {
+    await db.update(broker_api_endpoints)
+      .set({ authType: "consumer_key_only" })
+      .where(and(eq(broker_api_endpoints.brokerName, BROKER_NAME), eq(broker_api_endpoints.endpointName, "scrip_master_file_paths")));
+    fixes.push("updated scrip_master_file_paths auth_type → consumer_key_only");
+  }
+
+  const modifyFields = await db.select().from(broker_field_mappings)
+    .where(and(eq(broker_field_mappings.brokerName, BROKER_NAME), eq(broker_field_mappings.category, "order_modify")));
+  const modifyFieldCodes = new Set(modifyFields.map(f => f.fieldCode));
+
+  const vdField = modifyFields.find(f => f.fieldCode === "vd" && f.universalFieldName === "validity");
+  if (vdField) {
+    await db.update(broker_field_mappings)
+      .set({ fieldCode: "rt" })
+      .where(eq(broker_field_mappings.id, vdField.id));
+    fixes.push("updated order_modify validity field_code vd → rt");
+  }
+
+  if (!modifyFieldCodes.has("pf")) {
+    await db.insert(broker_field_mappings).values({
+      brokerName: BROKER_NAME, category: "order_modify", fieldCode: "pf", fieldName: "pf",
+      fieldType: "Y | N", fieldDescription: "Portfolio Flag", direction: "request",
+      endpoint: "{baseUrl}/quick/order/vr/modify", universalFieldName: "priceFillFlag",
+      matchStatus: "matched", defaultValue: "N", isRequired: false, sortOrder: 29, isActive: true
+    });
+    fixes.push("added order_modify pf field");
+  }
+
+  if (!modifyFieldCodes.has("mp")) {
+    await db.insert(broker_field_mappings).values({
+      brokerName: BROKER_NAME, category: "order_modify", fieldCode: "mp", fieldName: "mp",
+      fieldType: "string", fieldDescription: "Market Protection", direction: "request",
+      endpoint: "{baseUrl}/quick/order/vr/modify", universalFieldName: "marketProtection",
+      matchStatus: "matched", defaultValue: "0", isRequired: false, sortOrder: 30, isActive: true
+    });
+    fixes.push("added order_modify mp field");
+  }
+
+  return fixes;
+}
+
 export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exchanges: number; headers: number }> {
+  const complianceFixes = await ensureCompliance();
+  if (complianceFixes.length > 0) {
+    console.log(`${LOG_PREFIX} Applied ${complianceFixes.length} compliance fixes: ${complianceFixes.join(', ')}`);
+  }
+
   const existingEndpoints = await db.select().from(broker_api_endpoints).where(eq(broker_api_endpoints.brokerName, BROKER_NAME));
   const existingExchanges = await db.select().from(broker_exchange_maps).where(eq(broker_exchange_maps.brokerName, BROKER_NAME));
   const existingHeaders = await db.select().from(broker_headers).where(eq(broker_headers.brokerName, BROKER_NAME));
@@ -20,19 +111,9 @@ export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exch
     console.log(`${LOG_PREFIX} Added ${added.length} missing endpoints: ${added.map(e => e.endpointName).join(', ')}`);
   }
 
-  const existingHeaderKeys = new Set(existingHeaders.map(h => `${h.authType}::${h.headerName}`));
-  const missingHeaders: { brokerName: string; authType: string; headerName: string; headerSource: string; headerValue: string; sortOrder: number }[] = [];
-  if (!existingHeaderKeys.has("session::Authorization")) {
-    missingHeaders.push({ brokerName: BROKER_NAME, authType: "session", headerName: "Authorization", headerSource: "config_field", headerValue: "consumerKey", sortOrder: 4 });
-  }
-  if (missingHeaders.length > 0) {
-    const added = await db.insert(broker_headers).values(missingHeaders).returning();
-    console.log(`${LOG_PREFIX} Added ${added.length} missing headers: ${added.map(h => `${h.authType}::${h.headerName}`).join(', ')}`);
-  }
-
   if (existingEndpoints.length > 0 && existingExchanges.length > 0 && existingHeaders.length > 0) {
-    console.log(`${LOG_PREFIX} Already populated (${existingEndpoints.length + missingEndpoints.length} endpoints, ${existingExchanges.length} exchanges, ${existingHeaders.length} headers)`);
-    return { endpoints: existingEndpoints.length + missingEndpoints.length, exchanges: existingExchanges.length, headers: existingHeaders.length };
+    console.log(`${LOG_PREFIX} Already populated (${existingEndpoints.length} endpoints, ${existingExchanges.length} exchanges, ${existingHeaders.length} headers)`);
+    return { endpoints: existingEndpoints.length, exchanges: existingExchanges.length, headers: existingHeaders.length };
   }
 
   let endpointCount = 0;
@@ -87,10 +168,12 @@ export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exch
       { brokerName: BROKER_NAME, authType: "consumer_key_with_view", headerName: "Content-Type", headerSource: "static", headerValue: "application/json", sortOrder: 3 },
       { brokerName: BROKER_NAME, authType: "consumer_key_with_view", headerName: "Auth", headerSource: "config_field", headerValue: "viewToken", sortOrder: 4 },
       { brokerName: BROKER_NAME, authType: "consumer_key_with_view", headerName: "sid", headerSource: "config_field", headerValue: "sidView", sortOrder: 5 },
+      { brokerName: BROKER_NAME, authType: "session", headerName: "accept", headerSource: "static", headerValue: "application/json", sortOrder: 0 },
       { brokerName: BROKER_NAME, authType: "session", headerName: "Sid", headerSource: "config_field", headerValue: "sessionId", sortOrder: 1 },
       { brokerName: BROKER_NAME, authType: "session", headerName: "Auth", headerSource: "config_field", headerValue: "accessToken", sortOrder: 2 },
       { brokerName: BROKER_NAME, authType: "session", headerName: "Content-Type", headerSource: "static", headerValue: "application/x-www-form-urlencoded", sortOrder: 3 },
-      { brokerName: BROKER_NAME, authType: "session", headerName: "Authorization", headerSource: "config_field", headerValue: "consumerKey", sortOrder: 4 },
+      { brokerName: BROKER_NAME, authType: "session", headerName: "Authorization", headerSource: "config_field", headerValue: "consumerKey", sortOrder: 4, isActive: false },
+      { brokerName: BROKER_NAME, authType: "session", headerName: "neo-fin-key", headerSource: "static", headerValue: "neotradeapi", sortOrder: 5 },
       { brokerName: BROKER_NAME, authType: "consumer_key_only", headerName: "Authorization", headerSource: "config_field", headerValue: "consumerKey", sortOrder: 1 },
     ];
     const inserted = await db.insert(broker_headers).values(headers).returning();
