@@ -278,6 +278,7 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
 
       const allSignals = resolveAllSignalsFromActionMapper(parsedData, linkedConfig?.actionMapper);
       const { signalType, blockType: directBlockType, resolvedAction } = allSignals[0];
+      console.log(`[PFL] ▶ Webhook ${webhookId.slice(0,8)} received: alert=${parsedData.alert} signals=${allSignals.length} → ${allSignals.map(s => `${s.resolvedAction}@${s.blockType}(${s.signalType})`).join(", ")}`);
       timing.signal_resolve_ms = Date.now() - t2;
 
       const t3 = Date.now();
@@ -316,10 +317,11 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
         }
 
         if (allSignals.length > 1) {
-          console.log(`[WEBHOOK ${webhookId}] Composite signal: ${allSignals.length} actions processed — ${allSignals.map(s => `${s.resolvedAction}@${s.blockType}`).join(", ")}`);
+          console.log(`[PFL] Composite signal: ${allSignals.length} actions processed — ${allSignals.map(s => `${s.resolvedAction}@${s.blockType}`).join(", ")}`);
         }
       }
       timing.trade_execute_ms = Date.now() - t3;
+      console.log(`[PFL] ◀ Webhook ${webhookId.slice(0,8)} complete: ${tradeResults.length} result(s) — ${tradeResults.map(r => `${r.action}:${r.success?"OK":"FAIL"}`).join(", ")} | hot=${timing.total_hot_path_ms || (Date.now() - t0)}ms`);
       timing.total_hot_path_ms = Date.now() - t0;
 
       res.json({ 

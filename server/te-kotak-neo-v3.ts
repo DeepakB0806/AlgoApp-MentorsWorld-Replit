@@ -102,6 +102,7 @@ export async function processTradeSignal(
   strategyConfigId: string,
   signalContext?: SignalContext
 ): Promise<TradeResult[]> {
+  console.log(`[PFL] ▶ processTradeSignal: signal=${webhookData.signalType} alert=${webhookData.alert} config=${strategyConfigId.slice(0,8)} resolvedAction=${signalContext?.resolvedAction || "N/A"} blockType=${signalContext?.blockType || "N/A"}`);
   const results: TradeResult[] = [];
 
   let plans = tradingCache.getActivePlansByConfigId(strategyConfigId);
@@ -112,8 +113,10 @@ export async function processTradeSignal(
   }
 
   if (plans.length === 0) {
+    console.log(`[PFL] ✗ No active plans found for config ${strategyConfigId.slice(0,8)}`);
     return [{ success: false, action: "hold", broker: "none", planId: "", message: "No active plans found for this strategy" }];
   }
+  console.log(`[PFL] Found ${plans.length} active plan(s): ${plans.map(p => `${p.name}[${p.id.slice(0,8)}]`).join(", ")}`);
 
   const brokerConfigIds = Array.from(new Set(plans.map(p => p.brokerConfigId!)));
   const brokerConfigs = new Map<string, BrokerConfig>();
@@ -180,7 +183,10 @@ async function executeTradeForPlan(
   const price = data.price || 0;
   const ticker = plan.ticker || data.indices || signalContext?.parentTicker || "UNKNOWN";
   const exchange = plan.exchange || data.exchange || signalContext?.parentExchange;
+  const resolvedAction = signalContext?.resolvedAction || "N/A";
+  console.log(`[PFL] ── Plan "${plan.name}" [${plan.id.slice(0,8)}] | broker=${broker} signal=${signalType} alert=${data.alert} action=${resolvedAction} ticker=${ticker} exchange=${exchange || "NONE"} price=${price}`);
   if (!exchange) {
+    console.log(`[PFL] ✗ Plan "${plan.name}" — NO EXCHANGE configured (plan/webhook/parent all empty)`);
     return { success: false, action: "error", broker, planId: plan.id, message: "No exchange configured — set exchange on strategy plan, webhook data, or parent signal", executionTimeMs: Date.now() - startTime };
   }
   const resolvedBlockType = signalContext?.blockType || (signalType === "buy" ? "uptrendLegs" : signalType === "sell" ? "downtrendLegs" : "neutralLegs");
@@ -189,6 +195,7 @@ async function executeTradeForPlan(
   const lotMultiplier = plan.lotMultiplier || 1;
 
   if (signalType === "hold" || !signalType) {
+    console.log(`[PFL] ⏸ Plan "${plan.name}" — HOLD signal, no action taken`);
     return { success: true, action: "hold", broker, planId: plan.id, message: "Hold signal — no action taken", executionTimeMs: Date.now() - startTime };
   }
 
@@ -197,9 +204,10 @@ async function executeTradeForPlan(
   const blockConfig = getBlockConfig(tradeParams, resolvedBlockType);
 
   if (legs.length === 0) {
-    console.log(`[TRADE] No legs found for ${resolvedBlockType} in plan ${plan.id} — holding`);
+    console.log(`[PFL] ⏸ Plan "${plan.name}" — No legs found for ${resolvedBlockType}, holding`);
     return { success: true, action: "hold", broker, planId: plan.id, message: `No legs configured for ${resolvedBlockType}`, executionTimeMs: Date.now() - startTime };
   }
+  console.log(`[PFL] Plan "${plan.name}" — ${legs.length} leg(s) found for ${resolvedBlockType}: ${legs.map((l,i) => `L${i}:${l.type}/${l.strike}/${l.action}`).join(", ")}`);
 
   let instrumentConfig: InstrumentConfig | undefined;
   if (isOptionExchange(exchange)) {
@@ -223,18 +231,24 @@ async function executeTradeForPlan(
 
   const ctx: TradeContext = { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, blockConfig, instrumentConfig };
 
+  console.log(`[PFL] Plan "${plan.name}" — openTrades=${openTrades.length} awaitingCleanEntry=${plan.awaitingCleanEntry}`);
+
   if (signalType === "buy") {
+    console.log(`[PFL] Plan "${plan.name}" → executeBuySignal`);
     return executeBuySignal(storage, plan, brokerConfig, ctx);
   }
 
   if (signalType === "sell") {
-    const resolvedAction = signalContext?.resolvedAction || "EXIT";
-    if (plan.awaitingCleanEntry && resolvedAction === "EXIT" && openTrades.length === 0) {
+    const resolvedAction2 = signalContext?.resolvedAction || "EXIT";
+    if (plan.awaitingCleanEntry && resolvedAction2 === "EXIT" && openTrades.length === 0) {
+      console.log(`[PFL] ⏸ Plan "${plan.name}" — awaitingCleanEntry=true + EXIT + no open trades → HOLD`);
       return { success: true, action: "hold", broker, planId: plan.id, message: "Awaiting clean entry — no position to exit, skipping", executionTimeMs: Date.now() - startTime };
     }
+    console.log(`[PFL] Plan "${plan.name}" → executeSellSignal (resolvedAction=${resolvedAction2})`);
     return executeSellSignal(storage, plan, brokerConfig, ctx);
   }
 
+  console.log(`[PFL] ✗ Plan "${plan.name}" — Unknown signal type: ${signalType}`);
   return { success: false, action: "error", broker, planId: plan.id, message: `Unknown signal type: ${signalType}`, executionTimeMs: Date.now() - startTime };
 }
 
@@ -312,16 +326,19 @@ async function executeBuySignal(
 
   const existingBuy = ctx.openTrades.find(t => t.action === "BUY");
   if (existingBuy) {
+    console.log(`[PFL] ⏸ Plan "${plan.name}" BUY — position already open (${existingBuy.tradingSymbol}), holding`);
     return { success: true, action: "hold", broker, planId: plan.id, message: "Buy position already open — holding", executionTimeMs: Date.now() - ctx.startTime };
   }
 
   const openSell = ctx.openTrades.find(t => t.action === "SELL");
   if (openSell) {
+    console.log(`[PFL] Plan "${plan.name}" BUY — closing existing SELL position (${openSell.tradingSymbol})`);
     const closedTrade = await closeTrade(storage, openSell, ctx.price, ctx.now, brokerConfig);
     deferDailyPnlUpdate(storage, plan.id, ctx.today, closedTrade.pnl || 0);
   }
 
   if (broker === "kotak_neo" && (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl)) {
+    console.log(`[PFL] ✗ Plan "${plan.name}" BUY — Kotak Neo session expired/not connected (connected=${brokerConfig.isConnected} token=${!!brokerConfig.accessToken} session=${!!brokerConfig.sessionId} baseUrl=${!!brokerConfig.baseUrl})`);
     return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
   }
 
@@ -351,13 +368,15 @@ async function executeBuySignal(
         quantity: String(params.quantity),
         productType: params.productCode,
       };
-      console.log(`[TE] Order payload (dynamic only): ${JSON.stringify(universalPayload)}`);
+      console.log(`[PFL] Plan "${plan.name}" BUY L${i} — placing Kotak order: ${JSON.stringify(universalPayload)}`);
       const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
 
       if (!orderResult.success) {
+        console.log(`[PFL] ✗ Plan "${plan.name}" BUY L${i} — ORDER FAILED: ${orderResult.error}`);
         return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo leg[${i}] order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
       }
       orderId = orderResult.data?.orderNo;
+      console.log(`[PFL] ✓ Plan "${plan.name}" BUY L${i} — ORDER SUCCESS orderNo=${orderId}`);
       productType = params.productCode;
     } else if (broker === "binance") {
       const session = buildBinanceSession(brokerConfig);
@@ -419,6 +438,8 @@ async function executeBuySignal(
   }
 
   const legSummary = ctx.legs.map((l, i) => `L${i}:${l.type}/${l.strike}/${l.action}`).join(", ");
+  const execMs = Date.now() - ctx.startTime;
+  console.log(`[PFL] ✓ Plan "${plan.name}" BUY COMPLETE — ${ctx.legs.length} leg(s) [${legSummary}] @ ${ctx.price} orders=[${orderIds.join(",")}] ${execMs}ms`);
 
   return {
     success: true,
@@ -428,7 +449,7 @@ async function executeBuySignal(
     trade: trades[0],
     orderId: orderIds[0],
     message: `${broker.toUpperCase()} BUY ${ctx.legs.length} leg(s) [${legSummary}] @ ${ctx.price} [${ctx.resolvedBlockType}]`,
-    executionTimeMs: Date.now() - ctx.startTime,
+    executionTimeMs: execMs,
   };
 }
 
@@ -443,6 +464,7 @@ async function executeSellSignal(
 
   const existingBuyToClose = ctx.openTrades.find(t => t.action === "BUY");
   if (existingBuyToClose) {
+    console.log(`[PFL] Plan "${plan.name}" SELL — closing existing BUY position (${existingBuyToClose.tradingSymbol})`);
     const closedTrade = await closeTrade(storage, existingBuyToClose, ctx.price, ctx.now, brokerConfig);
     closePnl = closedTrade.pnl || 0;
     deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
@@ -450,10 +472,12 @@ async function executeSellSignal(
 
   const existingSell = ctx.openTrades.find(t => t.action === "SELL");
   if (existingSell) {
+    console.log(`[PFL] ⏸ Plan "${plan.name}" SELL — position already open (${existingSell.tradingSymbol}), holding`);
     return { success: true, action: "hold", broker, planId: plan.id, message: "Sell position already open — holding", pnl: closePnl, executionTimeMs: Date.now() - ctx.startTime };
   }
 
   if (broker === "kotak_neo" && (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl)) {
+    console.log(`[PFL] ✗ Plan "${plan.name}" SELL — Kotak Neo session expired/not connected (connected=${brokerConfig.isConnected} token=${!!brokerConfig.accessToken} session=${!!brokerConfig.sessionId} baseUrl=${!!brokerConfig.baseUrl})`);
     return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
   }
 
@@ -483,13 +507,15 @@ async function executeSellSignal(
         quantity: String(params.quantity),
         productType: params.productCode,
       };
-      console.log(`[TE] Order payload (dynamic only): ${JSON.stringify(universalPayload)}`);
+      console.log(`[PFL] Plan "${plan.name}" SELL L${i} — placing Kotak order: ${JSON.stringify(universalPayload)}`);
       const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
 
       if (!orderResult.success) {
+        console.log(`[PFL] ✗ Plan "${plan.name}" SELL L${i} — ORDER FAILED: ${orderResult.error}`);
         return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo leg[${i}] order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
       }
       orderId = orderResult.data?.orderNo;
+      console.log(`[PFL] ✓ Plan "${plan.name}" SELL L${i} — ORDER SUCCESS orderNo=${orderId}`);
       productType = params.productCode;
     } else if (broker === "binance") {
       const session = buildBinanceSession(brokerConfig);
@@ -551,6 +577,8 @@ async function executeSellSignal(
   }
 
   const legSummary = ctx.legs.map((l, i) => `L${i}:${l.type}/${l.strike}/${l.action}`).join(", ");
+  const execMs = Date.now() - ctx.startTime;
+  console.log(`[PFL] ✓ Plan "${plan.name}" SELL COMPLETE — ${ctx.legs.length} leg(s) [${legSummary}] @ ${ctx.price} pnl=${closePnl} orders=[${orderIds.join(",")}] ${execMs}ms`);
 
   return {
     success: true,
@@ -561,7 +589,7 @@ async function executeSellSignal(
     orderId: orderIds[0],
     pnl: closePnl,
     message: `${broker.toUpperCase()} SELL ${ctx.legs.length} leg(s) [${legSummary}] @ ${ctx.price} [${ctx.resolvedBlockType}]`,
-    executionTimeMs: Date.now() - ctx.startTime,
+    executionTimeMs: execMs,
   };
 }
 
