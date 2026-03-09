@@ -14,6 +14,62 @@ interface ParsedInstrument {
   strikeInterval: number;
   instrumentType: string;
   token: string | null;
+  expiryDay: string;
+}
+
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function parseExpiryDate(raw: string): Date | null {
+  if (!raw || raw === "-" || raw === "0") return null;
+  const trimmed = raw.trim().replace(/"/g, '');
+
+  const epochMs = Number(trimmed);
+  if (!isNaN(epochMs) && epochMs > 946684800000) {
+    return new Date(epochMs);
+  }
+
+  const epochSec = Number(trimmed);
+  if (!isNaN(epochSec) && epochSec > 946684800 && epochSec < 4102444800) {
+    return new Date(epochSec * 1000);
+  }
+
+  const d = new Date(trimmed);
+  if (!isNaN(d.getTime())) return d;
+
+  const ddmmmyyyy = trimmed.match(/^(\d{1,2})[-\/\s]?([A-Za-z]{3})[-\/\s]?(\d{2,4})$/);
+  if (ddmmmyyyy) {
+    const parsed = new Date(`${ddmmmyyyy[1]} ${ddmmmyyyy[2]} ${ddmmmyyyy[3]}`);
+    if (!isNaN(parsed.getTime())) return parsed;
+  }
+
+  return null;
+}
+
+function inferExpiryDay(expiryDates: Date[]): string {
+  if (expiryDates.length === 0) return "Thursday";
+
+  const now = new Date();
+  const sorted = expiryDates
+    .filter(d => d >= now)
+    .sort((a, b) => a.getTime() - b.getTime());
+
+  if (sorted.length === 0) {
+    const fallbackSorted = expiryDates.sort((a, b) => b.getTime() - a.getTime());
+    const dayFreq = new Map<number, number>();
+    for (const d of fallbackSorted.slice(0, 100)) {
+      const day = d.getDay();
+      dayFreq.set(day, (dayFreq.get(day) || 0) + 1);
+    }
+    let bestDay = 4;
+    let bestCount = 0;
+    for (const [day, count] of Array.from(dayFreq.entries())) {
+      if (count > bestCount) { bestDay = day; bestCount = count; }
+    }
+    return DAY_NAMES[bestDay];
+  }
+
+  const nearestExpiry = sorted[0];
+  return DAY_NAMES[nearestExpiry.getDay()];
 }
 
 function inferStrikeInterval(strikes: number[]): number {
@@ -79,11 +135,15 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
   const instTypeIdx = headers.findIndex(h => h === 'instrumenttype' || h === 'instrument_type' || h === 'insttype' || h === 'instype' || h === 'pinsttype' || h === 'pinstrumenttype');
   const tokenIdx = headers.findIndex(h => h === 'token' || h === 'pscriprefkey' || h === 'scripcode');
   const optTypeIdx = headers.findIndex(h => h === 'optiontype' || h === 'option_type' || h === 'optype' || h === 'opttype' || h === 'poptiontype' || h === 'popttype');
+  const expiryIdx = headers.findIndex(h => h === 'pexpirydate' || h === 'dexpirydate' || h === 'expirydate' || h === 'expiry_date' || h === 'expdate' || h === 'pexpdate' || h === 'dexpdate');
 
-  console.log(`${LOG_PREFIX} CSV headers (${headers.length}): ${headers.slice(0, 15).join(', ')}...`);
-  console.log(`${LOG_PREFIX} Column indices: symbol=${symbolIdx}, lot=${lotIdx}(${lotIdx >= 0 ? headers[lotIdx] : 'none'}), strike=${strikeIdx}, instType=${instTypeIdx}, token=${tokenIdx}, optType=${optTypeIdx}`);
+  console.log(`${LOG_PREFIX} CSV headers (${headers.length}): ${headers.slice(0, 20).join(', ')}...`);
+  console.log(`${LOG_PREFIX} Column indices: symbol=${symbolIdx}, lot=${lotIdx}(${lotIdx >= 0 ? headers[lotIdx] : 'none'}), strike=${strikeIdx}, instType=${instTypeIdx}, token=${tokenIdx}, optType=${optTypeIdx}, expiry=${expiryIdx}(${expiryIdx >= 0 ? headers[expiryIdx] : 'none'})`);
+  if (expiryIdx < 0) {
+    console.warn(`${LOG_PREFIX} ⚠ No expiry date column found in CSV — expiry day will fall back to Thursday. Available headers: ${headers.join(', ')}`);
+  }
 
-  const tickerData = new Map<string, { lotSizes: number[]; strikes: number[]; instrumentType: string; token: string | null }>();
+  const tickerData = new Map<string, { lotSizes: number[]; strikes: number[]; instrumentType: string; token: string | null; expiryDates: Date[] }>();
 
   for (let i = 1; i < lines.length; i++) {
     const cols = parseCSVLine(lines[i]);
@@ -110,14 +170,18 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
     const rawStrike = parseFloat(strikePriceStr);
     const strikePrice = rawStrike / 100;
 
+    const expiryRaw = expiryIdx >= 0 ? cols[expiryIdx] : "";
+    const expiryDate = parseExpiryDate(expiryRaw);
+
     if (!tickerData.has(baseTicker)) {
-      tickerData.set(baseTicker, { lotSizes: [], strikes: [], instrumentType: instType, token });
+      tickerData.set(baseTicker, { lotSizes: [], strikes: [], instrumentType: instType, token, expiryDates: [] });
     }
 
     const td = tickerData.get(baseTicker)!;
     if (!isNaN(lotSize) && lotSize > 0) td.lotSizes.push(lotSize);
     if (!isNaN(strikePrice) && strikePrice > 0) td.strikes.push(strikePrice);
     if (instType.includes("OPT")) td.instrumentType = instType;
+    if (expiryDate) td.expiryDates.push(expiryDate);
   }
 
   const results: ParsedInstrument[] = [];
@@ -137,6 +201,8 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
     }
 
     const strikeInterval = inferStrikeInterval(data.strikes);
+    const expiryDay = inferExpiryDay(data.expiryDates);
+    console.log(`${LOG_PREFIX} ${ticker} expiry: ${data.expiryDates.length} dates parsed → nearest expiry day = ${expiryDay}`);
 
     results.push({
       ticker,
@@ -145,6 +211,7 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
       strikeInterval,
       instrumentType: data.instrumentType,
       token: data.token,
+      expiryDay,
     });
   }
 
@@ -228,7 +295,7 @@ export async function runScripMasterSync(
     console.log(`${LOG_PREFIX} Downloaded ${csvText.length} bytes, ${csvText.split('\n').length} lines`);
 
     const parsed = parseScripMasterCSV(csvText);
-    console.log(`${LOG_PREFIX} Parsed ${parsed.length} instruments: ${parsed.map(p => `${p.ticker}(lot=${p.lotSize},strike=${p.strikeInterval})`).join(', ')}`);
+    console.log(`${LOG_PREFIX} Parsed ${parsed.length} instruments: ${parsed.map(p => `${p.ticker}(lot=${p.lotSize},strike=${p.strikeInterval},expiry=${p.expiryDay})`).join(', ')}`);
 
     let synced = 0;
     for (const inst of parsed) {
@@ -240,7 +307,7 @@ export async function runScripMasterSync(
         instrumentType: inst.instrumentType,
         token: inst.token,
         source: "scrip_master",
-        expiryDay: "Thursday",
+        expiryDay: inst.expiryDay,
         expiryType: "weekly",
       });
       synced++;

@@ -281,6 +281,7 @@ class ExecutionLayer {
     if (bodyFormat === "jdata_urlencoded") {
       const stringified: Record<string, string> = {};
       for (const [k, v] of Object.entries(data)) {
+        if (v === undefined || v === null) continue;
         stringified[k] = String(v);
       }
       return { body: new URLSearchParams({ jData: JSON.stringify(stringified) }).toString() };
