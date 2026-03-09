@@ -146,6 +146,12 @@ async function ensureCompliance(): Promise<string[]> {
           .where(eq(broker_field_mappings.id, field.id));
         fixes.push(`set order_place tt allowed_values → ${TX_TYPE_ALLOWED}`);
       }
+      if (field.fieldType !== "string" && field.fieldType !== "B | S" && field.fieldType !== "YES | NO") {
+        await db.update(broker_field_mappings)
+          .set({ fieldType: "string" })
+          .where(eq(broker_field_mappings.id, field.id));
+        fixes.push(`set order_place ${field.fieldCode} fieldType → string (Kotak requires all jData values as strings)`);
+      }
     }
   }
 
