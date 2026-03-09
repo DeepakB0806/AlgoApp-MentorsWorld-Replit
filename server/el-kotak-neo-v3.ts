@@ -279,7 +279,11 @@ class ExecutionLayer {
     }
 
     if (bodyFormat === "jdata_urlencoded") {
-      return { body: new URLSearchParams({ jData: JSON.stringify(data) }).toString() };
+      const stringified: Record<string, string> = {};
+      for (const [k, v] of Object.entries(data)) {
+        stringified[k] = String(v);
+      }
+      return { body: new URLSearchParams({ jData: JSON.stringify(stringified) }).toString() };
     }
 
     return { body: JSON.stringify(data) };
