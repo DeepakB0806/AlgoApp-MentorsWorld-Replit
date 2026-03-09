@@ -382,6 +382,13 @@ class TranslationLayer {
     return null;
   }
 
+  getDefaultByUniversalName(universalName: string, category: string): string | null {
+    if (!this.ready) return null;
+    const fields = this.getRequestFields(category);
+    const field = fields.find(f => f.universalFieldName === universalName);
+    return field ? field.defaultValue : null;
+  }
+
   getUniversalFieldMetadata(fieldName: string): UniversalFieldEntry | null {
     return this.universalFieldMap.get(fieldName) || null;
   }

@@ -127,7 +127,7 @@ async function ensureCompliance(): Promise<string[]> {
 
   const ORDER_PLACE_DEFAULTS: Record<string, string> = {
     pr: "0", pt: "MKT", rt: "DAY", am: "NO",
-    dq: "0", mp: "0", pf: "N", tp: "0",
+    dq: "0", mp: "0", pf: "N", tp: "0", pc: "MIS",
   };
   const TX_TYPE_ALLOWED = "B=BUY,S=SELL";
 

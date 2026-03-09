@@ -179,7 +179,10 @@ async function executeTradeForPlan(
   const signalType = data.signalType;
   const price = data.price || 0;
   const ticker = plan.ticker || data.indices || signalContext?.parentTicker || "UNKNOWN";
-  const exchange = plan.exchange || data.exchange || signalContext?.parentExchange || "NFO";
+  const exchange = plan.exchange || data.exchange || signalContext?.parentExchange;
+  if (!exchange) {
+    return { success: false, action: "error", broker, planId: plan.id, message: "No exchange configured — set exchange on strategy plan, webhook data, or parent signal", executionTimeMs: Date.now() - startTime };
+  }
   const resolvedBlockType = signalContext?.blockType || (signalType === "buy" ? "uptrendLegs" : signalType === "sell" ? "downtrendLegs" : "neutralLegs");
   const now = new Date().toISOString();
   const today = now.split("T")[0];
@@ -259,10 +262,20 @@ function resolveOrderParams(leg: PlanTradeLeg, ctx: TradeContext, legIndex: numb
     return { error: `Missing instrument_config for ${ctx.ticker}/${ctx.exchange} — cannot trade options without lot_size/strike_interval` };
   }
 
-  const lotSize = ctx.instrumentConfig?.lotSize || 1;
-  const strikeInterval = ctx.instrumentConfig?.strikeInterval || 50;
-  const expiryDay = ctx.instrumentConfig?.expiryDay || "Thursday";
-  const expiryType = ctx.instrumentConfig?.expiryType || "weekly";
+  const lotSize = ctx.instrumentConfig?.lotSize ?? 1;
+  const strikeInterval = ctx.instrumentConfig?.strikeInterval ?? 50;
+  const expiryDay = ctx.instrumentConfig?.expiryDay ?? "Thursday";
+  const expiryType = ctx.instrumentConfig?.expiryType ?? "weekly";
+  if (isOption) {
+    const missing: string[] = [];
+    if (!ctx.instrumentConfig?.lotSize) missing.push(`lotSize=${lotSize}`);
+    if (!ctx.instrumentConfig?.strikeInterval) missing.push(`strikeInterval=${strikeInterval}`);
+    if (!ctx.instrumentConfig?.expiryDay) missing.push(`expiryDay=${expiryDay}`);
+    if (!ctx.instrumentConfig?.expiryType) missing.push(`expiryType=${expiryType}`);
+    if (missing.length > 0) {
+      console.warn(`[TE] Using DB column defaults for ${ctx.ticker}/${ctx.exchange}: ${missing.join(", ")} — verify instrument_configs table`);
+    }
+  }
 
   let tradingSymbol = ctx.ticker;
   if (isOption && isStrikeSpec(leg.strike) && (leg.type === "CE" || leg.type === "PE")) {
@@ -277,7 +290,11 @@ function resolveOrderParams(leg: PlanTradeLeg, ctx: TradeContext, legIndex: numb
   }
 
   const quantity = (leg.lots || 1) * lotSize * ctx.lotMultiplier;
-  const productCode = leg.orderType || ctx.blockConfig.productMode || "MIS";
+  const dbProductDefault = TL.isReady() ? TL.getDefaultByUniversalName("productType", "order_place") : null;
+  const productCode = leg.orderType || ctx.blockConfig.productMode || dbProductDefault || "MIS";
+  if (!leg.orderType && !ctx.blockConfig.productMode && !dbProductDefault) {
+    console.warn(`[TE] productType default not found in DB — using last-resort "MIS". Set default_value on broker_field_mappings for productType.`);
+  }
   const transactionType = mapTransactionType(leg.action);
 
   console.log(`[TRADE] Leg[${legIndex}] order params: symbol=${tradingSymbol} qty=${quantity} (${leg.lots}×${lotSize}×${ctx.lotMultiplier}) product=${productCode} tx=${transactionType} [${leg.type} ${leg.strike} ${leg.action}]`);
@@ -307,6 +324,10 @@ async function executeBuySignal(
   if (broker === "kotak_neo" && (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl)) {
     return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
   }
+
+  const dbOrderType = TL.getDefaultByUniversalName("priceType", "order_place");
+  if (!dbOrderType) console.warn("[TE] priceType default not found in DB — using last-resort MKT");
+  const orderTypeForRecord = dbOrderType || "MKT";
 
   const trades: any[] = [];
   const orderIds: string[] = [];
@@ -369,7 +390,7 @@ async function executeBuySignal(
       action: "BUY",
       blockType: ctx.resolvedBlockType,
       legIndex: i,
-      orderType: "MKT",
+      orderType: orderTypeForRecord,
       productType,
       status: "open",
       pnl: 0,
@@ -436,6 +457,10 @@ async function executeSellSignal(
     return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
   }
 
+  const dbOrderType = TL.getDefaultByUniversalName("priceType", "order_place");
+  if (!dbOrderType) console.warn("[TE] priceType default not found in DB — using last-resort MKT");
+  const orderTypeForRecord = dbOrderType || "MKT";
+
   const trades: any[] = [];
   const orderIds: string[] = [];
 
@@ -497,7 +522,7 @@ async function executeSellSignal(
       action: "SELL",
       blockType: ctx.resolvedBlockType,
       legIndex: i,
-      orderType: "MKT",
+      orderType: orderTypeForRecord,
       productType,
       status: "open",
       pnl: 0,
