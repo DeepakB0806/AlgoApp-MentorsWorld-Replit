@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink, Trash2, Info, ArrowDown, Plus, Pencil, Check, X, AlertOctagon } from "lucide-react";
+import { Home, Save, CheckCircle, XCircle, RefreshCw, AlertTriangle, LogIn, Key, Clock, Activity, Database, ChevronDown, ChevronRight, BookOpen, Send, Search, BarChart3, ShieldCheck, ArrowRightLeft, FileText, DollarSign, Briefcase, TrendingUp, Loader2, Timer, ExternalLink, Trash2, Info, ArrowDown, Plus, Pencil, Check, X, AlertOctagon, Download } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Link } from "wouter";
@@ -1543,6 +1543,78 @@ interface PFLEntry {
   price?: number;
   orderId?: string;
   executionTimeMs?: number;
+}
+
+function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfig[] }) {
+  const { toast } = useToast();
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const kotakConfigs = brokerConfigs.filter(c => c.brokerName === "kotak_neo");
+  const connectedConfigs = kotakConfigs.filter(c => c.isConnected && c.accessToken);
+  const selectedConfig = connectedConfigs[0] || kotakConfigs[0];
+
+  const handleDownload = async () => {
+    if (!selectedConfig) return;
+    setIsDownloading(true);
+    try {
+      const res = await fetch(`/api/broker-configs/${selectedConfig.id}/scrip-master-download`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `Download failed (${res.status})` }));
+        throw new Error(err.error || `Download failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      const filename = match?.[1] || `scrip_master_nfo_${new Date().toISOString().slice(0, 10)}.csv`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: "Scrip master CSV downloaded" });
+    } catch (err: any) {
+      toast({ title: "Download failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  return (
+    <Card data-testid="card-scrip-master">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              Scrip Master
+            </CardTitle>
+            <CardDescription>Download the day's NFO scrip master CSV from Kotak Neo</CardDescription>
+          </div>
+          <Button
+            onClick={handleDownload}
+            disabled={isDownloading || !selectedConfig?.isConnected || !selectedConfig?.accessToken}
+            data-testid="button-download-scrip-master"
+          >
+            {isDownloading ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4 mr-2" />
+            )}
+            {isDownloading ? "Downloading..." : "Download CSV"}
+          </Button>
+        </div>
+        {!selectedConfig?.isConnected && (
+          <p className="text-xs text-muted-foreground mt-1">
+            <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />
+            Broker session required — login with TOTP first
+          </p>
+        )}
+      </CardHeader>
+    </Card>
+  );
 }
 
 interface PFLPlan {
@@ -3182,6 +3254,12 @@ export default function BrokerApi() {
         {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
           <div className="mt-6">
             <ApiFieldsReference />
+          </div>
+        )}
+
+        {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
+          <div className="mt-6">
+            <ScripMasterCard brokerConfigs={brokerConfigs} />
           </div>
         )}
 

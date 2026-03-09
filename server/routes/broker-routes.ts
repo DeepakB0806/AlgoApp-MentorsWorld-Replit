@@ -910,6 +910,92 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     const plans = getProcessFlowPlans();
     res.json({ logs: entries, plans, total: totalCount });
   });
+
+  app.get("/api/broker-configs/:id/scrip-master-download", async (req, res) => {
+    try {
+      const brokerConfig = await storage.getBrokerConfig(req.params.id);
+      if (!brokerConfig) return res.status(404).json({ error: "Broker config not found" });
+      if (brokerConfig.brokerName !== "kotak_neo") {
+        return res.status(400).json({ error: "Scrip master download is only available for Kotak Neo brokers" });
+      }
+      if (!brokerConfig.isConnected || !brokerConfig.accessToken) {
+        return res.status(401).json({ error: "Broker not connected. Please login first." });
+      }
+
+      const { default: EL } = await import("../el-kotak-neo-v3");
+      const filePathsResult = await EL.getScripMasterFilePaths(brokerConfig);
+      if (!filePathsResult.success) {
+        return res.status(502).json({ error: filePathsResult.error || "Failed to get scrip master file paths from broker" });
+      }
+
+      const data = filePathsResult.data;
+      let nfoFileUrl: string | null = null;
+
+      if (Array.isArray(data)) {
+        for (const item of data) {
+          const path = item.filePath || item.path || item.url || item.fileUrl || "";
+          const name = item.fileName || item.name || item.exchange || "";
+          if (path && (name.toLowerCase().includes("nfo") || name.toLowerCase().includes("nse_fo") || path.toLowerCase().includes("nfo") || path.toLowerCase().includes("nse_fo"))) {
+            nfoFileUrl = path;
+            break;
+          }
+        }
+        if (!nfoFileUrl && data.length > 0) {
+          for (const item of data) {
+            const path = item.filePath || item.path || item.url || item.fileUrl || "";
+            if (path) { nfoFileUrl = path; break; }
+          }
+        }
+      } else if (data && typeof data === "object") {
+        const filesPaths = (data as any).filesPaths || (data as any).data?.filesPaths;
+        if (filesPaths && Array.isArray(filesPaths)) {
+          for (const item of filesPaths) {
+            const path = typeof item === "string" ? item : (item.filePath || item.path || item.url || "");
+            const name = typeof item === "string" ? item : (item.fileName || item.name || item.exchange || "");
+            if (path && (name.toLowerCase().includes("nfo") || name.toLowerCase().includes("nse_fo") || path.toLowerCase().includes("nfo") || path.toLowerCase().includes("nse_fo"))) {
+              nfoFileUrl = path;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!nfoFileUrl) {
+        return res.status(404).json({ error: "Could not find NFO scrip master file URL in broker response" });
+      }
+
+      try {
+        const parsed = new URL(nfoFileUrl);
+        if (parsed.protocol !== "https:") {
+          return res.status(400).json({ error: "Scrip master URL must use HTTPS" });
+        }
+        const host = parsed.hostname.toLowerCase();
+        if (!host.endsWith("kotaksecurities.com") && !host.endsWith("kotak.com") && !host.endsWith("neo.kotak.com")) {
+          return res.status(400).json({ error: `Untrusted scrip master host: ${host}` });
+        }
+      } catch {
+        return res.status(400).json({ error: "Invalid scrip master URL" });
+      }
+
+      const csvResponse = await fetch(nfoFileUrl, { signal: AbortSignal.timeout(180000) });
+      if (!csvResponse.ok) {
+        return res.status(502).json({ error: `CSV download failed: ${csvResponse.status} ${csvResponse.statusText}` });
+      }
+
+      const csvText = await csvResponse.text();
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const filename = `scrip_master_nfo_${dateStr}.csv`;
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", Buffer.byteLength(csvText, "utf-8"));
+      res.send(csvText);
+    } catch (error: any) {
+      console.error(`[BROKER] Scrip master download error:`, error.message);
+      res.status(500).json({ error: error.message || "Scrip master download failed" });
+    }
+  });
 }
 
 async function findConnectedKotak(storage: IStorage) {
