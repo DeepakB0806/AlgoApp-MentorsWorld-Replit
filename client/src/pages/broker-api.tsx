@@ -1526,6 +1526,194 @@ type ErrorLogResponse = {
   kotakErrorCodes: Record<string, string>;
 };
 
+interface PFLEntry {
+  id: string;
+  timestamp: string;
+  planId: string;
+  planName: string;
+  signalType: string;
+  alert: string;
+  resolvedAction: string;
+  blockType: string;
+  actionTaken: string;
+  message: string;
+  broker: string;
+  ticker?: string;
+  exchange?: string;
+  price?: number;
+  orderId?: string;
+  executionTimeMs?: number;
+}
+
+interface PFLPlan {
+  planId: string;
+  planName: string;
+  count: number;
+}
+
+function ProcessFlowLogCard() {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<string>("all");
+
+  const pflQuery = useQuery<{ logs: PFLEntry[]; plans: PFLPlan[]; total: number }>({
+    queryKey: ["/api/process-flow-logs", selectedPlan],
+    queryFn: async () => {
+      const url = selectedPlan === "all"
+        ? "/api/process-flow-logs?limit=100"
+        : `/api/process-flow-logs/${selectedPlan}?limit=100`;
+      const res = await fetch(url);
+      return res.json();
+    },
+    refetchInterval: isExpanded ? 30000 : false,
+  });
+
+  const logs = pflQuery.data?.logs || [];
+  const plans = pflQuery.data?.plans || [];
+  const total = pflQuery.data?.total || 0;
+
+  const formatTimestampIST = (ts: string) => {
+    try {
+      const date = new Date(ts);
+      if (isNaN(date.getTime())) return ts;
+      return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+    } catch {
+      return ts;
+    }
+  };
+
+  const getResultBadge = (action: string) => {
+    switch (action) {
+      case "open":
+        return <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30" data-testid={`badge-pfl-${action}`}>OPEN</Badge>;
+      case "close":
+        return <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-400 border-blue-500/30" data-testid={`badge-pfl-${action}`}>CLOSE</Badge>;
+      case "hold":
+        return <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-400 border-amber-500/30" data-testid={`badge-pfl-${action}`}>HOLD</Badge>;
+      case "error":
+        return <Badge variant="outline" className="text-[10px] bg-red-500/10 text-red-400 border-red-500/30" data-testid={`badge-pfl-${action}`}>ERROR</Badge>;
+      default:
+        return <Badge variant="outline" className="text-[10px]" data-testid={`badge-pfl-${action}`}>{action}</Badge>;
+    }
+  };
+
+  return (
+    <Card data-testid="card-process-flow-log">
+      <CardHeader
+        className="cursor-pointer select-none"
+        onClick={() => setIsExpanded(!isExpanded)}
+        data-testid="button-toggle-process-flow-log"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="w-5 h-5 text-blue-500" />
+              Process Flow Log
+            </CardTitle>
+            {total > 0 && (
+              <Badge variant="secondary" className="text-xs" data-testid="badge-pfl-count">
+                {total}
+              </Badge>
+            )}
+          </div>
+          {isExpanded ? <ChevronDown className="w-5 h-5 text-muted-foreground" /> : <ChevronRight className="w-5 h-5 text-muted-foreground" />}
+        </div>
+        <CardDescription>Trade signal processing decisions per strategy (in-memory, resets on restart)</CardDescription>
+      </CardHeader>
+      {isExpanded && (
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant={selectedPlan === "all" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSelectedPlan("all")}
+                data-testid="button-pfl-all"
+              >
+                All
+              </Button>
+              {plans.map((p) => (
+                <Button
+                  key={p.planId}
+                  variant={selectedPlan === p.planId ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setSelectedPlan(p.planId)}
+                  data-testid={`button-pfl-plan-${p.planId.slice(0, 8)}`}
+                >
+                  {p.planName}
+                  <Badge variant="secondary" className="ml-1 text-[10px]">{p.count}</Badge>
+                </Button>
+              ))}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                queryClient.invalidateQueries({ queryKey: ["/api/process-flow-logs", selectedPlan] });
+              }}
+              disabled={pflQuery.isLoading}
+              data-testid="button-refresh-pfl"
+            >
+              <RefreshCw className={`w-4 h-4 mr-1 ${pflQuery.isLoading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          </div>
+
+          {pflQuery.isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">Loading process flow logs...</span>
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground" data-testid="text-no-pfl">
+              <Activity className="w-8 h-8 mx-auto mb-2 text-muted-foreground/50" />
+              <p className="text-sm">No process flow logs yet</p>
+              <p className="text-xs mt-1">Logs will appear here when trade signals are received</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-border rounded-md">
+              <table className="w-full text-xs" data-testid="table-pfl">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Time (IST)</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Plan</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Alert</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Signal</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Action</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Block</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Result</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium">Message</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Order ID</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">ms</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {logs.map((log) => (
+                    <tr key={log.id} className="border-b border-border/50 last:border-0" data-testid={`row-pfl-${log.id}`}>
+                      <td className="py-2 px-3 font-mono whitespace-nowrap text-muted-foreground">{formatTimestampIST(log.timestamp)}</td>
+                      <td className="py-2 px-3 whitespace-nowrap font-medium">{log.planName}</td>
+                      <td className="py-2 px-3 whitespace-nowrap font-mono text-blue-400">{log.alert || "—"}</td>
+                      <td className="py-2 px-3 whitespace-nowrap">
+                        <Badge variant="outline" className="text-[10px]">{log.signalType}</Badge>
+                      </td>
+                      <td className="py-2 px-3 whitespace-nowrap font-mono">{log.resolvedAction}</td>
+                      <td className="py-2 px-3 whitespace-nowrap text-muted-foreground text-[10px]">{log.blockType || "—"}</td>
+                      <td className="py-2 px-3">{getResultBadge(log.actionTaken)}</td>
+                      <td className="py-2 px-3 max-w-[300px] truncate" title={log.message}>{log.message}</td>
+                      <td className="py-2 px-3 whitespace-nowrap font-mono text-muted-foreground">{log.orderId || "—"}</td>
+                      <td className="py-2 px-3 whitespace-nowrap font-mono text-muted-foreground">{log.executionTimeMs ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 function ErrorLogCard() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -2996,6 +3184,10 @@ export default function BrokerApi() {
             <ApiFieldsReference />
           </div>
         )}
+
+        <div className="mt-6">
+          <ProcessFlowLogCard />
+        </div>
 
         <div className="mt-6">
           <ErrorLogCard />

@@ -5,6 +5,7 @@ import { tradingCache } from "../cache";
 import { db } from "../db";
 import { desc, eq, sql, or } from "drizzle-orm";
 import EL from "../el-kotak-neo-v3";
+import { getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
 import {
   testBinanceConnectivity,
   authenticateBinance,
@@ -893,6 +894,21 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       console.error("[ERROR-LOGS] Failed to fetch error logs:", error);
       res.status(500).json({ error: "Failed to fetch error logs" });
     }
+  });
+
+  app.get("/api/process-flow-logs", (_req, res) => {
+    const planId = _req.query.planId as string | undefined;
+    const limit = parseInt(_req.query.limit as string) || 100;
+    const { entries, totalCount } = getProcessFlowLogs(planId || undefined, limit);
+    const plans = getProcessFlowPlans();
+    res.json({ logs: entries, plans, total: totalCount });
+  });
+
+  app.get("/api/process-flow-logs/:planId", (req, res) => {
+    const limit = parseInt(req.query.limit as string) || 100;
+    const { entries, totalCount } = getProcessFlowLogs(req.params.planId, limit);
+    const plans = getProcessFlowPlans();
+    res.json({ logs: entries, plans, total: totalCount });
   });
 }
 

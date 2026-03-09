@@ -2,6 +2,7 @@ import type { IStorage } from "./storage";
 import type { StrategyPlan, StrategyTrade, StrategyConfig, BrokerConfig, WebhookData, ActionMapperEntry, PlanTradeLeg, InstrumentConfig } from "@shared/schema";
 import { tradingCache } from "./cache";
 import EL from "./el-kotak-neo-v3";
+import { addProcessFlowLog } from "./process-flow-log";
 import TL from "./tl-kotak-neo-v3";
 import { placeOrder as placeBinanceOrder, type BinanceSession, type BinanceOrderParams } from "./binance-api";
 import { buildKotakOptionSymbol, isOptionExchange, isStrikeSpec } from "./option-symbol-builder";
@@ -170,6 +171,25 @@ function getBlockConfig(tradeParams: Record<string, any> | null, blockType: stri
   return tradeParams[configKey] || {};
 }
 
+function logPFL(plan: StrategyPlan, broker: string, data: WebhookData, actionTaken: string, message: string, extra?: Partial<{ resolvedAction: string; blockType: string; ticker: string; exchange: string; price: number; orderId: string; executionTimeMs: number }>) {
+  addProcessFlowLog({
+    planId: plan.id,
+    planName: plan.name,
+    signalType: data.signalType || "unknown",
+    alert: data.alert || "",
+    resolvedAction: extra?.resolvedAction || "N/A",
+    blockType: extra?.blockType || "",
+    actionTaken,
+    message,
+    broker,
+    ticker: extra?.ticker,
+    exchange: extra?.exchange,
+    price: extra?.price,
+    orderId: extra?.orderId,
+    executionTimeMs: extra?.executionTimeMs,
+  });
+}
+
 async function executeTradeForPlan(
   storage: IStorage,
   plan: StrategyPlan,
@@ -187,6 +207,7 @@ async function executeTradeForPlan(
   console.log(`[PFL] ── Plan "${plan.name}" [${plan.id.slice(0,8)}] | broker=${broker} signal=${signalType} alert=${data.alert} action=${resolvedAction} ticker=${ticker} exchange=${exchange || "NONE"} price=${price}`);
   if (!exchange) {
     console.log(`[PFL] ✗ Plan "${plan.name}" — NO EXCHANGE configured (plan/webhook/parent all empty)`);
+    logPFL(plan, broker, data, "error", "No exchange configured — set exchange on strategy plan, webhook data, or parent signal", { resolvedAction, ticker, price, executionTimeMs: Date.now() - startTime });
     return { success: false, action: "error", broker, planId: plan.id, message: "No exchange configured — set exchange on strategy plan, webhook data, or parent signal", executionTimeMs: Date.now() - startTime };
   }
   const resolvedBlockType = signalContext?.blockType || (signalType === "buy" ? "uptrendLegs" : signalType === "sell" ? "downtrendLegs" : "neutralLegs");
@@ -196,6 +217,7 @@ async function executeTradeForPlan(
 
   if (signalType === "hold" || !signalType) {
     console.log(`[PFL] ⏸ Plan "${plan.name}" — HOLD signal, no action taken`);
+    logPFL(plan, broker, data, "hold", "Hold signal — no action taken", { resolvedAction, blockType: resolvedBlockType, ticker, exchange, price, executionTimeMs: Date.now() - startTime });
     return { success: true, action: "hold", broker, planId: plan.id, message: "Hold signal — no action taken", executionTimeMs: Date.now() - startTime };
   }
 
@@ -205,6 +227,7 @@ async function executeTradeForPlan(
 
   if (legs.length === 0) {
     console.log(`[PFL] ⏸ Plan "${plan.name}" — No legs found for ${resolvedBlockType}, holding`);
+    logPFL(plan, broker, data, "hold", `No legs configured for ${resolvedBlockType}`, { resolvedAction, blockType: resolvedBlockType, ticker, exchange, price, executionTimeMs: Date.now() - startTime });
     return { success: true, action: "hold", broker, planId: plan.id, message: `No legs configured for ${resolvedBlockType}`, executionTimeMs: Date.now() - startTime };
   }
   console.log(`[PFL] Plan "${plan.name}" — ${legs.length} leg(s) found for ${resolvedBlockType}: ${legs.map((l,i) => `L${i}:${l.type}/${l.strike}/${l.action}`).join(", ")}`);
@@ -242,6 +265,7 @@ async function executeTradeForPlan(
     const resolvedAction2 = signalContext?.resolvedAction || "EXIT";
     if (plan.awaitingCleanEntry && resolvedAction2 === "EXIT" && openTrades.length === 0) {
       console.log(`[PFL] ⏸ Plan "${plan.name}" — awaitingCleanEntry=true + EXIT + no open trades → HOLD`);
+      logPFL(plan, broker, data, "hold", "Awaiting clean entry — no position to exit, skipping", { resolvedAction: resolvedAction2, blockType: resolvedBlockType, ticker, exchange, price, executionTimeMs: Date.now() - startTime });
       return { success: true, action: "hold", broker, planId: plan.id, message: "Awaiting clean entry — no position to exit, skipping", executionTimeMs: Date.now() - startTime };
     }
     console.log(`[PFL] Plan "${plan.name}" → executeSellSignal (resolvedAction=${resolvedAction2})`);
@@ -249,6 +273,7 @@ async function executeTradeForPlan(
   }
 
   console.log(`[PFL] ✗ Plan "${plan.name}" — Unknown signal type: ${signalType}`);
+  logPFL(plan, broker, data, "error", `Unknown signal type: ${signalType}`, { resolvedAction, blockType: resolvedBlockType, ticker, exchange, price, executionTimeMs: Date.now() - startTime });
   return { success: false, action: "error", broker, planId: plan.id, message: `Unknown signal type: ${signalType}`, executionTimeMs: Date.now() - startTime };
 }
 
@@ -327,6 +352,7 @@ async function executeBuySignal(
   const existingBuy = ctx.openTrades.find(t => t.action === "BUY");
   if (existingBuy) {
     console.log(`[PFL] ⏸ Plan "${plan.name}" BUY — position already open (${existingBuy.tradingSymbol}), holding`);
+    logPFL(plan, broker, ctx.data, "hold", `Buy position already open (${existingBuy.tradingSymbol}) — holding`, { resolvedAction: "ENTRY", blockType: ctx.resolvedBlockType, ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price, executionTimeMs: Date.now() - ctx.startTime });
     return { success: true, action: "hold", broker, planId: plan.id, message: "Buy position already open — holding", executionTimeMs: Date.now() - ctx.startTime };
   }
 
@@ -339,6 +365,7 @@ async function executeBuySignal(
 
   if (broker === "kotak_neo" && (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl)) {
     console.log(`[PFL] ✗ Plan "${plan.name}" BUY — Kotak Neo session expired/not connected (connected=${brokerConfig.isConnected} token=${!!brokerConfig.accessToken} session=${!!brokerConfig.sessionId} baseUrl=${!!brokerConfig.baseUrl})`);
+    logPFL(plan, broker, ctx.data, "error", "Kotak Neo session expired or not connected", { resolvedAction: "ENTRY", blockType: ctx.resolvedBlockType, ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price, executionTimeMs: Date.now() - ctx.startTime });
     return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
   }
 
@@ -353,6 +380,7 @@ async function executeBuySignal(
     const leg = ctx.legs[i];
     const resolved = resolveOrderParams(leg, ctx, i);
     if ("error" in resolved) {
+      logPFL(plan, broker, ctx.data, "error", resolved.error, { resolvedAction: "ENTRY", blockType: ctx.resolvedBlockType, ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price, executionTimeMs: Date.now() - ctx.startTime });
       return { success: false, action: "error", broker, planId: plan.id, message: resolved.error, executionTimeMs: Date.now() - ctx.startTime };
     }
     const params = resolved;
@@ -373,6 +401,7 @@ async function executeBuySignal(
 
       if (!orderResult.success) {
         console.log(`[PFL] ✗ Plan "${plan.name}" BUY L${i} — ORDER FAILED: ${orderResult.error}`);
+        logPFL(plan, broker, ctx.data, "error", `Kotak Neo BUY leg[${i}] order failed: ${orderResult.error}`, { resolvedAction: "ENTRY", blockType: ctx.resolvedBlockType, ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price, executionTimeMs: Date.now() - ctx.startTime });
         return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo leg[${i}] order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
       }
       orderId = orderResult.data?.orderNo;
@@ -440,6 +469,7 @@ async function executeBuySignal(
   const legSummary = ctx.legs.map((l, i) => `L${i}:${l.type}/${l.strike}/${l.action}`).join(", ");
   const execMs = Date.now() - ctx.startTime;
   console.log(`[PFL] ✓ Plan "${plan.name}" BUY COMPLETE — ${ctx.legs.length} leg(s) [${legSummary}] @ ${ctx.price} orders=[${orderIds.join(",")}] ${execMs}ms`);
+  logPFL(plan, broker, ctx.data, "open", `BUY ${ctx.legs.length} leg(s) [${legSummary}] @ ${ctx.price}`, { resolvedAction: "ENTRY", blockType: ctx.resolvedBlockType, ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price, orderId: orderIds.join(","), executionTimeMs: execMs });
 
   return {
     success: true,
@@ -473,11 +503,13 @@ async function executeSellSignal(
   const existingSell = ctx.openTrades.find(t => t.action === "SELL");
   if (existingSell) {
     console.log(`[PFL] ⏸ Plan "${plan.name}" SELL — position already open (${existingSell.tradingSymbol}), holding`);
+    logPFL(plan, broker, ctx.data, "hold", `Sell position already open (${existingSell.tradingSymbol}) — holding`, { resolvedAction: "EXIT", blockType: ctx.resolvedBlockType, ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price, executionTimeMs: Date.now() - ctx.startTime });
     return { success: true, action: "hold", broker, planId: plan.id, message: "Sell position already open — holding", pnl: closePnl, executionTimeMs: Date.now() - ctx.startTime };
   }
 
   if (broker === "kotak_neo" && (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl)) {
     console.log(`[PFL] ✗ Plan "${plan.name}" SELL — Kotak Neo session expired/not connected (connected=${brokerConfig.isConnected} token=${!!brokerConfig.accessToken} session=${!!brokerConfig.sessionId} baseUrl=${!!brokerConfig.baseUrl})`);
+    logPFL(plan, broker, ctx.data, "error", "Kotak Neo session expired or not connected", { resolvedAction: "EXIT", blockType: ctx.resolvedBlockType, ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price, executionTimeMs: Date.now() - ctx.startTime });
     return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired or not connected", executionTimeMs: Date.now() - ctx.startTime };
   }
 
@@ -492,6 +524,7 @@ async function executeSellSignal(
     const leg = ctx.legs[i];
     const resolved = resolveOrderParams(leg, ctx, i);
     if ("error" in resolved) {
+      logPFL(plan, broker, ctx.data, "error", resolved.error, { resolvedAction: "EXIT", blockType: ctx.resolvedBlockType, ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price, executionTimeMs: Date.now() - ctx.startTime });
       return { success: false, action: "error", broker, planId: plan.id, message: resolved.error, executionTimeMs: Date.now() - ctx.startTime };
     }
     const params = resolved;
@@ -512,6 +545,7 @@ async function executeSellSignal(
 
       if (!orderResult.success) {
         console.log(`[PFL] ✗ Plan "${plan.name}" SELL L${i} — ORDER FAILED: ${orderResult.error}`);
+        logPFL(plan, broker, ctx.data, "error", `Kotak Neo SELL leg[${i}] order failed: ${orderResult.error}`, { resolvedAction: "EXIT", blockType: ctx.resolvedBlockType, ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price, executionTimeMs: Date.now() - ctx.startTime });
         return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo leg[${i}] order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
       }
       orderId = orderResult.data?.orderNo;
@@ -579,6 +613,7 @@ async function executeSellSignal(
   const legSummary = ctx.legs.map((l, i) => `L${i}:${l.type}/${l.strike}/${l.action}`).join(", ");
   const execMs = Date.now() - ctx.startTime;
   console.log(`[PFL] ✓ Plan "${plan.name}" SELL COMPLETE — ${ctx.legs.length} leg(s) [${legSummary}] @ ${ctx.price} pnl=${closePnl} orders=[${orderIds.join(",")}] ${execMs}ms`);
+  logPFL(plan, broker, ctx.data, "close", `SELL ${ctx.legs.length} leg(s) [${legSummary}] @ ${ctx.price} pnl=${closePnl}`, { resolvedAction: "EXIT", blockType: ctx.resolvedBlockType, ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price, orderId: orderIds.join(","), executionTimeMs: execMs });
 
   return {
     success: true,
