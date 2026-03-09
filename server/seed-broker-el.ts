@@ -125,6 +125,30 @@ async function ensureCompliance(): Promise<string[]> {
     fixes.push("fixed order_place pc: productCode → productType");
   }
 
+  const ORDER_PLACE_DEFAULTS: Record<string, string> = {
+    pr: "0", pt: "MKT", rt: "DAY", am: "NO",
+    dq: "0", mp: "0", pf: "N", tp: "0",
+  };
+  const TX_TYPE_ALLOWED = "B=BUY,S=SELL";
+
+  for (const field of placeFields) {
+    if (field.direction === "request") {
+      const expectedDefault = ORDER_PLACE_DEFAULTS[field.fieldCode];
+      if (expectedDefault && field.defaultValue !== expectedDefault) {
+        await db.update(broker_field_mappings)
+          .set({ defaultValue: expectedDefault })
+          .where(eq(broker_field_mappings.id, field.id));
+        fixes.push(`set order_place ${field.fieldCode} default → ${expectedDefault}`);
+      }
+      if (field.fieldCode === "tt" && field.allowedValues !== TX_TYPE_ALLOWED) {
+        await db.update(broker_field_mappings)
+          .set({ allowedValues: TX_TYPE_ALLOWED })
+          .where(eq(broker_field_mappings.id, field.id));
+        fixes.push(`set order_place tt allowed_values → ${TX_TYPE_ALLOWED}`);
+      }
+    }
+  }
+
   const pendingWithValidUF = await db.select().from(broker_field_mappings)
     .where(and(eq(broker_field_mappings.brokerName, BROKER_NAME), eq(broker_field_mappings.matchStatus, "pending")));
   const allUF = await db.select().from(universal_fields);

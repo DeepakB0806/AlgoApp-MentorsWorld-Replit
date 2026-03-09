@@ -6,78 +6,15 @@ import TL from "./tl-kotak-neo-v3";
 import { placeOrder as placeBinanceOrder, type BinanceSession, type BinanceOrderParams } from "./binance-api";
 import { buildKotakOptionSymbol, isOptionExchange, isStrikeSpec } from "./option-symbol-builder";
 
-function getUniversalName(brokerFieldCode: string, category: string = "order_place"): string | null {
-  if (!TL.isReady()) return null;
-  const fields = TL.getRequestFields(category);
-  const field = fields.find(f => f.fieldCode === brokerFieldCode);
-  return field?.universalFieldName || null;
-}
-
-function buildKotakOrderPayload(values: {
-  tradingSymbol: string;
-  exchange: string;
-  transactionType: string;
-  quantity: string;
-  price: string;
-  priceType: string;
-  productCode: string;
-  validity: string;
-  afterMarketOrder: string;
-  disclosedQuantity: string;
-  marketProtection: string;
-  priceFillFlag: string;
-  triggerPrice: string;
-}): Record<string, any> {
-  const payload: Record<string, any> = {};
-  const fieldMap: Record<string, string> = {
-    ts: values.tradingSymbol,
-    es: values.exchange,
-    tt: values.transactionType,
-    qt: values.quantity,
-    pr: values.price,
-    pt: values.priceType,
-    pc: values.productCode,
-    rt: values.validity,
-    am: values.afterMarketOrder,
-    dq: values.disclosedQuantity,
-    mp: values.marketProtection,
-    pf: values.priceFillFlag,
-    tp: values.triggerPrice,
-  };
-
-  const FALLBACK_NAMES: Record<string, string> = {
-    ts: "tradingSymbol", es: "exchange", tt: "transactionType",
-    qt: "quantity", pr: "price", pt: "priceType", pc: "productType",
-    rt: "validity", am: "afterMarketOrder", dq: "disclosedQuantity",
-    mp: "marketProtection", pf: "priceFillFlag", tp: "triggerPrice",
-  };
-
-  const mappings: string[] = [];
-  const missingMappings: string[] = [];
-
-  for (const [brokerCode, value] of Object.entries(fieldMap)) {
-    const dbName = getUniversalName(brokerCode);
-    if (dbName) {
-      payload[dbName] = value;
-      mappings.push(`${brokerCode}→${dbName}`);
-    } else if (!TL.isReady()) {
-      const fallback = FALLBACK_NAMES[brokerCode] || brokerCode;
-      payload[fallback] = value;
-      mappings.push(`${brokerCode}→${fallback}(fallback)`);
-    } else {
-      missingMappings.push(brokerCode);
-      const fallback = FALLBACK_NAMES[brokerCode] || brokerCode;
-      payload[fallback] = value;
-    }
+function mapTransactionType(action: string): string {
+  if (TL.isReady()) {
+    const mapped = TL.mapValueFromAllowed("transactionType", "order_place", action);
+    if (mapped) return mapped;
+    console.error(`[TE] Transaction type mapping not found in DB for action="${action}" — check broker_field_mappings.allowed_values for transactionType`);
+  } else {
+    console.warn(`[TE] TL not ready — cannot map transaction type for action="${action}"`);
   }
-
-  if (missingMappings.length > 0) {
-    console.error(`[TE] WARN: ${missingMappings.length} broker codes have no universal mapping in DB: [${missingMappings.join(", ")}] — using fallback names`);
-  }
-
-  console.log(`[TE] DB-driven order payload: ${mappings.join(", ")} | keys: [${Object.keys(payload).join(", ")}]`);
-
-  return payload;
+  return action;
 }
 
 export interface SignalContext {
@@ -341,8 +278,7 @@ function resolveOrderParams(leg: PlanTradeLeg, ctx: TradeContext, legIndex: numb
 
   const quantity = (leg.lots || 1) * lotSize * ctx.lotMultiplier;
   const productCode = leg.orderType || ctx.blockConfig.productMode || "MIS";
-  const txMap: Record<string, string> = { BUY: "B", SELL: "S" };
-  const transactionType = txMap[leg.action] || "B";
+  const transactionType = mapTransactionType(leg.action);
 
   console.log(`[TRADE] Leg[${legIndex}] order params: symbol=${tradingSymbol} qty=${quantity} (${leg.lots}×${lotSize}×${ctx.lotMultiplier}) product=${productCode} tx=${transactionType} [${leg.type} ${leg.strike} ${leg.action}]`);
 
@@ -387,22 +323,15 @@ async function executeBuySignal(
     let productType = "PAPER";
 
     if (broker === "kotak_neo") {
-      const orderPayload = buildKotakOrderPayload({
+      const universalPayload: Record<string, any> = {
         tradingSymbol: params.tradingSymbol,
         exchange: EL.mapExchange(ctx.exchange),
         transactionType: params.transactionType,
         quantity: String(params.quantity),
-        price: "0",
-        priceType: "MKT",
-        productCode: params.productCode,
-        validity: "DAY",
-        afterMarketOrder: "NO",
-        disclosedQuantity: "0",
-        marketProtection: "0",
-        priceFillFlag: "N",
-        triggerPrice: "0",
-      });
-      const orderResult = await EL.placeOrder(brokerConfig, orderPayload);
+        productType: params.productCode,
+      };
+      console.log(`[TE] Order payload (dynamic only): ${JSON.stringify(universalPayload)}`);
+      const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
 
       if (!orderResult.success) {
         return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo leg[${i}] order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
@@ -522,22 +451,15 @@ async function executeSellSignal(
     let productType = "PAPER";
 
     if (broker === "kotak_neo") {
-      const orderPayload = buildKotakOrderPayload({
+      const universalPayload: Record<string, any> = {
         tradingSymbol: params.tradingSymbol,
         exchange: EL.mapExchange(ctx.exchange),
         transactionType: params.transactionType,
         quantity: String(params.quantity),
-        price: "0",
-        priceType: "MKT",
-        productCode: params.productCode,
-        validity: "DAY",
-        afterMarketOrder: "NO",
-        disclosedQuantity: "0",
-        marketProtection: "0",
-        priceFillFlag: "N",
-        triggerPrice: "0",
-      });
-      const orderResult = await EL.placeOrder(brokerConfig, orderPayload);
+        productType: params.productCode,
+      };
+      console.log(`[TE] Order payload (dynamic only): ${JSON.stringify(universalPayload)}`);
+      const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
 
       if (!orderResult.success) {
         return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo leg[${i}] order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
@@ -632,7 +554,7 @@ async function closeTrade(
     : (entryPrice - exitPrice) * qty;
 
   const exitAction = trade.action === "BUY" ? "SELL" : "BUY";
-  const exitTxType = trade.action === "BUY" ? "S" : "B";
+  const exitTxType = mapTransactionType(exitAction);
 
   if (brokerConfig && brokerConfig.brokerName === "kotak_neo" && brokerConfig.isConnected && brokerConfig.accessToken && brokerConfig.sessionId && brokerConfig.baseUrl) {
     if (!trade.tradingSymbol || !trade.exchange || !trade.productType) {
@@ -646,27 +568,16 @@ async function closeTrade(
       return failedUpdate || trade;
     }
 
-    const mappedExchange = EL.mapExchange(trade.exchange);
-    const productCode = trade.productType;
-
-    console.log(`[TRADE] Closing position: ${trade.tradingSymbol} qty=${qty} tx=${exitTxType} product=${productCode} exchange=${mappedExchange}`);
-
-    const orderPayload = buildKotakOrderPayload({
+    const universalPayload: Record<string, any> = {
       tradingSymbol: trade.tradingSymbol,
-      exchange: mappedExchange,
+      exchange: EL.mapExchange(trade.exchange),
       transactionType: exitTxType,
       quantity: String(qty),
-      price: "0",
-      priceType: "MKT",
-      productCode,
-      validity: "DAY",
-      afterMarketOrder: "NO",
-      disclosedQuantity: "0",
-      marketProtection: "0",
-      priceFillFlag: "N",
-      triggerPrice: "0",
-    });
-    const orderResult = await EL.placeOrder(brokerConfig, orderPayload);
+      productType: trade.productType,
+    };
+
+    console.log(`[TE] Close order payload (dynamic only): ${JSON.stringify(universalPayload)}`);
+    const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
 
     if (!orderResult.success) {
       console.error(`[TRADE] Close order FAILED for ${trade.tradingSymbol}: ${orderResult.error}`);

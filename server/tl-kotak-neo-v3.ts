@@ -354,13 +354,32 @@ class TranslationLayer {
   }
 
   getAllowedValues(fieldCode: string, category: string): string | null {
-    const field = this.responseMap.get(`${category}::${fieldCode}`);
+    const field = this.responseMap.get(`${category}::${fieldCode}`) || this.requestMap.get(`${category}::${fieldCode}`);
     return field ? field.allowedValues : null;
   }
 
   getDefaultValue(fieldCode: string, category: string): string | null {
-    const field = this.responseMap.get(`${category}::${fieldCode}`);
+    const field = this.responseMap.get(`${category}::${fieldCode}`) || this.requestMap.get(`${category}::${fieldCode}`);
     return field ? field.defaultValue : null;
+  }
+
+  getAllowedValuesByUniversalName(universalName: string, category: string): string | null {
+    if (!this.ready) return null;
+    const fields = this.getRequestFields(category);
+    const field = fields.find(f => f.universalFieldName === universalName);
+    return field ? field.allowedValues : null;
+  }
+
+  mapValueFromAllowed(universalName: string, category: string, inputValue: string): string | null {
+    const allowed = this.getAllowedValuesByUniversalName(universalName, category);
+    if (!allowed) return null;
+    const pairs = allowed.split(",");
+    for (const pair of pairs) {
+      const [brokerVal, displayVal] = pair.split("=");
+      if (displayVal === inputValue) return brokerVal;
+      if (brokerVal === inputValue) return brokerVal;
+    }
+    return null;
   }
 
   getUniversalFieldMetadata(fieldName: string): UniversalFieldEntry | null {
