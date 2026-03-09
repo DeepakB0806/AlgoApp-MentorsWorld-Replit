@@ -1,3 +1,6 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMPORTS & CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════════
 import { db } from "./db";
 import { broker_field_mappings, universal_fields } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -5,6 +8,9 @@ import { eq } from "drizzle-orm";
 const BROKER_NAME = "kotak_neo_v3";
 const LOG_PREFIX = "[TL]";
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TYPES & INTERFACES
+// ═══════════════════════════════════════════════════════════════════════════════
 interface BrokerFieldEntry {
   id: number;
   fieldCode: string;
@@ -50,7 +56,11 @@ interface TLStatus {
   initError: string | null;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRANSLATION LAYER CLASS
+// ═══════════════════════════════════════════════════════════════════════════════
 class TranslationLayer {
+  // ─── Class Properties ──────────────────────────────────────────────────────
   private brokerFields: BrokerFieldEntry[] = [];
   private universalFieldList: UniversalFieldEntry[] = [];
 
@@ -69,6 +79,7 @@ class TranslationLayer {
   private initError: string | null = null;
   private reloading = false;
 
+  // ─── Init & Load ─────────────────────────────────────────────────────────
   async init(): Promise<void> {
     const start = Date.now();
     console.log(`${LOG_PREFIX} Initializing Translation Layer for ${BROKER_NAME}...`);
@@ -141,6 +152,7 @@ class TranslationLayer {
     }
   }
 
+  // ─── Map Building ───────────────────────────────────────────────────────
   private buildMaps(): void {
     this.requestMap.clear();
     this.responseMap.clear();
@@ -199,6 +211,7 @@ class TranslationLayer {
     }
   }
 
+  // ─── Reload ─────────────────────────────────────────────────────────────
   async reload(): Promise<void> {
     if (this.reloading) {
       console.warn(`${LOG_PREFIX} Reload already in progress, skipping`);
@@ -213,6 +226,7 @@ class TranslationLayer {
     }
   }
 
+  // ─── Status & Diagnostics ────────────────────────────────────────────────
   isReady(): boolean {
     return this.ready;
   }
@@ -234,6 +248,7 @@ class TranslationLayer {
     };
   }
 
+  // ─── Request Translation (Universal → Broker) ───────────────────────────
   translateRequest(
     category: string,
     universalPayload: Record<string, any>,
@@ -268,6 +283,7 @@ class TranslationLayer {
     return { payload, mapped, unmapped };
   }
 
+  // ─── Response Translation (Broker → Universal) ──────────────────────────
   translateResponse(
     category: string,
     brokerPayload: Record<string, any>,
@@ -297,6 +313,7 @@ class TranslationLayer {
     return { payload, mapped, unmapped };
   }
 
+  // ─── Field Lookup Helpers ────────────────────────────────────────────────
   getBrokerField(
     universalFieldName: string,
     category: string,
@@ -401,6 +418,7 @@ class TranslationLayer {
     return this.getFieldsByCategoryAndDirection(category, "response");
   }
 
+  // ─── Payload Builders (with defaults) ────────────────────────────────────
   buildRequestPayload(
     category: string,
     universalPayload: Record<string, any>,
@@ -432,6 +450,7 @@ class TranslationLayer {
     return this.translateResponse(category, brokerPayload);
   }
 
+  // ─── Value Casting ──────────────────────────────────────────────────────
   private castValue(value: any, fieldType: string): any {
     if (value === null || value === undefined) return value;
 
@@ -452,6 +471,9 @@ class TranslationLayer {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SINGLETON EXPORT
+// ═══════════════════════════════════════════════════════════════════════════════
 const TL = new TranslationLayer();
 
 export default TL;

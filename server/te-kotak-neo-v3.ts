@@ -1,3 +1,6 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMPORTS
+// ═══════════════════════════════════════════════════════════════════════════════
 import type { IStorage } from "./storage";
 import type { StrategyPlan, StrategyTrade, StrategyConfig, BrokerConfig, WebhookData, ActionMapperEntry, PlanTradeLeg, InstrumentConfig } from "@shared/schema";
 import { tradingCache } from "./cache";
@@ -7,6 +10,10 @@ import TL from "./tl-kotak-neo-v3";
 import { placeOrder as placeBinanceOrder, type BinanceSession, type BinanceOrderParams } from "./binance-api";
 import { buildKotakOptionSymbol, isOptionExchange, isStrikeSpec } from "./option-symbol-builder";
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRANSACTION TYPE MAPPING
+// Maps universal action names (BUY/SELL) to broker-specific codes via TL
+// ═══════════════════════════════════════════════════════════════════════════════
 function mapTransactionType(action: string): string {
   if (TL.isReady()) {
     const mapped = TL.mapValueFromAllowed("transactionType", "order_place", action);
@@ -18,6 +25,9 @@ function mapTransactionType(action: string): string {
   return action;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TYPES & INTERFACES
+// ═══════════════════════════════════════════════════════════════════════════════
 export interface SignalContext {
   blockType?: string;
   resolvedAction?: "ENTRY" | "EXIT" | "HOLD";
@@ -39,6 +49,10 @@ export interface TradeResult {
 
 export type ResolvedSignal = { signalType: string; blockType: string; resolvedAction: "ENTRY" | "EXIT" | "HOLD" };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SIGNAL RESOLUTION
+// Resolves webhook alert strings into ENTRY/EXIT/HOLD actions using actionMapper
+// ═══════════════════════════════════════════════════════════════════════════════
 export function resolveSignalFromActionMapper(
   signalData: Record<string, any>,
   actionMapperJson: string | null | undefined
@@ -88,6 +102,9 @@ export function resolveAllSignalsFromActionMapper(
   return [{ signalType: fallbackType, blockType: fallbackType === "buy" ? "uptrendLegs" : fallbackType === "sell" ? "downtrendLegs" : "neutralLegs", resolvedAction: fallbackAction as "ENTRY" | "EXIT" | "HOLD" }];
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// BINANCE HELPER
+// ═══════════════════════════════════════════════════════════════════════════════
 function buildBinanceSession(config: BrokerConfig): BinanceSession | null {
   if (!config.consumerKey || !config.consumerSecret) return null;
   return {
@@ -97,6 +114,10 @@ function buildBinanceSession(config: BrokerConfig): BinanceSession | null {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN ENTRY POINT
+// Finds active plans for a config, loads broker configs, dispatches to executors
+// ═══════════════════════════════════════════════════════════════════════════════
 export async function processTradeSignal(
   storage: IStorage,
   webhookData: WebhookData,
@@ -150,6 +171,10 @@ export async function processTradeSignal(
   return results.length > 0 ? results : [{ success: false, action: "hold", broker: "none", planId: "", message: "No broker plans matched" }];
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLAN HELPERS
+// Extract trade params, select legs by blockType, get block config, log PFL
+// ═══════════════════════════════════════════════════════════════════════════════
 function parseTradeParams(plan: StrategyPlan): Record<string, any> | null {
   if (!plan.tradeParams) return null;
   try {
@@ -190,6 +215,10 @@ function logPFL(plan: StrategyPlan, broker: string, data: WebhookData, actionTak
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRADE ROUTING
+// Loads instrument config, checks open trades, routes to buy/sell executors
+// ═══════════════════════════════════════════════════════════════════════════════
 async function executeTradeForPlan(
   storage: IStorage,
   plan: StrategyPlan,
@@ -277,6 +306,10 @@ async function executeTradeForPlan(
   return { success: false, action: "error", broker, planId: plan.id, message: `Unknown signal type: ${signalType}`, executionTimeMs: Date.now() - startTime };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRADE CONTEXT & ORDER PARAMETER RESOLUTION
+// Builds trading symbol, calculates quantity, maps product code & tx type
+// ═══════════════════════════════════════════════════════════════════════════════
 interface TradeContext {
   ticker: string;
   exchange: string;
@@ -341,6 +374,10 @@ function resolveOrderParams(leg: PlanTradeLeg, ctx: TradeContext, legIndex: numb
   return { tradingSymbol, quantity, productCode, transactionType };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// BUY EXECUTION
+// Checks for duplicate positions, places order on broker, records trade in DB
+// ═══════════════════════════════════════════════════════════════════════════════
 async function executeBuySignal(
   storage: IStorage,
   plan: StrategyPlan,
@@ -483,6 +520,10 @@ async function executeBuySignal(
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SELL EXECUTION
+// Closes existing positions, places sell order on broker, records trade in DB
+// ═══════════════════════════════════════════════════════════════════════════════
 async function executeSellSignal(
   storage: IStorage,
   plan: StrategyPlan,
@@ -628,6 +669,10 @@ async function executeSellSignal(
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// POSITION CLOSE
+// Places counter-order on broker to square off, updates DB record, handles P&L
+// ═══════════════════════════════════════════════════════════════════════════════
 async function closeTrade(
   storage: IStorage,
   trade: StrategyTrade,
@@ -705,6 +750,10 @@ async function closeTrade(
   return updated || trade;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// P&L TRACKING
+// Deferred daily P&L calculation and update (runs in background)
+// ═══════════════════════════════════════════════════════════════════════════════
 function deferDailyPnlUpdate(
   storage: IStorage,
   planId: string,

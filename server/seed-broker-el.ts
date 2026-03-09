@@ -1,3 +1,6 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMPORTS & CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════════
 import { db } from "./db";
 import { broker_api_endpoints, broker_exchange_maps, broker_headers, broker_field_mappings, universal_fields } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
@@ -5,6 +8,10 @@ import { eq, and } from "drizzle-orm";
 const BROKER_NAME = "kotak_neo_v3";
 const LOG_PREFIX = "[EL-Seed]";
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// COMPLIANCE CHECKS
+// Ensures headers, endpoints, field mappings, and exchange codes are correct
+// ═══════════════════════════════════════════════════════════════════════════════
 async function ensureCompliance(): Promise<string[]> {
   const fixes: string[] = [];
 
@@ -171,6 +178,10 @@ async function ensureCompliance(): Promise<string[]> {
   return fixes;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ENDPOINT / EXCHANGE / HEADER SEEDING
+// Seeds initial data if tables are empty, adds missing endpoints
+// ═══════════════════════════════════════════════════════════════════════════════
 export async function ensureBrokerEndpoints(): Promise<{ endpoints: number; exchanges: number; headers: number }> {
   const complianceFixes = await ensureCompliance();
   if (complianceFixes.length > 0) {

@@ -1,7 +1,13 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════════
 const LOG_PREFIX = "[SYMBOL-BUILDER]";
-
 const MONTH_CODES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// STRIKE CALCULATION
+// Parse strike spec strings and calculate ATM/OTM/ITM strike prices
+// ═══════════════════════════════════════════════════════════════════════════════
 export interface StrikeSpec {
   direction: "OTM" | "ATM" | "ITM";
   offset: number;
@@ -50,6 +56,10 @@ export function getOTMStrike(
   return atmStrike;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPIRY CALCULATION
+// Determines the next expiry date based on day of week and weekly/monthly type
+// ═══════════════════════════════════════════════════════════════════════════════
 export function getNextExpiry(expiryDay: string = "Thursday", expiryType: string = "weekly"): Date {
   const dayMap: Record<string, number> = {
     Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
@@ -85,6 +95,10 @@ export function getNextExpiry(expiryDay: string = "Thursday", expiryType: string
   return expiry;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SYMBOL BUILDING
+// Assembles the full Kotak option trading symbol (e.g. NIFTY10MAR2624400CE)
+// ═══════════════════════════════════════════════════════════════════════════════
 export function buildKotakOptionSymbol(
   ticker: string,
   spotPrice: number,
@@ -110,6 +124,9 @@ export function buildKotakOptionSymbol(
   return symbol;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// UTILITY HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
 export function isOptionExchange(exchange: string): boolean {
   return ["NFO", "BFO", "MCX"].includes(exchange?.toUpperCase());
 }

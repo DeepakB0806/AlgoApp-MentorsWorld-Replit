@@ -1,3 +1,6 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMPORTS & CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════════
 import { db } from "./db";
 import { broker_api_endpoints, broker_exchange_maps, broker_headers } from "@shared/schema";
 import type { BrokerConfig } from "@shared/schema";
@@ -8,6 +11,9 @@ const BROKER_NAME = "kotak_neo_v3";
 const LOG_PREFIX = "[EL]";
 const LOGIN_BASE_URL = "https://mis.kotaksecurities.com";
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TYPES & INTERFACES
+// ═══════════════════════════════════════════════════════════════════════════════
 interface EndpointEntry {
   id: number;
   category: string;
@@ -55,7 +61,11 @@ interface ApiResponse<T = unknown> {
   sessionExpired?: boolean;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXECUTION LAYER CLASS
+// ═══════════════════════════════════════════════════════════════════════════════
 class ExecutionLayer {
+  // ─── Class Properties ──────────────────────────────────────────────────────
   private endpoints: EndpointEntry[] = [];
   private endpointsByCategory: Map<string, EndpointEntry[]> = new Map();
   private endpointByName: Map<string, EndpointEntry> = new Map();
@@ -69,6 +79,7 @@ class ExecutionLayer {
   private initError: string | null = null;
   private reloading = false;
 
+  // ─── Init & Load ─────────────────────────────────────────────────────────
   async init(): Promise<void> {
     const start = Date.now();
     console.log(`${LOG_PREFIX} Initializing Execution Layer for ${BROKER_NAME}...`);
@@ -142,6 +153,7 @@ class ExecutionLayer {
     }
   }
 
+  // ─── Map Building ───────────────────────────────────────────────────────
   private buildMaps(
     rawExchanges: { universalCode: string; brokerCode: string }[],
     rawHeaders: { authType: string; headerName: string; headerSource: string; headerValue: string }[],
@@ -178,6 +190,7 @@ class ExecutionLayer {
     }
   }
 
+  // ─── Reload ─────────────────────────────────────────────────────────────
   async reload(): Promise<void> {
     if (this.reloading) {
       console.warn(`${LOG_PREFIX} Reload already in progress, skipping`);
@@ -192,6 +205,7 @@ class ExecutionLayer {
     }
   }
 
+  // ─── Status & Diagnostics ────────────────────────────────────────────────
   isReady(): boolean {
     return this.ready;
   }
@@ -212,6 +226,7 @@ class ExecutionLayer {
     };
   }
 
+  // ─── Exchange Mapping ───────────────────────────────────────────────────
   mapExchange(universalCode: string | null | undefined): string {
     if (!universalCode) return "nse_fo";
     return this.exchangeMap.get(universalCode.toUpperCase()) || universalCode.toLowerCase();
@@ -222,6 +237,7 @@ class ExecutionLayer {
     return this.reverseExchangeMap.get(brokerCode) || brokerCode.toUpperCase();
   }
 
+  // ─── URL / Header / Body Helpers ─────────────────────────────────────────
   private getEndpoint(name: string): EndpointEntry | null {
     return this.endpointByName.get(name) || null;
   }
@@ -290,6 +306,7 @@ class ExecutionLayer {
     return { body: JSON.stringify(data) };
   }
 
+  // ─── Request Execution ──────────────────────────────────────────────────
   private async executeRequest(
     endpoint: EndpointEntry,
     headers: Record<string, string>,
@@ -314,6 +331,7 @@ class ExecutionLayer {
     return response.json();
   }
 
+  // ─── Authentication (TOTP + MPIN two-step) ──────────────────────────────
   async authenticate(
     config: BrokerConfig,
     totp: string,
@@ -395,6 +413,7 @@ class ExecutionLayer {
     }
   }
 
+  // ─── Order Management (place, modify, cancel) ───────────────────────────
   async placeOrder(
     config: BrokerConfig,
     universalParams: Record<string, any>,
@@ -530,6 +549,7 @@ class ExecutionLayer {
     }
   }
 
+  // ─── Data Retrieval (orderBook, tradeBook, positions, holdings, history) ─
   async getOrderBook(config: BrokerConfig): Promise<ApiResponse<unknown[]>> {
     return this.executeGetRequest(config, "order_book", "data_get");
   }
@@ -617,6 +637,7 @@ class ExecutionLayer {
     }
   }
 
+  // ─── Margin & Limits ────────────────────────────────────────────────────
   async checkMargin(
     config: BrokerConfig,
     universalParams: Record<string, any>,
@@ -685,6 +706,7 @@ class ExecutionLayer {
     }
   }
 
+  // ─── Quotes ─────────────────────────────────────────────────────────────
   async getQuotes(
     config: BrokerConfig,
     exchange: string,
@@ -717,6 +739,7 @@ class ExecutionLayer {
     }
   }
 
+  // ─── Scrip Master ───────────────────────────────────────────────────────
   async getScripMasterFilePaths(
     config: BrokerConfig,
   ): Promise<ApiResponse<any>> {
@@ -745,6 +768,7 @@ class ExecutionLayer {
     }
   }
 
+  // ─── Connectivity Test ──────────────────────────────────────────────────
   async testConnectivity(consumerKey?: string): Promise<ApiResponse> {
     try {
       const totpEndpoint = this.getEndpoint("totp_login");
@@ -778,6 +802,7 @@ class ExecutionLayer {
     }
   }
 
+  // ─── Response Helpers ───────────────────────────────────────────────────
   private async executeGetRequest(
     config: BrokerConfig,
     endpointName: string,
@@ -831,6 +856,9 @@ class ExecutionLayer {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SINGLETON EXPORT
+// ═══════════════════════════════════════════════════════════════════════════════
 const EL = new ExecutionLayer();
 
 export default EL;

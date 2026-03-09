@@ -1,12 +1,17 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMPORTS & CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════════
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
 import EL from "./el-kotak-neo-v3";
 import { tradingCache } from "./cache";
 
 const LOG_PREFIX = "[SCRIP-MASTER]";
-
 const INDEX_TICKERS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"];
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TYPES
+// ═══════════════════════════════════════════════════════════════════════════════
 interface ParsedInstrument {
   ticker: string;
   exchange: string;
@@ -17,6 +22,10 @@ interface ParsedInstrument {
   expiryDay: string;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPIRY DATE PARSING
+// Parses various date formats from CSV and infers expiry day of week
+// ═══════════════════════════════════════════════════════════════════════════════
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 function parseExpiryDate(raw: string): Date | null {
@@ -72,6 +81,10 @@ function inferExpiryDay(expiryDates: Date[]): string {
   return DAY_NAMES[nearestExpiry.getDay()];
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// STRIKE INTERVAL INFERENCE
+// Determines the most common gap between strike prices
+// ═══════════════════════════════════════════════════════════════════════════════
 function inferStrikeInterval(strikes: number[]): number {
   if (strikes.length < 2) return 50;
   const sorted = Array.from(new Set(strikes)).sort((a, b) => a - b);
@@ -99,6 +112,10 @@ function inferStrikeInterval(strikes: number[]): number {
   return best;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CSV PARSING
+// Parses scrip master CSV: headers, rows, column detection, ticker aggregation
+// ═══════════════════════════════════════════════════════════════════════════════
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
   let current = "";
@@ -218,6 +235,10 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
   return results;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SCRIP MASTER DOWNLOAD & SYNC
+// Downloads NFO CSV from Kotak, parses instruments, upserts to DB
+// ═══════════════════════════════════════════════════════════════════════════════
 async function downloadFile(url: string): Promise<string> {
   const response = await fetch(url, { signal: AbortSignal.timeout(180000) });
   if (!response.ok) throw new Error(`Download failed: ${response.status} ${response.statusText}`);
