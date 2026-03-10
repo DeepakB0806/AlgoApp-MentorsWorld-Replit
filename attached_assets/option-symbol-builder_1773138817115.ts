@@ -2,35 +2,9 @@
 // CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════════
 const LOG_PREFIX = "[SYMBOL-BUILDER]";
-const MONTH_CODES = [
-  "JAN",
-  "FEB",
-  "MAR",
-  "APR",
-  "MAY",
-  "JUN",
-  "JUL",
-  "AUG",
-  "SEP",
-  "OCT",
-  "NOV",
-  "DEC",
-];
+const MONTH_CODES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 // Kotak's proprietary single-character month codes for weekly expiries
-const WEEKLY_MONTH_CODES = [
-  "1",
-  "2",
-  "3",
-  "4",
-  "5",
-  "6",
-  "7",
-  "8",
-  "9",
-  "O",
-  "N",
-  "D",
-];
+const WEEKLY_MONTH_CODES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "O", "N", "D"];
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // STRIKE CALCULATION
@@ -58,10 +32,7 @@ export function parseStrikeSpec(strike: string): StrikeSpec {
   return { direction: "ATM", offset: 0 };
 }
 
-export function getATMStrike(
-  spotPrice: number,
-  strikeInterval: number,
-): number {
+export function getATMStrike(spotPrice: number, strikeInterval: number): number {
   return Math.round(spotPrice / strikeInterval) * strikeInterval;
 }
 
@@ -69,7 +40,7 @@ export function getOTMStrike(
   atmStrike: number,
   spec: StrikeSpec,
   strikeInterval: number,
-  optionType: "CE" | "PE",
+  optionType: "CE" | "PE"
 ): number {
   if (spec.direction === "ATM") return atmStrike;
 
@@ -89,18 +60,10 @@ export function getOTMStrike(
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXPIRY CALCULATION
 // ═══════════════════════════════════════════════════════════════════════════════
-export function getNextExpiry(
-  expiryDay: string = "Thursday",
-  expiryType: string = "weekly",
-): Date {
+export function getNextExpiry(expiryDay: string = "Thursday", expiryType: string = "weekly"): Date {
   const dayMap: Record<string, number> = {
-    Sunday: 0,
-    Monday: 1,
-    Tuesday: 2,
-    Wednesday: 3,
-    Thursday: 4,
-    Friday: 5,
-    Saturday: 6,
+    Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
+    Thursday: 4, Friday: 5, Saturday: 6,
   };
 
   const targetDay = dayMap[expiryDay] ?? 4;
@@ -143,7 +106,7 @@ export function buildKotakOptionSymbol(
   optionType: "CE" | "PE",
   strikeInterval: number,
   expiryDay: string = "Thursday",
-  expiryType: string = "weekly",
+  expiryType: string = "weekly"
 ): string {
   const spec = parseStrikeSpec(strikeSpecStr);
   const atm = getATMStrike(spotPrice, strikeInterval);
@@ -159,21 +122,19 @@ export function buildKotakOptionSymbol(
   const isMonthlyExpiry = nextWeek.getMonth() !== expiry.getMonth();
 
   if (expiryType === "monthly" || isMonthlyExpiry) {
-    // Kotak Monthly Format: {TICKER}{YY}{MON}{STRIKE}{CE/PE}
+    // Kotak Monthly Format: {TICKER}{YY}{MON}{STRIKE}{CE/PE} 
     // Example: NIFTY26MAR20150PE
     const mon = MONTH_CODES[expiry.getMonth()];
     symbol = `${ticker}${yy}${mon}${strike}${optionType}`;
   } else {
-    // Kotak Weekly Format: {TICKER}{YY}{M}{DD}{STRIKE}{CE/PE}
+    // Kotak Weekly Format: {TICKER}{YY}{M}{DD}{STRIKE}{CE/PE} 
     // Example: NIFTY2632430450PE
     const singleCharMon = WEEKLY_MONTH_CODES[expiry.getMonth()];
     const ddPadded = String(expiry.getDate()).padStart(2, "0");
     symbol = `${ticker}${yy}${singleCharMon}${ddPadded}${strike}${optionType}`;
   }
 
-  console.log(
-    `${LOG_PREFIX} ${ticker} spot=${spotPrice} strike=${strike} isMonthlyWeek=${isMonthlyExpiry} → ${symbol}`,
-  );
+  console.log(`${LOG_PREFIX} ${ticker} spot=${spotPrice} strike=${strike} isMonthlyWeek=${isMonthlyExpiry} → ${symbol}`);
 
   return symbol;
 }

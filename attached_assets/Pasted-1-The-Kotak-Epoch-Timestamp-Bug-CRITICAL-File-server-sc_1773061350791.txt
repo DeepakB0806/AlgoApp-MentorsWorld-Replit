@@ -1,0 +1,46 @@
+1. The Kotak Epoch Timestamp Bug (CRITICAL)
+File: server/scrip-master-sync.ts
+
+What the Code Assumes: The script currently parses the pExpiryDate field assuming it is a standard Unix Epoch timestamp (seconds since Jan 1, 1970).
+
+What the CSV Shows: Kotak Securities uses a 1980 Epoch (seconds since Jan 1, 1980).
+
+The Silent Failure: Your parser is converting the expiry dates exactly 10 years into the past. For example, the timestamp 1458829800 is being parsed as 2016-03-24 instead of 2026-03-24. Because 2016 is in the past, your fallback logic in inferExpiryDay kicks in, grouping the wrong historical dates, and assigning the completely wrong day of the week to your options.
+
+The Fix: You need to offset the timestamp by 315532800 seconds (10 years + 2 leap years).
+
+TypeScript
+// Fix in parseExpiryDate()
+if (!isNaN(epochSec) && epochSec > 946684800 && epochSec < 4102444800) {
+    // Offset by 315532800 seconds to account for Kotak's 1980 Epoch
+    return new Date((epochSec + 315532800) * 1000); 
+}
+2. The Option Symbol Generation Format (CRITICAL)
+File: server/option-symbol-builder.ts
+
+What the Code Assumes: Your local symbol builder generates the format {TICKER}{DD}{MON}{YY}{STRIKE}{CE/PE} (e.g., NIFTY12MAR2624500CE).
+
+What the CSV Shows: Kotak's pTrdSymbol format is completely different and is split into two unique formats depending on the expiry type:
+
+Monthly Expiry: {TICKER}{YY}{MON}{STRIKE}{CE/PE} (e.g., NIFTY26MAR20150PE — Note: YY is first, and DD is omitted entirely).
+
+Weekly Expiry: {TICKER}{YY}{M}{DD}{STRIKE}{CE/PE} (e.g., NIFTY2632430450PE — Note: Month is a single digit '3' for March, followed by day '24').
+
+The Silent Failure: If you use your local generator to place orders, Kotak will reject 100% of them with Error 1007: Invalid Symbol.
+
+The Fix: You must overhaul buildKotakOptionSymbol to generate the exact string structure found in the CSV, or better yet, fetch the pTrdSymbol directly from the cached Scrip Master data when building the payload.
+
+3. The Token Column Mapping (CRITICAL)
+File: server/scrip-master-sync.ts
+
+What the Code Assumes: Your CSV column matching logic assigns the tokenIdx by searching for ['token', 'pscriprefkey', 'scripcode'].
+
+What the CSV Shows: Your parser finds the pScripRefKey column first and assigns string values like SUZLON30MAR2642.00CE as the token. However, the Kotak documentation dictates that the Quotes API strictly requires the numerical token from the pSymbol column (e.g., 160178).
+
+The Silent Failure: Your pSymbol column is currently being completely ignored by the parser. If you pass SUZLON30MAR2642.00CE into the Quotes API as the token, it will fail.
+
+The Fix: Update the tokenIdx array to prioritize the pSymbol column:
+
+TypeScript
+// Fix in parseScripMasterCSV()
+const tokenIdx = headers.findIndex(h => h === 'psymbol' || h === 'token' || h === 'scripcode');
