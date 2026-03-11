@@ -154,7 +154,7 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
   const tokenIdx = headers.findIndex(h => h === 'psymbol' || h === 'token' || h === 'scripcode' || h === 'pscriprefkey');
 
   const optTypeIdx = headers.findIndex(h => h === 'optiontype' || h === 'option_type' || h === 'optype' || h === 'opttype' || h === 'poptiontype' || h === 'popttype');
-  const expiryIdx = headers.findIndex(h => h === 'pexpirydate' || h === 'dexpirydate' || h === 'expirydate' || h === 'expiry_date' || h === 'expdate' || h === 'pexpdate' || h === 'dexpdate');
+  const expiryIdx = headers.findIndex(h => h === 'lexpirydate' || h === 'pexpirydate' || h === 'dexpirydate' || h === 'expirydate' || h === 'expiry_date' || h === 'expdate' || h === 'pexpdate' || h === 'dexpdate');
 
   console.log(`${LOG_PREFIX} CSV headers (${headers.length}): ${headers.slice(0, 20).join(', ')}...`);
 
