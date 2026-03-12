@@ -9,6 +9,7 @@ import { tradingCache } from "./cache";
 import TL from "./tl-kotak-neo-v3";
 import EL from "./el-kotak-neo-v3";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
+import { runScripMasterSync } from "./scrip-master-sync";
 
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err.stack || err.message || err);
@@ -135,6 +136,28 @@ app.use((req, res, next) => {
   }
 
   tradingCache.warmUp(storage).catch(err => log(`Cache warm-up error: ${err}`));
+
+  // Auto-sync scrip master for connected live brokers on startup
+  try {
+    const allBrokerConfigs = await storage.getBrokerConfigs();
+    const liveBrokers = allBrokerConfigs.filter(
+      (bc) => bc.isConnected === true && bc.brokerName === "kotak_neo"
+    );
+    for (const brokerConfig of liveBrokers) {
+      try {
+        const result = await runScripMasterSync(storage, brokerConfig);
+        if (result.success) {
+          log(`[STARTUP] Scrip master auto-sync: ${result.synced} contracts loaded for broker ${brokerConfig.ucc || brokerConfig.id}`);
+        } else {
+          log(`[STARTUP] Scrip master auto-sync warning for broker ${brokerConfig.ucc || brokerConfig.id}: ${result.error}`);
+        }
+      } catch (syncErr) {
+        log(`[STARTUP] Scrip master auto-sync warning for broker ${brokerConfig.ucc || brokerConfig.id}: ${syncErr}`);
+      }
+    }
+  } catch (err) {
+    log(`[STARTUP] Scrip master auto-sync warning: ${err}`);
+  }
 
   // Auto-cleanup old webhook logs (older than 30 days) on startup
   try {
