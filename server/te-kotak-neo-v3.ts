@@ -565,15 +565,18 @@ async function closeTrade(
   storage: IStorage, trade: StrategyTrade, currentPrice: number, now: string, brokerConfig: BrokerConfig,
 ): Promise<StrategyTrade> {
   const broker = brokerConfig.brokerName;
-  let exitPrice = currentPrice;
-  let pnl = 0;
-  let orderId: string | undefined;
-
+  const exitPrice = currentPrice;
   const exitAction = trade.action === "BUY" ? "SELL" : "BUY";
   const transactionType = mapTransactionType(exitAction);
   console.log(`[TRADE] Closing leg: symbol=${trade.tradingSymbol} action=${exitAction} transactionType=${transactionType}`);
 
-  if (broker === "kotak_neo") {
+  if (broker === "kotak_neo" && brokerConfig.isConnected && brokerConfig.accessToken && brokerConfig.sessionId && brokerConfig.baseUrl) {
+    if (!trade.tradingSymbol || !trade.exchange || !trade.productType) {
+      const failedUpdate = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
+      tradingCache.invalidateOpenTrades(trade.planId);
+      return failedUpdate || trade;
+    }
+
     const universalPayload: Record<string, any> = {
       tradingSymbol: trade.tradingSymbol,
       exchange: EL.mapExchange(trade.exchange),
@@ -585,24 +588,30 @@ async function closeTrade(
     const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
     if (!orderResult.success) {
       console.error(`[TE] Failed to close Kotak trade: ${orderResult.error}`);
-    } else {
-      orderId = orderResult.data?.orderNo;
+      const failedUpdate = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
+      tradingCache.invalidateOpenTrades(trade.planId);
+      return failedUpdate || trade;
     }
-  } else {
-    orderId = `PT-CLOSE-${Date.now()}`;
   }
 
-  if (trade.price > 0 && currentPrice > 0) {
-    const entryPrice = trade.price;
-    const qty = trade.quantity;
-    pnl = trade.action === "BUY" ? (exitPrice - entryPrice) * qty : (entryPrice - exitPrice) * qty;
-  }
+  const entryPrice = trade.price || 0;
+  const qty = trade.quantity || 1;
+  const pnl = trade.action === "BUY" ? (exitPrice - entryPrice) * qty : (entryPrice - exitPrice) * qty;
 
-  const updatedTrade = await storage.updateStrategyTrade(trade.id, {
-    status: "closed", pnl, closedAt: now, exitOrderId: orderId || null, updatedAt: now,
+  const updated = await storage.updateStrategyTrade(trade.id, {
+    status: "closed", pnl: Math.round(pnl * 100) / 100, ltp: exitPrice, exitPrice, exitAction, exitedAt: now, updatedAt: now,
   });
 
-  return updatedTrade;
+  tradingCache.invalidateOpenTrades(trade.planId);
+
+  const remainingOpen = await storage.getOpenTradesByPlan(trade.planId);
+  if (remainingOpen.length === 0) {
+    await storage.updateStrategyPlan(trade.planId, { awaitingCleanEntry: true });
+    const plan = await storage.getStrategyPlan(trade.planId);
+    if (plan?.configId) tradingCache.invalidatePlans(plan.configId);
+  }
+
+  return updated || trade;
 }
 
 function deferDailyPnlUpdate(storage: IStorage, planId: string, today: string, closePnl: number) {
