@@ -5,7 +5,8 @@ import { tradingCache } from "../cache";
 import { db } from "../db";
 import { desc, eq, sql, or } from "drizzle-orm";
 import EL from "../el-kotak-neo-v3";
-import { getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
+import { squareOffPlan } from "../te-kotak-neo-v3";
+import { addProcessFlowLog, getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
 import {
   testBinanceConnectivity,
   authenticateBinance,
@@ -397,6 +398,54 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: `Cannot transition from '${currentStatus}' to '${deploymentStatus}'. Allowed: ${allowed.join(", ")}` });
       }
       const updateData: Record<string, unknown> = { deploymentStatus, updatedAt: new Date().toISOString() };
+      if (deploymentStatus === "squared_off") {
+        const now = new Date().toISOString();
+        let usedBroker = false;
+        if (plan.brokerConfigId) {
+          const brokerConfig = await storage.getBrokerConfig(plan.brokerConfigId);
+          if (brokerConfig) {
+            usedBroker = true;
+            const result = await squareOffPlan(storage, id, brokerConfig);
+            console.log(`[ROUTE] Square off result for plan ${id}: closed=${result.closed}, failed=${result.failed}`);
+          }
+        }
+        if (!usedBroker) {
+          const openTrades = await storage.getOpenTradesByPlan(id);
+          for (const trade of openTrades) {
+            const entryPrice = trade.price || 0;
+            const currentPrice = trade.ltp || entryPrice;
+            const qty = trade.quantity || 1;
+            const pnl = trade.action === "BUY"
+              ? (currentPrice - entryPrice) * qty
+              : (entryPrice - currentPrice) * qty;
+            const roundedPnl = Math.round(pnl * 100) / 100;
+            await storage.updateStrategyTrade(trade.id, {
+              status: "closed",
+              pnl: roundedPnl,
+              ltp: currentPrice,
+              exitPrice: currentPrice,
+              exitAction: trade.action === "BUY" ? "SELL" : "BUY",
+              exitedAt: now,
+              updatedAt: now,
+            });
+            addProcessFlowLog({
+              planId: id,
+              planName: plan.name,
+              signalType: "square_off",
+              alert: "Square off all positions (paper)",
+              resolvedAction: "CLOSE",
+              blockType: "square_off",
+              actionTaken: "squared_off",
+              message: `Paper squared off trade: ${trade.tradingSymbol} qty=${trade.quantity} exitPrice=${currentPrice} pnl=${roundedPnl}`,
+              broker: "paper_trade",
+              ticker: trade.tradingSymbol || undefined,
+              exchange: trade.exchange || undefined,
+              price: currentPrice,
+            });
+          }
+          tradingCache.invalidateOpenTrades(id);
+        }
+      }
       if (deploymentStatus === "active") {
         updateData.awaitingCleanEntry = true;
       }

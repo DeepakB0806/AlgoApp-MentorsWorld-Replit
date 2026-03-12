@@ -614,6 +614,94 @@ async function closeTrade(
   return updated || trade;
 }
 
+export async function squareOffPlan(
+  storage: IStorage,
+  planId: string,
+  brokerConfig: BrokerConfig,
+): Promise<{ closed: number; failed: number; errors: string[] }> {
+  const openTrades = await storage.getOpenTradesByPlan(planId);
+  const now = new Date().toISOString();
+  const today = now.slice(0, 10);
+  const plan = await storage.getStrategyPlan(planId);
+  const broker = brokerConfig.brokerName;
+  let closed = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  console.log(`[TE] squareOffPlan: planId=${planId}, openTrades=${openTrades.length}`);
+
+  for (const trade of openTrades) {
+    try {
+      const currentPrice = trade.ltp || trade.price || 0;
+      const result = await closeTrade(storage, trade, currentPrice, now, brokerConfig);
+      if (result.status === "closed") {
+        closed++;
+        const pnl = result.pnl || 0;
+        deferDailyPnlUpdate(storage, planId, today, pnl);
+        if (plan) {
+          addProcessFlowLog({
+            planId: plan.id,
+            planName: plan.name,
+            signalType: "square_off",
+            alert: "Square off all positions",
+            resolvedAction: "CLOSE",
+            blockType: "square_off",
+            actionTaken: "squared_off",
+            message: `Squared off trade: ${trade.tradingSymbol} qty=${trade.quantity} exitPrice=${result.exitPrice} pnl=${pnl}`,
+            broker,
+            ticker: trade.tradingSymbol || undefined,
+            exchange: trade.exchange || undefined,
+            price: result.exitPrice || currentPrice,
+          });
+        }
+      } else {
+        failed++;
+        const errMsg = `Failed to close trade ${trade.id} (${trade.tradingSymbol})`;
+        errors.push(errMsg);
+        if (plan) {
+          addProcessFlowLog({
+            planId: plan.id,
+            planName: plan.name,
+            signalType: "square_off",
+            alert: "Square off all positions",
+            resolvedAction: "CLOSE",
+            blockType: "square_off",
+            actionTaken: "close_failed",
+            message: errMsg,
+            broker,
+            ticker: trade.tradingSymbol || undefined,
+            exchange: trade.exchange || undefined,
+          });
+        }
+      }
+    } catch (err: any) {
+      failed++;
+      const errMsg = `Error closing trade ${trade.id}: ${err?.message || err}`;
+      errors.push(errMsg);
+      console.error(`[TE] ${errMsg}`);
+      if (plan) {
+        addProcessFlowLog({
+          planId: plan.id,
+          planName: plan.name,
+          signalType: "square_off",
+          alert: "Square off all positions",
+          resolvedAction: "CLOSE",
+          blockType: "square_off",
+          actionTaken: "close_failed",
+          message: errMsg,
+          broker,
+          ticker: trade.tradingSymbol || undefined,
+          exchange: trade.exchange || undefined,
+        });
+      }
+    }
+  }
+
+  tradingCache.invalidateOpenTrades(planId);
+  console.log(`[TE] squareOffPlan complete: closed=${closed}, failed=${failed}`);
+  return { closed, failed, errors };
+}
+
 function deferDailyPnlUpdate(storage: IStorage, planId: string, today: string, closePnl: number) {
   setTimeout(() => {
     storage.getDailyPnl(planId, today).then((dailyPnl) => {
