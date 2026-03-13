@@ -48,6 +48,7 @@ export function MotherConfigurator() {
   const [tickerOptions, setTickerOptions] = useState<string[]>([]);
   const [editingFieldName, setEditingFieldName] = useState<string | null>(null);
   const [editFieldValue, setEditFieldValue] = useState("");
+  const [priceField, setPriceField] = useState("");
 
   const { data: configs = [], isLoading } = useQuery<StrategyConfig[]>({
     queryKey: ["/api/strategy-configs"],
@@ -202,6 +203,7 @@ export function MotherConfigurator() {
     setMapperReady(false);
     setLoadingValues(false);
     setStatus("draft");
+    setPriceField("");
   };
 
   const handleEdit = (config: StrategyConfig) => {
@@ -220,6 +222,7 @@ export function MotherConfigurator() {
     setSignalsFetched(parsedMapper.length > 0);
     setMapperReady(parsedMapper.length > 0);
     setStatus(config.status);
+    setPriceField(config.priceField || "");
     setIsEditing(true);
   };
 
@@ -234,6 +237,7 @@ export function MotherConfigurator() {
       webhookId: webhookId || null,
       exchange: exchange || null,
       ticker: ticker || null,
+      priceField: priceField || null,
       actionMapper: JSON.stringify(actionMapper.filter((e) => e.signalValue.trim())),
       status,
     };
@@ -371,6 +375,36 @@ export function MotherConfigurator() {
               </div>
             </div>
           )}
+        </div>
+
+        <div>
+          <Label className="mb-1.5 block">Price Source Field</Label>
+          <div className="flex items-center gap-2 flex-wrap">
+            {availableFields.length > 0 ? (
+              <Select value={priceField || "auto"} onValueChange={(v) => setPriceField(v === "auto" ? "" : v)}>
+                <SelectTrigger className="flex-1 min-w-[200px]" data-testid="select-price-field">
+                  <SelectValue placeholder="Auto-detect (price / PRICE / Price)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto-detect (price / PRICE / Price)</SelectItem>
+                  {availableFields.map((f) => (
+                    <SelectItem key={f} value={f}>{f}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                value={priceField}
+                onChange={(e) => setPriceField(e.target.value.trim())}
+                placeholder="e.g. close, ltp, price  (leave blank for auto-detect)"
+                className="flex-1 min-w-[200px] font-mono text-sm"
+                data-testid="select-price-field"
+              />
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            The exact field name in the webhook payload that contains the underlying price. Leave blank to auto-detect.
+          </p>
         </div>
 
         {signalsFetched && (

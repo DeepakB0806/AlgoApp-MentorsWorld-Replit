@@ -276,6 +276,16 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
         tradingCache.setConfigByWebhookId(webhookId, linkedConfig);
       }
 
+      if (linkedConfig?.priceField) {
+        const configuredPrice = parseNumeric((payload as Record<string, any>)[linkedConfig.priceField]);
+        if (configuredPrice !== null && configuredPrice !== undefined && !isNaN(configuredPrice)) {
+          console.log(`[WEBHOOK ${webhookId.slice(0,8)}] Price extracted: field=${linkedConfig.priceField} value=${configuredPrice}`);
+          parsedData.price = configuredPrice;
+        } else {
+          console.warn(`[WEBHOOK ${webhookId.slice(0,8)}] Configured priceField="${linkedConfig.priceField}" not found in payload — falling back to auto-detect`);
+        }
+      }
+
       const allSignals = resolveAllSignalsFromActionMapper(parsedData, linkedConfig?.actionMapper);
       const { signalType, blockType: directBlockType, resolvedAction } = allSignals[0];
       console.log(`[PFL] ▶ Webhook ${webhookId.slice(0,8)} received: alert=${parsedData.alert} signals=${allSignals.length} → ${allSignals.map(s => `${s.resolvedAction}@${s.blockType}(${s.signalType})`).join(", ")}`);

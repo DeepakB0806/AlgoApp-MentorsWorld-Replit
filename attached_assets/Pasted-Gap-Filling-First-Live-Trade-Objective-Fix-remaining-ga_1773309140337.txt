@@ -1,0 +1,89 @@
+Gap Filling — First Live Trade
+Objective
+Fix remaining gaps for first live trade + improve Process Flow Log UX.
+
+Tasks
+GAP 1: Price Field Mapping
+T001: Add priceField column to strategy_configs table
+Blocked By: []
+Details:
+Add priceField: text("price_field") column to strategy_configs in shared/schema.ts
+Add priceField to the insert schema and types
+Run npm run db:push to sync the schema
+Default is null (fall back to existing price/PRICE/Price behavior)
+Files: shared/schema.ts
+Acceptance: Column exists in DB, existing data unaffected
+T002: Add "Price Source" selector to Mother Configurator UI
+Blocked By: [T001]
+Details:
+In client/src/components/strategy-config.tsx, add a "Price Source Field" dropdown
+The dropdown lists all discovered webhook payload fields (same source as the signal field selector)
+Place it as a separate, clearly labeled selector — NOT part of the Action Mapper table
+Pre-select price if it exists in the available fields
+Save the selected value as priceField when updating the strategy config
+When editing an existing config, load and display the saved priceField value
+Add data-testid="select-price-field" to the dropdown
+Files: client/src/components/strategy-config.tsx
+Acceptance: User can select a price source field, it saves to DB
+T003: Use configured priceField in webhook route
+Blocked By: [T001]
+Details:
+In server/routes/webhook-routes.ts, line 255 area, after loading the strategy config for a webhook signal:
+Read strategyConfig.priceField (e.g., "close", "price", "ltp")
+Extract the price from payload[priceField] instead of hardcoded payload.price ?? payload.PRICE ?? payload.Price
+Fall back to the existing hardcoded lookup if priceField is null/undefined (backward compatibility)
+Cast to number: Number(priceValue) — TradingView sometimes sends values as strings
+Log: [WEBHOOK] Price extracted: field=${fieldUsed} value=${priceValue}
+Files: server/routes/webhook-routes.ts
+Acceptance: When priceField is configured, the webhook uses that exact field name; when not, falls back to existing behavior
+GAP 6: Process Flow Log — Per-Strategy Side Panel with Enriched Data + Download
+T011A: Enrich PFL data model with diagnostic fields
+Blocked By: []
+Details:
+In server/process-flow-log.ts, extend ProcessFlowEntry interface with new optional fields:
+Condition/Keyword Output: strikeSpec?: string (e.g., "OTM 10"), atmStrike?: number, targetStrike?: number, cacheKey?: string (e.g., "NIFTY_22900_PE"), cacheResult?: string ("HIT" or "MISS")
+Instrument Details: tradingSymbol?: string (exact broker symbol, e.g., "NIFTY2631722900PE"), strikePrice?: number, optionType?: string ("CE"/"PE"), expiryDate?: string, lotSize?: number, quantity?: number
+Error Codes: errorCode?: string (structured broker error code), brokerResponse?: string (raw broker API response, truncated to 500 chars)
+In client/src/pages/broker-api.tsx, extend the PFLEntry interface to match
+Files: server/process-flow-log.ts, client/src/pages/broker-api.tsx
+Acceptance: New fields available in the PFL data structure (backward compatible — all optional)
+T011B: Populate enriched PFL fields from TE and EL
+Blocked By: [T011A]
+Details:
+In server/te-kotak-neo-v3.ts, update all logPFL() calls to pass the new fields:
+After resolveOrderParams(): pass tradingSymbol, strikePrice, optionType, quantity, strikeSpec, atmStrike, targetStrike, cacheKey, cacheResult
+After EL placeOrder response: pass orderId, brokerResponse (raw JSON stringified, truncated), errorCode if failed
+Update the logPFL() helper function signature to accept the new extra fields and pass them through to addProcessFlowLog()
+Files: server/te-kotak-neo-v3.ts
+Acceptance: PFL entries contain strike calculation details, broker symbol, and broker error codes
+T011C: Build per-strategy PFL side panel with expanded view and download
+Blocked By: [T011A, T011B]
+Details:
+Icon in strategy row: In client/src/components/broker-linking.tsx, in the strategy card header (line 846 area), after the deployment status badge, add an Activity icon button:
+Use the Activity icon from lucide-react (already imported)
+Show a small badge count of PFL entries for that specific plan
+Styled subtly (muted color, small size)
+On click, opens a Sheet (side panel) from the right
+Sheet side panel (per-plan PFL viewer):
+Uses Sheet, SheetContent, SheetHeader, SheetTitle from @/components/ui/sheet
+Same pattern as webhooks.tsx (line 992) — slides from right
+Summary table (default view): Key columns — Time (IST), Alert, Action, Block, Result, Message, Order ID, ms
+Expanded view (toggle button): Shows ALL enriched fields in a detailed layout:
+Condition Output: Strike spec, ATM strike, target strike, cache key, cache result
+Instrument: Trading symbol, strike price, option type, expiry, lot size, quantity
+Error Details: Error code, broker response
+Each row can be clicked/expanded to show full details inline (accordion style)
+Has expand button to toggle between max-w-[800px] and full-width
+Has "Clear" button to clear displayed logs from state (client-side)
+Has "Refresh" button to re-fetch
+Auto-refreshes every 30 seconds while open
+Data persists in component state when Sheet is closed
+Download CSV: Button in Sheet header:
+Exports ALL fields (summary + enriched) as CSV
+CSV columns: Time (IST), Plan, Alert, Signal, Action, Block, Result, Message, Trading Symbol, Strike, Option Type, Expiry, Qty, Spot Price, ATM Strike, Target Strike, Cache Key, Cache Result, Order ID, Error Code, Broker Response, Execution Time (ms)
+File name: PFL_{planName}_{date}.csv
+Users can share this CSV with super admin for debugging
+Remove embedded PFL card: Remove <ProcessFlowLogCard /> from broker-api.tsx (line 3267) and its function definition (lines 1626-1775)
+Add appropriate data-testid attributes to all interactive elements
+Files: client/src/components/broker-linking.tsx, client/src/pages/broker-api.tsx
+Acceptance: Activity icon in each strategy row; side panel shows summary + expandable detail view; CSV download includes all fields

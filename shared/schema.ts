@@ -130,6 +130,7 @@ export const strategyConfigs = pgTable("strategy_configs", {
   uptrendBlock: text("uptrend_block"),
   downtrendBlock: text("downtrend_block"),
   neutralBlock: text("neutral_block"),
+  priceField: text("price_field"),
   status: text("status").notNull().default("draft"),
   configVersion: integer("config_version").notNull().default(1),
   createdBy: varchar("created_by", { length: 36 }),
