@@ -565,7 +565,28 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       if (kotakConfig) {
         const result = await EL.getPositions(kotakConfig);
         if (result.success && result.data) {
-          return res.json(result.data);
+          const normalized = (result.data as any[]).map((p: any) => {
+            const buyQty = Number(p.buyQuantity || p.flBuyQty || 0);
+            const sellQty = Number(p.sellQuantity || p.flSellQty || 0);
+            const buyAmt = Number(p.buyAmount || p.buyAmt || 0);
+            const sellAmt = Number(p.sellAmount || p.sellAmt || 0);
+            return {
+              trading_symbol: p.tradingSymbol || p.trading_symbol || p.symbol || p.trdSym || "",
+              exchange: p.exchange || p.exSeg || "",
+              product_type: p.productType || p.product_type || p.prod || "NRML",
+              quantity: Number(p.quantity || 0),
+              buy_avg: buyQty > 0 ? buyAmt / buyQty : Number(p.uploadPrice || p.upldPrc || p.buy_avg || 0),
+              sell_avg: sellQty > 0 ? sellAmt / sellQty : Number(p.sell_avg || 0),
+              ltp: Number(p.lastTradedPrice || p.ltp || 0),
+              option_type: p.optionType || p.option_type || p.optTp || null,
+              strike_price: p.strikePrice || p.strike_price || p.stkPrc || null,
+              expiry: p.expiryDisplay || p.expiry || p.exp || null,
+              pnl: Number(p.mtmPnl || p.mtm || p.pnl || 0),
+              realised_pnl: Number(p.realisedPnl || p.realised_pnl || 0),
+              unrealised_pnl: p.unrealisedPnl !== undefined ? Number(p.unrealisedPnl) : undefined,
+            };
+          });
+          return res.json(normalized);
         }
       }
       
@@ -583,7 +604,18 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       if (kotakConfig) {
         const result = await EL.getOrderBook(kotakConfig);
         if (result.success && result.data) {
-          return res.json(result.data);
+          const normalized = (result.data as any[]).map((o: any) => ({
+            order_id: o.orderNo || o.order_id || o.nOrdNo || o.ordNo || "",
+            trading_symbol: o.tradingSymbol || o.trading_symbol || o.trdSym || o.ts || "",
+            exchange: o.exchange || o.exSeg || o.es || "",
+            transaction_type: o.transactionType || o.transaction_type || o.tt || "",
+            order_type: o.priceType || o.order_type || o.pt || o.orderType || "",
+            quantity: Number(o.quantity || o.qt || 0),
+            price: Number(o.price || o.pr || 0),
+            status: o.status || o.stat || o.ordSt || "",
+            timestamp: o.timestamp || o.plDate || o.time || o.ordTm || "",
+          }));
+          return res.json(normalized);
         }
       }
       
