@@ -692,7 +692,7 @@ class ExecutionLayer {
         const result = TL.buildRequestPayload("limits", {
           exchange,
           segment,
-          product,
+          productType: product,
         });
         body = result.payload;
       } else {
