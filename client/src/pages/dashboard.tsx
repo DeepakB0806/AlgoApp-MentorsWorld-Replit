@@ -36,7 +36,7 @@ export default function Dashboard() {
     queryKey: ["/api/holdings"],
   });
 
-  const { data: portfolioSummary, isLoading: summaryLoading } = useQuery<PortfolioSummary>({
+  const { data: portfolioSummary, isLoading: summaryLoading, refetch: refetchSummary } = useQuery<PortfolioSummary>({
     queryKey: ["/api/portfolio-summary"],
   });
 
@@ -51,6 +51,7 @@ export default function Dashboard() {
     refetchPositions();
     refetchOrders();
     refetchHoldings();
+    refetchSummary();
   };
 
   const isLoading = positionsLoading || ordersLoading || holdingsLoading || summaryLoading;
