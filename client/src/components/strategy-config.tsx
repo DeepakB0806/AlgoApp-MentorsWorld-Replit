@@ -102,21 +102,22 @@ export function MotherConfigurator() {
     }
   };
 
+  useEffect(() => {
+    if (addedFields.length >= 2) {
+      setPriceField(addedFields[1]);
+    } else {
+      setPriceField("");
+    }
+  }, [addedFields]);
+
   const addSignalField = () => {
     if (!selectedField) return;
-    setAddedFields((prev) => {
-      const updated = [...prev, selectedField];
-      if (updated.length >= 2 && !priceField) {
-        setPriceField(updated[1]);
-      }
-      return updated;
-    });
+    setAddedFields((prev) => [...prev, selectedField]);
     setAvailableFields((prev) => prev.filter((f) => f !== selectedField));
     setSelectedField("");
   };
 
   const removeAddedField = (field: string) => {
-    if (field === priceField) setPriceField("");
     setAddedFields((prev) => prev.filter((f) => f !== field));
     setAvailableFields((prev) => [...prev, field]);
     setActionMapper((prev) => prev.filter((e) => e.fieldKey !== field));
@@ -225,6 +226,9 @@ export function MotherConfigurator() {
     const parsedMapper = parseJsonSafe<ActionMapperEntry[]>(config.actionMapper, []);
     setActionMapper(parsedMapper);
     const existingFieldKeys = Array.from(new Set(parsedMapper.map((e) => e.fieldKey).filter(Boolean))) as string[];
+    if (config.priceField && !existingFieldKeys.includes(config.priceField)) {
+      existingFieldKeys.push(config.priceField);
+    }
     setAddedFields(existingFieldKeys);
     setAvailableFields([]);
     setSelectedField("");
