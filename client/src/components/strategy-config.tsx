@@ -226,10 +226,13 @@ export function MotherConfigurator() {
     const parsedMapper = parseJsonSafe<ActionMapperEntry[]>(config.actionMapper, []);
     setActionMapper(parsedMapper);
     const existingFieldKeys = Array.from(new Set(parsedMapper.map((e) => e.fieldKey).filter(Boolean))) as string[];
-    if (config.priceField && !existingFieldKeys.includes(config.priceField)) {
-      existingFieldKeys.push(config.priceField);
+    if (config.priceField) {
+      const withoutPrice = existingFieldKeys.filter(f => f !== config.priceField);
+      withoutPrice.splice(1, 0, config.priceField);
+      setAddedFields(withoutPrice);
+    } else {
+      setAddedFields(existingFieldKeys);
     }
-    setAddedFields(existingFieldKeys);
     setAvailableFields([]);
     setSelectedField("");
     setSignalsFetched(parsedMapper.length > 0);
