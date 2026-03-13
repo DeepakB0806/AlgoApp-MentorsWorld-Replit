@@ -65,7 +65,7 @@ function TradeTableContent({ trades, groupedTrades, BLOCK_LABELS, plan }: {
     if (key === "ticker") return trade.ticker || trade.tradingSymbol || plan?.ticker || "-";
     if (key === "indicator") return trade.indicator || "-";
     if (key === "alert") return trade.alert || trade.action || "-";
-    if (key === "signalPrice") return (trade.price || 0).toFixed(2);
+    if (key === "signalPrice") return Number(trade.price || 0).toFixed(2);
     if (key === "localTime") return trade.localTime || "-";
     if (key === "mode") return trade.mode || "-";
     if (key === "modeDesc") return trade.modeDesc || "-";
@@ -93,7 +93,7 @@ function TradeTableContent({ trades, groupedTrades, BLOCK_LABELS, plan }: {
       {Object.entries(groupedTrades).map(([blockType, blockTrades]) => {
         const blockCfg = BLOCK_LABELS[blockType] || BLOCK_LABELS.legs;
         const BlockIcon = blockCfg.icon;
-        const blockPnl = blockTrades.reduce((s, t) => s + (t.pnl || 0), 0);
+        const blockPnl = blockTrades.reduce((s, t) => s + Number(t.pnl || 0), 0);
         return (
           <div key={blockType} className="border border-border/30 rounded-md" data-testid={`container-block-${blockType}`}>
             <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border/20 flex-wrap">
@@ -137,9 +137,9 @@ function TradeTableContent({ trades, groupedTrades, BLOCK_LABELS, plan }: {
                         <td className="whitespace-nowrap px-2 py-1.5">{getFieldValue(trade, "mode")}</td>
                         <td className="whitespace-nowrap px-2 py-1.5">{getFieldValue(trade, "modeDesc")}</td>
                         <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{trade.quantity}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{(trade.price || 0).toFixed(2)}</td>
-                        <td className={`whitespace-nowrap px-2 py-1.5 text-right font-mono font-semibold ${(trade.pnl || 0) > 0 ? "text-emerald-400" : (trade.pnl || 0) < 0 ? "text-red-400" : "text-muted-foreground"}`}>
-                          {isClosed ? (<>{(trade.pnl || 0) >= 0 ? "+" : ""}{(trade.pnl || 0).toFixed(2)}</>) : (<span className="text-muted-foreground/60">--</span>)}
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{Number(trade.price || 0).toFixed(2)}</td>
+                        <td className={`whitespace-nowrap px-2 py-1.5 text-right font-mono font-semibold ${Number(trade.pnl || 0) > 0 ? "text-emerald-400" : Number(trade.pnl || 0) < 0 ? "text-red-400" : "text-muted-foreground"}`}>
+                          {isClosed ? (<>{Number(trade.pnl || 0) >= 0 ? "+" : ""}{Number(trade.pnl || 0).toFixed(2)}</>) : (<span className="text-muted-foreground/60">--</span>)}
                         </td>
                         <td className="whitespace-nowrap px-2 py-1.5">
                           <Badge variant="outline" className="text-xs">{trade.status}</Badge>
@@ -212,8 +212,8 @@ function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: Stra
     if (tradesCount > 0 || !isLoading) setLastFetched(new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }));
   }, [tradesCount, isLoading]);
 
-  const totalPnl = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-  const totalValue = trades.reduce((sum, t) => sum + ((t.price || 0) * (t.quantity || 0)), 0);
+  const totalPnl = trades.reduce((sum, t) => sum + Number(t.pnl || 0), 0);
+  const totalValue = trades.reduce((sum, t) => sum + (Number(t.price || 0) * Number(t.quantity || 0)), 0);
   const openTrades = trades.filter((t) => t.status === "executed" || t.status === "partial");
   const closedTrades = trades.filter((t) => t.status === "closed" || t.status === "squared_off");
 
@@ -472,11 +472,11 @@ function DailyPnlTable({ entries }: { entries: StrategyDailyPnl[] }) {
           {entries.map((entry) => (
             <tr key={entry.id} data-testid={`row-daily-pnl-${entry.id}`} className="border-b hover:bg-muted/50">
               <td className="whitespace-nowrap px-2 py-2 font-mono font-medium">{entry.date}</td>
-              <td className={`whitespace-nowrap px-2 py-2 text-right font-mono font-semibold ${(entry.dailyPnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                {(entry.dailyPnl || 0) >= 0 ? "+" : ""}{(entry.dailyPnl || 0).toFixed(2)}
+              <td className={`whitespace-nowrap px-2 py-2 text-right font-mono font-semibold ${Number(entry.dailyPnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {Number(entry.dailyPnl || 0) >= 0 ? "+" : ""}{Number(entry.dailyPnl || 0).toFixed(2)}
               </td>
-              <td className={`whitespace-nowrap px-2 py-2 text-right font-mono font-semibold ${(entry.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                {(entry.cumulativePnl || 0) >= 0 ? "+" : ""}{(entry.cumulativePnl || 0).toFixed(2)}
+              <td className={`whitespace-nowrap px-2 py-2 text-right font-mono font-semibold ${Number(entry.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {Number(entry.cumulativePnl || 0) >= 0 ? "+" : ""}{Number(entry.cumulativePnl || 0).toFixed(2)}
               </td>
               <td className="whitespace-nowrap px-2 py-2 text-center font-mono">{entry.tradesCount || 0}</td>
               <td className="whitespace-nowrap px-2 py-2 text-center font-mono">{entry.openTrades || 0}</td>
@@ -531,8 +531,8 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
               <SheetDescription>
                 {entries.length} day{entries.length !== 1 ? "s" : ""} of P&L data recorded
                 {entries.length > 0 && (
-                  <span className={`ml-2 font-mono font-semibold ${(entries[0]?.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    Cumulative: {(entries[0]?.cumulativePnl || 0) >= 0 ? "+" : ""}{(entries[0]?.cumulativePnl || 0).toFixed(2)}
+                  <span className={`ml-2 font-mono font-semibold ${Number(entries[0]?.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    Cumulative: {Number(entries[0]?.cumulativePnl || 0) >= 0 ? "+" : ""}{Number(entries[0]?.cumulativePnl || 0).toFixed(2)}
                   </span>
                 )}
               </SheetDescription>

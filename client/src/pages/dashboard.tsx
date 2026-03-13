@@ -67,22 +67,21 @@ export default function Dashboard() {
 
   // Calculate position summaries - use API fields when available, otherwise compute
   const positionTotals = {
-    totalPnL: positions.reduce((sum, p) => sum + (p.pnl || 0), 0),
+    totalPnL: positions.reduce((sum, p) => sum + Number(p.pnl || 0), 0),
     unrealisedPnL: positions.reduce((sum, p) => {
-      // Use API-provided unrealised P/L if available, otherwise compute
-      if (p.unrealised_pnl !== undefined) return sum + p.unrealised_pnl;
-      return sum + (((p.ltp || 0) - (p.buy_avg || 0)) * (p.quantity || 0));
+      if (p.unrealised_pnl !== undefined) return sum + Number(p.unrealised_pnl);
+      return sum + ((Number(p.ltp || 0) - Number(p.buy_avg || 0)) * Number(p.quantity || 0));
     }, 0),
-    realisedPnL: positions.reduce((sum, p) => sum + (p.realised_pnl || 0), 0),
-    netTradedValue: positions.reduce((sum, p) => sum + ((p.ltp || 0) * Math.abs(p.quantity || 0)), 0),
+    realisedPnL: positions.reduce((sum, p) => sum + Number(p.realised_pnl || 0), 0),
+    netTradedValue: positions.reduce((sum, p) => sum + (Number(p.ltp || 0) * Math.abs(Number(p.quantity || 0))), 0),
   };
 
   // Calculate holdings summaries - use API values when available
   const holdingTotals = {
-    totalPnL: holdings.reduce((sum, h) => sum + (h.pnl || 0), 0),
-    investedValue: holdings.reduce((sum, h) => sum + (h.invested_value || (h.average_price || 0) * (h.quantity || 0)), 0),
-    currentValue: holdings.reduce((sum, h) => sum + (h.current_value || (h.current_price || 0) * (h.quantity || 0)), 0),
-    todayPnL: holdings.reduce((sum, h) => sum + (h.today_pnl || 0), 0),
+    totalPnL: holdings.reduce((sum, h) => sum + Number(h.pnl || 0), 0),
+    investedValue: holdings.reduce((sum, h) => sum + Number(h.invested_value || (Number(h.average_price || 0) * Number(h.quantity || 0))), 0),
+    currentValue: holdings.reduce((sum, h) => sum + Number(h.current_value || (Number(h.current_price || 0) * Number(h.quantity || 0))), 0),
+    todayPnL: holdings.reduce((sum, h) => sum + Number(h.today_pnl || 0), 0),
   };
   
   // Calculate percentages
@@ -245,22 +244,22 @@ export default function Dashboard() {
                             <div className="font-medium" data-testid={`text-holding-symbol-${index}`}>{holding.trading_symbol}</div>
                           </TableCell>
                           <TableCell className="text-right">{holding.quantity}</TableCell>
-                          <TableCell className="text-right">{(holding.average_price || 0).toFixed(2)}</TableCell>
-                          <TableCell className="text-right">{(holding.current_price || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{Number(holding.average_price || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{Number(holding.current_price || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-right">
                             {(holding.current_value || holding.current_price * holding.quantity).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                           </TableCell>
                           <TableCell className="text-right">
                             {(holding.invested_value || holding.average_price * holding.quantity).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                           </TableCell>
-                          <TableCell className={`text-right font-medium ${(holding.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
-                            {(holding.pnl || 0) >= 0 ? "+" : ""}{(holding.pnl || 0).toFixed(0)} ({(holding.pnl_percent || 0) >= 0 ? "+" : ""}{(holding.pnl_percent || 0).toFixed(2)}%)
+                          <TableCell className={`text-right font-medium ${Number(holding.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {Number(holding.pnl || 0) >= 0 ? "+" : ""}{Number(holding.pnl || 0).toFixed(0)} ({Number(holding.pnl_percent || 0) >= 0 ? "+" : ""}{Number(holding.pnl_percent || 0).toFixed(2)}%)
                           </TableCell>
-                          <TableCell className={`text-right font-medium ${(holding.today_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
-                            {(holding.today_pnl || 0) >= 0 ? "+" : ""}{(holding.today_pnl || 0).toFixed(0)} ({(holding.today_pnl_percent || 0) >= 0 ? "+" : ""}{(holding.today_pnl_percent || 0).toFixed(2)}%)
+                          <TableCell className={`text-right font-medium ${Number(holding.today_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {Number(holding.today_pnl || 0) >= 0 ? "+" : ""}{Number(holding.today_pnl || 0).toFixed(0)} ({Number(holding.today_pnl_percent || 0) >= 0 ? "+" : ""}{Number(holding.today_pnl_percent || 0).toFixed(2)}%)
                           </TableCell>
                           <TableCell className="text-right text-xs text-muted-foreground">
-                            {(holding.prev_close || 0) > 0 ? (holding.prev_close || 0).toFixed(2) : "—"}
+                            {Number(holding.prev_close || 0) > 0 ? Number(holding.prev_close || 0).toFixed(2) : "—"}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -345,7 +344,7 @@ export default function Dashboard() {
                     </TableHeader>
                     <TableBody>
                       {filteredPositions.map((position, index) => {
-                        const unrealisedPnl = position.unrealised_pnl ?? (((position.ltp || 0) - (position.buy_avg || 0)) * (position.quantity || 0));
+                        const unrealisedPnl = Number(position.unrealised_pnl ?? ((Number(position.ltp || 0) - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
                         return (
                         <TableRow key={index} data-testid={`row-position-${index}`}>
                           <TableCell>
@@ -362,9 +361,9 @@ export default function Dashboard() {
                             <span className="text-sm" data-testid={`text-product-type-${index}`}>{position.product_type || "NRML"}</span>
                           </TableCell>
                           <TableCell className="text-right">{Math.abs(position.quantity)}</TableCell>
-                          <TableCell className="text-right">{(position.buy_avg || 0).toFixed(2)}</TableCell>
-                          <TableCell className="text-right">{(position.sell_avg || 0).toFixed(2)}</TableCell>
-                          <TableCell className="text-right">{(position.ltp || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{Number(position.buy_avg || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{Number(position.sell_avg || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{Number(position.ltp || 0).toFixed(2)}</TableCell>
                           <TableCell>
                             {position.option_type ? (
                               <Badge variant="outline" className="text-xs" data-testid={`badge-option-${index}`}>
@@ -380,11 +379,11 @@ export default function Dashboard() {
                           <TableCell>
                             <span className="text-xs">{position.expiry || "—"}</span>
                           </TableCell>
-                          <TableCell className={`text-right font-medium ${(position.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
-                            {(position.pnl || 0) >= 0 ? "+" : ""}{(position.pnl || 0).toFixed(2)}
+                          <TableCell className={`text-right font-medium ${Number(position.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {Number(position.pnl || 0) >= 0 ? "+" : ""}{Number(position.pnl || 0).toFixed(2)}
                           </TableCell>
-                          <TableCell className={`text-right text-xs ${(position.realised_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
-                            {(position.realised_pnl || 0) >= 0 ? "+" : ""}{(position.realised_pnl || 0).toFixed(2)}
+                          <TableCell className={`text-right text-xs ${Number(position.realised_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {Number(position.realised_pnl || 0) >= 0 ? "+" : ""}{Number(position.realised_pnl || 0).toFixed(2)}
                           </TableCell>
                           <TableCell className={`text-right text-xs ${unrealisedPnl >= 0 ? "text-primary" : "text-destructive"}`}>
                             {unrealisedPnl >= 0 ? "+" : ""}{unrealisedPnl.toFixed(2)}
@@ -444,7 +443,7 @@ export default function Dashboard() {
                           </TableCell>
                           <TableCell className="text-sm">{order.order_type}</TableCell>
                           <TableCell className="text-right">{order.quantity}</TableCell>
-                          <TableCell className="text-right">{(order.price || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{Number(order.price || 0).toFixed(2)}</TableCell>
                           <TableCell>
                             <Badge 
                               variant={order.status === "COMPLETE" ? "default" : order.status === "CANCELLED" ? "destructive" : "secondary"}
@@ -496,7 +495,7 @@ function DashboardTradeCard({ plan, configs, brokerConfigs }: { plan: StrategyPl
     refetchInterval: depStatus === "active" ? 30000 : false,
   });
 
-  const totalPnl = trades.reduce((s, t) => s + (t.pnl || 0), 0);
+  const totalPnl = trades.reduce((s, t) => s + Number(t.pnl || 0), 0);
   const openCount = trades.filter((t) => t.status === "open" || t.status === "pending").length;
   const closedCount = trades.filter((t) => t.status === "closed" || t.status === "squared_off").length;
 
