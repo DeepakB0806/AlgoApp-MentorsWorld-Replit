@@ -247,10 +247,10 @@ export default function Dashboard() {
                           <TableCell className="text-right">{Number(holding.average_price || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-right">{Number(holding.current_price || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-right">
-                            {(holding.current_value || holding.current_price * holding.quantity).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                            {(Number(holding.current_value) || Number(holding.current_price || 0) * Number(holding.quantity || 0)).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                           </TableCell>
                           <TableCell className="text-right">
-                            {(holding.invested_value || holding.average_price * holding.quantity).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                            {(Number(holding.invested_value) || Number(holding.average_price || 0) * Number(holding.quantity || 0)).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                           </TableCell>
                           <TableCell className={`text-right font-medium ${Number(holding.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
                             {Number(holding.pnl || 0) >= 0 ? "+" : ""}{Number(holding.pnl || 0).toFixed(0)} ({Number(holding.pnl_percent || 0) >= 0 ? "+" : ""}{Number(holding.pnl_percent || 0).toFixed(2)}%)
