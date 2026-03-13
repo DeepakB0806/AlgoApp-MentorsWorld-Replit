@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Edit, Settings, Loader2, X, Save, AlertTriangle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Plus, Trash2, Edit, Settings, Loader2, X, Save, Info } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -103,12 +104,19 @@ export function MotherConfigurator() {
 
   const addSignalField = () => {
     if (!selectedField) return;
-    setAddedFields((prev) => [...prev, selectedField]);
+    setAddedFields((prev) => {
+      const updated = [...prev, selectedField];
+      if (updated.length >= 2 && !priceField) {
+        setPriceField(updated[1]);
+      }
+      return updated;
+    });
     setAvailableFields((prev) => prev.filter((f) => f !== selectedField));
     setSelectedField("");
   };
 
   const removeAddedField = (field: string) => {
+    if (field === priceField) setPriceField("");
     setAddedFields((prev) => prev.filter((f) => f !== field));
     setAvailableFields((prev) => [...prev, field]);
     setActionMapper((prev) => prev.filter((e) => e.fieldKey !== field));
@@ -118,8 +126,9 @@ export function MotherConfigurator() {
     if (addedFields.length === 0) return;
     setLoadingValues(true);
     try {
+      const fieldsToLoad = addedFields.filter(f => f !== priceField);
       const results = await Promise.all(
-        addedFields.map(async (field) => {
+        fieldsToLoad.map(async (field) => {
           const resp = await fetch(`/api/webhook-field-values/${webhookId}/${field}`);
           if (resp.ok) {
             const values: string[] = await resp.json();
@@ -382,27 +391,6 @@ export function MotherConfigurator() {
             <Label className="mb-2 block">Select Signal Fields</Label>
 
             <div className="flex items-center gap-2 flex-wrap">
-              <Label className="whitespace-nowrap text-xs text-muted-foreground">Price Field</Label>
-              <Select value={priceField || "auto"} onValueChange={(v) => setPriceField(v === "auto" ? "" : v)}>
-                <SelectTrigger className="w-48" data-testid="select-price-field">
-                  <SelectValue placeholder="None (auto-detect)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">None (auto-detect)</SelectItem>
-                  {[...availableFields, ...addedFields].filter((f, i, arr) => arr.indexOf(f) === i).map((f) => (
-                    <SelectItem key={f} value={f}>{f}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {!priceField && (
-                <span className="inline-flex items-center gap-1 text-xs text-amber-500" data-testid="warning-price-field">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  No price field set — auto-detect in use
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
               {availableFields.length > 0 && (
                 <>
                   <Select value={selectedField} onValueChange={setSelectedField}>
@@ -431,12 +419,31 @@ export function MotherConfigurator() {
               <div className="space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   {addedFields.map((field) => (
-                    <Badge key={field} variant="secondary" className="gap-1" data-testid={`badge-field-${field}`}>
-                      {field}
-                      <button onClick={() => removeAddedField(field)} className="ml-1" data-testid={`button-remove-field-${field}`}>
-                        <X className="w-3 h-3" />
-                      </button>
-                    </Badge>
+                    field === priceField ? (
+                      <TooltipProvider key={field}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge variant="secondary" className="gap-1 border-amber-500/50" data-testid={`badge-field-${field}`}>
+                              <Info className="w-3 h-3 text-amber-500" />
+                              {field}
+                              <button onClick={() => removeAddedField(field)} className="ml-1" data-testid={`button-remove-field-${field}`}>
+                                <X className="w-3 h-3" />
+                              </button>
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent data-testid="tooltip-price-field">
+                            <p>Price source — will not appear in the Action Mapper</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : (
+                      <Badge key={field} variant="secondary" className="gap-1" data-testid={`badge-field-${field}`}>
+                        {field}
+                        <button onClick={() => removeAddedField(field)} className="ml-1" data-testid={`button-remove-field-${field}`}>
+                          <X className="w-3 h-3" />
+                        </button>
+                      </Badge>
+                    )
                   ))}
                 </div>
                 {!mapperReady && (
@@ -563,6 +570,15 @@ export function MotherConfigurator() {
               <Plus className="w-3 h-3 mr-1" />
               Add Signal
             </Button>
+
+            {priceField && (
+              <div className="mt-4 pt-4 border-t border-border" data-testid="section-price-source">
+                <p className="text-sm font-medium mb-1">Price Source</p>
+                <p className="text-sm text-muted-foreground">
+                  Field <span className="font-mono font-semibold text-amber-500">{priceField}</span> — spot price will be taken from the TradingView webhook.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
