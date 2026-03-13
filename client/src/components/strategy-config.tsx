@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Edit, Settings, Loader2, X, Save } from "lucide-react";
+import { Plus, Trash2, Edit, Settings, Loader2, X, Save, AlertTriangle } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -377,39 +377,30 @@ export function MotherConfigurator() {
           )}
         </div>
 
-        <div>
-          <Label className="mb-1.5 block">Price Source Field</Label>
-          <div className="flex items-center gap-2 flex-wrap">
-            {availableFields.length > 0 ? (
+        {signalsFetched && (
+          <div className="space-y-3">
+            <Label className="mb-2 block">Select Signal Fields</Label>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <Label className="whitespace-nowrap text-xs text-muted-foreground">Price Field</Label>
               <Select value={priceField || "auto"} onValueChange={(v) => setPriceField(v === "auto" ? "" : v)}>
-                <SelectTrigger className="flex-1 min-w-[200px]" data-testid="select-price-field">
-                  <SelectValue placeholder="Auto-detect (price / PRICE / Price)" />
+                <SelectTrigger className="w-48" data-testid="select-price-field">
+                  <SelectValue placeholder="None (auto-detect)" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="auto">Auto-detect (price / PRICE / Price)</SelectItem>
-                  {availableFields.map((f) => (
+                  <SelectItem value="auto">None (auto-detect)</SelectItem>
+                  {[...availableFields, ...addedFields].filter((f, i, arr) => arr.indexOf(f) === i).map((f) => (
                     <SelectItem key={f} value={f}>{f}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            ) : (
-              <Input
-                value={priceField}
-                onChange={(e) => setPriceField(e.target.value.trim())}
-                placeholder="e.g. close, ltp, price  (leave blank for auto-detect)"
-                className="flex-1 min-w-[200px] font-mono text-sm"
-                data-testid="select-price-field"
-              />
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            The exact field name in the webhook payload that contains the underlying price. Leave blank to auto-detect.
-          </p>
-        </div>
-
-        {signalsFetched && (
-          <div className="space-y-3">
-            <Label className="mb-2 block">Select Signal Fields</Label>
+              {!priceField && (
+                <span className="inline-flex items-center gap-1 text-xs text-amber-500" data-testid="warning-price-field">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  No price field set — auto-detect in use
+                </span>
+              )}
+            </div>
 
             <div className="flex items-center gap-2 flex-wrap">
               {availableFields.length > 0 && (
