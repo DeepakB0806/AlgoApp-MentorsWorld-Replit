@@ -612,7 +612,20 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         }
         
         if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
-          return res.json(result.data);
+          const normalized = (result.data as any[]).map((h: any) => ({
+            trading_symbol: h.symbol || h.displaySymbol || h.trading_symbol || h.tradingSymbol || "",
+            quantity: Number(h.quantity || 0),
+            average_price: Number(h.averagePrice || h.average_price || 0),
+            current_price: Number(h.ltp || h.closingPrice || h.current_price || 0),
+            current_value: Number(h.marketValue || h.mktValue || h.current_value || 0),
+            invested_value: Number(h.investedValue || h.holdingCost || h.invested_value || 0),
+            pnl: Number(h.unrealisedPnl || h.pnl || 0),
+            pnl_percent: Number(h.pnlPercent || h.pnl_percent || 0),
+            today_pnl: Number(h.todayPnl || h.today_pnl || 0),
+            today_pnl_percent: Number(h.todayPnlPercent || h.today_pnl_percent || 0),
+            prev_close: Number(h.prevDayLtp || h.prev_close || 0),
+          }));
+          return res.json(normalized);
         }
       }
       
