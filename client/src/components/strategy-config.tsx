@@ -155,7 +155,9 @@ export function MotherConfigurator() {
         setActionMapper(allEntries);
         setMapperReady(true);
       } else {
-        toast({ title: "No signal values found for selected fields. Webhook may not have received data yet.", variant: "destructive" });
+        toast({ title: "No signal values found. You can add signal values manually below." });
+        setManualMode(true);
+        setMapperReady(true);
       }
     } catch {
       toast({ title: "Failed to load field values", variant: "destructive" });
