@@ -254,6 +254,20 @@ export function MotherConfigurator() {
     setStatus(config.status);
     setPriceField(config.priceField || "");
     setIsEditing(true);
+    if (config.webhookId) {
+      const alreadyAdded = [
+        ...(config.priceField
+          ? existingFieldKeys.filter(f => f !== config.priceField)
+          : existingFieldKeys),
+        config.priceField,
+      ].filter(Boolean) as string[];
+      fetch(`/api/webhook-signals/${config.webhookId}`)
+        .then(r => r.ok ? r.json() : [])
+        .then((fetched: string[]) => {
+          setAvailableFields(fetched.filter(f => !alreadyAdded.includes(f)));
+        })
+        .catch(() => {});
+    }
   };
 
   const handleSave = () => {
@@ -350,11 +364,16 @@ export function MotherConfigurator() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">None</SelectItem>
-                {webhooks.map((wh) => (
-                  <SelectItem key={wh.id} value={wh.id}>
-                    {wh.name}
-                  </SelectItem>
-                ))}
+                {webhooks
+                  .filter(wh => {
+                    const usedByOther = configs.some(c => c.webhookId === wh.id && c.id !== editingId);
+                    return !usedByOther;
+                  })
+                  .map((wh) => (
+                    <SelectItem key={wh.id} value={wh.id}>
+                      {wh.name}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
             <Button
@@ -365,17 +384,6 @@ export function MotherConfigurator() {
             >
               {signalsFetched ? (manualMode ? "Manual Mode" : "Signals Loaded") : "Fetch Signals"}
             </Button>
-            {!signalsFetched && isSuperAdmin && webhookId && webhookId !== "none" && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-amber-500 hover:text-amber-400"
-                onClick={() => { setManualMode(true); setSignalsFetched(true); }}
-                data-testid="button-configure-manually"
-              >
-                Configure Manually
-              </Button>
-            )}
           </div>
           {webhookId && webhookId !== "none" && (
             <div className="flex items-center gap-4 mt-3 flex-wrap">
