@@ -50,6 +50,8 @@ export function MotherConfigurator() {
   const [editingFieldName, setEditingFieldName] = useState<string | null>(null);
   const [editFieldValue, setEditFieldValue] = useState("");
   const [priceField, setPriceField] = useState("");
+  const [manualMode, setManualMode] = useState(false);
+  const [manualFieldInput, setManualFieldInput] = useState("");
 
   const { data: configs = [], isLoading } = useQuery<StrategyConfig[]>({
     queryKey: ["/api/strategy-configs"],
@@ -98,7 +100,11 @@ export function MotherConfigurator() {
       setSignalsFetched(true);
       setSelectedField("");
     } else {
-      toast({ title: "No fields found for this webhook", variant: "destructive" });
+      toast({ title: "No fields found for this webhook. Use Configure Manually to add fields.", variant: "destructive" });
+      if (isSuperAdmin) {
+        setManualMode(true);
+        setSignalsFetched(true);
+      }
     }
   };
 
@@ -125,6 +131,10 @@ export function MotherConfigurator() {
 
   const loadFieldValues = async () => {
     if (addedFields.length === 0) return;
+    if (manualMode) {
+      setMapperReady(true);
+      return;
+    }
     setLoadingValues(true);
     try {
       const fieldsToLoad = addedFields.filter(f => f !== priceField);
@@ -214,6 +224,8 @@ export function MotherConfigurator() {
     setLoadingValues(false);
     setStatus("draft");
     setPriceField("");
+    setManualMode(false);
+    setManualFieldInput("");
   };
 
   const handleEdit = (config: StrategyConfig) => {
@@ -330,7 +342,7 @@ export function MotherConfigurator() {
         <div>
           <Label className="mb-2 block">Indicator Source (Webhook)</Label>
           <div className="flex items-center gap-2 flex-wrap">
-            <Select value={webhookId} onValueChange={(val) => { setWebhookId(val); setActionMapper([]); setAvailableFields([]); setAddedFields([]); setSelectedField(""); setSignalsFetched(false); setMapperReady(false); }}>
+            <Select value={webhookId} onValueChange={(val) => { setWebhookId(val); setActionMapper([]); setAvailableFields([]); setAddedFields([]); setSelectedField(""); setSignalsFetched(false); setMapperReady(false); setManualMode(false); setManualFieldInput(""); }}>
               <SelectTrigger className="flex-1 min-w-[200px]" data-testid="select-config-webhook">
                 <SelectValue placeholder="Select indicator webhook..." />
               </SelectTrigger>
@@ -349,8 +361,19 @@ export function MotherConfigurator() {
               disabled={!webhookId || webhookId === "none"}
               data-testid="button-fetch-signals"
             >
-              {signalsFetched ? "Signals Loaded" : "Fetch Signals"}
+              {signalsFetched ? (manualMode ? "Manual Mode" : "Signals Loaded") : "Fetch Signals"}
             </Button>
+            {!signalsFetched && isSuperAdmin && webhookId && webhookId !== "none" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-amber-500 hover:text-amber-400"
+                onClick={() => { setManualMode(true); setSignalsFetched(true); }}
+                data-testid="button-configure-manually"
+              >
+                Configure Manually
+              </Button>
+            )}
           </div>
           {webhookId && webhookId !== "none" && (
             <div className="flex items-center gap-4 mt-3 flex-wrap">
@@ -397,28 +420,71 @@ export function MotherConfigurator() {
           <div className="space-y-3">
             <Label className="mb-2 block">Select Signal Fields</Label>
 
+            {manualMode && (
+              <p className="text-sm text-amber-500/80" data-testid="text-manual-mode-info">Manual mode — no signals loaded for this webhook. Add fields and signal values manually.</p>
+            )}
+
             <div className="flex items-center gap-2 flex-wrap">
-              {availableFields.length > 0 && (
+              {manualMode ? (
                 <>
-                  <Select value={selectedField} onValueChange={setSelectedField}>
-                    <SelectTrigger className="flex-1 min-w-[200px]" data-testid="select-signal-field">
-                      <SelectValue placeholder="Select a signal field to add..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableFields.map((f) => (
-                        <SelectItem key={f} value={f}>{f}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Input
+                    value={manualFieldInput}
+                    onChange={(e) => setManualFieldInput(e.target.value)}
+                    placeholder="Type field name (e.g. action)"
+                    className="flex-1 min-w-[200px]"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const trimmed = manualFieldInput.trim();
+                        if (trimmed && !addedFields.includes(trimmed)) {
+                          setAddedFields((prev) => [...prev, trimmed]);
+                          setManualFieldInput("");
+                        }
+                      }
+                    }}
+                    data-testid="input-manual-field"
+                  />
                   <Button
                     variant="outline"
-                    onClick={addSignalField}
-                    disabled={!selectedField}
-                    data-testid="button-add-signal-field"
+                    onClick={() => {
+                      const trimmed = manualFieldInput.trim();
+                      if (!trimmed) return;
+                      if (addedFields.includes(trimmed)) {
+                        toast({ title: "Field already added", variant: "destructive" });
+                        return;
+                      }
+                      setAddedFields((prev) => [...prev, trimmed]);
+                      setManualFieldInput("");
+                    }}
+                    disabled={!manualFieldInput.trim()}
+                    data-testid="button-add-manual-field"
                   >
                     <Plus className="w-4 h-4 mr-1" /> Add
                   </Button>
                 </>
+              ) : (
+                availableFields.length > 0 && (
+                  <>
+                    <Select value={selectedField} onValueChange={setSelectedField}>
+                      <SelectTrigger className="flex-1 min-w-[200px]" data-testid="select-signal-field">
+                        <SelectValue placeholder="Select a signal field to add..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableFields.map((f) => (
+                          <SelectItem key={f} value={f}>{f}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="outline"
+                      onClick={addSignalField}
+                      disabled={!selectedField}
+                      data-testid="button-add-signal-field"
+                    >
+                      <Plus className="w-4 h-4 mr-1" /> Add
+                    </Button>
+                  </>
+                )
               )}
             </div>
 
@@ -466,12 +532,16 @@ export function MotherConfigurator() {
             )}
 
             {addedFields.length === 0 && !mapperReady && (
-              <p className="text-sm text-muted-foreground">Select signal fields from the dropdown above, then click "Next" to load their values for mapping.</p>
+              <p className="text-sm text-muted-foreground">
+                {manualMode
+                  ? "Type a field name above and click Add, then click Next to open the mapper."
+                  : "Select signal fields from the dropdown above, then click \"Next\" to load their values for mapping."}
+              </p>
             )}
           </div>
         )}
 
-        {mapperReady && actionMapper.length > 0 && (
+        {mapperReady && (actionMapper.length > 0 || manualMode) && (
           <div className="space-y-3">
             <Label className="mb-2 block">Strategy Action Mapper</Label>
             <div className="border border-border rounded-md overflow-x-auto">
@@ -485,6 +555,13 @@ export function MotherConfigurator() {
                   </tr>
                 </thead>
                 <tbody>
+                  {actionMapper.length === 0 && manualMode && (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-4 text-center text-sm text-muted-foreground" data-testid="text-empty-mapper">
+                        No signal rows yet. Click "Add Signal" below to add rows manually.
+                      </td>
+                    </tr>
+                  )}
                   {actionMapper.map((entry, idx) => (
                     <tr key={`${entry.fieldKey}-${entry.signalValue}`} className="border-b border-border/50 last:border-0">
                       <td className="px-3 py-2 font-mono text-xs" data-testid={`text-signal-${idx}`}>
