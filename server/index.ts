@@ -10,6 +10,7 @@ import TL from "./tl-kotak-neo-v3";
 import EL from "./el-kotak-neo-v3";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
 import { runScripMasterSync } from "./scrip-master-sync";
+import { startPlanMonitor } from "./plan-monitor";
 
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err.stack || err.message || err);
@@ -167,6 +168,14 @@ app.use((req, res, next) => {
     }
   } catch (error) {
     log(`Auto-cleanup warning: ${error}`);
+  }
+
+  // Start plan monitor — auto square-off based on exitTime and exitOnExpiry
+  try {
+    startPlanMonitor(storage);
+    log(`Plan monitor started`);
+  } catch (err) {
+    log(`Plan monitor startup warning: ${err}`);
   }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
