@@ -538,6 +538,47 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.post("/api/strategy-daily-pnl/snapshot/:planId", async (req, res) => {
+    try {
+      const { planId } = req.params;
+      const { totalPnl, openCount, closedCount } = req.body;
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
+      const entries = await storage.getStrategyDailyPnl(planId);
+      const todayEntry = entries.find(e => e.date === today);
+      const previousDaysPnl = entries.filter(e => e.date !== today).reduce((s, e) => s + Number(e.dailyPnl || 0), 0);
+      const cumulativePnl = previousDaysPnl + Number(totalPnl || 0);
+      const tradesCount = (openCount || 0) + (closedCount || 0);
+
+      if (todayEntry) {
+        const updated = await storage.updateStrategyDailyPnl(todayEntry.id, {
+          dailyPnl: totalPnl,
+          cumulativePnl,
+          openTrades: openCount,
+          closedTrades: closedCount,
+          tradesCount,
+          status: "active",
+        });
+        res.json(updated);
+      } else {
+        const created = await storage.createStrategyDailyPnl({
+          planId,
+          date: today,
+          dailyPnl: totalPnl,
+          cumulativePnl,
+          openTrades: openCount,
+          closedTrades: closedCount,
+          tradesCount,
+          status: "active",
+          createdAt: new Date().toISOString(),
+        });
+        res.json(created);
+      }
+    } catch (error) {
+      res.status(500).json({ error: "Failed to snapshot daily P&L" });
+    }
+  });
+
   app.delete("/api/strategy-daily-pnl/:planId/clear", async (req, res) => {
     try {
       const { planId } = req.params;

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { TrendingUp, TrendingDown, RefreshCw, Home, Wifi, WifiOff, Search, BarChart3, Activity, Play, Pause, Square, Power, Rocket, Clock } from "lucide-react";
+import { TrendingUp, TrendingDown, RefreshCw, Home, Wifi, WifiOff, Search, BarChart3, Activity, Play, Pause, Square, Power, Rocket, Clock, ChevronDown, ChevronUp } from "lucide-react";
 import { Link } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 
@@ -602,6 +602,7 @@ function DashboardTradeCard({ plan, configs, brokerConfigs, nfoPositions }: { pl
   const depStatus = plan.deploymentStatus || "draft";
   const depConfig = DEPLOY_STATUS_MAP[depStatus] || DEPLOY_STATUS_MAP.draft;
   const DepIcon = depConfig.icon;
+  const [tableCollapsed, setTableCollapsed] = useState(false);
 
   const { data: trades = [], isLoading: tradesLoading, refetch } = useQuery<StrategyTrade[]>({
     queryKey: ["/api/strategy-trades", plan.id],
@@ -648,12 +649,16 @@ function DashboardTradeCard({ plan, configs, brokerConfigs, nfoPositions }: { pl
             </span>
             <Badge variant="secondary" className="text-xs">Open: {openCount}</Badge>
             <Badge variant="secondary" className="text-xs">Closed: {closedCount}</Badge>
+            <Button variant="ghost" size="sm" onClick={() => setTableCollapsed(!tableCollapsed)} data-testid={`button-toggle-table-${plan.id}`}>
+              {tableCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+            </Button>
             <Button variant="outline" size="sm" onClick={() => refetch()} disabled={tradesLoading} data-testid={`button-refresh-trade-${plan.id}`}>
               <RefreshCw className={`w-3 h-3 ${tradesLoading ? "animate-spin" : ""}`} />
             </Button>
           </div>
         </div>
       </CardHeader>
+      {!tableCollapsed && (
       <CardContent className="pt-0">
         {tradesLoading ? (
           <p className="text-xs text-muted-foreground py-4 text-center">Loading…</p>
@@ -739,6 +744,7 @@ function DashboardTradeCard({ plan, configs, brokerConfigs, nfoPositions }: { pl
           </div>
         )}
       </CardContent>
+      )}
     </Card>
   );
 }

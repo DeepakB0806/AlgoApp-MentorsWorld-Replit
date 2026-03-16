@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, Trash2, Settings, Link2, Loader2, X, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, Activity, BarChart3, Archive, AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
+import { Plus, Trash2, Settings, Link2, Loader2, X, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, Activity, BarChart3, Archive, AlertTriangle, Maximize2, Minimize2, ChevronDown, ChevronUp, Search } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl, Position } from "@shared/schema";
@@ -82,6 +82,7 @@ function DailyPnlTable({ entries }: { entries: StrategyDailyPnl[] }) {
 function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; isOpen: boolean; onOpenChange: (open: boolean) => void }) {
   const { toast } = useToast();
   const [sheetExpanded, setSheetExpanded] = useState(false);
+  const [searchPositions, setSearchPositions] = useState("");
 
   const { data: rawEntries = [], isLoading, refetch } = useQuery<StrategyDailyPnl[]>({
     queryKey: ["/api/strategy-daily-pnl", plan.id],
@@ -109,6 +110,36 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
   const nfoPositions = allPositions.filter((p) => p.exchange === "NFO");
   const strategySymbols = new Set(trades.map((t) => t.tradingSymbol).filter(Boolean));
   const strategyPositions = nfoPositions.filter((p) => strategySymbols.has(p.trading_symbol || ""));
+  const filteredStrategyPositions = strategyPositions.filter((p) =>
+    (p.trading_symbol || "").toLowerCase().includes(searchPositions.toLowerCase())
+  );
+
+  const totalPnl = strategyPositions.reduce((s, p) => s + Number(p.pnl || 0), 0);
+  const realisedPnl = strategyPositions.reduce((s, p) => s + Number(p.realised_pnl || 0), 0);
+  const unrealisedTotal = strategyPositions.reduce((s, p) => s + Number(p.unrealised_pnl ?? ((Number(p.ltp || 0) - Number(p.buy_avg || 0)) * Number(p.quantity || 0))), 0);
+  const openCount = strategyPositions.filter((p) => Number(p.quantity || 0) !== 0).length;
+  const closedCount = strategyPositions.filter((p) => Number(p.quantity || 0) === 0).length;
+
+  const snapshotRef = useRef({ totalPnl, openCount, closedCount, positionsLoading, tradesLoading });
+  snapshotRef.current = { totalPnl, openCount, closedCount, positionsLoading, tradesLoading };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const snapshotPnl = () => {
+      const { totalPnl: tp, openCount: oc, closedCount: cc, positionsLoading: pl, tradesLoading: tl } = snapshotRef.current;
+      if (pl || tl) return;
+      fetch(`/api/strategy-daily-pnl/snapshot/${plan.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ totalPnl: tp, openCount: oc, closedCount: cc }),
+      }).then((resp) => {
+        if (resp.ok) queryClient.invalidateQueries({ queryKey: ["/api/strategy-daily-pnl", plan.id] });
+      }).catch(() => {});
+    };
+    snapshotPnl();
+    const interval = setInterval(snapshotPnl, 30000);
+    return () => clearInterval(interval);
+  }, [isOpen, plan.id]);
 
   const clearDailyPnlMutation = useMutation({
     mutationFn: async (days: number | "all") => {
@@ -205,14 +236,34 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
         </SheetHeader>
         <div className="mt-4 flex-1 min-h-0 overflow-y-auto flex flex-col gap-6">
           <div>
-            <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Live Positions</p>
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+              <div className="flex items-center gap-4 flex-wrap">
+                <span className={`text-sm font-bold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`} data-testid={`text-sheet-pnl-${plan.id}`}>
+                  P&L: {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
+                </span>
+                <Badge variant="secondary" className="text-xs">Open: {openCount}</Badge>
+                <Badge variant="secondary" className="text-xs">Closed: {closedCount}</Badge>
+              </div>
+              {strategyPositions.length > 0 && (
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                  <Input
+                    placeholder="Search positions"
+                    value={searchPositions}
+                    onChange={(e) => setSearchPositions(e.target.value)}
+                    className="pl-8 h-8 w-48 text-xs"
+                    data-testid={`input-search-pnl-positions-${plan.id}`}
+                  />
+                </div>
+              )}
+            </div>
             {(tradesLoading || positionsLoading) ? (
               <div className="flex items-center gap-2 py-4">
                 <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">Loading positions…</span>
               </div>
-            ) : strategyPositions.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4" data-testid={`empty-state-positions-pnl-${plan.id}`}>No NFO positions linked to this strategy.</p>
+            ) : filteredStrategyPositions.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4" data-testid={`empty-state-positions-pnl-${plan.id}`}>{strategyPositions.length === 0 ? "No NFO positions linked to this strategy." : "No matching positions."}</p>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -236,7 +287,7 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {strategyPositions.map((position, index) => {
+                    {filteredStrategyPositions.map((position, index) => {
                       const unrealisedPnl = Number(position.unrealised_pnl ?? ((Number(position.ltp || 0) - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
                       const instType = (position as any).instrument_type || "";
                       const token = (position as any).token || "";
@@ -316,6 +367,7 @@ export function BrokerLinking() {
   const [confirmAction, setConfirmAction] = useState<{ planId: string; action: string } | null>(null);
   const [deployConfig, setDeployConfig] = useState<Record<string, { lotMultiplier: number; stoploss: number; profitTarget: number; baseStoploss: number; baseProfitTarget: number; brokerConfigId?: string }>>({});
   const [pnlSheetPlanId, setPnlSheetPlanId] = useState<string | null>(null);
+  const [expandedCorrelationMaps, setExpandedCorrelationMaps] = useState<Set<string>>(new Set());
 
   const plansKey = activePlans.map((p) => `${p.id}:${p.brokerConfigId}:${p.isProxyMode}`).join(",");
   useEffect(() => {
@@ -664,10 +716,24 @@ export function BrokerLinking() {
                       ...(tp.legs || []).length > 0 ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground", productMode: "MIS" as const }] : [],
                     ];
                     if (blockGroups.length === 0) return null;
+                    const isCorrelationExpanded = expandedCorrelationMaps.has(plan.id);
                     return (
                       <div className="mt-3 border-t border-border/50 pt-3" data-testid={`container-field-correlation-${plan.id}`}>
-                        <Label className="text-xs mb-2 block text-muted-foreground">Field Correlation Map</Label>
-                        <div className="overflow-x-auto">
+                        <button
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-full"
+                          onClick={() => setExpandedCorrelationMaps(prev => {
+                            const next = new Set(prev);
+                            if (next.has(plan.id)) next.delete(plan.id);
+                            else next.add(plan.id);
+                            return next;
+                          })}
+                          data-testid={`button-toggle-correlation-${plan.id}`}
+                        >
+                          {isCorrelationExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          <span>Field Correlation Map</span>
+                        </button>
+                        {isCorrelationExpanded && (
+                        <div className="overflow-x-auto mt-2">
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="border-b border-border/30">
@@ -715,6 +781,7 @@ export function BrokerLinking() {
                             </tbody>
                           </table>
                         </div>
+                        )}
                       </div>
                     );
                   })()}
