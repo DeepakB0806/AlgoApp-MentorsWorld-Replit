@@ -12,11 +12,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, Trash2, Edit, Settings, Link2, Loader2, Save, Clock, Shield, Target, TrendingUp, Info, CalendarIcon } from "lucide-react";
+import { Plus, Trash2, Edit, Settings, Link2, Loader2, Save, Clock, Shield, Target, TrendingUp, Info, CalendarIcon, ChevronRight } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { StrategyConfig, StrategyPlan } from "@shared/schema";
+import type { StrategyConfig, StrategyPlan, Webhook } from "@shared/schema";
 import type { PlanTradeLeg, TradeParams, BlockConfig, StoplossConfig, ProfitTargetConfig, TrailingStoplossConfig, TimeLogicConfig } from "@shared/schema";
 import type { BrokerConfig } from "@shared/schema";
 
@@ -85,6 +85,10 @@ export function TradePlanning() {
 
   const { data: brokerConfigs = [] } = useQuery<BrokerConfig[]>({
     queryKey: ["/api/broker-configs"],
+  });
+
+  const { data: webhooks = [] } = useQuery<Webhook[]>({
+    queryKey: ["/api/webhooks"],
   });
 
   const activeConfigs = configs.filter((c) => c.status === "active" || c.status === "draft");
@@ -248,6 +252,16 @@ export function TradePlanning() {
   const getConfigName = (cId: string) => {
     const c = configs.find((cfg) => cfg.id === cId);
     return c ? c.name : "Unknown";
+  };
+
+  const getPlanChain = (plan: StrategyPlan): { p?: string | null; mc?: string | null; tps?: string | null } => {
+    const config = configs.find((c) => c.id === plan.configId);
+    const webhook = config ? webhooks.find((w) => w.id === config.webhookId) : undefined;
+    return {
+      p: webhook?.uniqueCode,
+      mc: config?.uniqueCode,
+      tps: plan.uniqueCode,
+    };
   };
 
   const getBrokerName = (bId: string | null | undefined) => {
@@ -972,7 +986,23 @@ export function TradePlanning() {
                       <Badge variant={getStatusVariant(plan.status)} data-testid={`badge-plan-status-${plan.id}`}>
                         {plan.status}
                       </Badge>
+                      {plan.uniqueCode && (
+                        <Badge variant="outline" className="font-mono text-xs" data-testid={`badge-plan-code-${plan.id}`}>
+                          {plan.uniqueCode}
+                        </Badge>
+                      )}
                     </CardTitle>
+                    {(() => {
+                      const chain = getPlanChain(plan);
+                      if (!chain.mc && !chain.tps) return null;
+                      return (
+                        <div className="flex items-center gap-1 text-xs font-mono text-muted-foreground" data-testid={`text-plan-chain-${plan.id}`}>
+                          {chain.p && <><span className="text-amber-500">{chain.p}</span><ChevronRight className="w-3 h-3" /></>}
+                          {chain.mc && <><span className="text-blue-500">{chain.mc}</span><ChevronRight className="w-3 h-3" /></>}
+                          {chain.tps && <span className="text-emerald-500">{chain.tps}</span>}
+                        </div>
+                      );
+                    })()}
                     <p className="text-sm text-muted-foreground">
                       Config: <span data-testid={`text-plan-config-${plan.id}`}>{getConfigName(plan.configId)}</span>
                       {plan.exchange && <span className="ml-2">{plan.exchange}</span>}

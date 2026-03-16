@@ -136,11 +136,13 @@ export const strategyConfigs = pgTable("strategy_configs", {
   createdBy: varchar("created_by", { length: 36 }),
   createdAt: text("created_at"),
   updatedAt: text("updated_at"),
+  uniqueCode: varchar("unique_code", { length: 9 }),
+  linkedConfigCode: varchar("linked_config_code", { length: 9 }),
 }, (table) => [
   index("idx_strategy_configs_webhook_id").on(table.webhookId),
 ]);
 
-export const insertStrategyConfigSchema = createInsertSchema(strategyConfigs).omit({ id: true });
+export const insertStrategyConfigSchema = createInsertSchema(strategyConfigs).omit({ id: true, uniqueCode: true });
 export type InsertStrategyConfig = z.infer<typeof insertStrategyConfigSchema>;
 export type StrategyConfig = typeof strategyConfigs.$inferSelect;
 
@@ -167,13 +169,15 @@ export const strategyPlans = pgTable("strategy_plans", {
   createdBy: varchar("created_by", { length: 36 }),
   createdAt: text("created_at"),
   updatedAt: text("updated_at"),
+  uniqueCode: varchar("unique_code", { length: 10 }),
+  linkedPlanCode: varchar("linked_plan_code", { length: 10 }),
 }, (table) => [
   index("idx_strategy_plans_config_id").on(table.configId),
   index("idx_strategy_plans_broker_config_id").on(table.brokerConfigId),
   index("idx_strategy_plans_deployment_status").on(table.deploymentStatus),
 ]);
 
-export const insertStrategyPlanSchema = createInsertSchema(strategyPlans).omit({ id: true });
+export const insertStrategyPlanSchema = createInsertSchema(strategyPlans).omit({ id: true, uniqueCode: true });
 export type InsertStrategyPlan = z.infer<typeof insertStrategyPlanSchema>;
 export type StrategyPlan = typeof strategyPlans.$inferSelect;
 
@@ -208,6 +212,7 @@ export const strategyTrades = pgTable("strategy_trades", {
   localTime: text("local_time"),
   mode: text("mode"),
   modeDesc: text("mode_desc"),
+  webhookDataId: varchar("webhook_data_id", { length: 36 }),
 }, (table) => [
   index("idx_strategy_trades_plan_id").on(table.planId),
   index("idx_strategy_trades_status").on(table.status),
@@ -405,6 +410,7 @@ export const webhookData = pgTable("webhook_data", {
   signalType: text("signal_type"), // "buy", "sell", "hold"
   isProcessed: boolean("is_processed").default(false),
   processedAt: text("processed_at"),
+  processStatus: text("process_status").default("pending"), // 'pending'|'success'|'failed'|'expired'
 }, (table) => [
   index("idx_webhook_data_webhook_id").on(table.webhookId),
   index("idx_webhook_data_strategy_id").on(table.strategyId),

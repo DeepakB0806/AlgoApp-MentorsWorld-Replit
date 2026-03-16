@@ -11,6 +11,7 @@ import EL from "./el-kotak-neo-v3";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
 import { runScripMasterSync } from "./scrip-master-sync";
 import { startPlanMonitor } from "./plan-monitor";
+import { resolveAllSignalsFromActionMapper, processTradeSignal } from "./te-kotak-neo-v3";
 
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err.stack || err.message || err);
@@ -21,6 +22,54 @@ process.on('unhandledRejection', (reason) => {
 
 const app = express();
 const httpServer = createServer(app);
+
+async function recoverUnprocessedSignals(): Promise<void> {
+  const CUTOFF_MS = 90_000;
+  const now = Date.now();
+
+  const unprocessed = await storage.getUnprocessedWebhookData();
+  const recent = unprocessed.filter(row => {
+    const receivedAt = row.receivedAt ? new Date(row.receivedAt).getTime() : 0;
+    return (now - receivedAt) <= CUTOFF_MS;
+  });
+
+  if (recent.length === 0) {
+    log(`[RECOVERY] No recent unprocessed signals (cutoff: ${CUTOFF_MS / 1000}s)`);
+    return;
+  }
+
+  log(`[RECOVERY] Found ${recent.length} unprocessed signal(s) within ${CUTOFF_MS / 1000}s cutoff — replaying...`);
+
+  for (const row of recent) {
+    try {
+      const configs = await storage.getStrategyConfigsByWebhookId(row.webhookId);
+      if (configs.length === 0) {
+        log(`[RECOVERY] No MC configs for webhook ${row.webhookId} — skipping signal ${row.id.slice(0, 8)}`);
+        await storage.updateWebhookData(row.id, { processStatus: "skipped" });
+        continue;
+      }
+
+      const signalData: Record<string, any> = { ...row, signalType: row.signalType, alert: row.alert };
+
+      for (const config of configs) {
+        const resolvedSignals = resolveAllSignalsFromActionMapper(signalData, config.actionMapper);
+        for (const resolved of resolvedSignals) {
+          if (resolved.signalType === "hold") continue;
+          await processTradeSignal(storage, row, config.id, {
+            blockType: resolved.blockType,
+            resolvedAction: resolved.resolvedAction,
+          }).catch(err => log(`[RECOVERY] processTradeSignal error for config ${config.id.slice(0, 8)}: ${err}`));
+        }
+      }
+
+      await storage.updateWebhookData(row.id, { processStatus: "processed" });
+      log(`[RECOVERY] Signal ${row.id.slice(0, 8)} replayed successfully`);
+    } catch (err) {
+      log(`[RECOVERY] Error replaying signal ${row.id.slice(0, 8)}: ${err}`);
+      await storage.updateWebhookData(row.id, { processStatus: "failed" }).catch(() => {});
+    }
+  }
+}
 
 function gracefulShutdown(signal: string) {
   console.error(`${signal} received, shutting down gracefully...`);
@@ -137,6 +186,14 @@ app.use((req, res, next) => {
   }
 
   tradingCache.warmUp(storage).catch(err => log(`Cache warm-up error: ${err}`));
+
+  // Backfill unique codes for any MC/TPS rows that were created before codes were added
+  storage.backfillUniqueCodes().catch(err => log(`[BACKFILL] Error: ${err}`));
+
+  // Crash recovery: replay any signals that arrived during a server outage (90-second cutoff)
+  setTimeout(() => {
+    recoverUnprocessedSignals().catch(err => log(`[RECOVERY] Error: ${err}`));
+  }, 3000);
 
   // Auto-sync scrip master for connected live brokers on startup
   try {

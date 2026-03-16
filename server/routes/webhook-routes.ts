@@ -270,68 +270,96 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
       timing.parse_ms = Date.now() - t1;
 
       const t2 = Date.now();
-      let linkedConfig = tradingCache.getConfigByWebhookId(webhookId);
-      if (linkedConfig === undefined) {
-        linkedConfig = (await storage.getStrategyConfigByWebhookId(webhookId)) || null;
-        tradingCache.setConfigByWebhookId(webhookId, linkedConfig);
+
+      // Persist signal to DB immediately — BEFORE any trade attempt (hot path)
+      // This ensures signal is recorded even if server crashes during trade execution.
+      // Fallback: if DB write fails, create an in-memory stub so trade can still proceed.
+      let savedSignal: any;
+      try {
+        savedSignal = await storage.createWebhookData({
+          webhookId,
+          strategyId: webhook.strategyId || undefined,
+          webhookName: webhook.name,
+          receivedAt: new Date().toISOString(),
+          rawPayload: JSON.stringify(payload),
+          ...parsedData,
+          signalType: parsedData.actionBinary === 1 ? "buy" : parsedData.actionBinary === 0 ? "sell" : "hold",
+          isProcessed: false,
+          processStatus: "pending",
+        });
+      } catch (sigErr) {
+        console.error(`[WEBHOOK ${webhookId.slice(0,8)}] Signal DB write failed (trade will still proceed):`, sigErr);
+        savedSignal = { id: "", webhookId, webhookName: webhook.name, receivedAt: new Date().toISOString(), rawPayload: JSON.stringify(payload), ...parsedData, isProcessed: false, processStatus: "pending" };
       }
 
-      if (linkedConfig?.priceField) {
-        const configuredPrice = parseNumeric((payload as Record<string, any>)[linkedConfig.priceField]);
-        if (configuredPrice !== null && configuredPrice !== undefined && !isNaN(configuredPrice)) {
-          console.log(`[WEBHOOK ${webhookId.slice(0,8)}] Price extracted: field=${linkedConfig.priceField} value=${configuredPrice}`);
-          parsedData.price = configuredPrice;
-        } else {
-          console.warn(`[WEBHOOK ${webhookId.slice(0,8)}] Configured priceField="${linkedConfig.priceField}" not found in payload — falling back to auto-detect`);
-        }
+      // Load all MC configs attached to this webhook (one webhook → many MCs)
+      let linkedConfigs = tradingCache.getConfigsByWebhookId(webhookId);
+      if (linkedConfigs === undefined) {
+        linkedConfigs = await storage.getStrategyConfigsByWebhookId(webhookId);
+        tradingCache.setConfigsByWebhookId(webhookId, linkedConfigs);
       }
 
-      const allSignals = resolveAllSignalsFromActionMapper(parsedData, linkedConfig?.actionMapper);
-      const { signalType, blockType: directBlockType, resolvedAction } = allSignals[0];
-      console.log(`[PFL] ▶ Webhook ${webhookId.slice(0,8)} received: alert=${parsedData.alert} signals=${allSignals.length} → ${allSignals.map(s => `${s.resolvedAction}@${s.blockType}(${s.signalType})`).join(", ")}`);
       timing.signal_resolve_ms = Date.now() - t2;
+      console.log(`[PFL] ▶ Webhook ${webhookId.slice(0,8)} received: alert=${parsedData.alert} MCs=${linkedConfigs.length}`);
 
       const t3 = Date.now();
       let tradeResults: any[] = [];
-      const strategyConfigId = linkedConfig?.id || webhook.strategyId || null;
+      let signalType = savedSignal.signalType || "hold";
 
-      if (strategyConfigId && allSignals.some(s => s.signalType === "buy" || s.signalType === "sell")) {
+      for (const linkedConfig of linkedConfigs) {
+        // Each MC may specify its own priceField — resolve per-config
+        const configParsedData = { ...parsedData };
+        if (linkedConfig.priceField) {
+          const configuredPrice = parseNumeric((payload as Record<string, any>)[linkedConfig.priceField]);
+          if (configuredPrice !== null && configuredPrice !== undefined && !isNaN(configuredPrice)) {
+            console.log(`[WEBHOOK ${webhookId.slice(0,8)}] MC ${linkedConfig.id.slice(0,8)}: price from field=${linkedConfig.priceField} value=${configuredPrice}`);
+            configParsedData.price = configuredPrice;
+          } else {
+            console.warn(`[WEBHOOK ${webhookId.slice(0,8)}] MC ${linkedConfig.id.slice(0,8)}: priceField="${linkedConfig.priceField}" not found — using auto-detected price`);
+          }
+        }
+
+        const allSignals = resolveAllSignalsFromActionMapper(configParsedData, linkedConfig.actionMapper);
+        const primarySignal = allSignals[0];
+        signalType = primarySignal.signalType;
+        console.log(`[PFL] MC ${linkedConfig.id.slice(0,8)} "${linkedConfig.name}": ${allSignals.length} signal(s) → ${allSignals.map(s => `${s.resolvedAction}@${s.blockType}(${s.signalType})`).join(", ")}`);
+
+        const signalDataForTrade = { ...savedSignal, ...configParsedData, signalType: primarySignal.signalType };
+
         for (const signal of allSignals) {
           if (signal.signalType !== "buy" && signal.signalType !== "sell") continue;
-
-          const webhookDataForTrade = {
-            id: "",
-            webhookId,
-            strategyId: webhook.strategyId || null,
-            webhookName: webhook.name,
-            receivedAt: new Date().toISOString(),
-            rawPayload: JSON.stringify(payload),
-            ...parsedData,
-            signalType: signal.signalType,
-            isProcessed: false,
-            processedAt: null,
-          };
-
           try {
-            const results = await processTradeSignal(storage, webhookDataForTrade as any, strategyConfigId, {
+            const results = await processTradeSignal(storage, signalDataForTrade as any, linkedConfig.id, {
               blockType: signal.blockType,
               resolvedAction: signal.resolvedAction,
-              parentExchange: linkedConfig?.exchange,
-              parentTicker: linkedConfig?.ticker,
+              parentExchange: linkedConfig.exchange,
+              parentTicker: linkedConfig.ticker,
             });
             tradeResults.push(...results);
           } catch (ptError) {
-            console.error(`Trade execution error for ${signal.resolvedAction}@${signal.blockType}:`, ptError);
+            console.error(`Trade execution error for MC ${linkedConfig.id.slice(0,8)} ${signal.resolvedAction}@${signal.blockType}:`, ptError);
             tradeResults.push({ success: false, action: "error", message: String(ptError) });
           }
         }
 
         if (allSignals.length > 1) {
-          console.log(`[PFL] Composite signal: ${allSignals.length} actions processed — ${allSignals.map(s => `${s.resolvedAction}@${s.blockType}`).join(", ")}`);
+          console.log(`[PFL] MC ${linkedConfig.id.slice(0,8)} composite: ${allSignals.length} actions — ${allSignals.map(s => `${s.resolvedAction}@${s.blockType}`).join(", ")}`);
         }
       }
+
+      // Update saved signal with final processStatus
+      const anySuccess = tradeResults.some(r => r.success);
+      if (savedSignal.id) {
+        storage.updateWebhookData(savedSignal.id, {
+          isProcessed: anySuccess,
+          processStatus: anySuccess ? "success" : (tradeResults.length === 0 ? "pending" : "failed"),
+          processedAt: anySuccess ? new Date().toISOString() : undefined,
+          signalType,
+        }).catch(err => console.error("[WEBHOOK] Signal status update failed:", err));
+      }
+
       timing.trade_execute_ms = Date.now() - t3;
-      console.log(`[PFL] ◀ Webhook ${webhookId.slice(0,8)} complete: ${tradeResults.length} result(s) — ${tradeResults.map(r => `${r.action}:${r.success?"OK":"FAIL"}`).join(", ")} | hot=${timing.total_hot_path_ms || (Date.now() - t0)}ms`);
+      console.log(`[PFL] ◀ Webhook ${webhookId.slice(0,8)} complete: ${tradeResults.length} result(s) across ${linkedConfigs.length} MC(s) — ${tradeResults.map(r => `${r.action}:${r.success?"OK":"FAIL"}`).join(", ")} | hot=${Date.now() - t0}ms`);
       timing.total_hot_path_ms = Date.now() - t0;
 
       res.json({ 
@@ -363,17 +391,6 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
               ...parsedData,
             }),
 
-            storage.createWebhookData({
-              webhookId,
-              strategyId: webhook.strategyId || undefined,
-              webhookName: webhook.name,
-              receivedAt: new Date().toISOString(),
-              rawPayload: JSON.stringify(payload),
-              ...parsedData,
-              signalType,
-              isProcessed: tradeResults.some(r => r.success),
-            }),
-
             storage.updateWebhook(webhookId, {
               lastTriggered: new Date().toISOString(),
               totalTriggers: (webhook.totalTriggers || 0) + 1,
@@ -382,7 +399,7 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
 
           tradingCache.invalidateWebhook(webhookId);
 
-          console.log(`[WEBHOOK ${webhookId}] HOT: ${timing.total_hot_path_ms}ms | COLD: ${Date.now() - coldStart}ms | Signal: ${signalType} | Trades: ${tradeResults.length} | Timing: ${JSON.stringify(timing)}`);
+          console.log(`[WEBHOOK ${webhookId}] HOT: ${timing.total_hot_path_ms}ms | COLD: ${Date.now() - coldStart}ms | Signal: ${signalType} | Trades: ${tradeResults.length} | MCs: ${linkedConfigs!.length} | Timing: ${JSON.stringify(timing)}`);
         } catch (coldErr) {
           console.error("Cold path error (non-blocking):", coldErr);
         }

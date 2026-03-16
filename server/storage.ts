@@ -36,6 +36,9 @@ function generateUniqueCode(): string {
   return code;
 }
 
+function generateConfigCode(): string { return `MC-${generateUniqueCode()}`; }
+function generatePlanCode(): string { return `TPS-${generateUniqueCode()}`; }
+
 export interface IStorage {
   // Strategies
   getStrategies(): Promise<Strategy[]>;
@@ -80,7 +83,9 @@ export interface IStorage {
   getWebhookDataByStrategy(strategyId: string): Promise<WebhookData[]>;
   getLatestWebhookData(webhookId: string): Promise<WebhookData | undefined>;
   createWebhookData(data: InsertWebhookData): Promise<WebhookData>;
+  updateWebhookData(id: string, data: Partial<InsertWebhookData>): Promise<WebhookData | undefined>;
   markWebhookDataProcessed(id: string): Promise<WebhookData | undefined>;
+  getUnprocessedWebhookData(): Promise<WebhookData[]>;
   deleteWebhookData(webhookId: string, daysToKeep: number): Promise<number>;
   deleteWebhookDataOlderThan(daysToKeep: number): Promise<number>;
   deleteAllWebhookData(): Promise<number>;
@@ -112,6 +117,7 @@ export interface IStorage {
   getStrategyConfigs(): Promise<StrategyConfig[]>;
   getStrategyConfig(id: string): Promise<StrategyConfig | undefined>;
   getStrategyConfigByWebhookId(webhookId: string): Promise<StrategyConfig | undefined>;
+  getStrategyConfigsByWebhookId(webhookId: string): Promise<StrategyConfig[]>;
   createStrategyConfig(config: InsertStrategyConfig): Promise<StrategyConfig>;
   updateStrategyConfig(id: string, config: Partial<InsertStrategyConfig>): Promise<StrategyConfig | undefined>;
   deleteStrategyConfig(id: string): Promise<boolean>;
@@ -160,6 +166,9 @@ export interface IStorage {
   getInstrumentConfigs(): Promise<InstrumentConfig[]>;
   getInstrumentConfig(ticker: string, exchange: string): Promise<InstrumentConfig | undefined>;
   upsertInstrumentConfig(data: InsertInstrumentConfig): Promise<InstrumentConfig>;
+
+  // Startup utilities
+  backfillUniqueCodes(): Promise<void>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -552,6 +561,17 @@ export class DatabaseStorage implements IStorage {
     return updated || undefined;
   }
 
+  async updateWebhookData(id: string, data: Partial<InsertWebhookData>): Promise<WebhookData | undefined> {
+    const [updated] = await db.update(webhookData).set(data).where(eq(webhookData.id, id)).returning();
+    return updated || undefined;
+  }
+
+  async getUnprocessedWebhookData(): Promise<WebhookData[]> {
+    return await db.select().from(webhookData)
+      .where(and(eq(webhookData.isProcessed, false), eq(webhookData.processStatus, "pending")))
+      .orderBy(desc(webhookData.receivedAt));
+  }
+
   async deleteWebhookData(webhookId: string, daysToKeep: number): Promise<number> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
@@ -755,9 +775,14 @@ export class DatabaseStorage implements IStorage {
     return config || undefined;
   }
 
+  async getStrategyConfigsByWebhookId(webhookId: string): Promise<StrategyConfig[]> {
+    return await db.select().from(strategyConfigs).where(eq(strategyConfigs.webhookId, webhookId));
+  }
+
   async createStrategyConfig(insertConfig: InsertStrategyConfig): Promise<StrategyConfig> {
     const id = randomUUID();
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const uniqueCode = generateConfigCode();
     const [config] = await db.insert(strategyConfigs).values({
       id,
       name: insertConfig.name,
@@ -772,6 +797,8 @@ export class DatabaseStorage implements IStorage {
       createdBy: insertConfig.createdBy ?? null,
       createdAt: now,
       updatedAt: now,
+      uniqueCode,
+      linkedConfigCode: insertConfig.linkedConfigCode ?? null,
     }).returning();
     return config;
   }
@@ -809,6 +836,7 @@ export class DatabaseStorage implements IStorage {
   async createStrategyPlan(insertPlan: InsertStrategyPlan): Promise<StrategyPlan> {
     const id = randomUUID();
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const uniqueCode = generatePlanCode();
     const [plan] = await db.insert(strategyPlans).values({
       id,
       name: insertPlan.name,
@@ -822,6 +850,8 @@ export class DatabaseStorage implements IStorage {
       createdBy: insertPlan.createdBy ?? null,
       createdAt: now,
       updatedAt: now,
+      uniqueCode,
+      linkedPlanCode: insertPlan.linkedPlanCode ?? null,
     }).returning();
     return plan;
   }
@@ -1407,6 +1437,36 @@ export class DatabaseStorage implements IStorage {
       .values({ ...data, updatedAt: new Date().toISOString() })
       .returning();
     return created;
+  }
+
+  async backfillUniqueCodes(): Promise<void> {
+    const configs = await this.getStrategyConfigs();
+    let configsBackfilled = 0;
+    for (const c of configs) {
+      if (!c.uniqueCode) {
+        await db.update(strategyConfigs)
+          .set({ uniqueCode: generateConfigCode() })
+          .where(eq(strategyConfigs.id, c.id));
+        configsBackfilled++;
+      }
+    }
+
+    let plansBackfilled = 0;
+    for (const c of configs) {
+      const plans = await this.getStrategyPlansByConfig(c.id);
+      for (const p of plans) {
+        if (!p.uniqueCode) {
+          await db.update(strategyPlans)
+            .set({ uniqueCode: generatePlanCode() })
+            .where(eq(strategyPlans.id, p.id));
+          plansBackfilled++;
+        }
+      }
+    }
+
+    if (configsBackfilled > 0 || plansBackfilled > 0) {
+      console.log(`[BACKFILL] Assigned codes: ${configsBackfilled} MC(s), ${plansBackfilled} TPS(s)`);
+    }
   }
 }
 

@@ -12,7 +12,7 @@ const OPEN_TRADES_TTL_MS = 10_000; // 10 seconds for open trades
 
 class TradingCache {
   private webhooks = new Map<string, CacheEntry<Webhook>>();
-  private configsByWebhookId = new Map<string, CacheEntry<StrategyConfig | null>>();
+  private configsByWebhookId = new Map<string, CacheEntry<StrategyConfig[]>>();
   private configsById = new Map<string, CacheEntry<StrategyConfig>>();
   private brokerConfigs = new Map<string, CacheEntry<BrokerConfig>>();
   private activePlansByConfigId = new Map<string, CacheEntry<StrategyPlan[]>>();
@@ -32,14 +32,14 @@ class TradingCache {
     this.webhooks.set(id, { data: webhook, expiresAt: Date.now() + HOT_PATH_TTL_MS });
   }
 
-  getConfigByWebhookId(webhookId: string): StrategyConfig | null | undefined {
+  getConfigsByWebhookId(webhookId: string): StrategyConfig[] | undefined {
     const entry = this.configsByWebhookId.get(webhookId);
     if (!this.isValid(entry)) return undefined;
     return entry.data;
   }
 
-  setConfigByWebhookId(webhookId: string, config: StrategyConfig | null): void {
-    this.configsByWebhookId.set(webhookId, { data: config, expiresAt: Date.now() + HOT_PATH_TTL_MS });
+  setConfigsByWebhookId(webhookId: string, configs: StrategyConfig[]): void {
+    this.configsByWebhookId.set(webhookId, { data: configs, expiresAt: Date.now() + HOT_PATH_TTL_MS });
   }
 
   getConfigById(id: string): StrategyConfig | undefined {
@@ -105,7 +105,7 @@ class TradingCache {
     this.configsById.delete(id);
     const keysToDelete: string[] = [];
     this.configsByWebhookId.forEach((entry, webhookId) => {
-      if (entry.data && entry.data.id === id) {
+      if (entry.data && entry.data.some(c => c.id === id)) {
         keysToDelete.push(webhookId);
       }
     });
@@ -144,9 +144,17 @@ class TradingCache {
         if (wh.isActive) this.setWebhook(wh.id, wh);
       }
 
+      const configsByWebhook = new Map<string, StrategyConfig[]>();
       for (const cfg of configs) {
         this.setConfigById(cfg.id, cfg);
-        if (cfg.webhookId) this.setConfigByWebhookId(cfg.webhookId, cfg);
+        if (cfg.webhookId) {
+          const arr = configsByWebhook.get(cfg.webhookId) || [];
+          arr.push(cfg);
+          configsByWebhook.set(cfg.webhookId, arr);
+        }
+      }
+      for (const [webhookId, cfgArr] of configsByWebhook) {
+        this.setConfigsByWebhookId(webhookId, cfgArr);
       }
 
       for (const bc of brokerConfigs) {

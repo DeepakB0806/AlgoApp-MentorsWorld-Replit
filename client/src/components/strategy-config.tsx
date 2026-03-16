@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, Trash2, Edit, Settings, Loader2, X, Save, Info } from "lucide-react";
+import { Plus, Trash2, Edit, Settings, Loader2, X, Save, Info, ChevronRight } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -300,6 +300,12 @@ export function MotherConfigurator() {
     if (!wId) return "None";
     const wh = webhooks.find((w) => w.id === wId);
     return wh ? wh.name : "Unknown";
+  };
+
+  const getWebhookCode = (wId: string | null | undefined) => {
+    if (!wId) return null;
+    const wh = webhooks.find((w) => w.id === wId);
+    return wh?.uniqueCode || null;
   };
 
   const getStatusVariant = (s: string) => {
@@ -733,7 +739,23 @@ export function MotherConfigurator() {
                       <Badge variant={getStatusVariant(config.status)} data-testid={`badge-config-status-${config.id}`}>
                         {config.status}
                       </Badge>
+                      {config.uniqueCode && (
+                        <Badge variant="outline" className="font-mono text-xs" data-testid={`badge-config-code-${config.id}`}>
+                          {config.uniqueCode}
+                        </Badge>
+                      )}
                     </CardTitle>
+                    {config.uniqueCode && (
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground font-mono" data-testid={`text-config-chain-${config.id}`}>
+                        {getWebhookCode(config.webhookId) && (
+                          <>
+                            <span className="text-amber-500">{getWebhookCode(config.webhookId)}</span>
+                            <ChevronRight className="w-3 h-3" />
+                          </>
+                        )}
+                        <span className="text-blue-500">{config.uniqueCode}</span>
+                      </div>
+                    )}
                     <p className="text-sm text-muted-foreground" data-testid={`text-config-desc-${config.id}`}>
                       {config.description || "No description"}
                     </p>

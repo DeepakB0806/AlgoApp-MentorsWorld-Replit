@@ -286,11 +286,11 @@ async function executeTradeForPlan(
   const legs = selectLegs(tradeParams, resolvedBlockType);
   const blockConfig = getBlockConfig(tradeParams, resolvedBlockType);
 
-  // T010: Silent success. Use debug instead of log, and completely skip the PFL database insert.
-  // This ensures if a Strategy lacks neutralLegs (or any other block), it gracefully ignores it.
   if (legs.length === 0) {
-    console.debug(`[TE] Skipping empty ${resolvedBlockType} block (no legs configured)`);
-    return { success: true, action: "hold", broker, planId: plan.id, message: `No legs configured for ${resolvedBlockType}`, executionTimeMs: Date.now() - startTime };
+    const skipMsg = `No legs configured for ${resolvedBlockType} — signal skipped`;
+    console.log(`[PFL] ✗ Plan "${plan.name}" — ${skipMsg}`);
+    logPFL(plan, broker, data, "held", skipMsg, { resolvedAction, ticker, exchange, price, executionTimeMs: Date.now() - startTime });
+    return { success: true, action: "hold", broker, planId: plan.id, message: skipMsg, executionTimeMs: Date.now() - startTime };
   }
 
   console.log(`[PFL] Plan "${plan.name}" — ${legs.length} leg(s) found for ${resolvedBlockType}`);
@@ -495,6 +495,7 @@ async function executeBuySignal(
       action: leg.action ? leg.action.toUpperCase() : "BUY", 
 
       blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: ctx.price, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
+      webhookDataId: ctx.data.id || undefined,
     });
 
     trades.push(trade);
@@ -609,6 +610,7 @@ async function executeSellSignal(
       action: leg.action ? leg.action.toUpperCase() : "SELL", 
 
       blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: ctx.price, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
+      webhookDataId: ctx.data.id || undefined,
     });
 
     trades.push(trade);
@@ -802,14 +804,57 @@ export function startPersistentSquareOff(
   });
 }
 
+export const persistentEntryActive = new Set<string>();
+
+export function startPersistentEntry(
+  storage: IStorage,
+  planId: string,
+  brokerConfig: BrokerConfig,
+  webhookDataRow: WebhookData,
+  signalContext: SignalContext,
+): void {
+  if (persistentEntryActive.has(planId)) {
+    console.log(`[TE] PersistentEntry already running for plan ${planId}, skipping duplicate`);
+    return;
+  }
+  persistentEntryActive.add(planId);
+
+  async function attempt() {
+    const allTrades = await storage.getStrategyTradesByPlan(planId);
+    const failedForSignal = allTrades.filter(
+      t => t.webhookDataId === webhookDataRow.id && t.status === "failed"
+    );
+    if (failedForSignal.length === 0) {
+      console.log(`[TE] PersistentEntry complete — all legs entered for plan ${planId}`);
+      persistentEntryActive.delete(planId);
+      return;
+    }
+    console.log(`[TE] PersistentEntry — ${failedForSignal.length} failed leg(s) for plan ${planId}, retrying...`);
+    const plan = await storage.getStrategyPlan(planId);
+    if (plan) {
+      await executeTradeForPlan(storage, plan, brokerConfig, webhookDataRow, signalContext)
+        .catch(err => console.error(`[TE] PersistentEntry retry error:`, err));
+    }
+    const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
+    const intervalMs = settingRow?.value ? Math.max(500, parseInt(settingRow.value, 10)) : 2000;
+    setTimeout(attempt, intervalMs);
+  }
+
+  attempt().catch((err) => {
+    console.error(`[TE] PersistentEntry error for plan ${planId}:`, err?.message || err);
+    persistentEntryActive.delete(planId);
+  });
+}
+
 function deferDailyPnlUpdate(storage: IStorage, planId: string, today: string, closePnl: number) {
   setTimeout(() => {
-    storage.getDailyPnl(planId, today).then((dailyPnl) => {
-      const currentPnl = dailyPnl ? Number(dailyPnl.realizedPnl) : 0;
+    storage.getStrategyDailyPnl(planId).then((records) => {
+      const dailyPnl = records.find(r => r.date === today);
+      const currentPnl = dailyPnl ? Number(dailyPnl.dailyPnl) : 0;
       if (dailyPnl) {
-        storage.updateDailyPnl(dailyPnl.id, { realizedPnl: currentPnl + closePnl, updatedAt: new Date().toISOString() }).catch(console.error);
+        storage.updateStrategyDailyPnl(dailyPnl.id, { dailyPnl: currentPnl + closePnl }).catch(console.error);
       } else {
-        storage.createDailyPnl({ planId, date: today, realizedPnl: closePnl }).catch(console.error);
+        storage.createStrategyDailyPnl({ planId, date: today, dailyPnl: closePnl }).catch(console.error);
       }
     }).catch(console.error);
   }, 1000);
