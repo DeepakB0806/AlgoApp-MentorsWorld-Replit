@@ -305,7 +305,7 @@ export function MotherConfigurator() {
   const getWebhookCode = (wId: string | null | undefined) => {
     if (!wId) return null;
     const wh = webhooks.find((w) => w.id === wId);
-    return wh?.uniqueCode || null;
+    return wh?.uniqueCode ? `P-${wh.uniqueCode}` : null;
   };
 
   const getStatusVariant = (s: string) => {

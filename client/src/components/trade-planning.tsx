@@ -258,7 +258,7 @@ export function TradePlanning() {
     const config = configs.find((c) => c.id === plan.configId);
     const webhook = config ? webhooks.find((w) => w.id === config.webhookId) : undefined;
     return {
-      p: webhook?.uniqueCode,
+      p: webhook?.uniqueCode ? `P-${webhook.uniqueCode}` : undefined,
       mc: config?.uniqueCode,
       tps: plan.uniqueCode,
     };
