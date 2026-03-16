@@ -9,7 +9,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
   ArrowLeft, Mail, Key, CheckCircle, XCircle, 
-  Eye, EyeOff, AlertTriangle, FileText, Settings as SettingsIcon
+  Eye, EyeOff, AlertTriangle, FileText, Settings as SettingsIcon, Database
 } from "lucide-react";
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
@@ -24,7 +24,7 @@ interface MailSettings {
   fromName: string;
 }
 
-type SettingsSection = "general" | "mail" | "templates";
+type SettingsSection = "general" | "mail" | "templates" | "retention";
 
 function MailApiSettings() {
   const [showApiKey, setShowApiKey] = useState(false);
@@ -448,6 +448,101 @@ function GeneralTradingSettings() {
   );
 }
 
+const RETENTION_FIELDS = [
+  { key: "retention_webhook_data_days",        label: "Signal history (webhook data)",   default: "90",  hint: "Raw incoming signals" },
+  { key: "retention_strategy_trades_days",     label: "Trade records",                   default: "365", hint: "All executed trades" },
+  { key: "retention_broker_session_logs_days", label: "Broker session logs",             default: "30",  hint: "Login/logout history" },
+  { key: "retention_broker_test_logs_days",    label: "Broker test logs",               default: "7",   hint: "Connectivity test results" },
+  { key: "retention_webhook_status_logs_days", label: "Webhook status logs",             default: "30",  hint: "Per-webhook activity" },
+];
+
+function RetentionField({ field }: { field: typeof RETENTION_FIELDS[0] }) {
+  const [value, setValue] = useState("");
+  const { toast } = useToast();
+
+  const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: [`/api/settings/${field.key}`],
+  });
+
+  useEffect(() => {
+    if (setting?.value) {
+      setValue(setting.value);
+    } else if (!isLoading) {
+      setValue(field.default);
+    }
+  }, [setting, isLoading, field.default]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const days = parseInt(value, 10);
+      if (isNaN(days) || days < 1) throw new Error("Enter a valid number of days (minimum 1)");
+      const res = await apiRequest("POST", `/api/settings/${field.key}`, { value: String(days) });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/settings/${field.key}`] });
+      toast({ title: "Saved", description: `${field.label} retention updated.` });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <div className="grid grid-cols-[1fr_auto_auto] gap-3 items-center py-2 border-b border-border last:border-0">
+      <div>
+        <div className="text-sm font-medium text-foreground">{field.label}</div>
+        <div className="text-xs text-muted-foreground">{field.hint}</div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          data-testid={`input-${field.key}`}
+          type="number"
+          min="1"
+          className="w-24 h-8 text-sm"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          disabled={isLoading}
+        />
+        <span className="text-xs text-muted-foreground whitespace-nowrap">days</span>
+      </div>
+      <Button
+        data-testid={`button-save-${field.key}`}
+        size="sm"
+        variant="outline"
+        onClick={() => saveMutation.mutate()}
+        disabled={saveMutation.isPending || isLoading}
+      >
+        {saveMutation.isPending ? "Saving..." : "Save"}
+      </Button>
+    </div>
+  );
+}
+
+function DataRetentionSettings() {
+  return (
+    <Card data-testid="card-data-retention-settings">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Database className="w-5 h-5" />
+          Data Retention
+        </CardTitle>
+        <CardDescription>
+          Old records are pruned automatically every 24 hours. Set how many days of history to keep for each data type.
+          Changes take effect on the next daily cleanup run.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="divide-y divide-border">
+          {RETENTION_FIELDS.map((f) => (
+            <RetentionField key={f.key} field={f} />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Settings() {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
 
@@ -466,6 +561,11 @@ export default function Settings() {
       id: "templates" as const,
       label: "Templates",
       icon: FileText,
+    },
+    {
+      id: "retention" as const,
+      label: "Data Retention",
+      icon: Database,
     },
   ];
 
@@ -518,6 +618,7 @@ export default function Settings() {
             {activeSection === "general" && <GeneralTradingSettings />}
             {activeSection === "mail" && <MailApiSettings />}
             {activeSection === "templates" && <EmailTemplates />}
+            {activeSection === "retention" && <DataRetentionSettings />}
           </div>
         </main>
       </div>

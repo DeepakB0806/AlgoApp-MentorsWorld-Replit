@@ -27,6 +27,31 @@ import {
 import { liveContractCache } from "./scrip-master-sync";
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// FILL PRICE LOOKUP
+// After a Kotak order is placed, fetch actual execution price from order history
+// ═══════════════════════════════════════════════════════════════════════════════
+async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallback: number): Promise<number> {
+  try {
+    const histResult = await EL.getOrderHistory(brokerConfig, orderId);
+    if (histResult.success && Array.isArray(histResult.data) && histResult.data.length > 0) {
+      const latest = histResult.data[histResult.data.length - 1] as any;
+      const fill = Number(
+        latest?.avgPrc || latest?.avgPrice || latest?.avg_prc ||
+        latest?.flprc  || latest?.fillPrice || latest?.fill_price ||
+        latest?.prc    || latest?.pr || 0
+      );
+      if (fill > 0) {
+        console.log(`[TE] Fill price from order history (${orderId.slice(0,8)}): ${fill} (fallback was ${fallback})`);
+        return fill;
+      }
+    }
+  } catch (err) {
+    console.warn(`[TE] Could not fetch fill price for order ${orderId.slice(0,8)}: ${err}`);
+  }
+  return fallback;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // TRANSACTION TYPE MAPPING
 // Maps universal action names (BUY/SELL) to broker-specific codes via TL
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -487,14 +512,18 @@ async function executeBuySignal(
       orderId = `PT-${Date.now()}-L${i}`;
     }
 
+    const fillPrice = (broker === "kotak_neo" && orderId)
+      ? await getFillPrice(brokerConfig, orderId, ctx.price)
+      : ctx.price;
+
     const trade = await storage.createStrategyTrade({
       planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${i}`,
-      tradingSymbol: params.tradingSymbol, exchange: ctx.exchange, quantity: params.quantity, price: ctx.price, 
+      tradingSymbol: params.tradingSymbol, exchange: ctx.exchange, quantity: params.quantity, price: fillPrice, 
 
       // 3. OPTION SELLING FIX: Store actual leg direction ("BUY" or "SELL"), not hardcoded
       action: leg.action ? leg.action.toUpperCase() : "BUY", 
 
-      blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: ctx.price, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
+      blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
       webhookDataId: ctx.data.id || undefined,
     });
 
@@ -602,14 +631,18 @@ async function executeSellSignal(
       orderId = `PT-${Date.now()}-L${i}`;
     }
 
+    const fillPrice = (broker === "kotak_neo" && orderId)
+      ? await getFillPrice(brokerConfig, orderId, ctx.price)
+      : ctx.price;
+
     const trade = await storage.createStrategyTrade({
       planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${i}`,
-      tradingSymbol: params.tradingSymbol, exchange: ctx.exchange, quantity: params.quantity, price: ctx.price, 
+      tradingSymbol: params.tradingSymbol, exchange: ctx.exchange, quantity: params.quantity, price: fillPrice, 
 
       // 6. OPTION SELLING FIX: Store actual leg direction ("BUY" or "SELL"), not hardcoded
       action: leg.action ? leg.action.toUpperCase() : "SELL", 
 
-      blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: ctx.price, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
+      blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
       webhookDataId: ctx.data.id || undefined,
     });
 
@@ -634,7 +667,7 @@ async function closeTrade(
   storage: IStorage, trade: StrategyTrade, currentPrice: number, now: string, brokerConfig: BrokerConfig,
 ): Promise<StrategyTrade> {
   const broker = brokerConfig.brokerName;
-  const exitPrice = currentPrice;
+  let exitPrice = currentPrice;
   const exitAction = trade.action === "BUY" ? "SELL" : "BUY";
   const transactionType = mapTransactionType(exitAction);
   console.log(`[TRADE] Closing leg: symbol=${trade.tradingSymbol} action=${exitAction} transactionType=${transactionType}`);
@@ -660,6 +693,11 @@ async function closeTrade(
       const failedUpdate = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
       tradingCache.invalidateOpenTrades(trade.planId);
       return failedUpdate || trade;
+    }
+
+    const closeOrderId = orderResult.data?.orderNo;
+    if (closeOrderId) {
+      exitPrice = await getFillPrice(brokerConfig, closeOrderId, exitPrice);
     }
   }
 

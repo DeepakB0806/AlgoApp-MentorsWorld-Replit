@@ -107,11 +107,13 @@ export interface IStorage {
   getBrokerTestLogs(brokerConfigId: string): Promise<BrokerTestLog[]>;
   createBrokerTestLog(log: InsertBrokerTestLog): Promise<BrokerTestLog>;
   deleteBrokerTestLogs(brokerConfigId: string, days?: number): Promise<number>;
+  deleteBrokerTestLogsOlderThan(days: number): Promise<number>;
 
   // Broker Session Logs
   getBrokerSessionLogs(brokerConfigId: string): Promise<BrokerSessionLog[]>;
   createBrokerSessionLog(log: InsertBrokerSessionLog): Promise<BrokerSessionLog>;
   deleteBrokerSessionLogs(brokerConfigId: string, days?: number): Promise<number>;
+  deleteBrokerSessionLogsOlderThan(days: number): Promise<number>;
 
   // Strategy Configs (Mother Configurator) - persisted in database
   getStrategyConfigs(): Promise<StrategyConfig[]>;
@@ -138,6 +140,7 @@ export interface IStorage {
   updateStrategyTrade(id: string, trade: Partial<InsertStrategyTrade>): Promise<StrategyTrade | undefined>;
   deleteStrategyTradesByPlan(planId: string, olderThanDays?: number): Promise<number>;
   deleteAllStrategyTradesByPlan(planId: string): Promise<number>;
+  deleteStrategyTradesOlderThan(days: number): Promise<number>;
 
   // Strategy Daily P&L - daily P&L log entries
   getStrategyDailyPnl(planId: string): Promise<StrategyDailyPnl[]>;
@@ -731,6 +734,16 @@ export class DatabaseStorage implements IStorage {
     return deleted.length;
   }
 
+  async deleteBrokerTestLogsOlderThan(days: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoffStr = cutoffDate.toISOString();
+    const deleted = await db.delete(brokerTestLogs)
+      .where(lt(brokerTestLogs.testedAt, cutoffStr))
+      .returning();
+    return deleted.length;
+  }
+
   // Broker Session Logs
   async getBrokerSessionLogs(brokerConfigId: string): Promise<BrokerSessionLog[]> {
     return await db.select().from(brokerSessionLogs)
@@ -756,6 +769,16 @@ export class DatabaseStorage implements IStorage {
     }
     const deleted = await db.delete(brokerSessionLogs)
       .where(eq(brokerSessionLogs.brokerConfigId, brokerConfigId))
+      .returning();
+    return deleted.length;
+  }
+
+  async deleteBrokerSessionLogsOlderThan(days: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoffStr = cutoffDate.toISOString();
+    const deleted = await db.delete(brokerSessionLogs)
+      .where(lt(brokerSessionLogs.loginAt, cutoffStr))
       .returning();
     return deleted.length;
   }
@@ -914,6 +937,14 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAllStrategyTradesByPlan(planId: string): Promise<number> {
     const result = await db.delete(strategyTrades).where(eq(strategyTrades.planId, planId)).returning();
+    return result.length;
+  }
+
+  async deleteStrategyTradesOlderThan(days: number): Promise<number> {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const result = await db.delete(strategyTrades)
+      .where(lt(strategyTrades.createdAt, cutoff))
+      .returning();
     return result.length;
   }
 

@@ -11,6 +11,7 @@ import EL from "./el-kotak-neo-v3";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
 import { runScripMasterSync } from "./scrip-master-sync";
 import { startPlanMonitor } from "./plan-monitor";
+import { startDataRetentionJob } from "./data-retention";
 import { resolveAllSignalsFromActionMapper, processTradeSignal } from "./te-kotak-neo-v3";
 
 process.on('uncaughtException', (err) => {
@@ -217,22 +218,19 @@ app.use((req, res, next) => {
     log(`[STARTUP] Scrip master auto-sync warning: ${err}`);
   }
 
-  // Auto-cleanup old webhook logs (older than 30 days) on startup
-  try {
-    const deletedCount = await storage.deleteOldLogsGlobally(30);
-    if (deletedCount > 0) {
-      log(`Auto-cleanup: Removed ${deletedCount} webhook logs older than 30 days`);
-    }
-  } catch (error) {
-    log(`Auto-cleanup warning: ${error}`);
-  }
-
   // Start plan monitor — auto square-off based on exitTime and exitOnExpiry
   try {
     startPlanMonitor(storage);
     log(`Plan monitor started`);
   } catch (err) {
     log(`Plan monitor startup warning: ${err}`);
+  }
+
+  // Start scheduled data retention job — prunes old rows from all major tables daily
+  try {
+    startDataRetentionJob(storage);
+  } catch (err) {
+    log(`Data retention job startup warning: ${err}`);
   }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

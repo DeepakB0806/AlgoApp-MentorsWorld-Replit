@@ -566,24 +566,45 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         const result = await EL.getPositions(kotakConfig);
         if (result.success && result.data) {
           const normalized = (result.data as any[]).map((p: any) => {
-            const buyQty = Number(p.flBuyQty || p.buyQuantity || p.buyQty || 0);
+            const buyQty  = Number(p.flBuyQty  || p.buyQuantity  || p.buyQty  || 0);
             const sellQty = Number(p.flSellQty || p.sellQuantity || p.sellQty || 0);
-            const buyAmt = Number(p.buyAmt || p.buyAmount || 0);
+            const buyAmt  = Number(p.buyAmt  || p.buyAmount  || 0);
             const sellAmt = Number(p.sellAmt || p.sellAmount || 0);
+
+            const quantity = Number(p.qty || p.quantity || 0);
+            const buyAvg  = buyQty  > 0 ? buyAmt  / buyQty  : Number(p.upldPrc || p.uploadPrice || p.buy_avg  || 0);
+            const sellAvg = sellQty > 0 ? sellAmt / sellQty : Number(p.sell_avg || 0);
+
+            const kotakLtp  = Number(p.ltp || p.lastTradedPrice || 0);
+            const kotakPnl  = Number(p.pnl || p.mtmPnl || p.mtm || 0);
+            const kotakRpnl = Number(p.rpnl || p.realisedPnl || p.realised_pnl || 0);
+            const unrealisedPnl = p.urmtom !== undefined
+              ? Number(p.urmtom)
+              : (p.unrealisedPnl !== undefined ? Number(p.unrealisedPnl) : undefined);
+
+            // When Kotak does not supply rpnl/pnl/ltp for net-zero (qty=0) positions,
+            // compute them from amounts that Kotak does supply correctly.
+            const amountsKnown  = buyAmt > 0 && sellAmt > 0;
+            const computedRpnl  = amountsKnown ? sellAmt - buyAmt : 0;
+            const realisedPnl   = kotakRpnl !== 0 ? kotakRpnl : computedRpnl;
+            const totalPnl      = kotakPnl  !== 0 ? kotakPnl  : realisedPnl + (unrealisedPnl ?? 0);
+            // For closed positions (qty=0) where Kotak returns ltp=0, show the last execution price.
+            const ltp = kotakLtp !== 0 ? kotakLtp : (quantity === 0 ? (sellAvg || buyAvg) : 0);
+
             return {
               trading_symbol: p.trdSym || p.tradingSymbol || p.trading_symbol || p.symbol || "",
               exchange: p.exSeg || p.exchange || "",
               product_type: p.prod || p.productType || p.product_type || "NRML",
-              quantity: Number(p.qty || p.quantity || 0),
-              buy_avg: buyQty > 0 ? buyAmt / buyQty : Number(p.upldPrc || p.uploadPrice || p.buy_avg || 0),
-              sell_avg: sellQty > 0 ? sellAmt / sellQty : Number(p.sell_avg || 0),
-              ltp: Number(p.ltp || p.lastTradedPrice || 0),
+              quantity,
+              buy_avg: buyAvg,
+              sell_avg: sellAvg,
+              ltp,
               option_type: p.optTp || p.optionType || p.option_type || null,
               strike_price: p.stkPrc || p.strikePrice || p.strike_price || null,
               expiry: p.expDt || p.expiryDisplay || p.expiry || p.exp || null,
-              pnl: Number(p.pnl || p.mtmPnl || p.mtm || 0),
-              realised_pnl: Number(p.rpnl || p.realisedPnl || p.realised_pnl || 0),
-              unrealised_pnl: p.urmtom !== undefined ? Number(p.urmtom) : (p.unrealisedPnl !== undefined ? Number(p.unrealisedPnl) : undefined),
+              pnl: totalPnl,
+              realised_pnl: realisedPnl,
+              unrealised_pnl: unrealisedPnl,
               instrument_type: p.type || p.instType || "",
               token: p.tok || p.tknNo || "",
             };
