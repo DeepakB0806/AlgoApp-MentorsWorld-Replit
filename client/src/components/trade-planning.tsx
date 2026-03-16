@@ -794,7 +794,7 @@ export function TradePlanning() {
                         <div>
                           <Label className="text-xs text-muted-foreground">
                             End Day
-                            <InfoTip text="The last day of the week your strategy is active. For an expiry-day-only strategy on NIFTY, set this to Tuesday. Use Contract Selection below to choose which week's contract to trade." />
+                            <InfoTip text="The last day of the week your strategy is active. For an expiry-day-only strategy on NIFTY, set this to Tuesday. Use the Expiry Type above to choose current or next week's contract." />
                           </Label>
                           <Select value={timeLogic.weeklyEndDay || "Thursday"} onValueChange={(v) => setTimeLogic((s) => ({ ...s, weeklyEndDay: v }))}>
                             <SelectTrigger data-testid="select-weekly-end-day">
