@@ -528,6 +528,11 @@ async function executeSellSignal(
     closePnl = closedTrade.pnl || 0;
     deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
 
+    if (closedTrade.status === "close_failed") {
+      console.warn(`[TE] Plan "${plan.name}" — leg close_failed, starting persistent retry loop`);
+      startPersistentSquareOff(storage, plan.id, brokerConfig);
+    }
+
     // THE GUARD: Stop here if it's a pure EXIT signal
     if (ctx.signalContext?.resolvedAction === "EXIT") {
       console.log(`[TE] Plan "${plan.name}" — Pure EXIT signal processed. Halting before opening new positions.`);
@@ -537,7 +542,9 @@ async function executeSellSignal(
         broker,
         planId: plan.id,
         pnl: closePnl,
-        message: "Successfully closed existing position (Pure EXIT).",
+        message: closedTrade.status === "close_failed"
+          ? "Leg close failed — persistent retry started."
+          : "Successfully closed existing position (Pure EXIT).",
         executionTimeMs: Date.now() - ctx.startTime,
       };
     }
@@ -679,7 +686,7 @@ export async function squareOffPlan(
   planId: string,
   brokerConfig: BrokerConfig,
 ): Promise<{ closed: number; failed: number; errors: string[] }> {
-  const openTrades = await storage.getOpenTradesByPlan(planId);
+  const openTrades = await storage.getUnclosedTradesByPlan(planId);
   const now = new Date().toISOString();
   const today = now.slice(0, 10);
   const plan = await storage.getStrategyPlan(planId);
@@ -688,7 +695,7 @@ export async function squareOffPlan(
   let failed = 0;
   const errors: string[] = [];
 
-  console.log(`[TE] squareOffPlan: planId=${planId}, openTrades=${openTrades.length}`);
+  console.log(`[TE] squareOffPlan: planId=${planId}, unclosedTrades=${openTrades.length}`);
 
   for (const trade of openTrades) {
     try {
@@ -760,6 +767,39 @@ export async function squareOffPlan(
   tradingCache.invalidateOpenTrades(planId);
   console.log(`[TE] squareOffPlan complete: closed=${closed}, failed=${failed}`);
   return { closed, failed, errors };
+}
+
+export const persistentSquareOffActive = new Set<string>();
+
+export function startPersistentSquareOff(
+  storage: IStorage,
+  planId: string,
+  brokerConfig: BrokerConfig,
+): void {
+  if (persistentSquareOffActive.has(planId)) {
+    console.log(`[TE] PersistentSquareOff already running for plan ${planId}, skipping duplicate`);
+    return;
+  }
+  persistentSquareOffActive.add(planId);
+
+  async function attempt() {
+    const unclosed = await storage.getUnclosedTradesByPlan(planId);
+    if (unclosed.length === 0) {
+      console.log(`[TE] PersistentSquareOff complete — all legs exited for plan ${planId}`);
+      persistentSquareOffActive.delete(planId);
+      return;
+    }
+    console.log(`[TE] PersistentSquareOff — ${unclosed.length} unclosed leg(s) for plan ${planId}, retrying...`);
+    await squareOffPlan(storage, planId, brokerConfig);
+    const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
+    const intervalMs = settingRow?.value ? Math.max(0, parseInt(settingRow.value, 10)) : 0;
+    setTimeout(attempt, intervalMs);
+  }
+
+  attempt().catch((err) => {
+    console.error(`[TE] PersistentSquareOff error for plan ${planId}:`, err?.message || err);
+    persistentSquareOffActive.delete(planId);
+  });
 }
 
 function deferDailyPnlUpdate(storage: IStorage, planId: string, today: string, closePnl: number) {

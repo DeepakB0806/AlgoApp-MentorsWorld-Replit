@@ -1,5 +1,5 @@
 import { randomUUID, randomBytes } from "crypto";
-import { eq, desc, and, lt, sql } from "drizzle-orm";
+import { eq, desc, and, inArray, lt, sql } from "drizzle-orm";
 import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
@@ -127,6 +127,7 @@ export interface IStorage {
   // Strategy Trades - records trades executed by strategy plans
   getStrategyTradesByPlan(planId: string): Promise<StrategyTrade[]>;
   getOpenTradesByPlan(planId: string): Promise<StrategyTrade[]>;
+  getUnclosedTradesByPlan(planId: string): Promise<StrategyTrade[]>;
   createStrategyTrade(trade: InsertStrategyTrade): Promise<StrategyTrade>;
   updateStrategyTrade(id: string, trade: Partial<InsertStrategyTrade>): Promise<StrategyTrade | undefined>;
   deleteStrategyTradesByPlan(planId: string, olderThanDays?: number): Promise<number>;
@@ -848,6 +849,14 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         eq(strategyTrades.planId, planId),
         eq(strategyTrades.status, "open")
+      ));
+  }
+
+  async getUnclosedTradesByPlan(planId: string): Promise<StrategyTrade[]> {
+    return await db.select().from(strategyTrades)
+      .where(and(
+        eq(strategyTrades.planId, planId),
+        inArray(strategyTrades.status, ["open", "close_failed"])
       ));
   }
 

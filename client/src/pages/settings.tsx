@@ -9,7 +9,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
   ArrowLeft, Mail, Key, CheckCircle, XCircle, 
-  Eye, EyeOff, AlertTriangle, FileText
+  Eye, EyeOff, AlertTriangle, FileText, Settings as SettingsIcon
 } from "lucide-react";
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
@@ -24,7 +24,7 @@ interface MailSettings {
   fromName: string;
 }
 
-type SettingsSection = "mail" | "templates";
+type SettingsSection = "general" | "mail" | "templates";
 
 function MailApiSettings() {
   const [showApiKey, setShowApiKey] = useState(false);
@@ -367,10 +367,96 @@ function EmailTemplates() {
   );
 }
 
+function GeneralTradingSettings() {
+  const [intervalValue, setIntervalValue] = useState<string>("");
+  const { toast } = useToast();
+
+  const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/squareoff_retry_interval_ms"],
+  });
+
+  useEffect(() => {
+    if (setting?.value !== undefined && setting?.value !== null) {
+      setIntervalValue(setting.value);
+    } else if (!isLoading) {
+      setIntervalValue("0");
+    }
+  }, [setting, isLoading]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const ms = parseInt(intervalValue, 10);
+      if (isNaN(ms) || ms < 0) throw new Error("Enter a valid non-negative number");
+      const res = await apiRequest("POST", "/api/settings/squareoff_retry_interval_ms", { value: String(ms) });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/squareoff_retry_interval_ms"] });
+      toast({ title: "Saved", description: "Square-off retry interval updated." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <Card data-testid="card-general-trading-settings">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <SettingsIcon className="w-5 h-5" />
+          Trading Execution
+        </CardTitle>
+        <CardDescription>
+          Controls how the platform retries exit orders when a leg fails to close.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {isLoading ? (
+          <div className="text-center py-8 text-muted-foreground">Loading...</div>
+        ) : (
+          <div className="space-y-3">
+            <Label htmlFor="input-squareoff-interval">
+              Square-off Retry Interval (ms)
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              Delay between retry attempts after a failed exit order. Set to <strong>0</strong> for immediate retry — the broker API response time is the natural throttle. Increase only if the broker rejects rapid repeated orders.
+            </p>
+            <div className="flex items-center gap-3 max-w-xs">
+              <Input
+                id="input-squareoff-interval"
+                data-testid="input-squareoff-interval"
+                type="number"
+                min="0"
+                step="50"
+                value={intervalValue}
+                onChange={(e) => setIntervalValue(e.target.value)}
+                placeholder="0"
+              />
+              <span className="text-sm text-muted-foreground whitespace-nowrap">ms</span>
+            </div>
+            <Button
+              data-testid="button-save-squareoff-interval"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+            >
+              {saveMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Settings() {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("mail");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("general");
 
   const navItems = [
+    {
+      id: "general" as const,
+      label: "Trading Execution",
+      icon: SettingsIcon,
+    },
     {
       id: "mail" as const,
       label: "Mail API Settings",
@@ -429,6 +515,7 @@ export default function Settings() {
 
         <main className="flex-1 p-8">
           <div className="max-w-3xl">
+            {activeSection === "general" && <GeneralTradingSettings />}
             {activeSection === "mail" && <MailApiSettings />}
             {activeSection === "templates" && <EmailTemplates />}
           </div>

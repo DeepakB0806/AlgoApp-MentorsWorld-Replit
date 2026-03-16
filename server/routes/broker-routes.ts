@@ -5,7 +5,7 @@ import { tradingCache } from "../cache";
 import { db } from "../db";
 import { desc, eq, sql, or } from "drizzle-orm";
 import EL from "../el-kotak-neo-v3";
-import { squareOffPlan } from "../te-kotak-neo-v3";
+import { startPersistentSquareOff } from "../te-kotak-neo-v3";
 import { addProcessFlowLog, getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
 import {
   testBinanceConnectivity,
@@ -405,8 +405,8 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
           const brokerConfig = await storage.getBrokerConfig(plan.brokerConfigId);
           if (brokerConfig) {
             usedBroker = true;
-            const result = await squareOffPlan(storage, id, brokerConfig);
-            console.log(`[ROUTE] Square off result for plan ${id}: closed=${result.closed}, failed=${result.failed}`);
+            startPersistentSquareOff(storage, id, brokerConfig);
+            console.log(`[ROUTE] Persistent square-off started for plan ${id}`);
           }
         }
         if (!usedBroker) {

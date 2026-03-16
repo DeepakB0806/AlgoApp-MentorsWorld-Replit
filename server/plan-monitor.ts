@@ -1,12 +1,10 @@
 import type { IStorage } from "./storage";
 import type { TimeLogicConfig, TradeParams } from "@shared/schema";
-import { squareOffPlan } from "./te-kotak-neo-v3";
+import { startPersistentSquareOff, persistentSquareOffActive } from "./te-kotak-neo-v3";
 import { addProcessFlowLog } from "./process-flow-log";
 
 const LOG_PREFIX = "[PLAN-MONITOR]";
 const CHECK_INTERVAL_MS = 60 * 1000;
-
-const firedToday = new Map<string, string>();
 
 function getISTDatetime(): { date: string; time: string; dayName: string } {
   const istDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
@@ -46,7 +44,7 @@ export function startPlanMonitor(storage: IStorage): void {
 }
 
 async function checkPlans(storage: IStorage): Promise<void> {
-  const { date: istDate, time: istTime, dayName: istDayName } = getISTDatetime();
+  const { time: istTime, dayName: istDayName } = getISTDatetime();
 
   if (istTime < "09:00" || istTime > "16:00") return;
 
@@ -59,12 +57,12 @@ async function checkPlans(storage: IStorage): Promise<void> {
 
   for (const plan of deployedPlans) {
     try {
+      if (persistentSquareOffActive.has(plan.id)) continue;
+
       const timeLogic = parseTimeLogic(plan.tradeParams);
       if (!timeLogic) continue;
 
       const { exitTime, exitOnExpiry } = timeLogic;
-
-      if (firedToday.get(plan.id) === istDate) continue;
 
       let shouldSquareOff = false;
       let reason = "";
@@ -92,12 +90,9 @@ async function checkPlans(storage: IStorage): Promise<void> {
 
       if (!shouldSquareOff) continue;
 
-      const openTrades = await storage.getOpenTradesByPlan(plan.id);
+      const unclosedTrades = await storage.getUnclosedTradesByPlan(plan.id);
 
-      firedToday.set(plan.id, istDate);
-
-      if (openTrades.length === 0) {
-        console.log(`${LOG_PREFIX} Plan "${plan.name}" — ${reason} — no open trades, skipping`);
+      if (unclosedTrades.length === 0) {
         continue;
       }
 
@@ -115,12 +110,13 @@ async function checkPlans(storage: IStorage): Promise<void> {
           blockType: "plan_monitor",
           actionTaken: "error",
           message: `Auto square-off skipped — broker config not found (${plan.brokerConfigId})`,
+          broker: "unknown",
         });
         continue;
       }
 
       console.log(
-        `${LOG_PREFIX} Plan "${plan.name}" (${plan.id}) — ${reason} — squaring off ${openTrades.length} open trade(s)`
+        `${LOG_PREFIX} Plan "${plan.name}" (${plan.id}) — ${reason} — starting persistent exit for ${unclosedTrades.length} unclosed trade(s)`
       );
 
       addProcessFlowLog({
@@ -131,21 +127,11 @@ async function checkPlans(storage: IStorage): Promise<void> {
         resolvedAction: "CLOSE",
         blockType: "plan_monitor",
         actionTaken: "auto_square_off",
-        message: `Reason: ${reason}. Closing ${openTrades.length} open trade(s).`,
+        message: `Reason: ${reason}. Persistent exit started for ${unclosedTrades.length} unclosed trade(s).`,
         broker: brokerConfig.brokerName,
       });
 
-      const result = await squareOffPlan(storage, plan.id, brokerConfig);
-
-      console.log(
-        `${LOG_PREFIX} Plan "${plan.name}" — auto square-off complete: closed=${result.closed}, failed=${result.failed}`
-      );
-
-      if (result.errors.length > 0) {
-        console.error(
-          `${LOG_PREFIX} Plan "${plan.name}" — errors: ${result.errors.join("; ")}`
-        );
-      }
+      startPersistentSquareOff(storage, plan.id, brokerConfig);
     } catch (err: any) {
       console.error(
         `${LOG_PREFIX} Error checking plan "${plan.name}" (${plan.id}):`,
