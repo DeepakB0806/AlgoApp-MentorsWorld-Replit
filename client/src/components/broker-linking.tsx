@@ -238,11 +238,28 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
           <div>
             <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
               <div className="flex items-center gap-4 flex-wrap">
-                <span className={`text-sm font-bold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`} data-testid={`text-sheet-pnl-${plan.id}`}>
-                  P&L: {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
-                </span>
-                <Badge variant="secondary" className="text-xs">Open: {openCount}</Badge>
-                <Badge variant="secondary" className="text-xs">Closed: {closedCount}</Badge>
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">F&amp;O P&L</span>
+                  <span className={`text-sm font-bold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`} data-testid={`text-sheet-pnl-${plan.id}`}>
+                    {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Realised</span>
+                  <span className={`text-sm font-mono ${realisedPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {realisedPnl >= 0 ? "+" : ""}{realisedPnl.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Unrealised</span>
+                  <span className={`text-sm font-mono ${unrealisedTotal >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {unrealisedTotal >= 0 ? "+" : ""}{unrealisedTotal.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-xs">Open: {openCount}</Badge>
+                  <Badge variant="secondary" className="text-xs">Closed: {closedCount}</Badge>
+                </div>
               </div>
               {strategyPositions.length > 0 && (
                 <div className="relative">
