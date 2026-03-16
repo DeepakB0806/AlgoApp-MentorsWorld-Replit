@@ -270,7 +270,12 @@ async function executeTradeForPlan(
     const startIdx = WEEKDAYS.indexOf(timeLogicGate.weeklyStartDay);
     const endIdx = WEEKDAYS.indexOf(timeLogicGate.weeklyEndDay);
     const todayIdx = WEEKDAYS.indexOf(istDayName);
-    if (todayIdx < 0 || todayIdx < startIdx || todayIdx > endIdx) {
+    // Wrap-around support: Wed–Tue (startIdx=2 > endIdx=1) means Wed,Thu,Fri,Mon,Tue are active.
+    // Non-wrapping: Mon–Thu (startIdx=0 <= endIdx=3) means simple range check.
+    const isActiveDay = startIdx <= endIdx
+      ? (todayIdx >= startIdx && todayIdx <= endIdx)
+      : (todayIdx >= startIdx || todayIdx <= endIdx);
+    if (todayIdx < 0 || !isActiveDay) {
       const msg = `Signal held — today is ${istDayName}, outside active window ${timeLogicGate.weeklyStartDay}–${timeLogicGate.weeklyEndDay}`;
       console.log(`[TE] ${msg}`);
       logPFL(plan, broker, data, "held", msg, { resolvedAction, ticker, exchange, price, executionTimeMs: Date.now() - startTime });
