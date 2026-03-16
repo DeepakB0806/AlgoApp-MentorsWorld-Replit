@@ -86,6 +86,7 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
   const { data: rawEntries = [], isLoading, refetch } = useQuery<StrategyDailyPnl[]>({
     queryKey: ["/api/strategy-daily-pnl", plan.id],
     enabled: isOpen,
+    refetchInterval: isOpen ? 30000 : false,
   });
 
   const { data: trades = [], isLoading: tradesLoading, refetch: refetchTrades } = useQuery<StrategyTrade[]>({
@@ -96,11 +97,13 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
       return resp.json();
     },
     enabled: isOpen,
+    refetchInterval: isOpen ? 30000 : false,
   });
 
   const { data: allPositions = [], isLoading: positionsLoading, refetch: refetchPositions } = useQuery<Position[]>({
     queryKey: ["/api/positions"],
     enabled: isOpen,
+    refetchInterval: isOpen ? 30000 : false,
   });
 
   const nfoPositions = allPositions.filter((p) => p.exchange === "NFO");
