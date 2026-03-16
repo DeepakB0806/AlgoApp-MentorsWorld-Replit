@@ -233,6 +233,22 @@ app.use((req, res, next) => {
     log(`Data retention job startup warning: ${err}`);
   }
 
+  setInterval(async () => {
+    if (!EL.isReady()) {
+      log(`[EL] Health check: EL not ready, triggering background recovery...`);
+      try {
+        await EL.reload();
+        if (EL.isReady()) {
+          log(`[EL] Health check: recovery successful`);
+        } else {
+          log(`[EL] Health check: recovery failed, will retry in 60s`);
+        }
+      } catch (err) {
+        log(`[EL] Health check: recovery error: ${err}`);
+      }
+    }
+  }, 60_000);
+
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

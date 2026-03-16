@@ -191,6 +191,13 @@ class ExecutionLayer {
   }
 
   // ─── Reload ─────────────────────────────────────────────────────────────
+  async ensureReady(): Promise<boolean> {
+    if (this.ready) return true;
+    console.warn(`${LOG_PREFIX} Auto-recovery: re-initializing after DB connection drop`);
+    await this.reload();
+    return this.ready;
+  }
+
   async reload(): Promise<void> {
     if (this.reloading) {
       console.warn(`${LOG_PREFIX} Reload already in progress, skipping`);
@@ -337,7 +344,10 @@ class ExecutionLayer {
     totp: string,
   ): Promise<ApiResponse<{ viewToken: string; sidView: string; sessionToken: string; sidSession: string; baseUrl: string }>> {
     if (!this.ready) {
-      return { success: false, error: "EL not ready" };
+      const recovered = await this.ensureReady();
+      if (!recovered) {
+        return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
+      }
     }
 
     try {
@@ -418,7 +428,7 @@ class ExecutionLayer {
     config: BrokerConfig,
     universalParams: Record<string, any>,
   ): Promise<ApiResponse<{ orderNo: string }>> {
-    if (!this.ready) return { success: false, error: "EL not ready" };
+    if (!this.ready && !(await this.ensureReady())) return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
 
     try {
       const endpoint = this.getEndpoint("place_order");
@@ -467,7 +477,7 @@ class ExecutionLayer {
     config: BrokerConfig,
     universalParams: Record<string, any>,
   ): Promise<ApiResponse<{ orderNo: string }>> {
-    if (!this.ready) return { success: false, error: "EL not ready" };
+    if (!this.ready && !(await this.ensureReady())) return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
 
     try {
       const endpoint = this.getEndpoint("modify_order");
@@ -509,7 +519,7 @@ class ExecutionLayer {
     orderType: "regular" | "cover" | "bracket" = "regular",
     afterMarketOrder = false,
   ): Promise<ApiResponse> {
-    if (!this.ready) return { success: false, error: "EL not ready" };
+    if (!this.ready && !(await this.ensureReady())) return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
 
     try {
       const endpointName =
@@ -563,7 +573,7 @@ class ExecutionLayer {
   }
 
   async getHoldings(config: BrokerConfig): Promise<ApiResponse<unknown[]>> {
-    if (!this.ready) return { success: false, error: "EL not ready" };
+    if (!this.ready && !(await this.ensureReady())) return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
 
     try {
       const endpoint = this.getEndpoint("holdings");
@@ -605,7 +615,7 @@ class ExecutionLayer {
     config: BrokerConfig,
     orderNo: string,
   ): Promise<ApiResponse<unknown[]>> {
-    if (!this.ready) return { success: false, error: "EL not ready" };
+    if (!this.ready && !(await this.ensureReady())) return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
 
     try {
       const endpoint = this.getEndpoint("order_history");
@@ -642,7 +652,7 @@ class ExecutionLayer {
     config: BrokerConfig,
     universalParams: Record<string, any>,
   ): Promise<ApiResponse<unknown>> {
-    if (!this.ready) return { success: false, error: "EL not ready" };
+    if (!this.ready && !(await this.ensureReady())) return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
 
     try {
       const endpoint = this.getEndpoint("check_margin");
@@ -675,7 +685,7 @@ class ExecutionLayer {
     segment = "ALL",
     product = "ALL",
   ): Promise<ApiResponse<unknown>> {
-    if (!this.ready) return { success: false, error: "EL not ready" };
+    if (!this.ready && !(await this.ensureReady())) return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
 
     try {
       const endpoint = this.getEndpoint("limits");
@@ -712,7 +722,7 @@ class ExecutionLayer {
     exchange: string,
     token: string,
   ): Promise<ApiResponse<unknown>> {
-    if (!this.ready) return { success: false, error: "EL not ready" };
+    if (!this.ready && !(await this.ensureReady())) return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
 
     try {
       const endpoint = this.getEndpoint("quotes");
@@ -743,7 +753,7 @@ class ExecutionLayer {
   async getScripMasterFilePaths(
     config: BrokerConfig,
   ): Promise<ApiResponse<any>> {
-    if (!this.ready) return { success: false, error: "EL not ready" };
+    if (!this.ready && !(await this.ensureReady())) return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
 
     try {
       const endpoint = this.getEndpoint("scrip_master_file_paths");
@@ -808,7 +818,7 @@ class ExecutionLayer {
     endpointName: string,
     tlCategory: string,
   ): Promise<ApiResponse<unknown[]>> {
-    if (!this.ready) return { success: false, error: "EL not ready" };
+    if (!this.ready && !(await this.ensureReady())) return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
 
     try {
       const endpoint = this.getEndpoint(endpointName);
