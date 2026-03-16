@@ -78,6 +78,7 @@ class ExecutionLayer {
   private lastLoadDurationMs: number | null = null;
   private initError: string | null = null;
   private reloading = false;
+  private reloadPromise: Promise<void> | null = null;
 
   // ─── Init & Load ─────────────────────────────────────────────────────────
   async init(): Promise<void> {
@@ -194,22 +195,30 @@ class ExecutionLayer {
   async ensureReady(): Promise<boolean> {
     if (this.ready) return true;
     console.warn(`${LOG_PREFIX} Auto-recovery: re-initializing after DB connection drop`);
-    await this.reload();
+    if (this.reloadPromise) {
+      await this.reloadPromise;
+    } else {
+      await this.reload();
+    }
     return this.ready;
   }
 
   async reload(): Promise<void> {
-    if (this.reloading) {
-      console.warn(`${LOG_PREFIX} Reload already in progress, skipping`);
+    if (this.reloading && this.reloadPromise) {
+      await this.reloadPromise;
       return;
     }
     this.reloading = true;
-    try {
-      console.log(`${LOG_PREFIX} Reloading from database...`);
-      await this.init();
-    } finally {
-      this.reloading = false;
-    }
+    this.reloadPromise = (async () => {
+      try {
+        console.log(`${LOG_PREFIX} Reloading from database...`);
+        await this.init();
+      } finally {
+        this.reloading = false;
+        this.reloadPromise = null;
+      }
+    })();
+    await this.reloadPromise;
   }
 
   // ─── Status & Diagnostics ────────────────────────────────────────────────
