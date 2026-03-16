@@ -255,6 +255,29 @@ async function executeTradeForPlan(
   }
 
   const tradeParams = parseTradeParams(plan);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ACTIVE DAY GATE
+  // Checks whether today (IST) falls within the plan's configured Start Day →
+  // End Day window. If not, the signal is held — not an error. This enforces
+  // the weeklyStartDay / weeklyEndDay settings from Time Logic & Expiry.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const timeLogicGate = tradeParams?.timeLogic as { weeklyStartDay?: string; weeklyEndDay?: string } | undefined;
+  if (timeLogicGate?.weeklyStartDay && timeLogicGate?.weeklyEndDay) {
+    const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+    const istDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const istDayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][istDate.getDay()];
+    const startIdx = WEEKDAYS.indexOf(timeLogicGate.weeklyStartDay);
+    const endIdx = WEEKDAYS.indexOf(timeLogicGate.weeklyEndDay);
+    const todayIdx = WEEKDAYS.indexOf(istDayName);
+    if (todayIdx < 0 || todayIdx < startIdx || todayIdx > endIdx) {
+      const msg = `Signal held — today is ${istDayName}, outside active window ${timeLogicGate.weeklyStartDay}–${timeLogicGate.weeklyEndDay}`;
+      console.log(`[TE] ${msg}`);
+      logPFL(plan, broker, data, "held", msg, { resolvedAction, ticker, exchange, price, executionTimeMs: Date.now() - startTime });
+      return { success: true, action: "hold", broker, planId: plan.id, message: msg, executionTimeMs: Date.now() - startTime };
+    }
+  }
+
   const legs = selectLegs(tradeParams, resolvedBlockType);
   const blockConfig = getBlockConfig(tradeParams, resolvedBlockType);
 
