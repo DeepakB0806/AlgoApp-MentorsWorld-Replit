@@ -313,8 +313,7 @@ async function executeTradeForPlan(
 
   if (legs.length === 0) {
     const skipMsg = `No legs configured for ${resolvedBlockType} — signal skipped`;
-    console.log(`[PFL] ✗ Plan "${plan.name}" — ${skipMsg}`);
-    logPFL(plan, broker, data, "held", skipMsg, { resolvedAction, ticker, exchange, price, executionTimeMs: Date.now() - startTime });
+    console.debug(`[TE] Skipping empty ${resolvedBlockType} block (no legs configured)`);
     return { success: true, action: "hold", broker, planId: plan.id, message: skipMsg, executionTimeMs: Date.now() - startTime };
   }
 
@@ -411,14 +410,51 @@ function resolveOrderParams(
     const fallbackDate = `${fallbackNow.getFullYear()}-${String(fallbackNow.getMonth() + 1).padStart(2, "0")}-${String(fallbackNow.getDate()).padStart(2, "0")}`;
     const expiryDateStr = ctx.targetExpiryDate || fallbackDate;
     const cacheKey = `${ctx.ticker}_${expiryDateStr}_${targetStrike}_${leg.type}`;
-    const exactMatch = liveContractCache.get(cacheKey);
 
-    if (!exactMatch) {
-       return { error: `No contract in multi-expiry cache for ${cacheKey}. Run Scrip Master Sync or check expiry settings.` };
+    let resolvedContract = liveContractCache.get(cacheKey);
+    let resolvedExpiry = expiryDateStr;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // FIX 3: HOLIDAY EXPIRY FALLBACK SCANNER
+    // When NSE shifts a weekly expiry due to a holiday (e.g. Thursday → Wednesday),
+    // the scrip master CSV stores the actual date while getTargetExpiry returns the
+    // theoretical calendar date. Scan cache keys within a ±3-day window and use
+    // the nearest actual expiry if the exact key misses.
+    // Cache key format: ${ticker}_${YYYY-MM-DD}_${strike}_${optType}
+    // Cache value type: { brokerSymbol: string, token: string } — NO metadata fields.
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (!resolvedContract) {
+      console.warn(`[TE] Exact match missed for ${cacheKey}. Initiating Holiday Fallback scan...`);
+      let minDiff = Infinity;
+      const targetTime = new Date(expiryDateStr).getTime();
+      const nowTime = new Date().setHours(0, 0, 0, 0);
+
+      for (const [key, contract] of liveContractCache.entries()) {
+        const parts = key.split("_");
+        if (parts.length !== 4) continue;
+        const [keyTicker, keyDate, keyStrike, keyOptType] = parts;
+        if (keyTicker !== ctx.ticker) continue;
+        if (Number(keyStrike) !== Number(targetStrike)) continue;
+        if (keyOptType !== leg.type) continue;
+        const contractTime = new Date(keyDate).getTime();
+        if (contractTime < nowTime) continue;
+        const diff = Math.abs(contractTime - targetTime);
+        if (diff < minDiff && diff <= 3 * 24 * 60 * 60 * 1000) {
+          minDiff = diff;
+          resolvedContract = contract;
+          resolvedExpiry = keyDate;
+        }
+      }
+
+      if (resolvedContract) {
+        console.warn(`[TE] Holiday Fallback: ${cacheKey} → using ${ctx.ticker}_${resolvedExpiry}_${targetStrike}_${leg.type} (shifted by ${Math.round(minDiff / 86400000)}d)`);
+      } else {
+        return { error: `No contract in multi-expiry cache for ${cacheKey}. Holiday Fallback also failed (±3d window). Run Scrip Master Sync or check expiry settings.` };
+      }
     }
 
-    tradingSymbol = exactMatch.brokerSymbol;
-    console.log(`[TE] Cache HIT: ${cacheKey} → ${tradingSymbol} (expiry=${expiryDateStr})`);
+    tradingSymbol = resolvedContract.brokerSymbol;
+    console.log(`[TE] Cache HIT: ${cacheKey} → ${tradingSymbol} (expiry=${resolvedExpiry})`);
   } else if (leg.type === "FUT") {
     tradingSymbol = `${ctx.ticker}-FUT`;
   }
@@ -494,12 +530,24 @@ async function executeBuySignal(
     let productType = "PAPER";
 
     if (broker === "kotak_neo") {
+      // ═══════════════════════════════════════════════════════════════════════════
+      // FIX 1 & 2: RESOLVED TERMINOLOGY & ELIMINATED PAYLOAD STARVATION
+      // ═══════════════════════════════════════════════════════════════════════════
+      const l = leg as Record<string, any>;
+      const actualProductType = l.productType || leg.orderType || params.productCode;
+      const actualPriceType = l.priceType || orderTypeForRecord || "MKT";
+      const actualPrice = actualPriceType === "LMT" ? String(l.limitPrice || ctx.price) : "0";
+
       const universalPayload: Record<string, any> = {
         tradingSymbol: params.tradingSymbol,
         exchange: EL.mapExchange(ctx.exchange),
         transactionType: params.transactionType,
         quantity: String(params.quantity),
-        productType: params.productCode,
+        productType: actualProductType,
+        priceType: actualPriceType,
+        price: actualPrice,
+        validity: l.validity || "DAY",
+        afterMarket: "NO",
       };
 
       const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
@@ -520,7 +568,6 @@ async function executeBuySignal(
       planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${i}`,
       tradingSymbol: params.tradingSymbol, exchange: ctx.exchange, quantity: params.quantity, price: fillPrice, 
 
-      // 3. OPTION SELLING FIX: Store actual leg direction ("BUY" or "SELL"), not hardcoded
       action: leg.action ? leg.action.toUpperCase() : "BUY", 
 
       blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
@@ -613,12 +660,24 @@ async function executeSellSignal(
     let productType = "PAPER";
 
     if (broker === "kotak_neo") {
+      // ═══════════════════════════════════════════════════════════════════════════
+      // FIX 1 & 2: RESOLVED TERMINOLOGY & ELIMINATED PAYLOAD STARVATION
+      // ═══════════════════════════════════════════════════════════════════════════
+      const l = leg as Record<string, any>;
+      const actualProductType = l.productType || leg.orderType || params.productCode;
+      const actualPriceType = l.priceType || orderTypeForRecord || "MKT";
+      const actualPrice = actualPriceType === "LMT" ? String(l.limitPrice || ctx.price) : "0";
+
       const universalPayload: Record<string, any> = {
         tradingSymbol: params.tradingSymbol,
         exchange: EL.mapExchange(ctx.exchange),
         transactionType: params.transactionType,
         quantity: String(params.quantity),
-        productType: params.productCode,
+        productType: actualProductType,
+        priceType: actualPriceType,
+        price: actualPrice,
+        validity: l.validity || "DAY",
+        afterMarket: "NO",
       };
 
       const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
@@ -639,7 +698,6 @@ async function executeSellSignal(
       planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${i}`,
       tradingSymbol: params.tradingSymbol, exchange: ctx.exchange, quantity: params.quantity, price: fillPrice, 
 
-      // 6. OPTION SELLING FIX: Store actual leg direction ("BUY" or "SELL"), not hardcoded
       action: leg.action ? leg.action.toUpperCase() : "SELL", 
 
       blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
@@ -685,6 +743,10 @@ async function closeTrade(
       transactionType,
       quantity: String(trade.quantity),
       productType: trade.productType,
+      priceType: "MKT",
+      price: "0",
+      validity: "DAY",
+      afterMarket: "NO",
     };
 
     const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
