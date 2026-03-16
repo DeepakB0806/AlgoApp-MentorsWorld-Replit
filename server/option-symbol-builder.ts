@@ -133,6 +133,54 @@ export function getNextExpiry(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// EXPIRY DATE RESOLUTION
+// Resolves the target expiry date from plan timeLogic settings:
+//   expiryDay  — "Tuesday" / "Monday" / "Thursday" (from instrument_configs)
+//   expiryType — "weekly" / "monthly"
+//   weekOffset — 0 = current week, 1 = next week, 2 = week after
+// Returns a Date representing the target expiry for cache key lookup.
+// ═══════════════════════════════════════════════════════════════════════════════
+export function getTargetExpiry(
+  expiryDay: string = "Thursday",
+  expiryType: string = "weekly",
+  weekOffset: number = 0,
+): Date {
+  const dayMap: Record<string, number> = {
+    Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
+    Thursday: 4, Friday: 5, Saturday: 6,
+  };
+
+  const targetDay = dayMap[expiryDay] ?? 4;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const currentDay = today.getDay();
+
+  let daysUntil = targetDay - currentDay;
+  if (daysUntil < 0) daysUntil += 7;
+  if (daysUntil === 0) {
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    if (currentHour > 15 || (currentHour === 15 && currentMinute >= 30)) {
+      daysUntil = 7;
+    }
+  }
+
+  const expiry = new Date(today);
+  if (expiryType === "monthly") {
+    expiry.setDate(today.getDate() + daysUntil);
+    const month = expiry.getMonth();
+    while (expiry.getMonth() === month) {
+      expiry.setDate(expiry.getDate() + 7);
+    }
+    expiry.setDate(expiry.getDate() - 7);
+  } else {
+    expiry.setDate(today.getDate() + daysUntil + (weekOffset * 7));
+  }
+
+  return expiry;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // SYMBOL BUILDING
 // Assembles the full Kotak option trading symbol
 // ═══════════════════════════════════════════════════════════════════════════════

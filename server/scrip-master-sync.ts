@@ -9,7 +9,12 @@ import { tradingCache } from "./cache";
 const LOG_PREFIX = "[SCRIP-MASTER]";
 const INDEX_TICKERS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"];
 
-// The live memory cache to bypass math symbol generation
+// ═══════════════════════════════════════════════════════════════════════════════
+// MULTI-EXPIRY LIVE CONTRACT CACHE
+// Keyed by ticker_YYYY-MM-DD_strike_optType so the TE can look up contracts
+// for any expiry date (current week, next week, monthly) — not just nearest.
+// Populated on every scrip master sync from the broker's NFO CSV.
+// ═══════════════════════════════════════════════════════════════════════════════
 export const liveContractCache = new Map<string, { brokerSymbol: string, token: string }>();
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -61,19 +66,21 @@ function inferExpiryDay(expiryDates: Date[]): string {
   return DAY_NAMES[sorted[0].getDay()];
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// STRIKE INTERVAL INFERENCE (feeds instrument_configs.strike_interval)
+// Uses the minimum non-zero gap between adjacent sorted unique strikes.
+// Must receive ONLY nearest-expiry strikes to avoid far-expiry 100-point gaps
+// inflating NIFTY's interval from the correct 50 to 100.
+// ═══════════════════════════════════════════════════════════════════════════════
 function inferStrikeInterval(strikes: number[]): number {
   if (strikes.length < 2) return 50;
   const sorted = Array.from(new Set(strikes)).sort((a, b) => a - b);
-  const freq = new Map<number, number>();
+  let minGap = Infinity;
   for (let i = 1; i < sorted.length; i++) {
     const d = Math.round((sorted[i] - sorted[i - 1]) * 100) / 100;
-    if (d > 0) freq.set(d, (freq.get(d) || 0) + 1);
+    if (d > 0 && d < minGap) minGap = d;
   }
-  let best = 50, bestCount = 0;
-  for (const [val, count] of Array.from(freq.entries())) {
-    if (count > bestCount) { bestCount = count; best = val; }
-  }
-  return best;
+  return minGap === Infinity ? 50 : minGap;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -140,12 +147,12 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
     if (expiryDate) td.expiryDates.push(expiryDate);
   }
 
-  // Populate the Live Contract Cache (Nearest Expiry Only)
+  // Populate the Multi-Expiry Live Contract Cache (ALL upcoming expiries)
   liveContractCache.clear();
-  const nearestDates = new Map<string, number>();
   const startOfDay = new Date(); startOfDay.setHours(0,0,0,0);
   const nowTime = startOfDay.getTime();
 
+  const nearestDates = new Map<string, number>();
   for (const c of rawContracts) {
       const t = c.date.getTime();
       if (t >= nowTime) {
@@ -156,20 +163,34 @@ function parseScripMasterCSV(csvText: string): ParsedInstrument[] {
   }
 
   for (const c of rawContracts) {
-      if (c.date.getTime() === nearestDates.get(c.ticker)) {
-          const key = `${c.ticker}_${c.strike}_${c.optType}`;
+      if (c.date.getTime() >= nowTime) {
+          const y = c.date.getFullYear();
+          const m = String(c.date.getMonth() + 1).padStart(2, "0");
+          const d = String(c.date.getDate()).padStart(2, "0");
+          const dateStr = `${y}-${m}-${d}`;
+          const key = `${c.ticker}_${dateStr}_${c.strike}_${c.optType}`;
           liveContractCache.set(key, { brokerSymbol: c.symbol, token: c.token });
       }
   }
-  console.log(`${LOG_PREFIX} Successfully loaded ${liveContractCache.size} exact contract strings into live cache.`);
+  console.log(`${LOG_PREFIX} Loaded ${liveContractCache.size} contracts (all upcoming expiries) into multi-expiry cache.`);
+
+  // Collect nearest-expiry-only strikes per ticker for accurate strike interval inference
+  const nearestStrikesByTicker = new Map<string, number[]>();
+  for (const c of rawContracts) {
+      if (c.date.getTime() === nearestDates.get(c.ticker)) {
+          if (!nearestStrikesByTicker.has(c.ticker)) nearestStrikesByTicker.set(c.ticker, []);
+          nearestStrikesByTicker.get(c.ticker)!.push(c.strike);
+      }
+  }
 
   const results: ParsedInstrument[] = [];
   for (const [ticker, data] of Array.from(tickerData.entries())) {
     const lotSizeFreq = new Map<number, number>();
     data.lotSizes.forEach(ls => lotSizeFreq.set(ls, (lotSizeFreq.get(ls) || 0) + 1));
     const lotSize = Array.from(lotSizeFreq.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || 1;
+    const nearStrikes = nearestStrikesByTicker.get(ticker) || data.strikes;
     results.push({
-      ticker, exchange: "NFO", lotSize, strikeInterval: inferStrikeInterval(data.strikes),
+      ticker, exchange: "NFO", lotSize, strikeInterval: inferStrikeInterval(nearStrikes),
       instrumentType: data.instrumentType, token: data.token, expiryDay: inferExpiryDay(data.expiryDates),
     });
   }

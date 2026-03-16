@@ -21,7 +21,8 @@ import {
   isStrikeSpec,
   parseStrikeSpec,
   getATMStrike,
-  getOTMStrike
+  getOTMStrike,
+  getTargetExpiry,
 } from "./option-symbol-builder";
 import { liveContractCache } from "./scrip-master-sync";
 
@@ -146,7 +147,13 @@ export async function processTradeSignal(
   }
 
   if (plans.length === 0) {
-    console.log(`[PFL] ✗ No active plans found for config ${strategyConfigId.slice(0, 8)}`);
+    console.warn(`[PFL] ⚠ No active/deployed plans found for config ${strategyConfigId.slice(0, 8)} — signal dropped. Check if plan is still in 'draft' or 'closed' state.`);
+    addProcessFlowLog({
+      planId: "", planName: "UNKNOWN", signalType: webhookData.signalType || "unknown",
+      alert: webhookData.alert || "", resolvedAction: "N/A", blockType: "",
+      actionTaken: "dropped", message: `No active/deployed plans for config ${strategyConfigId.slice(0, 8)}. Signal dropped.`,
+      broker: "none",
+    });
     return [{ success: false, action: "hold", broker: "none", planId: "", message: "No active plans found for this strategy" }];
   }
   console.log(`[PFL] Found ${plans.length} active plan(s): ${plans.map((p) => `${p.name}[${p.id.slice(0, 8)}]`).join(", ")}`);
@@ -269,13 +276,32 @@ async function executeTradeForPlan(
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // EXPIRY DATE RESOLUTION
+  // Reads timeLogic from plan's tradeParams to determine the target expiry
+  // date for the multi-expiry contract cache lookup.
+  // ═══════════════════════════════════════════════════════════════════════════
+  let targetExpiryDate: string | undefined;
+  if (isOptionExchange(exchange) && instrumentConfig) {
+    const timeLogic = tradeParams?.timeLogic as { expiryType?: string; expiryWeekOffset?: number } | undefined;
+    const expiryType = timeLogic?.expiryType || "weekly";
+    const weekOffset = timeLogic?.expiryWeekOffset || 0;
+    const expiryDay = instrumentConfig.expiryDay || "Thursday";
+    const targetDate = getTargetExpiry(expiryDay, expiryType, weekOffset);
+    const ey = targetDate.getFullYear();
+    const em = String(targetDate.getMonth() + 1).padStart(2, "0");
+    const ed = String(targetDate.getDate()).padStart(2, "0");
+    targetExpiryDate = `${ey}-${em}-${ed}`;
+    console.log(`[TE] Resolved target expiry: ${expiryDay} + ${expiryType} + offset=${weekOffset} → ${targetExpiryDate}`);
+  }
+
   let openTrades = tradingCache.getOpenTradesByPlanId(plan.id);
   if (!openTrades) {
     openTrades = await storage.getOpenTradesByPlan(plan.id);
     tradingCache.setOpenTradesByPlanId(plan.id, openTrades);
   }
 
-  const ctx: TradeContext = { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, blockConfig, instrumentConfig };
+  const ctx: TradeContext = { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, blockConfig, instrumentConfig, targetExpiryDate };
 
   if (signalType === "buy") {
     return executeBuySignal(storage, plan, brokerConfig, ctx);
@@ -296,7 +322,7 @@ async function executeTradeForPlan(
 // TRADE CONTEXT & ORDER PARAMETER RESOLUTION
 // ═══════════════════════════════════════════════════════════════════════════════
 interface TradeContext {
-  ticker: string; exchange: string; price: number; resolvedBlockType: string; lotMultiplier: number; now: string; today: string; data: WebhookData; openTrades: StrategyTrade[]; signalContext?: SignalContext; startTime: number; legs: PlanTradeLeg[]; blockConfig: Record<string, any>; instrumentConfig?: InstrumentConfig;
+  ticker: string; exchange: string; price: number; resolvedBlockType: string; lotMultiplier: number; now: string; today: string; data: WebhookData; openTrades: StrategyTrade[]; signalContext?: SignalContext; startTime: number; legs: PlanTradeLeg[]; blockConfig: Record<string, any>; instrumentConfig?: InstrumentConfig; targetExpiryDate?: string;
 }
 
 function resolveOrderParams(
@@ -319,21 +345,27 @@ function resolveOrderParams(
       return { error: `Cannot calculate ${leg.strike} strike for ${ctx.ticker} — spot price is missing.` };
     }
 
-    // Calculate the target strike price mathematically
+    // ═══════════════════════════════════════════════════════════════════════════
+    // EXPIRY-AWARE CONTRACT RESOLUTION
+    // Reads the plan's timeLogic to resolve the target expiry, then looks up
+    // the contract in the multi-expiry cache keyed by ticker_YYYY-MM-DD_strike_optType.
+    // ═══════════════════════════════════════════════════════════════════════════
     const spec = parseStrikeSpec(leg.strike);
     const atm = getATMStrike(ctx.price, strikeInterval);
     const targetStrike = getOTMStrike(atm, spec, strikeInterval, leg.type);
 
-    // Look up the exact Kotak string from our live CSV memory cache
-    const cacheKey = `${ctx.ticker}_${targetStrike}_${leg.type}`;
+    const fallbackNow = new Date();
+    const fallbackDate = `${fallbackNow.getFullYear()}-${String(fallbackNow.getMonth() + 1).padStart(2, "0")}-${String(fallbackNow.getDate()).padStart(2, "0")}`;
+    const expiryDateStr = ctx.targetExpiryDate || fallbackDate;
+    const cacheKey = `${ctx.ticker}_${expiryDateStr}_${targetStrike}_${leg.type}`;
     const exactMatch = liveContractCache.get(cacheKey);
 
     if (!exactMatch) {
-       return { error: `No exact contract found in live cache for ${cacheKey}. Did you run Scrip Master Sync today?` };
+       return { error: `No contract in multi-expiry cache for ${cacheKey}. Run Scrip Master Sync or check expiry settings.` };
     }
 
     tradingSymbol = exactMatch.brokerSymbol;
-    console.log(`[TE] Cache HIT: Translated ${cacheKey} → ${tradingSymbol}`);
+    console.log(`[TE] Cache HIT: ${cacheKey} → ${tradingSymbol} (expiry=${expiryDateStr})`);
   } else if (leg.type === "FUT") {
     tradingSymbol = `${ctx.ticker}-FUT`;
   }
