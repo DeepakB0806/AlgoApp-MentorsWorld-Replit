@@ -70,7 +70,11 @@ function inferExpiryDay(expiryDates: Date[]): string {
   const now = new Date();
   const sorted = expiryDates.filter(d => d >= now).sort((a, b) => a.getTime() - b.getTime());
   if (sorted.length === 0) return "Thursday";
-  return DAY_NAMES[sorted[0].getDay()];
+  // FIX #40: Kotak epoch timestamps land at UTC 18:30 the previous calendar day.
+  // Adding 5h30m (19800000ms) shifts to midnight IST so getUTCDay() returns the
+  // correct IST calendar weekday (e.g. Thursday, not Wednesday for NIFTY).
+  const istDate = new Date(sorted[0].getTime() + 19800000);
+  return DAY_NAMES[istDate.getUTCDay()];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
