@@ -623,12 +623,12 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
               ? Number(p.urmtom)
               : (p.unrealisedPnl !== undefined ? Number(p.unrealisedPnl) : undefined);
 
-            // When Kotak does not supply rpnl/pnl/ltp for net-zero (qty=0) positions,
-            // compute them from amounts that Kotak does supply correctly.
+            // Always derive P&L from actual fill amounts (sell_avg - buy_avg basis),
+            // not Kotak's session-scoped MTM pnl which resets intraday and can be misleading.
             const amountsKnown  = buyAmt > 0 && sellAmt > 0;
-            const computedRpnl  = amountsKnown ? sellAmt - buyAmt : 0;
-            const realisedPnl   = kotakRpnl !== 0 ? kotakRpnl : computedRpnl;
-            const totalPnl      = kotakPnl  !== 0 ? kotakPnl  : realisedPnl + (unrealisedPnl ?? 0);
+            const computedRpnl  = amountsKnown ? sellAmt - buyAmt : kotakRpnl;
+            const realisedPnl   = computedRpnl;
+            const totalPnl      = realisedPnl + (unrealisedPnl ?? 0);
             // For closed positions (qty=0) where Kotak returns ltp=0, show the last execution price.
             const ltp = kotakLtp !== 0 ? kotakLtp : (quantity === 0 ? (sellAvg || buyAvg) : 0);
 
