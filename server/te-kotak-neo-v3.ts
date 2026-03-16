@@ -365,10 +365,7 @@ function resolveOrderParams(
   }
 
   const lotSize = ctx.instrumentConfig?.lotSize ?? 1;
-  const DEFAULT_STRIKE_INTERVALS: Record<string, number> = { BANKNIFTY: 100, SENSEX: 100, BANKEX: 100, MIDCPNIFTY: 25 };
-  const strikeInterval = ctx.instrumentConfig?.strikeInterval
-    ?? DEFAULT_STRIKE_INTERVALS[ctx.ticker?.toUpperCase() || ""]
-    ?? 50;
+  const strikeInterval = ctx.instrumentConfig!.strikeInterval;
 
   let tradingSymbol = ctx.ticker;
   if (isOption && isStrikeSpec(leg.strike) && (leg.type === "CE" || leg.type === "PE")) {

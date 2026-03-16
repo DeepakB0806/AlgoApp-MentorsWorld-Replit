@@ -5,10 +5,9 @@ import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
 import EL from "./el-kotak-neo-v3";
 import { tradingCache } from "./cache";
+import { isOptionExchange } from "./option-symbol-builder";
 
 const LOG_PREFIX = "[SCRIP-MASTER]";
-const NFO_TICKERS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"];
-const BFO_TICKERS = ["SENSEX", "BANKEX"];
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MULTI-EXPIRY LIVE CONTRACT CACHE
@@ -209,60 +208,90 @@ function populateContractCache(allRawContracts: RawContract[]): void {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCRIP MASTER DOWNLOAD
-// Downloads NFO CSV (required) and BFO CSV (optional, graceful on miss).
-// Each exchange's tickers receive the correct exchange label in instrument_configs.
+// Fully config-driven: reads configured (ticker, exchange) pairs from
+// strategy_configs, maps each exchange to a CSV URL via broker_exchange_maps,
+// and parses only the tickers the user has actually configured. No hardcoded
+// ticker lists — adding any ticker/exchange in the UI is sufficient.
 // ═══════════════════════════════════════════════════════════════════════════════
 export async function runScripMasterSync(storage: IStorage, brokerConfig: BrokerConfig): Promise<{ success: boolean; synced: number; error?: string }> {
   console.log(`${LOG_PREFIX} Starting scrip master sync for broker ${brokerConfig.name}`);
   try {
+    // ── Step 1: Collect all unique (ticker, exchange) pairs from strategy configs ──
+    const allConfigs = await storage.getStrategyConfigs();
+    const tickersByExchange = new Map<string, string[]>();
+    for (const cfg of allConfigs) {
+      if (!cfg.ticker || !cfg.exchange || !isOptionExchange(cfg.exchange)) continue;
+      const ex = cfg.exchange.toUpperCase();
+      if (!tickersByExchange.has(ex)) tickersByExchange.set(ex, []);
+      if (!tickersByExchange.get(ex)!.includes(cfg.ticker)) tickersByExchange.get(ex)!.push(cfg.ticker);
+    }
+
+    if (tickersByExchange.size === 0) {
+      console.warn(`${LOG_PREFIX} No option exchange strategies configured — nothing to sync`);
+      return { success: true, synced: 0 };
+    }
+    console.log(`${LOG_PREFIX} Configured exchanges: ${[...tickersByExchange.entries()].map(([ex, tks]) => `${ex}=[${tks.join(",")}]`).join(", ")}`);
+
+    // ── Step 2: Load exchange → broker_code map from DB ────────────────────────
+    const exchangeMaps = await storage.getBrokerExchangeMaps(brokerConfig.brokerName || "kotak_neo_v3");
+    const brokerCodeByExchange = new Map(exchangeMaps.map(m => [m.universalCode.toUpperCase(), m.brokerCode.toLowerCase()]));
+
+    // ── Step 3: Fetch all available scrip master file paths ────────────────────
     const filePathsResult = await EL.getScripMasterFilePaths(brokerConfig);
     if (!filePathsResult.success) return { success: false, synced: 0, error: filePathsResult.error };
 
     const data: any = filePathsResult.data;
-
-    // ── URL search helper ──────────────────────────────────────────────────────
-    const findUrl = (items: any[], keywords: string[]): string | null => {
-      for (const item of items) {
-        const path = typeof item === 'string' ? item : (item?.filePath || item?.path || item?.url || item?.fileUrl || "");
-        if (path && keywords.some(kw => path.toLowerCase().includes(kw))) return path;
-      }
-      return null;
-    };
-
     const flatItems: any[] = Array.isArray(data)
       ? data
       : Array.isArray(data?.filesPaths) ? data.filesPaths
       : Array.isArray(data?.data?.filesPaths) ? data.data.filesPaths
       : [];
 
-    const nfoFileUrl = findUrl(flatItems, ["nfo", "nse_fo"]);
-    const bfoFileUrl = findUrl(flatItems, ["bfo", "bse_fo", "bse"]);
+    const findUrl = (keywords: string[]): string | null => {
+      for (const item of flatItems) {
+        const path = typeof item === 'string' ? item : (item?.filePath || item?.path || item?.url || item?.fileUrl || "");
+        if (path && keywords.some(kw => path.toLowerCase().includes(kw))) return path;
+      }
+      return null;
+    };
 
-    if (!nfoFileUrl) return { success: false, synced: 0, error: "Could not find NFO scrip master file URL" };
-    if (!bfoFileUrl) console.warn(`${LOG_PREFIX} BFO scrip master file not found — SENSEX/BANKEX will not be synced`);
+    // ── Step 4: For each configured exchange, download & parse its CSV ─────────
+    const allRawContracts: RawContract[] = [];
+    const allInstruments: ParsedInstrument[] = [];
+    let atLeastOneRequired = false;
 
-    // ── Parse NFO (required) ───────────────────────────────────────────────────
-    const nfoCsv = await (await fetch(nfoFileUrl)).text();
-    const nfoParsed = parseScripMasterCSV(nfoCsv, "NFO", NFO_TICKERS);
-    console.log(`${LOG_PREFIX} NFO: ${nfoParsed.instruments.length} tickers, ${nfoParsed.rawContracts.length} contracts`);
+    for (const [exchange, tickers] of tickersByExchange.entries()) {
+      const brokerCode = brokerCodeByExchange.get(exchange);
+      // Build URL keywords: prefer broker_code from DB, fall back to exchange name itself
+      const keywords = brokerCode ? [brokerCode, exchange.toLowerCase()] : [exchange.toLowerCase()];
+      const csvUrl = findUrl(keywords);
 
-    // ── Parse BFO (optional) ───────────────────────────────────────────────────
-    let bfoParsed: ParseResult = { instruments: [], rawContracts: [] };
-    if (bfoFileUrl) {
+      if (!csvUrl) {
+        if (exchange === "NFO") {
+          return { success: false, synced: 0, error: `Could not find scrip master CSV for ${exchange} — required for configured strategies` };
+        }
+        console.warn(`${LOG_PREFIX} No scrip master CSV found for ${exchange} (tickers: ${tickers.join(",")}) — skipping`);
+        continue;
+      }
+
       try {
-        const bfoCsv = await (await fetch(bfoFileUrl)).text();
-        bfoParsed = parseScripMasterCSV(bfoCsv, "BFO", BFO_TICKERS);
-        console.log(`${LOG_PREFIX} BFO: ${bfoParsed.instruments.length} tickers, ${bfoParsed.rawContracts.length} contracts`);
-      } catch (bfoErr: any) {
-        console.warn(`${LOG_PREFIX} BFO CSV download failed (non-fatal): ${bfoErr.message}`);
+        const csvText = await (await fetch(csvUrl)).text();
+        const parsed = parseScripMasterCSV(csvText, exchange, tickers);
+        console.log(`${LOG_PREFIX} ${exchange}: ${parsed.instruments.length} tickers, ${parsed.rawContracts.length} contracts`);
+        allRawContracts.push(...parsed.rawContracts);
+        allInstruments.push(...parsed.instruments);
+        atLeastOneRequired = true;
+      } catch (fetchErr: any) {
+        if (exchange === "NFO") return { success: false, synced: 0, error: `Failed to download ${exchange} CSV: ${fetchErr.message}` };
+        console.warn(`${LOG_PREFIX} ${exchange} CSV download failed (non-fatal): ${fetchErr.message}`);
       }
     }
 
-    // ── Populate cache from both exchanges in one pass ─────────────────────────
-    populateContractCache([...nfoParsed.rawContracts, ...bfoParsed.rawContracts]);
+    if (!atLeastOneRequired) return { success: false, synced: 0, error: "No scrip master CSV could be loaded" };
 
-    // ── Upsert instrument configs ──────────────────────────────────────────────
-    const allInstruments = [...nfoParsed.instruments, ...bfoParsed.instruments];
+    // ── Step 5: Populate cache and upsert instrument configs ───────────────────
+    populateContractCache(allRawContracts);
+
     let synced = 0;
     for (const inst of allInstruments) {
       await storage.upsertInstrumentConfig({

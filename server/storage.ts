@@ -4,14 +4,14 @@ import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
   brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades, strategyDailyPnl,
-  broker_field_mappings, universal_fields, instrumentConfigs,
+  broker_field_mappings, universal_fields, instrumentConfigs, broker_exchange_maps,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
   type WebhookStatusLog, type InsertWebhookStatusLog,
   type WebhookData, type InsertWebhookData,
   type AppSetting, type InsertAppSetting,
-  type BrokerConfig, type InsertBrokerConfig,
+  type BrokerConfig, type InsertBrokerConfig, type BrokerExchangeMap,
   type WebhookRegistry, type InsertWebhookRegistry,
   type BrokerTestLog, type InsertBrokerTestLog,
   type BrokerSessionLog, type InsertBrokerSessionLog,
@@ -93,6 +93,7 @@ export interface IStorage {
   getBrokerConfigs(): Promise<BrokerConfig[]>;
   getBrokerConfig(id: string): Promise<BrokerConfig | undefined>;
   getBrokerConfigByUcc(ucc: string): Promise<BrokerConfig | undefined>;
+  getBrokerExchangeMaps(brokerName: string): Promise<BrokerExchangeMap[]>;
   createBrokerConfig(config: InsertBrokerConfig): Promise<BrokerConfig>;
   updateBrokerConfig(id: string, config: Partial<InsertBrokerConfig>): Promise<BrokerConfig | undefined>;
   deleteBrokerConfig(id: string): Promise<boolean>;
@@ -624,6 +625,11 @@ export class DatabaseStorage implements IStorage {
   async getBrokerConfigByUcc(ucc: string): Promise<BrokerConfig | undefined> {
     const [config] = await db.select().from(brokerConfigs).where(eq(brokerConfigs.ucc, ucc));
     return config || undefined;
+  }
+
+  async getBrokerExchangeMaps(brokerName: string): Promise<BrokerExchangeMap[]> {
+    return await db.select().from(broker_exchange_maps)
+      .where(and(eq(broker_exchange_maps.brokerName, brokerName), eq(broker_exchange_maps.isActive, true)));
   }
 
   async createBrokerConfig(insertConfig: InsertBrokerConfig): Promise<BrokerConfig> {
