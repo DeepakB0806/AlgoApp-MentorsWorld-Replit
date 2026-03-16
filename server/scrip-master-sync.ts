@@ -70,11 +70,10 @@ function inferExpiryDay(expiryDates: Date[]): string {
   const now = new Date();
   const sorted = expiryDates.filter(d => d >= now).sort((a, b) => a.getTime() - b.getTime());
   if (sorted.length === 0) return "Thursday";
-  // FIX #40: Kotak epoch timestamps land at UTC 18:30 the previous calendar day.
-  // Adding 5h30m (19800000ms) shifts to midnight IST so getUTCDay() returns the
-  // correct IST calendar weekday (e.g. Thursday, not Wednesday for NIFTY).
-  const istDate = new Date(sorted[0].getTime() + 19800000);
-  return DAY_NAMES[istDate.getUTCDay()];
+
+  // Reverted Replit's incorrect UTC offset. The raw getDay() accurately resolves
+  // the exact 2025/2026 NSE Tuesday baseline and month-end prepone shifts.
+  return DAY_NAMES[sorted[0].getDay()];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -220,21 +219,37 @@ function populateContractCache(allRawContracts: RawContract[]): void {
 export async function runScripMasterSync(storage: IStorage, brokerConfig: BrokerConfig): Promise<{ success: boolean; synced: number; error?: string }> {
   console.log(`${LOG_PREFIX} Starting scrip master sync for broker ${brokerConfig.name}`);
   try {
-    // ── Step 1: Collect all unique (ticker, exchange) pairs from strategy configs ──
+    // ── Step 1: Collect all unique (ticker, exchange) pairs from strategy configs & plans ──
     const allConfigs = await storage.getStrategyConfigs();
     const tickersByExchange = new Map<string, string[]>();
+
+    // 🛡️ PERMANENT SAFETY NET: Always sync the major NFO indices so the system never starves
+    tickersByExchange.set("NFO", ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]);
+
     for (const cfg of allConfigs) {
-      if (!cfg.ticker || !cfg.exchange || !isOptionExchange(cfg.exchange)) continue;
-      const ex = cfg.exchange.toUpperCase();
-      if (!tickersByExchange.has(ex)) tickersByExchange.set(ex, []);
-      if (!tickersByExchange.get(ex)!.includes(cfg.ticker)) tickersByExchange.get(ex)!.push(cfg.ticker);
+      // 1. Check Mother Config level
+      if (cfg.ticker && cfg.exchange && isOptionExchange(cfg.exchange)) {
+        const ex = cfg.exchange.toUpperCase();
+        if (!tickersByExchange.has(ex)) tickersByExchange.set(ex, []);
+        if (!tickersByExchange.get(ex)!.includes(cfg.ticker)) tickersByExchange.get(ex)!.push(cfg.ticker);
+      }
+
+      // 2. Check Plan level
+      const plans = await storage.getStrategyPlansByConfig(cfg.id);
+      for (const plan of plans) {
+        if (plan.ticker && plan.exchange && isOptionExchange(plan.exchange)) {
+          const ex = plan.exchange.toUpperCase();
+          if (!tickersByExchange.has(ex)) tickersByExchange.set(ex, []);
+          if (!tickersByExchange.get(ex)!.includes(plan.ticker)) tickersByExchange.get(ex)!.push(plan.ticker);
+        }
+      }
     }
 
     if (tickersByExchange.size === 0) {
       console.warn(`${LOG_PREFIX} No option exchange strategies configured — nothing to sync`);
       return { success: true, synced: 0 };
     }
-    console.log(`${LOG_PREFIX} Configured exchanges: ${[...tickersByExchange.entries()].map(([ex, tks]) => `${ex}=[${tks.join(",")}]`).join(", ")}`);
+    console.log(`${LOG_PREFIX} Configured exchanges to sync: ${[...tickersByExchange.entries()].map(([ex, tks]) => `${ex}=[${tks.join(",")}]`).join(", ")}`);
 
     // ── Step 2: Load exchange → broker_code map from DB ────────────────────────
     const exchangeMaps = await storage.getBrokerExchangeMaps(brokerConfig.brokerName || "kotak_neo_v3");
