@@ -7,14 +7,15 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, Trash2, Settings, Link2, Loader2, X, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, TrendingDown, Activity, ChevronDown, ChevronUp, BarChart3, Archive, AlertTriangle, ExternalLink, Maximize2, Minimize2 } from "lucide-react";
+import { Plus, Trash2, Settings, Link2, Loader2, X, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, Activity, BarChart3, Archive, AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl } from "@shared/schema";
+import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl, Position } from "@shared/schema";
 import type { TradeParams } from "@shared/schema";
 import { buildBrokerOrderParams } from "@shared/schema";
 import type { BrokerConfig } from "@shared/schema";
@@ -37,440 +38,6 @@ const DEPLOYMENT_STATUS_CONFIG: Record<string, { label: string; color: string; i
   closed: { label: "Closed", color: "text-muted-foreground", icon: Power },
   archived: { label: "Archived", color: "text-purple-400", icon: Archive },
 };
-
-function formatTradeTime(timeUnix: number | null, localTime: string | null, executedAt: string | null): string {
-  if (localTime) return localTime;
-  if (timeUnix) {
-    const d = new Date(timeUnix > 9999999999 ? timeUnix : timeUnix * 1000);
-    return d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
-  }
-  if (executedAt) {
-    const d = new Date(executedAt);
-    return d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
-  }
-  return "-";
-}
-
-function TradeTableContent({ trades, groupedTrades, BLOCK_LABELS, plan }: {
-  trades: StrategyTrade[];
-  groupedTrades: Record<string, StrategyTrade[]>;
-  BLOCK_LABELS: Record<string, { label: string; icon: typeof TrendingUp; color: string }>;
-  plan?: StrategyPlan;
-}) {
-  if (trades.length === 0) return null;
-
-  function parseNFOSym(sym: string): { optionType: string; strike: string; expiry: string } {
-    if (!sym) return { optionType: "", strike: "", expiry: "" };
-    const upper = sym.toUpperCase();
-    const m = upper.match(/^[A-Z]+(\d{2}[A-Z]{3}\d{2}|\d{5,6})(\d+(?:\.\d+)?)(CE|PE)$/);
-    if (m) return { optionType: m[3], strike: m[2], expiry: m[1] };
-    if (upper.endsWith("FUT")) return { optionType: "FUT", strike: "", expiry: "" };
-    return { optionType: "", strike: "", expiry: "" };
-  }
-
-  const HEADERS = [
-    { label: "Order ID", align: "text-left" },
-    { label: "Symbol", align: "text-left" },
-    { label: "Exchange", align: "text-left" },
-    { label: "Type", align: "text-left" },
-    { label: "Strike", align: "text-right" },
-    { label: "Product", align: "text-left" },
-    { label: "Option", align: "text-left" },
-    { label: "Expiry", align: "text-left" },
-    { label: "Qty", align: "text-right" },
-    { label: "Buy Avg", align: "text-right" },
-    { label: "Sell Avg", align: "text-right" },
-    { label: "LTP", align: "text-right" },
-    { label: "P&L", align: "text-right" },
-    { label: "P&L Realz", align: "text-right" },
-    { label: "P&L URealz", align: "text-right" },
-  ];
-
-  return (
-    <div className="space-y-3">
-      {Object.entries(groupedTrades).map(([blockType, blockTrades]) => {
-        const blockCfg = BLOCK_LABELS[blockType] || BLOCK_LABELS.legs;
-        const BlockIcon = blockCfg.icon;
-        const blockPnl = blockTrades.reduce((s, t) => s + Number(t.pnl || 0), 0);
-        return (
-          <div key={blockType} className="border border-border/30 rounded-md" data-testid={`container-block-${blockType}`}>
-            <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border/20 flex-wrap">
-              <div className="flex items-center gap-2">
-                <BlockIcon className={`w-3.5 h-3.5 ${blockCfg.color}`} />
-                <span className="text-xs font-semibold">{blockCfg.label}</span>
-                <Badge variant="secondary" className="text-xs">{blockTrades.length} trade{blockTrades.length !== 1 ? "s" : ""}</Badge>
-              </div>
-              <span className={`text-xs font-mono font-semibold ${blockPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                p&l: {blockPnl >= 0 ? "+" : ""}{blockPnl.toFixed(2)}
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border/30">
-                    {HEADERS.map((h) => (
-                      <th key={h.label} className={`whitespace-nowrap ${h.align} px-2 py-1 text-muted-foreground font-medium`}>{h.label}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {blockTrades.map((trade) => {
-                    const isClosed = trade.status === "closed" || trade.status === "squared_off";
-                    const isOpen = !isClosed;
-                    const action = trade.action || trade.alert || "";
-                    const isBuy = action.toUpperCase() === "BUY" || action.toUpperCase().includes("BUY");
-                    const sym = trade.tradingSymbol || trade.ticker || "";
-                    const parsed = parseNFOSym(sym);
-                    const buyAvg = isBuy ? Number(trade.price || 0) : Number(trade.exitPrice || 0);
-                    const sellAvg = isBuy ? Number(trade.exitPrice || 0) : Number(trade.price || 0);
-                    const pnlRealz = isClosed ? Number(trade.pnl || 0) : null;
-                    const pnlUrealz = isOpen
-                      ? (isBuy
-                          ? (Number(trade.ltp || 0) - Number(trade.price || 0)) * Number(trade.quantity || 0)
-                          : (Number(trade.price || 0) - Number(trade.ltp || 0)) * Number(trade.quantity || 0))
-                      : null;
-                    return (
-                      <tr key={trade.id} className="border-b border-border/20 hover:bg-muted/20" data-testid={`row-trade-${trade.id}`}>
-                        <td className="whitespace-nowrap px-2 py-1.5 font-mono text-muted-foreground">{trade.orderId || "—"}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 font-medium">{sym || "—"}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5">
-                          <Badge variant="outline" className="text-xs">{trade.exchange || plan?.exchange || "—"}</Badge>
-                        </td>
-                        <td className="whitespace-nowrap px-2 py-1.5">
-                          <Badge variant={isBuy ? "default" : "destructive"} className="font-mono text-xs">{action || "—"}</Badge>
-                        </td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">
-                          {parsed.strike || sym.match(/(\d{4,6})(CE|PE|FUT)/i)?.[1] || "—"}
-                        </td>
-                        <td className="whitespace-nowrap px-2 py-1.5">{trade.productType || "—"}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5">
-                          {parsed.optionType ? (
-                            <Badge variant="outline" className={`text-xs ${parsed.optionType === "CE" ? "text-emerald-400 border-emerald-400/50" : parsed.optionType === "PE" ? "text-red-400 border-red-400/50" : ""}`}>
-                              {parsed.optionType}
-                            </Badge>
-                          ) : "—"}
-                        </td>
-                        <td className="whitespace-nowrap px-2 py-1.5">{parsed.expiry || "—"}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{Math.abs(Number(trade.quantity || 0))}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{buyAvg > 0 ? buyAvg.toFixed(2) : "—"}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{sellAvg > 0 ? sellAvg.toFixed(2) : "—"}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{Number(trade.ltp || 0).toFixed(2)}</td>
-                        <td className={`whitespace-nowrap px-2 py-1.5 text-right font-mono font-semibold ${Number(trade.pnl || 0) > 0 ? "text-emerald-400" : Number(trade.pnl || 0) < 0 ? "text-red-400" : "text-muted-foreground"}`}>
-                          {isClosed ? <>{Number(trade.pnl || 0) >= 0 ? "+" : ""}{Number(trade.pnl || 0).toFixed(2)}</> : <span className="text-muted-foreground/60">—</span>}
-                        </td>
-                        <td className={`whitespace-nowrap px-2 py-1.5 text-right font-mono ${pnlRealz !== null ? (pnlRealz >= 0 ? "text-emerald-400" : "text-red-400") : "text-muted-foreground"}`}>
-                          {pnlRealz !== null ? `${pnlRealz >= 0 ? "+" : ""}${pnlRealz.toFixed(2)}` : "—"}
-                        </td>
-                        <td className={`whitespace-nowrap px-2 py-1.5 text-right font-mono ${pnlUrealz !== null ? (pnlUrealz >= 0 ? "text-emerald-400" : "text-red-400") : "text-muted-foreground"}`}>
-                          {pnlUrealz !== null ? `${pnlUrealz >= 0 ? "+" : ""}${pnlUrealz.toFixed(2)}` : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function LivePositionTracker({ plan, brokerConfigs, parentConfig }: { plan: StrategyPlan; brokerConfigs: BrokerConfig[]; parentConfig?: StrategyConfig }) {
-  const { toast } = useToast();
-  const brokerConfig = brokerConfigs.find((bc) => bc.id === plan.brokerConfigId);
-  const isConnected = brokerConfig?.isConnected || false;
-  const isDeployed = plan.deploymentStatus && plan.deploymentStatus !== "draft";
-  const isPaperTrade = brokerConfig?.brokerName === "paper_trade";
-  const webhookId = parentConfig?.webhookId;
-
-  const { data: _syncResult } = useQuery({
-    queryKey: ["/api/process-production-signals", webhookId],
-    queryFn: async () => {
-      const resp = await fetch(`/api/process-production-signals/${webhookId}`, { method: "POST" });
-      if (!resp.ok) return null;
-      return resp.json();
-    },
-    enabled: !!isPaperTrade && !!webhookId && plan.deploymentStatus === "active",
-    refetchInterval: 60000,
-  });
-
-  const { data: trades = [], isLoading, refetch } = useQuery<StrategyTrade[]>({
-    queryKey: ["/api/strategy-trades", plan.id],
-    queryFn: async () => {
-      const resp = await fetch(`/api/strategy-trades/${plan.id}`);
-      if (!resp.ok) throw new Error("Failed to fetch");
-      return resp.json();
-    },
-    enabled: !!isDeployed,
-    refetchInterval: plan.deploymentStatus === "active" ? 30000 : false,
-  });
-
-  const clearTradesMutation = useMutation({
-    mutationFn: async (days: number | "all") => {
-      if (days === "all") {
-        return apiRequest("DELETE", `/api/strategy-trades/${plan.id}/clear?days=all`);
-      }
-      return apiRequest("DELETE", `/api/strategy-trades/${plan.id}/clear?days=${days}`);
-    },
-    onSuccess: (_data, days) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/strategy-trades", plan.id] });
-      toast({ title: days === "all" ? "All trade data cleared" : `Trades older than ${days} day${days !== 1 ? "s" : ""} cleared` });
-    },
-    onError: () => {
-      toast({ title: "Failed to clear trade data", variant: "destructive" });
-    },
-  });
-
-  const [lastFetched, setLastFetched] = useState<string | null>(null);
-  const [isCollapsed, setIsCollapsed] = useState(true);
-  const [isSheetOpen, setIsSheetOpen] = useState(false);
-  const [sheetExpanded, setSheetExpanded] = useState(false);
-  const tradesCount = trades.length;
-  useEffect(() => {
-    if (tradesCount > 0 || !isLoading) setLastFetched(new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }));
-  }, [tradesCount, isLoading]);
-
-  const totalPnl = trades.reduce((sum, t) => sum + Number(t.pnl || 0), 0);
-  const totalValue = trades.reduce((sum, t) => sum + (Number(t.price || 0) * Number(t.quantity || 0)), 0);
-  const openTrades = trades.filter((t) => t.status === "executed" || t.status === "partial");
-  const closedTrades = trades.filter((t) => t.status === "closed" || t.status === "squared_off");
-
-  const BLOCK_LABELS: Record<string, { label: string; icon: typeof TrendingUp; color: string }> = {
-    uptrend: { label: "Uptrend Block", icon: TrendingUp, color: "text-emerald-400" },
-    downtrend: { label: "Downtrend Block", icon: TrendingDown, color: "text-red-400" },
-    neutral: { label: "Neutral Block", icon: Activity, color: "text-amber-400" },
-    legs: { label: "Legs", icon: Target, color: "text-blue-400" },
-  };
-
-  const groupedTrades: Record<string, StrategyTrade[]> = {};
-  trades.forEach((t) => {
-    const key = t.blockType || "legs";
-    if (!groupedTrades[key]) groupedTrades[key] = [];
-    groupedTrades[key].push(t);
-  });
-
-  return (
-    <div className="mt-3 border-t border-border/50 pt-3" data-testid={`container-live-positions-${plan.id}`}>
-      <button
-        className="w-full flex items-center justify-between gap-2 mb-2 cursor-pointer"
-        onClick={() => setIsCollapsed(!isCollapsed)}
-        data-testid={`button-toggle-trades-${plan.id}`}
-      >
-        <div className="flex items-center gap-2 flex-wrap">
-          <Activity className="w-4 h-4 text-emerald-400" />
-          <Label className="text-xs font-semibold cursor-pointer">Strategy Trade Tracker</Label>
-          {isConnected ? (
-            <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">
-              <Wifi className="w-3 h-3 mr-1" />
-              Connected
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="text-xs text-red-400 border-red-400/30">
-              <WifiOff className="w-3 h-3 mr-1" />
-              Disconnected
-            </Badge>
-          )}
-          <Badge variant="secondary" className="text-xs">{trades.length} trade{trades.length !== 1 ? "s" : ""}</Badge>
-          {trades.length > 0 && (
-            <span className={`text-xs font-mono font-semibold ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-              P&L: {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {lastFetched && <span className="text-xs text-muted-foreground">Updated: {lastFetched}</span>}
-          {isCollapsed ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronUp className="w-4 h-4 text-muted-foreground" />}
-        </div>
-      </button>
-
-      {!isCollapsed && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            {brokerConfig && (
-              <div className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
-                <span>Broker:</span>
-                <span className="font-medium text-foreground">{brokerConfig.name || brokerConfig.brokerName}</span>
-                {brokerConfig.environment === "uat" && <Badge variant="outline" className="text-xs text-amber-400 border-amber-400/30">Sandbox</Badge>}
-                {brokerConfig.environment === "prod" && <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">Production</Badge>}
-              </div>
-            )}
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon" onClick={(e) => { e.stopPropagation(); refetch(); }} disabled={isLoading} data-testid={`button-refresh-positions-${plan.id}`} title="Refresh">
-                <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    disabled={clearTradesMutation.isPending || trades.length === 0}
-                    data-testid={`button-clear-trades-${plan.id}`}
-                    title="Clear trade data"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => clearTradesMutation.mutate(1)} data-testid={`clear-trades-1-day-${plan.id}`}>
-                    Older than 1 day
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => clearTradesMutation.mutate(7)} data-testid={`clear-trades-7-days-${plan.id}`}>
-                    Older than 7 days
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => clearTradesMutation.mutate(30)} data-testid={`clear-trades-30-days-${plan.id}`}>
-                    Older than 30 days
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => clearTradesMutation.mutate("all")} data-testid={`clear-trades-all-${plan.id}`} className="text-destructive">
-                    Clear All Trades
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={(e) => { e.stopPropagation(); setIsSheetOpen(true); setSheetExpanded(false); }}
-                data-testid={`button-expand-trades-${plan.id}`}
-                title="Expand"
-              >
-                <ExternalLink className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <div className="bg-card border border-border rounded-md p-2">
-              <p className="text-xs text-muted-foreground">Total Value</p>
-              <p className="text-sm font-semibold font-mono">{totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</p>
-            </div>
-            <div className="bg-card border border-border rounded-md p-2">
-              <p className="text-xs text-muted-foreground">Total P&L</p>
-              <p className={`text-sm font-semibold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
-              </p>
-            </div>
-            <div className="bg-card border border-border rounded-md p-2">
-              <p className="text-xs text-muted-foreground">Open Trades</p>
-              <p className="text-sm font-semibold font-mono">{openTrades.length}</p>
-            </div>
-            <div className="bg-card border border-border rounded-md p-2">
-              <p className="text-xs text-muted-foreground">Closed Trades</p>
-              <p className="text-sm font-semibold font-mono">{closedTrades.length}</p>
-            </div>
-          </div>
-
-          {trades.length > 0 ? (
-            <TradeTableContent trades={trades} groupedTrades={groupedTrades} BLOCK_LABELS={BLOCK_LABELS} plan={plan} />
-          ) : (
-            <div className="text-center py-6 border border-dashed border-border/40 rounded-md" data-testid={`empty-state-trades-${plan.id}`}>
-              <Activity className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground font-medium">No trades executed by this strategy</p>
-              <p className="text-xs text-muted-foreground/70 mt-1">
-                {plan.deploymentStatus === "active"
-                  ? "Trades will appear here when market conditions trigger execution blocks"
-                  : "Deploy and activate this strategy to start executing trades"}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
-        <SheetContent className={`${sheetExpanded ? "w-full sm:max-w-full" : "w-full max-w-[900px]"} h-full max-h-screen overflow-hidden flex flex-col`} side="right">
-          <SheetHeader>
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div>
-                <SheetTitle data-testid={`title-trade-sheet-${plan.id}`}>Trade Tracker: {plan.name || `Plan #${plan.id}`}</SheetTitle>
-                <SheetDescription>
-                  {trades.length} trade{trades.length !== 1 ? "s" : ""} | Open: {openTrades.length} | Closed: {closedTrades.length} | P&L: {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
-                </SheetDescription>
-              </div>
-              <div className="flex gap-1">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => refetch()}
-                  disabled={isLoading}
-                  data-testid={`button-sheet-refresh-${plan.id}`}
-                  title="Refresh"
-                >
-                  <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      disabled={clearTradesMutation.isPending || trades.length === 0}
-                      data-testid={`button-sheet-clear-trades-${plan.id}`}
-                      title="Clear trade data"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => clearTradesMutation.mutate(1)} data-testid={`sheet-clear-trades-1-day-${plan.id}`}>
-                      Older than 1 day
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => clearTradesMutation.mutate(7)} data-testid={`sheet-clear-trades-7-days-${plan.id}`}>
-                      Older than 7 days
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => clearTradesMutation.mutate(30)} data-testid={`sheet-clear-trades-30-days-${plan.id}`}>
-                      Older than 30 days
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => clearTradesMutation.mutate("all")} data-testid={`sheet-clear-trades-all-${plan.id}`} className="text-destructive">
-                      Clear All Trades
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setSheetExpanded(!sheetExpanded)}
-                  data-testid={`button-sheet-expand-${plan.id}`}
-                  title={sheetExpanded ? "Collapse" : "Expand"}
-                >
-                  {sheetExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                </Button>
-              </div>
-            </div>
-          </SheetHeader>
-          <div className="mt-4 flex-1 min-h-0 overflow-y-auto">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-              <div className="bg-card border border-border rounded-md p-2">
-                <p className="text-xs text-muted-foreground">Total Value</p>
-                <p className="text-sm font-semibold font-mono">{totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</p>
-              </div>
-              <div className="bg-card border border-border rounded-md p-2">
-                <p className="text-xs text-muted-foreground">Total P&L</p>
-                <p className={`text-sm font-semibold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                  {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
-                </p>
-              </div>
-              <div className="bg-card border border-border rounded-md p-2">
-                <p className="text-xs text-muted-foreground">Open Trades</p>
-                <p className="text-sm font-semibold font-mono">{openTrades.length}</p>
-              </div>
-              <div className="bg-card border border-border rounded-md p-2">
-                <p className="text-xs text-muted-foreground">Closed Trades</p>
-                <p className="text-sm font-semibold font-mono">{closedTrades.length}</p>
-              </div>
-            </div>
-            {trades.length > 0 ? (
-              <TradeTableContent trades={trades} groupedTrades={groupedTrades} BLOCK_LABELS={BLOCK_LABELS} plan={plan} />
-            ) : (
-              <div className="text-center py-8">
-                <Activity className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">No trades to display</p>
-              </div>
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
-    </div>
-  );
-}
 
 function DailyPnlTable({ entries }: { entries: StrategyDailyPnl[] }) {
   if (entries.length === 0) return null;
@@ -521,6 +88,25 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
     enabled: isOpen,
   });
 
+  const { data: trades = [], isLoading: tradesLoading, refetch: refetchTrades } = useQuery<StrategyTrade[]>({
+    queryKey: ["/api/strategy-trades", plan.id],
+    queryFn: async () => {
+      const resp = await fetch(`/api/strategy-trades/${plan.id}`);
+      if (!resp.ok) throw new Error("Failed to fetch");
+      return resp.json();
+    },
+    enabled: isOpen,
+  });
+
+  const { data: allPositions = [], isLoading: positionsLoading, refetch: refetchPositions } = useQuery<Position[]>({
+    queryKey: ["/api/positions"],
+    enabled: isOpen,
+  });
+
+  const nfoPositions = allPositions.filter((p) => p.exchange === "NFO");
+  const strategySymbols = new Set(trades.map((t) => t.tradingSymbol).filter(Boolean));
+  const strategyPositions = nfoPositions.filter((p) => strategySymbols.has(p.trading_symbol || ""));
+
   const clearDailyPnlMutation = useMutation({
     mutationFn: async (days: number | "all") => {
       if (days === "all") {
@@ -540,16 +126,23 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
   const entries = [...rawEntries].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   const planName = plan.name || `Plan #${plan.id}`;
+  const isAnyLoading = isLoading || tradesLoading || positionsLoading;
+
+  function handleRefreshAll() {
+    refetch();
+    refetchTrades();
+    refetchPositions();
+  }
 
   return (
     <Sheet open={isOpen} onOpenChange={onOpenChange}>
-      <SheetContent className={`${sheetExpanded ? "w-full sm:max-w-full" : "w-full max-w-[800px]"} h-full max-h-screen overflow-hidden flex flex-col`} side="right">
+      <SheetContent className={`${sheetExpanded ? "w-full sm:max-w-full" : "w-full max-w-[1000px]"} h-full max-h-screen overflow-hidden flex flex-col`} side="right">
         <SheetHeader>
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
-              <SheetTitle data-testid={`title-daily-pnl-sheet-${plan.id}`}>Daily P&L Log: {planName}</SheetTitle>
+              <SheetTitle data-testid={`title-daily-pnl-sheet-${plan.id}`}>P&L Log: {planName}</SheetTitle>
               <SheetDescription>
-                {entries.length} day{entries.length !== 1 ? "s" : ""} of P&L data recorded
+                {entries.length} day{entries.length !== 1 ? "s" : ""} of P&L data · {strategyPositions.length} live position{strategyPositions.length !== 1 ? "s" : ""}
                 {entries.length > 0 && (
                   <span className={`ml-2 font-mono font-semibold ${Number(entries[0]?.cumulativePnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                     Cumulative: {Number(entries[0]?.cumulativePnl || 0) >= 0 ? "+" : ""}{Number(entries[0]?.cumulativePnl || 0).toFixed(2)}
@@ -561,12 +154,12 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
               <Button
                 variant="outline"
                 size="icon"
-                onClick={() => refetch()}
-                disabled={isLoading}
+                onClick={handleRefreshAll}
+                disabled={isAnyLoading}
                 data-testid={`button-sheet-refresh-pnl-${plan.id}`}
                 title="Refresh"
               >
-                <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+                <RefreshCw className={`w-4 h-4 ${isAnyLoading ? "animate-spin" : ""}`} />
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -607,17 +200,96 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
             </div>
           </div>
         </SheetHeader>
-        <div className="mt-6 flex-1 min-h-0 flex flex-col">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground mr-2" />
-              <span className="text-sm text-muted-foreground">Loading daily P&L data...</span>
-            </div>
-          ) : entries.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8" data-testid={`empty-state-daily-pnl-${plan.id}`}>No daily P&L entries recorded yet for this strategy.</p>
-          ) : (
-            <DailyPnlTable entries={entries} />
-          )}
+        <div className="mt-4 flex-1 min-h-0 overflow-y-auto flex flex-col gap-6">
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Live Positions</p>
+            {(tradesLoading || positionsLoading) ? (
+              <div className="flex items-center gap-2 py-4">
+                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Loading positions…</span>
+              </div>
+            ) : strategyPositions.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4" data-testid={`empty-state-positions-pnl-${plan.id}`}>No NFO positions linked to this strategy.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Order ID</TableHead>
+                      <TableHead>Symbol</TableHead>
+                      <TableHead>Exchange</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-right">Strike</TableHead>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Option</TableHead>
+                      <TableHead>Expiry</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead className="text-right">Buy Avg</TableHead>
+                      <TableHead className="text-right">Sell Avg</TableHead>
+                      <TableHead className="text-right">LTP</TableHead>
+                      <TableHead className="text-right">P&L</TableHead>
+                      <TableHead className="text-right">P&L Realz</TableHead>
+                      <TableHead className="text-right">P&L URealz</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {strategyPositions.map((position, index) => {
+                      const unrealisedPnl = Number(position.unrealised_pnl ?? ((Number(position.ltp || 0) - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
+                      const instType = (position as any).instrument_type || "";
+                      const token = (position as any).token || "";
+                      return (
+                        <TableRow key={index} data-testid={`row-pnl-position-${plan.id}-${index}`}>
+                          <TableCell><code className="text-xs text-muted-foreground font-mono">{token || "—"}</code></TableCell>
+                          <TableCell><div className="font-medium text-sm">{position.trading_symbol}</div></TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs text-violet-400 border-violet-400/50">{position.exchange}</Badge>
+                          </TableCell>
+                          <TableCell><span className="text-xs font-mono">{instType || "—"}</span></TableCell>
+                          <TableCell className="text-right font-mono text-sm">{position.strike_price || "—"}</TableCell>
+                          <TableCell><span className="text-xs">{position.product_type || "NRML"}</span></TableCell>
+                          <TableCell>
+                            {position.option_type ? (
+                              <Badge variant="outline" className={`text-xs ${position.option_type === "CE" ? "text-emerald-400 border-emerald-400/50" : "text-red-400 border-red-400/50"}`}>
+                                {position.option_type}
+                              </Badge>
+                            ) : <span className="text-xs text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell><span className="text-xs">{position.expiry || "—"}</span></TableCell>
+                          <TableCell className="text-right">{Math.abs(Number(position.quantity || 0))}</TableCell>
+                          <TableCell className="text-right">{Number(position.buy_avg || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{Number(position.sell_avg || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{Number(position.ltp || 0).toFixed(2)}</TableCell>
+                          <TableCell className={`text-right font-medium ${Number(position.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {Number(position.pnl || 0) >= 0 ? "+" : ""}{Number(position.pnl || 0).toFixed(2)}
+                          </TableCell>
+                          <TableCell className={`text-right text-xs ${Number(position.realised_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {Number(position.realised_pnl || 0) >= 0 ? "+" : ""}{Number(position.realised_pnl || 0).toFixed(2)}
+                          </TableCell>
+                          <TableCell className={`text-right text-xs ${unrealisedPnl >= 0 ? "text-primary" : "text-destructive"}`}>
+                            {unrealisedPnl >= 0 ? "+" : ""}{unrealisedPnl.toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Daily P&L Log</p>
+            {isLoading ? (
+              <div className="flex items-center gap-2 py-4">
+                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Loading daily P&L data…</span>
+              </div>
+            ) : entries.length === 0 ? (
+              <p className="text-muted-foreground text-sm py-4" data-testid={`empty-state-daily-pnl-${plan.id}`}>No daily P&L entries recorded yet for this strategy.</p>
+            ) : (
+              <DailyPnlTable entries={entries} />
+            )}
+          </div>
         </div>
       </SheetContent>
     </Sheet>
@@ -1226,9 +898,6 @@ export function BrokerLinking() {
                     </div>
                   )}
 
-                  {isDeployed && (
-                    <LivePositionTracker plan={plan} brokerConfigs={brokerConfigs} parentConfig={configs.find((c) => c.id === plan.configId)} />
-                  )}
                 </CardContent>
               </Card>
             );

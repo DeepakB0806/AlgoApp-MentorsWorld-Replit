@@ -581,7 +581,7 @@ export default function Dashboard() {
           </TabsContent>
 
           <TabsContent value="live-trades">
-            <LiveTradesPanel />
+            <LiveTradesPanel nfoPositions={nfoPositions} />
           </TabsContent>
         </Tabs>
       </div>
@@ -598,16 +598,7 @@ const DEPLOY_STATUS_MAP: Record<string, { label: string; color: string; icon: ty
   closed: { label: "Closed", color: "text-muted-foreground", icon: Power },
 };
 
-function parseNFOSymbol(sym: string): { optionType: string; strike: string; expiry: string } {
-  if (!sym) return { optionType: "", strike: "", expiry: "" };
-  const upper = sym.toUpperCase();
-  const m = upper.match(/^[A-Z]+(\d{2}[A-Z]{3}\d{2}|\d{5,6})(\d+(?:\.\d+)?)(CE|PE)$/);
-  if (m) return { optionType: m[3], strike: m[2], expiry: m[1] };
-  if (upper.endsWith("FUT")) return { optionType: "FUT", strike: "", expiry: "" };
-  return { optionType: "", strike: "", expiry: "" };
-}
-
-function DashboardTradeCard({ plan, configs, brokerConfigs }: { plan: StrategyPlan; configs: StrategyConfig[]; brokerConfigs: BrokerConfig[] }) {
+function DashboardTradeCard({ plan, configs, brokerConfigs, nfoPositions }: { plan: StrategyPlan; configs: StrategyConfig[]; brokerConfigs: BrokerConfig[]; nfoPositions: Position[] }) {
   const depStatus = plan.deploymentStatus || "draft";
   const depConfig = DEPLOY_STATUS_MAP[depStatus] || DEPLOY_STATUS_MAP.draft;
   const DepIcon = depConfig.icon;
@@ -622,9 +613,12 @@ function DashboardTradeCard({ plan, configs, brokerConfigs }: { plan: StrategyPl
     refetchInterval: depStatus === "active" ? 30000 : false,
   });
 
-  const totalPnl = trades.reduce((s, t) => s + Number(t.pnl || 0), 0);
-  const openCount = trades.filter((t) => t.status === "open" || t.status === "pending").length;
-  const closedCount = trades.filter((t) => t.status === "closed" || t.status === "squared_off").length;
+  const strategySymbols = new Set(trades.map((t) => t.tradingSymbol).filter(Boolean));
+  const strategyPositions = nfoPositions.filter((p) => strategySymbols.has(p.trading_symbol || ""));
+
+  const totalPnl = strategyPositions.reduce((s, p) => s + Number(p.pnl || 0), 0);
+  const openCount = strategyPositions.filter((p) => Number(p.quantity || 0) !== 0).length;
+  const closedCount = strategyPositions.filter((p) => Number(p.quantity || 0) === 0).length;
 
   const getConfigName = (configId: string) => configs.find((c) => c.id === configId)?.name || "Unknown";
   const getBrokerName = (bId: string | null) => {
@@ -662,83 +656,86 @@ function DashboardTradeCard({ plan, configs, brokerConfigs }: { plan: StrategyPl
       </CardHeader>
       <CardContent className="pt-0">
         {tradesLoading ? (
-          <p className="text-xs text-muted-foreground py-4 text-center">Loading trades…</p>
-        ) : trades.length === 0 ? (
-          <p className="text-xs text-muted-foreground py-4 text-center">No trades for this strategy</p>
+          <p className="text-xs text-muted-foreground py-4 text-center">Loading…</p>
+        ) : strategyPositions.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-4 text-center">No positions for this strategy</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border/40">
-                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Order ID</th>
-                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Symbol</th>
-                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Exchange</th>
-                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Type</th>
-                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Strike</th>
-                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Product</th>
-                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Option</th>
-                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Expiry</th>
-                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Qty</th>
-                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Buy Avg</th>
-                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Sell Avg</th>
-                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">LTP</th>
-                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">P&L</th>
-                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">P&L Realz</th>
-                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">P&L URealz</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trades.map((trade) => {
-                  const parsed = parseNFOSymbol(trade.tradingSymbol || trade.ticker || "");
-                  const isClosed = trade.status === "closed" || trade.status === "squared_off";
-                  const isOpen = !isClosed;
-                  const isBuy = (trade.action || "").toUpperCase() === "BUY";
-                  const buyAvg = isBuy ? Number(trade.price || 0) : Number(trade.exitPrice || 0);
-                  const sellAvg = isBuy ? Number(trade.exitPrice || 0) : Number(trade.price || 0);
-                  const pnlRealz = isClosed ? Number(trade.pnl || 0) : null;
-                  const pnlUrealz = isOpen
-                    ? (isBuy
-                        ? (Number(trade.ltp || 0) - Number(trade.price || 0)) * Number(trade.quantity || 0)
-                        : (Number(trade.price || 0) - Number(trade.ltp || 0)) * Number(trade.quantity || 0))
-                    : null;
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Order ID</TableHead>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Exchange</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right">Strike</TableHead>
+                  <TableHead>Product</TableHead>
+                  <TableHead>Option</TableHead>
+                  <TableHead>Expiry</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Buy Avg</TableHead>
+                  <TableHead className="text-right">Sell Avg</TableHead>
+                  <TableHead className="text-right">LTP</TableHead>
+                  <TableHead className="text-right">P&L</TableHead>
+                  <TableHead className="text-right">P&L Realz</TableHead>
+                  <TableHead className="text-right">P&L URealz</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {strategyPositions.map((position, index) => {
+                  const unrealisedPnl = Number(position.unrealised_pnl ?? ((Number(position.ltp || 0) - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
+                  const instType = (position as any).instrument_type || "";
+                  const token = (position as any).token || "";
                   return (
-                    <tr key={trade.id} className="border-b border-border/20 hover:bg-muted/30" data-testid={`row-live-trade-${trade.id}`}>
-                      <td className="px-2 py-1.5 font-mono text-muted-foreground whitespace-nowrap">{trade.orderId || "—"}</td>
-                      <td className="px-2 py-1.5 font-medium whitespace-nowrap">{trade.tradingSymbol || trade.ticker || "—"}</td>
-                      <td className="px-2 py-1.5 whitespace-nowrap">
-                        <Badge variant="outline" className="text-xs">{trade.exchange || "—"}</Badge>
-                      </td>
-                      <td className="px-2 py-1.5 whitespace-nowrap">
-                        <Badge variant={isBuy ? "default" : "destructive"} className="text-xs font-mono">{trade.action || "—"}</Badge>
-                      </td>
-                      <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">{parsed.strike || trade.tradingSymbol?.match(/(\d{4,6})(CE|PE|FUT)/i)?.[1] || "—"}</td>
-                      <td className="px-2 py-1.5 whitespace-nowrap">{trade.productType || "—"}</td>
-                      <td className="px-2 py-1.5 whitespace-nowrap">
-                        {parsed.optionType ? (
-                          <Badge variant="outline" className={`text-xs ${parsed.optionType === "CE" ? "text-emerald-400 border-emerald-400/50" : parsed.optionType === "PE" ? "text-red-400 border-red-400/50" : ""}`}>
-                            {parsed.optionType}
+                    <TableRow key={index} data-testid={`row-live-trade-${plan.id}-${index}`}>
+                      <TableCell>
+                        <code className="text-xs text-muted-foreground font-mono">{token || "—"}</code>
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium text-sm">{position.trading_symbol}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs text-violet-400 border-violet-400/50">{position.exchange}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs font-mono">{instType || "—"}</span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        {position.strike_price || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs">{position.product_type || "NRML"}</span>
+                      </TableCell>
+                      <TableCell>
+                        {position.option_type ? (
+                          <Badge variant="outline" className={`text-xs ${position.option_type === "CE" ? "text-emerald-400 border-emerald-400/50" : "text-red-400 border-red-400/50"}`}>
+                            {position.option_type}
                           </Badge>
-                        ) : "—"}
-                      </td>
-                      <td className="px-2 py-1.5 whitespace-nowrap">{parsed.expiry || "—"}</td>
-                      <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">{Math.abs(Number(trade.quantity || 0))}</td>
-                      <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">{buyAvg > 0 ? buyAvg.toFixed(2) : "—"}</td>
-                      <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">{sellAvg > 0 ? sellAvg.toFixed(2) : "—"}</td>
-                      <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">{Number(trade.ltp || 0).toFixed(2)}</td>
-                      <td className={`px-2 py-1.5 text-right font-mono font-semibold whitespace-nowrap ${Number(trade.pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {Number(trade.pnl || 0) >= 0 ? "+" : ""}{Number(trade.pnl || 0).toFixed(2)}
-                      </td>
-                      <td className={`px-2 py-1.5 text-right font-mono whitespace-nowrap ${pnlRealz !== null ? (pnlRealz >= 0 ? "text-emerald-400" : "text-red-400") : "text-muted-foreground"}`}>
-                        {pnlRealz !== null ? `${pnlRealz >= 0 ? "+" : ""}${pnlRealz.toFixed(2)}` : "—"}
-                      </td>
-                      <td className={`px-2 py-1.5 text-right font-mono whitespace-nowrap ${pnlUrealz !== null ? (pnlUrealz >= 0 ? "text-emerald-400" : "text-red-400") : "text-muted-foreground"}`}>
-                        {pnlUrealz !== null ? `${pnlUrealz >= 0 ? "+" : ""}${pnlUrealz.toFixed(2)}` : "—"}
-                      </td>
-                    </tr>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs">{position.expiry || "—"}</span>
+                      </TableCell>
+                      <TableCell className="text-right">{Math.abs(Number(position.quantity || 0))}</TableCell>
+                      <TableCell className="text-right">{Number(position.buy_avg || 0).toFixed(2)}</TableCell>
+                      <TableCell className="text-right">{Number(position.sell_avg || 0).toFixed(2)}</TableCell>
+                      <TableCell className="text-right">{Number(position.ltp || 0).toFixed(2)}</TableCell>
+                      <TableCell className={`text-right font-medium ${Number(position.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                        {Number(position.pnl || 0) >= 0 ? "+" : ""}{Number(position.pnl || 0).toFixed(2)}
+                      </TableCell>
+                      <TableCell className={`text-right text-xs ${Number(position.realised_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                        {Number(position.realised_pnl || 0) >= 0 ? "+" : ""}{Number(position.realised_pnl || 0).toFixed(2)}
+                      </TableCell>
+                      <TableCell className={`text-right text-xs ${unrealisedPnl >= 0 ? "text-primary" : "text-destructive"}`}>
+                        {unrealisedPnl >= 0 ? "+" : ""}{unrealisedPnl.toFixed(2)}
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </CardContent>
@@ -746,7 +743,7 @@ function DashboardTradeCard({ plan, configs, brokerConfigs }: { plan: StrategyPl
   );
 }
 
-function LiveTradesPanel() {
+function LiveTradesPanel({ nfoPositions }: { nfoPositions: Position[] }) {
   const { data: plans = [] } = useQuery<StrategyPlan[]>({
     queryKey: ["/api/strategy-plans"],
   });
@@ -780,7 +777,7 @@ function LiveTradesPanel() {
       ) : (
         <div className="space-y-4">
           {deployedPlans.map((plan) => (
-            <DashboardTradeCard key={plan.id} plan={plan} configs={configs} brokerConfigs={brokerConfigs} />
+            <DashboardTradeCard key={plan.id} plan={plan} configs={configs} brokerConfigs={brokerConfigs} nfoPositions={nfoPositions} />
           ))}
         </div>
       )}
