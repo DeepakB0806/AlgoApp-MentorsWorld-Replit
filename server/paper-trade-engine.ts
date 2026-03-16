@@ -56,7 +56,7 @@ export async function processPaperTrade(
 
   const plans = await storage.getStrategyPlansByConfig(strategyConfigId);
   const activePlansWithBroker = plans.filter(
-    (p) => p.brokerConfigId && p.deploymentStatus === "active"
+    (p) => p.brokerConfigId && (p.deploymentStatus === "active" || p.deploymentStatus === "deployed")
   );
 
   if (activePlansWithBroker.length === 0) {

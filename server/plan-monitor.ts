@@ -52,7 +52,7 @@ async function checkPlans(storage: IStorage): Promise<void> {
 
   const allPlans = await storage.getStrategyPlans();
   const deployedPlans = allPlans.filter(
-    (p) => p.deploymentStatus === "deployed" && p.brokerConfigId
+    (p) => (p.deploymentStatus === "active" || p.deploymentStatus === "deployed") && p.brokerConfigId
   );
 
   if (deployedPlans.length === 0) return;

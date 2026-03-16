@@ -156,7 +156,7 @@ class TradingCache {
       for (const cfg of configs) {
         try {
           const plans = await storage.getStrategyPlansByConfig(cfg.id);
-          const activePlans = plans.filter(p => p.brokerConfigId && p.deploymentStatus === "active");
+          const activePlans = plans.filter(p => p.brokerConfigId && (p.deploymentStatus === "active" || p.deploymentStatus === "deployed"));
           if (activePlans.length > 0) {
             this.setActivePlansByConfigId(cfg.id, activePlans);
           }

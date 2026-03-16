@@ -141,7 +141,7 @@ export async function processTradeSignal(
   let plans = tradingCache.getActivePlansByConfigId(strategyConfigId);
   if (!plans) {
     const allPlans = await storage.getStrategyPlansByConfig(strategyConfigId);
-    plans = allPlans.filter((p) => p.brokerConfigId && p.deploymentStatus === "active");
+    plans = allPlans.filter((p) => p.brokerConfigId && (p.deploymentStatus === "active" || p.deploymentStatus === "deployed"));
     tradingCache.setActivePlansByConfigId(strategyConfigId, plans);
   }
 
