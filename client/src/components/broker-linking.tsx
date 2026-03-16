@@ -59,33 +59,31 @@ function TradeTableContent({ trades, groupedTrades, BLOCK_LABELS, plan }: {
 }) {
   if (trades.length === 0) return null;
 
-  const getFieldValue = (trade: StrategyTrade, key: string): string => {
-    if (key === "timeUnix") return formatTradeTime(trade.timeUnix || null, null, trade.executedAt);
-    if (key === "exchange") return trade.exchange || plan?.exchange || "-";
-    if (key === "ticker") return trade.ticker || trade.tradingSymbol || plan?.ticker || "-";
-    if (key === "indicator") return trade.indicator || "-";
-    if (key === "alert") return trade.alert || trade.action || "-";
-    if (key === "signalPrice") return Number(trade.price || 0).toFixed(2);
-    if (key === "localTime") return trade.localTime || "-";
-    if (key === "mode") return trade.mode || "-";
-    if (key === "modeDesc") return trade.modeDesc || "-";
-    return "-";
-  };
+  function parseNFOSym(sym: string): { optionType: string; strike: string; expiry: string } {
+    if (!sym) return { optionType: "", strike: "", expiry: "" };
+    const upper = sym.toUpperCase();
+    const m = upper.match(/^[A-Z]+(\d{2}[A-Z]{3}\d{2}|\d{5,6})(\d+(?:\.\d+)?)(CE|PE)$/);
+    if (m) return { optionType: m[3], strike: m[2], expiry: m[1] };
+    if (upper.endsWith("FUT")) return { optionType: "FUT", strike: "", expiry: "" };
+    return { optionType: "", strike: "", expiry: "" };
+  }
 
   const HEADERS = [
-    { key: "timeUnix", label: "time_unix", align: "text-left" },
-    { key: "exchange", label: "exchange", align: "text-left" },
-    { key: "ticker", label: "ticker", align: "text-left" },
-    { key: "indicator", label: "indicator", align: "text-left" },
-    { key: "alert", label: "action", align: "text-left" },
-    { key: "signalPrice", label: "price", align: "text-right" },
-    { key: "localTime", label: "local_time", align: "text-left" },
-    { key: "mode", label: "mode", align: "text-left" },
-    { key: "modeDesc", label: "mode_desc", align: "text-left" },
-    { key: "qty", label: "qty", align: "text-right" },
-    { key: "entryPrice", label: "price", align: "text-right" },
-    { key: "pnl", label: "p&l", align: "text-right" },
-    { key: "status", label: "status", align: "text-left" },
+    { label: "Order ID", align: "text-left" },
+    { label: "Symbol", align: "text-left" },
+    { label: "Exchange", align: "text-left" },
+    { label: "Type", align: "text-left" },
+    { label: "Strike", align: "text-right" },
+    { label: "Product", align: "text-left" },
+    { label: "Option", align: "text-left" },
+    { label: "Expiry", align: "text-left" },
+    { label: "Qty", align: "text-right" },
+    { label: "Buy Avg", align: "text-right" },
+    { label: "Sell Avg", align: "text-right" },
+    { label: "LTP", align: "text-right" },
+    { label: "P&L", align: "text-right" },
+    { label: "P&L Realz", align: "text-right" },
+    { label: "P&L URealz", align: "text-right" },
   ];
 
   return (
@@ -111,38 +109,60 @@ function TradeTableContent({ trades, groupedTrades, BLOCK_LABELS, plan }: {
                 <thead>
                   <tr className="border-b border-border/30">
                     {HEADERS.map((h) => (
-                      <th key={h.key} className={`whitespace-nowrap ${h.align} px-2 py-1 text-muted-foreground font-medium`}>{h.label}</th>
+                      <th key={h.label} className={`whitespace-nowrap ${h.align} px-2 py-1 text-muted-foreground font-medium`}>{h.label}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {blockTrades.map((trade) => {
                     const isClosed = trade.status === "closed" || trade.status === "squared_off";
-                    const alertVal = trade.alert || trade.action || "-";
-                    const isSell = alertVal.toUpperCase().includes("SELL") || trade.action === "SELL";
-                    const isBuy = alertVal.toUpperCase().includes("BUY") || trade.action === "BUY";
+                    const isOpen = !isClosed;
+                    const action = trade.action || trade.alert || "";
+                    const isBuy = action.toUpperCase() === "BUY" || action.toUpperCase().includes("BUY");
+                    const sym = trade.tradingSymbol || trade.ticker || "";
+                    const parsed = parseNFOSym(sym);
+                    const buyAvg = isBuy ? Number(trade.price || 0) : Number(trade.exitPrice || 0);
+                    const sellAvg = isBuy ? Number(trade.exitPrice || 0) : Number(trade.price || 0);
+                    const pnlRealz = isClosed ? Number(trade.pnl || 0) : null;
+                    const pnlUrealz = isOpen
+                      ? (isBuy
+                          ? (Number(trade.ltp || 0) - Number(trade.price || 0)) * Number(trade.quantity || 0)
+                          : (Number(trade.price || 0) - Number(trade.ltp || 0)) * Number(trade.quantity || 0))
+                      : null;
                     return (
-                      <tr key={trade.id} className="border-b border-border/20" data-testid={`row-trade-${trade.id}`}>
-                        <td className="whitespace-nowrap px-2 py-1.5 font-mono text-muted-foreground">{getFieldValue(trade, "timeUnix")}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 font-mono">{getFieldValue(trade, "exchange")}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 font-mono font-medium">{getFieldValue(trade, "ticker")}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5">{getFieldValue(trade, "indicator")}</td>
+                      <tr key={trade.id} className="border-b border-border/20 hover:bg-muted/20" data-testid={`row-trade-${trade.id}`}>
+                        <td className="whitespace-nowrap px-2 py-1.5 font-mono text-muted-foreground">{trade.orderId || "—"}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5 font-medium">{sym || "—"}</td>
                         <td className="whitespace-nowrap px-2 py-1.5">
-                          <Badge variant={isSell ? "destructive" : isBuy ? "default" : "secondary"} className="font-mono text-xs">
-                            {alertVal}
-                          </Badge>
+                          <Badge variant="outline" className="text-xs">{trade.exchange || plan?.exchange || "—"}</Badge>
                         </td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{getFieldValue(trade, "signalPrice")}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 font-mono text-muted-foreground">{getFieldValue(trade, "localTime")}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5">{getFieldValue(trade, "mode")}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5">{getFieldValue(trade, "modeDesc")}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{trade.quantity}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{Number(trade.price || 0).toFixed(2)}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5">
+                          <Badge variant={isBuy ? "default" : "destructive"} className="font-mono text-xs">{action || "—"}</Badge>
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">
+                          {parsed.strike || sym.match(/(\d{4,6})(CE|PE|FUT)/i)?.[1] || "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-1.5">{trade.productType || "—"}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5">
+                          {parsed.optionType ? (
+                            <Badge variant="outline" className={`text-xs ${parsed.optionType === "CE" ? "text-emerald-400 border-emerald-400/50" : parsed.optionType === "PE" ? "text-red-400 border-red-400/50" : ""}`}>
+                              {parsed.optionType}
+                            </Badge>
+                          ) : "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-1.5">{parsed.expiry || "—"}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{Math.abs(Number(trade.quantity || 0))}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{buyAvg > 0 ? buyAvg.toFixed(2) : "—"}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{sellAvg > 0 ? sellAvg.toFixed(2) : "—"}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono">{Number(trade.ltp || 0).toFixed(2)}</td>
                         <td className={`whitespace-nowrap px-2 py-1.5 text-right font-mono font-semibold ${Number(trade.pnl || 0) > 0 ? "text-emerald-400" : Number(trade.pnl || 0) < 0 ? "text-red-400" : "text-muted-foreground"}`}>
-                          {isClosed ? (<>{Number(trade.pnl || 0) >= 0 ? "+" : ""}{Number(trade.pnl || 0).toFixed(2)}</>) : (<span className="text-muted-foreground/60">--</span>)}
+                          {isClosed ? <>{Number(trade.pnl || 0) >= 0 ? "+" : ""}{Number(trade.pnl || 0).toFixed(2)}</> : <span className="text-muted-foreground/60">—</span>}
                         </td>
-                        <td className="whitespace-nowrap px-2 py-1.5">
-                          <Badge variant="outline" className="text-xs">{trade.status}</Badge>
+                        <td className={`whitespace-nowrap px-2 py-1.5 text-right font-mono ${pnlRealz !== null ? (pnlRealz >= 0 ? "text-emerald-400" : "text-red-400") : "text-muted-foreground"}`}>
+                          {pnlRealz !== null ? `${pnlRealz >= 0 ? "+" : ""}${pnlRealz.toFixed(2)}` : "—"}
+                        </td>
+                        <td className={`whitespace-nowrap px-2 py-1.5 text-right font-mono ${pnlUrealz !== null ? (pnlUrealz >= 0 ? "text-emerald-400" : "text-red-400") : "text-muted-foreground"}`}>
+                          {pnlUrealz !== null ? `${pnlUrealz >= 0 ? "+" : ""}${pnlUrealz.toFixed(2)}` : "—"}
                         </td>
                       </tr>
                     );

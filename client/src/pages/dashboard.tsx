@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { TrendingUp, TrendingDown, RefreshCw, Home, Wifi, WifiOff, Search, BarChart3, Activity, Play, Pause, Square, Power, Rocket, Clock } from "lucide-react";
 import { Link } from "wouter";
 import { queryClient } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
+
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import type { Position, Order, Holding, PortfolioSummary, StrategyPlan, StrategyConfig, BrokerConfig, StrategyTrade } from "@shared/schema";
 import { Target } from "lucide-react";
@@ -56,8 +56,21 @@ export default function Dashboard() {
 
   const isLoading = positionsLoading || ordersLoading || holdingsLoading || summaryLoading;
 
-  // Filter positions by search
-  const filteredPositions = positions.filter(p => 
+  // F&O detection
+  const isFnO = (exchange: string) => {
+    const ex = (exchange || "").toLowerCase();
+    return ex.includes("nse_fo") || ex.includes("bse_fo") || ex === "nfo" || ex === "bfo";
+  };
+
+  // Split positions into equity and F&O
+  const equityPositions = positions.filter(p => !isFnO(p.exchange || ""));
+  const nfoPositions = positions.filter(p => isFnO(p.exchange || ""));
+
+  // Filter by search
+  const filteredPositions = equityPositions.filter(p =>
+    (p.trading_symbol || "").toLowerCase().includes(searchPositions.toLowerCase())
+  );
+  const filteredNfoPositions = nfoPositions.filter(p =>
     (p.trading_symbol || "").toLowerCase().includes(searchPositions.toLowerCase())
   );
 
@@ -160,7 +173,10 @@ export default function Dashboard() {
               INVESTMENTS <Badge variant="secondary" className="ml-2">{holdings.length}</Badge>
             </TabsTrigger>
             <TabsTrigger value="positions" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-positions">
-              POSITIONS <Badge variant="secondary" className="ml-2">{positions.length}</Badge>
+              POSITIONS <Badge variant="secondary" className="ml-2">{equityPositions.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="nfo-pos" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-nfo-pos">
+              NFO POS <Badge variant="secondary" className="ml-2">{nfoPositions.length}</Badge>
             </TabsTrigger>
             <TabsTrigger value="orders" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-orders">
               ORDERS <Badge variant="secondary" className="ml-2">{orders.length}</Badge>
@@ -272,7 +288,7 @@ export default function Dashboard() {
             </Card>
           </TabsContent>
 
-          {/* POSITIONS Tab */}
+          {/* POSITIONS Tab — Equity / non-F&O only */}
           <TabsContent value="positions">
             <Card>
               <CardHeader className="pb-4">
@@ -307,7 +323,7 @@ export default function Dashboard() {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
-                        placeholder="Search in positions"
+                        placeholder="Search positions"
                         value={searchPositions}
                         onChange={(e) => setSearchPositions(e.target.value)}
                         className="pl-9 w-60"
@@ -317,83 +333,184 @@ export default function Dashboard() {
                     <Button variant="outline" size="icon" data-testid="button-analyze">
                       <BarChart3 className="w-4 h-4" />
                     </Button>
-                    </div>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
                 {filteredPositions.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-8" data-testid="text-no-positions">No open positions</p>
+                  <p className="text-muted-foreground text-center py-8" data-testid="text-no-positions">No equity positions</p>
                 ) : (
                   <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="hover:bg-transparent">
-                        <TableHead>Symbol</TableHead>
-                        <TableHead>Exchange</TableHead>
-                        <TableHead>Product</TableHead>
-                        <TableHead className="text-right">Qty</TableHead>
-                        <TableHead className="text-right">Buy Avg</TableHead>
-                        <TableHead className="text-right">Sell Avg</TableHead>
-                        <TableHead className="text-right">LTP</TableHead>
-                        <TableHead>Option</TableHead>
-                        <TableHead className="text-right">Strike</TableHead>
-                        <TableHead>Expiry</TableHead>
-                        <TableHead className="text-right">P&L</TableHead>
-                        <TableHead className="text-right">Realised</TableHead>
-                        <TableHead className="text-right">Unrealised</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredPositions.map((position, index) => {
-                        const unrealisedPnl = Number(position.unrealised_pnl ?? ((Number(position.ltp || 0) - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
-                        return (
-                        <TableRow key={index} data-testid={`row-position-${index}`}>
-                          <TableCell>
-                            <div className="font-medium" data-testid={`text-position-symbol-${index}`}>
-                              {position.trading_symbol}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="text-xs" data-testid={`badge-exchange-${index}`}>
-                              {position.exchange}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-sm" data-testid={`text-product-type-${index}`}>{position.product_type || "NRML"}</span>
-                          </TableCell>
-                          <TableCell className="text-right">{Math.abs(position.quantity)}</TableCell>
-                          <TableCell className="text-right">{Number(position.buy_avg || 0).toFixed(2)}</TableCell>
-                          <TableCell className="text-right">{Number(position.sell_avg || 0).toFixed(2)}</TableCell>
-                          <TableCell className="text-right">{Number(position.ltp || 0).toFixed(2)}</TableCell>
-                          <TableCell>
-                            {position.option_type ? (
-                              <Badge variant="outline" className="text-xs" data-testid={`badge-option-${index}`}>
-                                {position.option_type}
-                              </Badge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {position.strike_price ? position.strike_price : <span className="text-muted-foreground">—</span>}
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-xs">{position.expiry || "—"}</span>
-                          </TableCell>
-                          <TableCell className={`text-right font-medium ${Number(position.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
-                            {Number(position.pnl || 0) >= 0 ? "+" : ""}{Number(position.pnl || 0).toFixed(2)}
-                          </TableCell>
-                          <TableCell className={`text-right text-xs ${Number(position.realised_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
-                            {Number(position.realised_pnl || 0) >= 0 ? "+" : ""}{Number(position.realised_pnl || 0).toFixed(2)}
-                          </TableCell>
-                          <TableCell className={`text-right text-xs ${unrealisedPnl >= 0 ? "text-primary" : "text-destructive"}`}>
-                            {unrealisedPnl >= 0 ? "+" : ""}{unrealisedPnl.toFixed(2)}
-                          </TableCell>
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead>Symbol</TableHead>
+                          <TableHead>Exchange</TableHead>
+                          <TableHead>Product</TableHead>
+                          <TableHead className="text-right">Qty</TableHead>
+                          <TableHead className="text-right">Buy Avg</TableHead>
+                          <TableHead className="text-right">Sell Avg</TableHead>
+                          <TableHead className="text-right">LTP</TableHead>
+                          <TableHead className="text-right">P&L</TableHead>
+                          <TableHead className="text-right">P&L Realz</TableHead>
+                          <TableHead className="text-right">P&L URealz</TableHead>
                         </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredPositions.map((position, index) => {
+                          const unrealisedPnl = Number(position.unrealised_pnl ?? ((Number(position.ltp || 0) - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
+                          return (
+                            <TableRow key={index} data-testid={`row-position-${index}`}>
+                              <TableCell>
+                                <div className="font-medium text-sm" data-testid={`text-position-symbol-${index}`}>{position.trading_symbol}</div>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="text-xs" data-testid={`badge-exchange-${index}`}>{position.exchange}</Badge>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-sm">{position.product_type || "NRML"}</span>
+                              </TableCell>
+                              <TableCell className="text-right">{Math.abs(Number(position.quantity || 0))}</TableCell>
+                              <TableCell className="text-right">{Number(position.buy_avg || 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-right">{Number(position.sell_avg || 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-right">{Number(position.ltp || 0).toFixed(2)}</TableCell>
+                              <TableCell className={`text-right font-medium ${Number(position.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                                {Number(position.pnl || 0) >= 0 ? "+" : ""}{Number(position.pnl || 0).toFixed(2)}
+                              </TableCell>
+                              <TableCell className={`text-right text-xs ${Number(position.realised_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                                {Number(position.realised_pnl || 0) >= 0 ? "+" : ""}{Number(position.realised_pnl || 0).toFixed(2)}
+                              </TableCell>
+                              <TableCell className={`text-right text-xs ${unrealisedPnl >= 0 ? "text-primary" : "text-destructive"}`}>
+                                {unrealisedPnl >= 0 ? "+" : ""}{unrealisedPnl.toFixed(2)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* NFO POS Tab — F&O positions only */}
+          <TabsContent value="nfo-pos">
+            <Card>
+              <CardHeader className="pb-4">
+                <div className="flex justify-between items-start gap-4 flex-wrap">
+                  <div className="flex gap-8 flex-wrap">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">F&O P&L</p>
+                      <p className={`text-lg font-semibold ${nfoPositions.reduce((s, p) => s + Number(p.pnl || 0), 0) >= 0 ? "text-primary" : "text-destructive"}`} data-testid="text-nfo-pnl">
+                        {formatPnL(nfoPositions.reduce((s, p) => s + Number(p.pnl || 0), 0))}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Realised</p>
+                      <p className={`text-lg font-semibold ${nfoPositions.reduce((s, p) => s + Number(p.realised_pnl || 0), 0) >= 0 ? "text-primary" : "text-destructive"}`} data-testid="text-nfo-realised">
+                        {formatPnL(nfoPositions.reduce((s, p) => s + Number(p.realised_pnl || 0), 0))}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Unrealised</p>
+                      <p className={`text-lg font-semibold ${nfoPositions.reduce((s, p) => s + (p.unrealised_pnl !== undefined ? Number(p.unrealised_pnl) : (Number(p.ltp || 0) - Number(p.buy_avg || 0)) * Number(p.quantity || 0)), 0) >= 0 ? "text-primary" : "text-destructive"}`} data-testid="text-nfo-unrealised">
+                        {formatPnL(nfoPositions.reduce((s, p) => s + (p.unrealised_pnl !== undefined ? Number(p.unrealised_pnl) : (Number(p.ltp || 0) - Number(p.buy_avg || 0)) * Number(p.quantity || 0)), 0))}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search NFO positions"
+                      value={searchPositions}
+                      onChange={(e) => setSearchPositions(e.target.value)}
+                      className="pl-9 w-60"
+                      data-testid="input-search-nfo"
+                    />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {filteredNfoPositions.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-8" data-testid="text-no-nfo-positions">No F&O positions</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead>Order ID</TableHead>
+                          <TableHead>Symbol</TableHead>
+                          <TableHead>Exchange</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead className="text-right">Strike</TableHead>
+                          <TableHead>Product</TableHead>
+                          <TableHead>Option</TableHead>
+                          <TableHead>Expiry</TableHead>
+                          <TableHead className="text-right">Qty</TableHead>
+                          <TableHead className="text-right">Buy Avg</TableHead>
+                          <TableHead className="text-right">Sell Avg</TableHead>
+                          <TableHead className="text-right">LTP</TableHead>
+                          <TableHead className="text-right">P&L</TableHead>
+                          <TableHead className="text-right">P&L Realz</TableHead>
+                          <TableHead className="text-right">P&L URealz</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredNfoPositions.map((position, index) => {
+                          const unrealisedPnl = Number(position.unrealised_pnl ?? ((Number(position.ltp || 0) - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
+                          const instType = (position as any).instrument_type || "";
+                          const token = (position as any).token || "";
+                          return (
+                            <TableRow key={index} data-testid={`row-nfo-${index}`}>
+                              <TableCell>
+                                <code className="text-xs text-muted-foreground font-mono" data-testid={`text-nfo-token-${index}`}>{token || "—"}</code>
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-medium text-sm" data-testid={`text-nfo-symbol-${index}`}>{position.trading_symbol}</div>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="text-xs text-violet-400 border-violet-400/50" data-testid={`badge-nfo-exchange-${index}`}>{position.exchange}</Badge>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-xs font-mono">{instType || "—"}</span>
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-sm">
+                                {position.strike_price || "—"}
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-xs">{position.product_type || "NRML"}</span>
+                              </TableCell>
+                              <TableCell>
+                                {position.option_type ? (
+                                  <Badge variant="outline" className={`text-xs ${position.option_type === "CE" ? "text-emerald-400 border-emerald-400/50" : "text-red-400 border-red-400/50"}`} data-testid={`badge-nfo-option-${index}`}>
+                                    {position.option_type}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-xs">{position.expiry || "—"}</span>
+                              </TableCell>
+                              <TableCell className="text-right">{Math.abs(Number(position.quantity || 0))}</TableCell>
+                              <TableCell className="text-right">{Number(position.buy_avg || 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-right">{Number(position.sell_avg || 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-right">{Number(position.ltp || 0).toFixed(2)}</TableCell>
+                              <TableCell className={`text-right font-medium ${Number(position.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                                {Number(position.pnl || 0) >= 0 ? "+" : ""}{Number(position.pnl || 0).toFixed(2)}
+                              </TableCell>
+                              <TableCell className={`text-right text-xs ${Number(position.realised_pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
+                                {Number(position.realised_pnl || 0) >= 0 ? "+" : ""}{Number(position.realised_pnl || 0).toFixed(2)}
+                              </TableCell>
+                              <TableCell className={`text-right text-xs ${unrealisedPnl >= 0 ? "text-primary" : "text-destructive"}`}>
+                                {unrealisedPnl >= 0 ? "+" : ""}{unrealisedPnl.toFixed(2)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
                   </div>
                 )}
               </CardContent>
@@ -481,6 +598,15 @@ const DEPLOY_STATUS_MAP: Record<string, { label: string; color: string; icon: ty
   closed: { label: "Closed", color: "text-muted-foreground", icon: Power },
 };
 
+function parseNFOSymbol(sym: string): { optionType: string; strike: string; expiry: string } {
+  if (!sym) return { optionType: "", strike: "", expiry: "" };
+  const upper = sym.toUpperCase();
+  const m = upper.match(/^[A-Z]+(\d{2}[A-Z]{3}\d{2}|\d{5,6})(\d+(?:\.\d+)?)(CE|PE)$/);
+  if (m) return { optionType: m[3], strike: m[2], expiry: m[1] };
+  if (upper.endsWith("FUT")) return { optionType: "FUT", strike: "", expiry: "" };
+  return { optionType: "", strike: "", expiry: "" };
+}
+
 function DashboardTradeCard({ plan, configs, brokerConfigs }: { plan: StrategyPlan; configs: StrategyConfig[]; brokerConfigs: BrokerConfig[] }) {
   const depStatus = plan.deploymentStatus || "draft";
   const depConfig = DEPLOY_STATUS_MAP[depStatus] || DEPLOY_STATUS_MAP.draft;
@@ -519,41 +645,108 @@ function DashboardTradeCard({ plan, configs, brokerConfigs }: { plan: StrategyPl
             </Badge>
             {plan.exchange && <Badge variant="secondary" className="text-xs font-mono">{plan.exchange}</Badge>}
             {plan.ticker && <Badge variant="secondary" className="text-xs font-mono">{plan.ticker}</Badge>}
+            <span className="text-xs text-muted-foreground">Config: {getConfigName(plan.configId)}</span>
+            <span className="text-xs text-muted-foreground">Broker: {getBrokerName(plan.brokerConfigId)}</span>
           </div>
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={tradesLoading} data-testid={`button-refresh-trade-${plan.id}`}>
-            <RefreshCw className={`w-3 h-3 ${tradesLoading ? "animate-spin" : ""}`} />
-          </Button>
-        </div>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
-          <span>Config: {getConfigName(plan.configId)}</span>
-          <span>Broker: {getBrokerName(plan.brokerConfigId)}</span>
+          <div className="flex items-center gap-3">
+            <span className={`text-sm font-bold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              P&L: {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
+            </span>
+            <Badge variant="secondary" className="text-xs">Open: {openCount}</Badge>
+            <Badge variant="secondary" className="text-xs">Closed: {closedCount}</Badge>
+            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={tradesLoading} data-testid={`button-refresh-trade-${plan.id}`}>
+              <RefreshCw className={`w-3 h-3 ${tradesLoading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </div>
       </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-card border border-border rounded-md p-2 text-center">
-            <p className="text-xs text-muted-foreground">total p&l</p>
-            <p className={`text-sm font-bold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-              {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}
-            </p>
+      <CardContent className="pt-0">
+        {tradesLoading ? (
+          <p className="text-xs text-muted-foreground py-4 text-center">Loading trades…</p>
+        ) : trades.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-4 text-center">No trades for this strategy</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border/40">
+                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Order ID</th>
+                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Symbol</th>
+                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Exchange</th>
+                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Type</th>
+                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Strike</th>
+                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Product</th>
+                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Option</th>
+                  <th className="text-left px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Expiry</th>
+                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Qty</th>
+                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Buy Avg</th>
+                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">Sell Avg</th>
+                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">LTP</th>
+                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">P&L</th>
+                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">P&L Realz</th>
+                  <th className="text-right px-2 py-1.5 text-muted-foreground font-medium whitespace-nowrap">P&L URealz</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map((trade) => {
+                  const parsed = parseNFOSymbol(trade.tradingSymbol || trade.ticker || "");
+                  const isClosed = trade.status === "closed" || trade.status === "squared_off";
+                  const isOpen = !isClosed;
+                  const isBuy = (trade.action || "").toUpperCase() === "BUY";
+                  const buyAvg = isBuy ? Number(trade.price || 0) : Number(trade.exitPrice || 0);
+                  const sellAvg = isBuy ? Number(trade.exitPrice || 0) : Number(trade.price || 0);
+                  const pnlRealz = isClosed ? Number(trade.pnl || 0) : null;
+                  const pnlUrealz = isOpen
+                    ? (isBuy
+                        ? (Number(trade.ltp || 0) - Number(trade.price || 0)) * Number(trade.quantity || 0)
+                        : (Number(trade.price || 0) - Number(trade.ltp || 0)) * Number(trade.quantity || 0))
+                    : null;
+                  return (
+                    <tr key={trade.id} className="border-b border-border/20 hover:bg-muted/30" data-testid={`row-live-trade-${trade.id}`}>
+                      <td className="px-2 py-1.5 font-mono text-muted-foreground whitespace-nowrap">{trade.orderId || "—"}</td>
+                      <td className="px-2 py-1.5 font-medium whitespace-nowrap">{trade.tradingSymbol || trade.ticker || "—"}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap">
+                        <Badge variant="outline" className="text-xs">{trade.exchange || "—"}</Badge>
+                      </td>
+                      <td className="px-2 py-1.5 whitespace-nowrap">
+                        <Badge variant={isBuy ? "default" : "destructive"} className="text-xs font-mono">{trade.action || "—"}</Badge>
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">{parsed.strike || trade.tradingSymbol?.match(/(\d{4,6})(CE|PE|FUT)/i)?.[1] || "—"}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap">{trade.productType || "—"}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap">
+                        {parsed.optionType ? (
+                          <Badge variant="outline" className={`text-xs ${parsed.optionType === "CE" ? "text-emerald-400 border-emerald-400/50" : parsed.optionType === "PE" ? "text-red-400 border-red-400/50" : ""}`}>
+                            {parsed.optionType}
+                          </Badge>
+                        ) : "—"}
+                      </td>
+                      <td className="px-2 py-1.5 whitespace-nowrap">{parsed.expiry || "—"}</td>
+                      <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">{Math.abs(Number(trade.quantity || 0))}</td>
+                      <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">{buyAvg > 0 ? buyAvg.toFixed(2) : "—"}</td>
+                      <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">{sellAvg > 0 ? sellAvg.toFixed(2) : "—"}</td>
+                      <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">{Number(trade.ltp || 0).toFixed(2)}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono font-semibold whitespace-nowrap ${Number(trade.pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {Number(trade.pnl || 0) >= 0 ? "+" : ""}{Number(trade.pnl || 0).toFixed(2)}
+                      </td>
+                      <td className={`px-2 py-1.5 text-right font-mono whitespace-nowrap ${pnlRealz !== null ? (pnlRealz >= 0 ? "text-emerald-400" : "text-red-400") : "text-muted-foreground"}`}>
+                        {pnlRealz !== null ? `${pnlRealz >= 0 ? "+" : ""}${pnlRealz.toFixed(2)}` : "—"}
+                      </td>
+                      <td className={`px-2 py-1.5 text-right font-mono whitespace-nowrap ${pnlUrealz !== null ? (pnlUrealz >= 0 ? "text-emerald-400" : "text-red-400") : "text-muted-foreground"}`}>
+                        {pnlUrealz !== null ? `${pnlUrealz >= 0 ? "+" : ""}${pnlUrealz.toFixed(2)}` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-          <div className="bg-card border border-border rounded-md p-2 text-center">
-            <p className="text-xs text-muted-foreground">open</p>
-            <p className="text-sm font-bold font-mono">{openCount}</p>
-          </div>
-          <div className="bg-card border border-border rounded-md p-2 text-center">
-            <p className="text-xs text-muted-foreground">closed</p>
-            <p className="text-sm font-bold font-mono">{closedCount}</p>
-          </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
 function LiveTradesPanel() {
-  const { toast } = useToast();
-
   const { data: plans = [] } = useQuery<StrategyPlan[]>({
     queryKey: ["/api/strategy-plans"],
   });
@@ -570,17 +763,11 @@ function LiveTradesPanel() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-3">
-              <Activity className="w-5 h-5 text-emerald-400" />
-              <CardTitle data-testid="text-live-trades-title">Live Trades</CardTitle>
-              <Badge variant="secondary">{deployedPlans.length} strategies</Badge>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
+      <div className="flex items-center gap-3 px-1">
+        <Activity className="w-5 h-5 text-emerald-400" />
+        <span className="font-semibold" data-testid="text-live-trades-title">Live Trades</span>
+        <Badge variant="secondary">{deployedPlans.length} strategies</Badge>
+      </div>
 
       {deployedPlans.length === 0 ? (
         <Card className="text-center py-12">
@@ -591,7 +778,7 @@ function LiveTradesPanel() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4">
+        <div className="space-y-4">
           {deployedPlans.map((plan) => (
             <DashboardTradeCard key={plan.id} plan={plan} configs={configs} brokerConfigs={brokerConfigs} />
           ))}

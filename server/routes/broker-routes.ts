@@ -566,24 +566,26 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         const result = await EL.getPositions(kotakConfig);
         if (result.success && result.data) {
           const normalized = (result.data as any[]).map((p: any) => {
-            const buyQty = Number(p.buyQuantity || p.flBuyQty || 0);
-            const sellQty = Number(p.sellQuantity || p.flSellQty || 0);
-            const buyAmt = Number(p.buyAmount || p.buyAmt || 0);
-            const sellAmt = Number(p.sellAmount || p.sellAmt || 0);
+            const buyQty = Number(p.flBuyQty || p.buyQuantity || p.buyQty || 0);
+            const sellQty = Number(p.flSellQty || p.sellQuantity || p.sellQty || 0);
+            const buyAmt = Number(p.buyAmt || p.buyAmount || 0);
+            const sellAmt = Number(p.sellAmt || p.sellAmount || 0);
             return {
-              trading_symbol: p.tradingSymbol || p.trading_symbol || p.symbol || p.trdSym || "",
-              exchange: p.exchange || p.exSeg || "",
-              product_type: p.productType || p.product_type || p.prod || "NRML",
-              quantity: Number(p.quantity || 0),
-              buy_avg: buyQty > 0 ? buyAmt / buyQty : Number(p.uploadPrice || p.upldPrc || p.buy_avg || 0),
+              trading_symbol: p.trdSym || p.tradingSymbol || p.trading_symbol || p.symbol || "",
+              exchange: p.exSeg || p.exchange || "",
+              product_type: p.prod || p.productType || p.product_type || "NRML",
+              quantity: Number(p.qty || p.quantity || 0),
+              buy_avg: buyQty > 0 ? buyAmt / buyQty : Number(p.upldPrc || p.uploadPrice || p.buy_avg || 0),
               sell_avg: sellQty > 0 ? sellAmt / sellQty : Number(p.sell_avg || 0),
-              ltp: Number(p.lastTradedPrice || p.ltp || 0),
-              option_type: p.optionType || p.option_type || p.optTp || null,
-              strike_price: p.strikePrice || p.strike_price || p.stkPrc || null,
-              expiry: p.expiryDisplay || p.expiry || p.exp || null,
-              pnl: Number(p.mtmPnl || p.mtm || p.pnl || 0),
-              realised_pnl: Number(p.realisedPnl || p.realised_pnl || 0),
-              unrealised_pnl: p.unrealisedPnl !== undefined ? Number(p.unrealisedPnl) : undefined,
+              ltp: Number(p.ltp || p.lastTradedPrice || 0),
+              option_type: p.optTp || p.optionType || p.option_type || null,
+              strike_price: p.stkPrc || p.strikePrice || p.strike_price || null,
+              expiry: p.expDt || p.expiryDisplay || p.expiry || p.exp || null,
+              pnl: Number(p.pnl || p.mtmPnl || p.mtm || 0),
+              realised_pnl: Number(p.rpnl || p.realisedPnl || p.realised_pnl || 0),
+              unrealised_pnl: p.urmtom !== undefined ? Number(p.urmtom) : (p.unrealisedPnl !== undefined ? Number(p.unrealisedPnl) : undefined),
+              instrument_type: p.type || p.instType || "",
+              token: p.tok || p.tknNo || "",
             };
           });
           return res.json(normalized);
@@ -611,7 +613,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
             transaction_type: o.transactionType || o.transaction_type || o.tt || "",
             order_type: o.priceType || o.order_type || o.pt || o.orderType || "",
             quantity: Number(o.quantity || o.qt || 0),
-            price: Number(o.price || o.pr || 0),
+            price: Number(o.avgPrc || o.prc || o.price || o.pr || 0),
             status: o.status || o.stat || o.ordSt || "",
             timestamp: o.timestamp || o.plDate || o.time || o.ordTm || "",
           }));
