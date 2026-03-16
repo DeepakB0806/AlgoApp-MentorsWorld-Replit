@@ -746,14 +746,26 @@ export function TradePlanning() {
                   <div>
                     <Label className="text-xs text-muted-foreground">
                       Expiry Type
-                      <InfoTip text="Select the contract expiry cycle. Weekly: for instruments like NIFTY that expire every week (e.g., every Tuesday). Monthly: for instruments like BANKNIFTY that expire on the last trading day of each month. Custom: for Crypto/Forex with non-standard cycles." />
+                      <InfoTip text="Select the contract expiry cycle. Weekly: current week's expiry (nearest upcoming). Next Week: following week's expiry (more time value, lower theta). Monthly: for instruments like BANKNIFTY that expire on the last trading day of each month. Custom: for Crypto/Forex with non-standard cycles." />
                     </Label>
-                    <Select value={timeLogic.expiryType || "weekly"} onValueChange={(v) => setTimeLogic((s) => ({ ...s, expiryType: v as TimeLogicConfig["expiryType"] }))}>
+                    <Select
+                      value={((timeLogic.expiryType || "weekly") === "weekly" && timeLogic.expiryWeekOffset === 1) ? "next_week" : (timeLogic.expiryType || "weekly")}
+                      onValueChange={(v) => {
+                        if (v === "next_week") {
+                          setTimeLogic((s) => ({ ...s, expiryType: "weekly" as TimeLogicConfig["expiryType"], expiryWeekOffset: 1 }));
+                        } else if (v === "weekly") {
+                          setTimeLogic((s) => ({ ...s, expiryType: "weekly" as TimeLogicConfig["expiryType"], expiryWeekOffset: 0 }));
+                        } else {
+                          setTimeLogic((s) => ({ ...s, expiryType: v as TimeLogicConfig["expiryType"] }));
+                        }
+                      }}
+                    >
                       <SelectTrigger data-testid="select-expiry-type">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="weekly">Weekly</SelectItem>
+                        <SelectItem value="next_week">Next Week</SelectItem>
                         <SelectItem value="monthly">Monthly</SelectItem>
                         <SelectItem value="custom">Custom</SelectItem>
                       </SelectContent>
@@ -795,21 +807,6 @@ export function TradePlanning() {
                             </SelectContent>
                           </Select>
                         </div>
-                      </div>
-                      <div>
-                        <Label className="text-xs text-muted-foreground">
-                          Contract Selection
-                          <InfoTip text="Which contract to trade. 'Current' = nearest upcoming expiry (less time value, higher theta decay). 'Next' = the following week's expiry (more time value, lower theta decay)." />
-                        </Label>
-                        <Select value={String(timeLogic.expiryWeekOffset || 0)} onValueChange={(v) => setTimeLogic((s) => ({ ...s, expiryWeekOffset: parseInt(v) }))}>
-                          <SelectTrigger data-testid="select-expiry-offset">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="0">Current (nearest expiry)</SelectItem>
-                            <SelectItem value="1">Next (following expiry)</SelectItem>
-                          </SelectContent>
-                        </Select>
                       </div>
                     </>
                   )}
@@ -1071,8 +1068,12 @@ export function TradePlanning() {
                     }
                     if (tp2.timeLogic?.exitOnExpiry) {
                       const expType = tp2.timeLogic.expiryType || "weekly";
-                      const expLabel = expType === "weekly"
-                        ? `Expiry: Weekly (${tp2.timeLogic.weeklyStartDay || "Mon"}-${tp2.timeLogic.weeklyEndDay || "Thu"})`
+                      const weekOffset = tp2.timeLogic.expiryWeekOffset || 0;
+                      const dayRange = `(${tp2.timeLogic.weeklyStartDay || "Mon"}-${tp2.timeLogic.weeklyEndDay || "Thu"})`;
+                      const expLabel = expType === "weekly" && weekOffset === 1
+                        ? `Expiry: Next Week ${dayRange}`
+                        : expType === "weekly"
+                        ? `Expiry: Weekly · Current ${dayRange}`
                         : expType === "monthly" ? "Expiry: Monthly"
                         : "Expiry: Custom";
                       exitBadges.push({ label: expLabel, color: "text-yellow-400" });
