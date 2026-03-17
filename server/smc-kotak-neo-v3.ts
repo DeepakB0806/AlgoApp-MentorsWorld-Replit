@@ -314,20 +314,31 @@ export async function runScripMasterSync(storage: IStorage, brokerConfig: Broker
       : Array.isArray(data?.data?.filesPaths) ? data.data.filesPaths
       : [];
 
-    const findUrl = (keywords: string[], isNFO: boolean = false): string | null => {
+    // Known Kotak scrip master filename keywords per exchange (from confirmed API response)
+    const KOTAK_EXCHANGE_KEYWORDS: Record<string, string[]> = {
+      NFO: ["nse_fo"],
+      BFO: ["bse_fo"],
+      CDS: ["cde_fo"],
+      MCX: ["mcx_fo"],
+    };
+
+    const findUrl = (exchange: string, brokerCodeKeywords: string[]): string | null => {
+      // Build a deduplicated keyword list: static known keywords first, then broker code / exchange name
+      const staticKws = KOTAK_EXCHANGE_KEYWORDS[exchange.toUpperCase()] || [];
+      const allKeywords = Array.from(new Set([...staticKws, ...brokerCodeKeywords]));
       let firstAvailablePath: string | null = null;
 
       for (const item of flatItems) {
         const path = typeof item === 'string' ? item : (item?.filePath || item?.path || item?.url || item?.fileUrl || "");
         if (path) {
           if (!firstAvailablePath) firstAvailablePath = path;
-          if (keywords.some(kw => path.toLowerCase().includes(kw))) return path;
+          if (allKeywords.some(kw => path.toLowerCase().includes(kw))) return path;
         }
       }
 
-      console.warn(`${LOG_PREFIX} No exact keyword match found for keywords: [${keywords.join(", ")}]. Available paths: ${JSON.stringify(flatItems).slice(0, 300)}`);
+      console.warn(`${LOG_PREFIX} No keyword match found for ${exchange} (tried: [${allKeywords.join(", ")}]). Available paths: ${JSON.stringify(flatItems).slice(0, 300)}`);
 
-      if (isNFO && firstAvailablePath) {
+      if (exchange === "NFO" && firstAvailablePath) {
         console.warn(`${LOG_PREFIX} [WARN] Using first available path as last resort for NFO: ${firstAvailablePath}`);
         return firstAvailablePath;
       }
@@ -342,8 +353,8 @@ export async function runScripMasterSync(storage: IStorage, brokerConfig: Broker
 
     for (const [exchange, tickers] of tickersByExchange.entries()) {
       const brokerCode = brokerCodeByExchange.get(exchange);
-      const keywords = brokerCode ? [brokerCode, exchange.toLowerCase()] : [exchange.toLowerCase()];
-      const csvUrl = findUrl(keywords, exchange === "NFO");
+      const brokerCodeKeywords = brokerCode ? [brokerCode, exchange.toLowerCase()] : [exchange.toLowerCase()];
+      const csvUrl = findUrl(exchange, brokerCodeKeywords);
 
       if (!csvUrl) {
         if (exchange === "NFO") {

@@ -104,6 +104,27 @@ async function ensureCompliance(): Promise<string[]> {
     fixes.push("fixed CDS exchange code cds_fo → cde_fo");
   }
 
+  // Force-correct NFO and BFO broker codes to match Kotak's actual scrip master filenames.
+  // Kotak returns nse_fo.csv for NFO and bse_fo.csv for BFO — if these are wrong in the DB
+  // the SMC keyword match fails silently. Update unconditionally so stale rows are corrected.
+  const nfoExchange = await db.select().from(broker_exchange_maps)
+    .where(and(eq(broker_exchange_maps.brokerName, BROKER_NAME), eq(broker_exchange_maps.universalCode, "NFO")));
+  if (nfoExchange.length > 0 && nfoExchange[0].brokerCode !== "nse_fo") {
+    await db.update(broker_exchange_maps)
+      .set({ brokerCode: "nse_fo" })
+      .where(and(eq(broker_exchange_maps.brokerName, BROKER_NAME), eq(broker_exchange_maps.universalCode, "NFO")));
+    fixes.push(`fixed NFO exchange code ${nfoExchange[0].brokerCode} → nse_fo`);
+  }
+
+  const bfoExchange = await db.select().from(broker_exchange_maps)
+    .where(and(eq(broker_exchange_maps.brokerName, BROKER_NAME), eq(broker_exchange_maps.universalCode, "BFO")));
+  if (bfoExchange.length > 0 && bfoExchange[0].brokerCode !== "bse_fo") {
+    await db.update(broker_exchange_maps)
+      .set({ brokerCode: "bse_fo" })
+      .where(and(eq(broker_exchange_maps.brokerName, BROKER_NAME), eq(broker_exchange_maps.universalCode, "BFO")));
+    fixes.push(`fixed BFO exchange code ${bfoExchange[0].brokerCode} → bse_fo`);
+  }
+
   const existingUF = await db.select().from(universal_fields).where(eq(universal_fields.fieldName, "priceFillFlag"));
   if (existingUF.length === 0) {
     await db.insert(universal_fields).values({
