@@ -1550,8 +1550,7 @@ function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfig[] }) {
   const [isDownloading, setIsDownloading] = useState(false);
 
   const kotakConfigs = brokerConfigs.filter(c => c.brokerName === "kotak_neo");
-  const connectedConfigs = kotakConfigs.filter(c => c.isConnected && c.accessToken);
-  const selectedConfig = connectedConfigs[0] || kotakConfigs[0];
+  const selectedConfig = kotakConfigs.find(c => c.consumerKey) || kotakConfigs[0];
 
   const handleDownload = async () => {
     if (!selectedConfig) return;
@@ -1595,7 +1594,7 @@ function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfig[] }) {
           </div>
           <Button
             onClick={handleDownload}
-            disabled={isDownloading || !selectedConfig?.isConnected || !selectedConfig?.accessToken}
+            disabled={isDownloading || !selectedConfig?.consumerKey}
             data-testid="button-download-scrip-master"
           >
             {isDownloading ? (
@@ -1606,10 +1605,10 @@ function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfig[] }) {
             {isDownloading ? "Downloading..." : "Download CSV"}
           </Button>
         </div>
-        {!selectedConfig?.isConnected && (
+        {!selectedConfig?.consumerKey && (
           <p className="text-xs text-muted-foreground mt-1">
             <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />
-            Broker session required — login with TOTP first
+            Consumer key required — configure broker first
           </p>
         )}
       </CardHeader>

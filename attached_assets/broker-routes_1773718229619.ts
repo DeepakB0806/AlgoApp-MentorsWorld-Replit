@@ -5,8 +5,7 @@ import { tradingCache } from "../cache";
 import { db } from "../db";
 import { desc, eq, sql, or } from "drizzle-orm";
 import EL from "../el-kotak-neo-v3";
-import { startPersistentSquareOff } from "../te-kotak-neo-v3";
-import { addProcessFlowLog, getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
+import { getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
 import {
   testBinanceConnectivity,
   authenticateBinance,
@@ -334,7 +333,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       if (result.success && updated) {
         setImmediate(async () => {
           try {
-            const { runScripMasterSync } = await import("../smc-kotak-neo-v3");
+            const { runScripMasterSync } = await import("../scrip-master-sync");
             const syncResult = await runScripMasterSync(storage, updated);
             console.log(`[BROKER-AUTH] Post-login scrip master sync: ${syncResult.success ? `${syncResult.synced} instruments synced` : syncResult.error}`);
           } catch (err: any) {
@@ -398,54 +397,6 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: `Cannot transition from '${currentStatus}' to '${deploymentStatus}'. Allowed: ${allowed.join(", ")}` });
       }
       const updateData: Record<string, unknown> = { deploymentStatus, updatedAt: new Date().toISOString() };
-      if (deploymentStatus === "squared_off") {
-        const now = new Date().toISOString();
-        let usedBroker = false;
-        if (plan.brokerConfigId) {
-          const brokerConfig = await storage.getBrokerConfig(plan.brokerConfigId);
-          if (brokerConfig) {
-            usedBroker = true;
-            startPersistentSquareOff(storage, id, brokerConfig);
-            console.log(`[ROUTE] Persistent square-off started for plan ${id}`);
-          }
-        }
-        if (!usedBroker) {
-          const openTrades = await storage.getOpenTradesByPlan(id);
-          for (const trade of openTrades) {
-            const entryPrice = trade.price || 0;
-            const currentPrice = trade.ltp || entryPrice;
-            const qty = trade.quantity || 1;
-            const pnl = trade.action === "BUY"
-              ? (currentPrice - entryPrice) * qty
-              : (entryPrice - currentPrice) * qty;
-            const roundedPnl = Math.round(pnl * 100) / 100;
-            await storage.updateStrategyTrade(trade.id, {
-              status: "closed",
-              pnl: roundedPnl,
-              ltp: currentPrice,
-              exitPrice: currentPrice,
-              exitAction: trade.action === "BUY" ? "SELL" : "BUY",
-              exitedAt: now,
-              updatedAt: now,
-            });
-            addProcessFlowLog({
-              planId: id,
-              planName: plan.name,
-              signalType: "square_off",
-              alert: "Square off all positions (paper)",
-              resolvedAction: "CLOSE",
-              blockType: "square_off",
-              actionTaken: "squared_off",
-              message: `Paper squared off trade: ${trade.tradingSymbol} qty=${trade.quantity} exitPrice=${currentPrice} pnl=${roundedPnl}`,
-              broker: "paper_trade",
-              ticker: trade.tradingSymbol || undefined,
-              exchange: trade.exchange || undefined,
-              price: currentPrice,
-            });
-          }
-          tradingCache.invalidateOpenTrades(id);
-        }
-      }
       if (deploymentStatus === "active") {
         updateData.awaitingCleanEntry = true;
       }
@@ -538,47 +489,6 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     }
   });
 
-  app.post("/api/strategy-daily-pnl/snapshot/:planId", async (req, res) => {
-    try {
-      const { planId } = req.params;
-      const { totalPnl, openCount, closedCount } = req.body;
-      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-
-      const entries = await storage.getStrategyDailyPnl(planId);
-      const todayEntry = entries.find(e => e.date === today);
-      const previousDaysPnl = entries.filter(e => e.date !== today).reduce((s, e) => s + Number(e.dailyPnl || 0), 0);
-      const cumulativePnl = previousDaysPnl + Number(totalPnl || 0);
-      const tradesCount = (openCount || 0) + (closedCount || 0);
-
-      if (todayEntry) {
-        const updated = await storage.updateStrategyDailyPnl(todayEntry.id, {
-          dailyPnl: totalPnl,
-          cumulativePnl,
-          openTrades: openCount,
-          closedTrades: closedCount,
-          tradesCount,
-          status: "active",
-        });
-        res.json(updated);
-      } else {
-        const created = await storage.createStrategyDailyPnl({
-          planId,
-          date: today,
-          dailyPnl: totalPnl,
-          cumulativePnl,
-          openTrades: openCount,
-          closedTrades: closedCount,
-          tradesCount,
-          status: "active",
-          createdAt: new Date().toISOString(),
-        });
-        res.json(created);
-      }
-    } catch (error) {
-      res.status(500).json({ error: "Failed to snapshot daily P&L" });
-    }
-  });
-
   app.delete("/api/strategy-daily-pnl/:planId/clear", async (req, res) => {
     try {
       const { planId } = req.params;
@@ -606,51 +516,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       if (kotakConfig) {
         const result = await EL.getPositions(kotakConfig);
         if (result.success && result.data) {
-          const normalized = (result.data as any[]).map((p: any) => {
-            const buyQty  = Number(p.flBuyQty  || p.buyQuantity  || p.buyQty  || 0);
-            const sellQty = Number(p.flSellQty || p.sellQuantity || p.sellQty || 0);
-            const buyAmt  = Number(p.buyAmt  || p.buyAmount  || 0);
-            const sellAmt = Number(p.sellAmt || p.sellAmount || 0);
-
-            const quantity = Number(p.qty || p.quantity || 0);
-            const buyAvg  = buyQty  > 0 ? buyAmt  / buyQty  : Number(p.upldPrc || p.uploadPrice || p.buy_avg  || 0);
-            const sellAvg = sellQty > 0 ? sellAmt / sellQty : Number(p.sell_avg || 0);
-
-            const kotakLtp  = Number(p.ltp || p.lastTradedPrice || 0);
-            const kotakPnl  = Number(p.pnl || p.mtmPnl || p.mtm || 0);
-            const kotakRpnl = Number(p.rpnl || p.realisedPnl || p.realised_pnl || 0);
-            const unrealisedPnl = p.urmtom !== undefined
-              ? Number(p.urmtom)
-              : (p.unrealisedPnl !== undefined ? Number(p.unrealisedPnl) : undefined);
-
-            // Always derive P&L from actual fill amounts (sell_avg - buy_avg basis),
-            // not Kotak's session-scoped MTM pnl which resets intraday and can be misleading.
-            const amountsKnown  = buyAmt > 0 && sellAmt > 0;
-            const computedRpnl  = amountsKnown ? sellAmt - buyAmt : kotakRpnl;
-            const realisedPnl   = computedRpnl;
-            const totalPnl      = realisedPnl + (unrealisedPnl ?? 0);
-            // For closed positions (qty=0) where Kotak returns ltp=0, show the last execution price.
-            const ltp = kotakLtp !== 0 ? kotakLtp : (quantity === 0 ? (sellAvg || buyAvg) : 0);
-
-            return {
-              trading_symbol: p.trdSym || p.tradingSymbol || p.trading_symbol || p.symbol || "",
-              exchange: p.exSeg || p.exchange || "",
-              product_type: p.prod || p.productType || p.product_type || "NRML",
-              quantity,
-              buy_avg: buyAvg,
-              sell_avg: sellAvg,
-              ltp,
-              option_type: p.optTp || p.optionType || p.option_type || null,
-              strike_price: p.stkPrc || p.strikePrice || p.strike_price || null,
-              expiry: p.expDt || p.expiryDisplay || p.expiry || p.exp || null,
-              pnl: totalPnl,
-              realised_pnl: realisedPnl,
-              unrealised_pnl: unrealisedPnl,
-              instrument_type: p.type || p.instType || "",
-              token: p.tok || p.tknNo || "",
-            };
-          });
-          return res.json(normalized);
+          return res.json(result.data);
         }
       }
       
@@ -668,18 +534,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       if (kotakConfig) {
         const result = await EL.getOrderBook(kotakConfig);
         if (result.success && result.data) {
-          const normalized = (result.data as any[]).map((o: any) => ({
-            order_id: o.orderNo || o.order_id || o.nOrdNo || o.ordNo || "",
-            trading_symbol: o.tradingSymbol || o.trading_symbol || o.trdSym || o.ts || "",
-            exchange: o.exchange || o.exSeg || o.es || "",
-            transaction_type: o.transactionType || o.transaction_type || o.tt || "",
-            order_type: o.priceType || o.order_type || o.pt || o.orderType || "",
-            quantity: Number(o.quantity || o.qt || 0),
-            price: Number(o.avgPrc || o.prc || o.price || o.pr || 0),
-            status: o.status || o.stat || o.ordSt || "",
-            timestamp: o.timestamp || o.plDate || o.time || o.ordTm || "",
-          }));
-          return res.json(normalized);
+          return res.json(result.data);
         }
       }
       
@@ -708,20 +563,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         }
         
         if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
-          const normalized = (result.data as any[]).map((h: any) => ({
-            trading_symbol: h.symbol || h.displaySymbol || h.trading_symbol || h.tradingSymbol || "",
-            quantity: Number(h.quantity || 0),
-            average_price: Number(h.averagePrice || h.average_price || 0),
-            current_price: Number(h.ltp || h.closingPrice || h.current_price || 0),
-            current_value: Number(h.marketValue || h.mktValue || h.current_value || 0),
-            invested_value: Number(h.investedValue || h.holdingCost || h.invested_value || 0),
-            pnl: Number(h.unrealisedPnl || h.pnl || 0),
-            pnl_percent: Number(h.pnlPercent || h.pnl_percent || 0),
-            today_pnl: Number(h.todayPnl || h.today_pnl || 0),
-            today_pnl_percent: Number(h.todayPnlPercent || h.today_pnl_percent || 0),
-            prev_close: Number(h.prevDayLtp || h.prev_close || 0),
-          }));
-          return res.json(normalized);
+          return res.json(result.data);
         }
       }
       
@@ -870,7 +712,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
           scripSyncInProgress.add(brokerConfigId);
           setImmediate(async () => {
             try {
-              const { runScripMasterSync } = await import("../smc-kotak-neo-v3");
+              const { runScripMasterSync } = await import("../scrip-master-sync");
               const result = await runScripMasterSync(storage, brokerConfig);
               console.log(`[TE-READINESS] Auto-sync (no data): ${result.success ? `${result.synced} instruments` : result.error}`);
             } catch (err: any) {
@@ -910,7 +752,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         scripSyncInProgress.add(brokerConfigId);
         setImmediate(async () => {
           try {
-            const { runScripMasterSync } = await import("../smc-kotak-neo-v3");
+            const { runScripMasterSync } = await import("../scrip-master-sync");
             const result = await runScripMasterSync(storage, brokerConfig);
             console.log(`[TE-READINESS] Auto-sync (stale data): ${result.success ? `${result.synced} instruments` : result.error}`);
           } catch (err: any) {
@@ -1076,8 +918,8 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       if (brokerConfig.brokerName !== "kotak_neo") {
         return res.status(400).json({ error: "Scrip master download is only available for Kotak Neo brokers" });
       }
-      if (!brokerConfig.consumerKey) {
-        return res.status(401).json({ error: "Consumer key not configured for this broker." });
+      if (!brokerConfig.isConnected || !brokerConfig.accessToken) {
+        return res.status(401).json({ error: "Broker not connected. Please login first." });
       }
 
       const { default: EL } = await import("../el-kotak-neo-v3");
