@@ -69,7 +69,22 @@ function inferExpiryDay(expiryDates: Date[]): string {
   if (expiryDates.length === 0) return "Thursday";
   const now = new Date();
   const sorted = expiryDates.filter(d => d >= now).sort((a, b) => a.getTime() - b.getTime());
-  if (sorted.length === 0) return "Thursday";
+
+  if (sorted.length === 0) {
+    // No future expiry dates — fall back to frequency analysis of past dates
+    const fallbackSorted = [...expiryDates].sort((a, b) => b.getTime() - a.getTime());
+    const dayFreq = new Map<number, number>();
+    for (const d of fallbackSorted.slice(0, 100)) {
+      const day = d.getDay();
+      dayFreq.set(day, (dayFreq.get(day) || 0) + 1);
+    }
+    let bestDay = 4;
+    let bestCount = 0;
+    for (const [day, count] of Array.from(dayFreq.entries())) {
+      if (count > bestCount) { bestDay = day; bestCount = count; }
+    }
+    return DAY_NAMES[bestDay];
+  }
 
   // Reverted Replit's incorrect UTC offset. The raw getDay() accurately resolves
   // the exact 2025/2026 NSE Tuesday baseline and month-end prepone shifts.
@@ -78,19 +93,36 @@ function inferExpiryDay(expiryDates: Date[]): string {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // STRIKE INTERVAL INFERENCE (feeds instrument_configs.strike_interval)
-// Uses the minimum non-zero gap between adjacent sorted unique strikes.
+// Uses frequency analysis: picks the most common gap that appears in ≥15% of
+// adjacent sorted unique strikes. Falls back to the most frequent gap overall.
 // Must receive ONLY nearest-expiry strikes to avoid far-expiry 100-point gaps
 // inflating NIFTY's interval from the correct 50 to 100.
 // ═══════════════════════════════════════════════════════════════════════════════
 function inferStrikeInterval(strikes: number[]): number {
   if (strikes.length < 2) return 50;
   const sorted = Array.from(new Set(strikes)).sort((a, b) => a - b);
-  let minGap = Infinity;
+  const freq = new Map<number, number>();
   for (let i = 1; i < sorted.length; i++) {
     const d = Math.round((sorted[i] - sorted[i - 1]) * 100) / 100;
-    if (d > 0 && d < minGap) minGap = d;
+    if (d > 0) freq.set(d, (freq.get(d) || 0) + 1);
   }
-  return minGap === Infinity ? 50 : minGap;
+  if (freq.size === 0) return 50;
+  const totalDiffs = sorted.length - 1;
+  const minThreshold = totalDiffs * 0.15;
+  let best = 50;
+  let bestCount = 0;
+  for (const [val, count] of Array.from(freq.entries())) {
+    if (count >= minThreshold && (bestCount === 0 || val < best)) {
+      best = val;
+      bestCount = count;
+    }
+  }
+  if (bestCount === 0) {
+    for (const [val, count] of Array.from(freq.entries())) {
+      if (count > bestCount) { bestCount = count; best = val; }
+    }
+  }
+  return best;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -223,8 +255,9 @@ export async function runScripMasterSync(storage: IStorage, brokerConfig: Broker
     const allConfigs = await storage.getStrategyConfigs();
     const tickersByExchange = new Map<string, string[]>();
 
-    // 🛡️ PERMANENT SAFETY NET: Always sync the major NFO indices so the system never starves
+    // 🛡️ PERMANENT SAFETY NET: Always sync the major indices so the system never starves
     tickersByExchange.set("NFO", ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]);
+    tickersByExchange.set("BFO", ["SENSEX", "BANKEX"]);
 
     for (const cfg of allConfigs) {
       // 1. Check Mother Config level
