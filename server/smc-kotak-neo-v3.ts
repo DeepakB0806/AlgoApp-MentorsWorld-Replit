@@ -18,6 +18,14 @@ const LOG_PREFIX = "[SCRIP-MASTER]";
 export const liveContractCache = new Map<string, { brokerSymbol: string, token: string }>();
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// RAW CSV CACHE
+// Stores the raw CSV text for each exchange (e.g. "NFO", "BFO") after every
+// sync. The scrip-master-download route serves from this cache instantly
+// instead of re-fetching from Kotak on every button click.
+// ═══════════════════════════════════════════════════════════════════════════════
+export const rawCsvCache = new Map<string, string>(); // exchange → raw CSV text
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
 interface ParsedInstrument {
@@ -378,6 +386,7 @@ export async function runScripMasterSync(storage: IStorage, brokerConfig: Broker
         }
 
         const csvText = await response.text();
+        rawCsvCache.set(exchange, csvText);
         const parsed = parseScripMasterCSV(csvText, exchange, tickers);
         console.log(`${LOG_PREFIX} ${exchange}: ${parsed.instruments.length} tickers, ${parsed.rawContracts.length} contracts`);
         allRawContracts.push(...parsed.rawContracts);
