@@ -1,0 +1,166 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// SELL EXECUTION (HANDLES "EXIT" SIGNALS)
+// ═══════════════════════════════════════════════════════════════════════════════
+async function executeSellSignal(
+  storage: IStorage, plan: StrategyPlan, brokerConfig: BrokerConfig, ctx: TradeContext,
+): Promise<TradeResult> {
+  const broker = brokerConfig.brokerName;
+  let closePnl = 0;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 1. SMART BASKET EXIT (PURE EXIT / REVERSAL)
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CRITICAL FIX: Used filter() instead of find() to grab ALL legs of the spread
+  const existingToClose = ctx.openTrades.filter((t) => t.blockType === ctx.resolvedBlockType);
+  
+  if (existingToClose.length > 0) {
+    console.log(`[PFL] Plan "${plan.name}" EXIT — closing existing positions (${existingToClose.length} legs)`);
+    
+    // MARGIN SAFETY FOR EXITS: To close a SHORT, we BUY. To close a LONG, we SELL.
+    // We MUST BUY to cover shorts BEFORE we SELL to close longs, or the broker rejects it.
+    const exitBasket = [...existingToClose].sort((a, b) => {
+      const aExitAction = a.action === "BUY" ? "SELL" : "BUY";
+      const bExitAction = b.action === "BUY" ? "SELL" : "BUY";
+      if (aExitAction === "BUY" && bExitAction === "SELL") return -1;
+      if (aExitAction === "SELL" && bExitAction === "BUY") return 1;
+      return 0;
+    });
+
+    let anyFailed = false;
+    for (const trade of exitBasket) {
+      const closedTrade = await closeTrade(storage, trade, ctx.price, ctx.now, brokerConfig);
+      closePnl += (closedTrade.pnl || 0);
+      if (closedTrade.status === "close_failed") anyFailed = true;
+      
+      // 🛡️ API THROTTLING: 100ms delay to prevent Kotak rate-limits
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
+
+    if (anyFailed) {
+      console.warn(`[TE] Plan "${plan.name}" — leg close failed, starting persistent retry loop`);
+      startPersistentSquareOff(storage, plan.id, brokerConfig);
+    }
+
+    if (ctx.signalContext?.resolvedAction === "EXIT") {
+      console.log(`[TE] Plan "${plan.name}" — Pure EXIT signal processed. Halting before opening new positions.`);
+      return {
+        success: true,
+        action: "close",
+        broker,
+        planId: plan.id,
+        pnl: closePnl,
+        message: anyFailed ? "Leg close failed — persistent retry started." : "Successfully closed existing positions (Pure EXIT).",
+        executionTimeMs: Date.now() - ctx.startTime,
+      };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 2. CHECK FOR OPPOSITE POSITIONS
+  // ═══════════════════════════════════════════════════════════════════════════
+  let targetOppositeBlock: string | null = null;
+  if (ctx.resolvedBlockType === "uptrendLegs") targetOppositeBlock = "downtrendLegs";
+  else if (ctx.resolvedBlockType === "downtrendLegs") targetOppositeBlock = "uptrendLegs";
+
+  const existingOpenOther = targetOppositeBlock ? ctx.openTrades.find((t) => t.blockType === targetOppositeBlock) : undefined;
+
+  if (existingOpenOther) {
+    return { success: true, action: "hold", broker, planId: plan.id, message: "Opposite position already open", pnl: closePnl, executionTimeMs: Date.now() - ctx.startTime };
+  }
+
+  if (broker === "kotak_neo" && (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl)) {
+    return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired", executionTimeMs: Date.now() - ctx.startTime };
+  }
+
+  const dbOrderType = TL.getDefaultByUniversalName("priceType", "order_place");
+  const orderTypeForRecord = dbOrderType || "MKT";
+
+  const trades: any[] = [];
+  const orderIds: string[] = [];
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 3. SMART BASKET ENTRY (MARGIN SAFETY NET)
+  // ═══════════════════════════════════════════════════════════════════════════
+  const basketLegs = [];
+  for (let i = 0; i < ctx.legs.length; i++) {
+    const leg = ctx.legs[i];
+    const resolved = resolveOrderParams(leg, ctx, i);
+    if ("error" in resolved) {
+      return { success: false, action: "error", broker, planId: plan.id, message: resolved.error, executionTimeMs: Date.now() - ctx.startTime };
+    }
+    basketLegs.push({ originalIndex: i, leg, params: resolved });
+  }
+
+  basketLegs.sort((a, b) => {
+    const aType = a.params.transactionType.toUpperCase();
+    const bType = b.params.transactionType.toUpperCase();
+    if ((aType === "BUY" || aType === "B") && (bType === "SELL" || bType === "S")) return -1;
+    if ((aType === "SELL" || aType === "S") && (bType === "BUY" || bType === "B")) return 1;
+    return 0;
+  });
+
+  console.log(`[BASKET] Smart sorting applied. Executing ${basketLegs.length} new legs for Plan "${plan.name}". BUY orders prioritized.`);
+
+  for (const item of basketLegs) {
+    const { originalIndex: i, leg, params } = item;
+    let orderId: string | undefined;
+    let productType = "PAPER";
+
+    if (broker === "kotak_neo") {
+      const l = leg as Record<string, any>;
+      const actualProductType = l.productType || leg.orderType || params.productCode;
+      const actualPriceType = l.priceType || orderTypeForRecord || "MKT";
+      const actualPrice = actualPriceType === "LMT" ? String(l.limitPrice || ctx.price) : "0";
+
+      const universalPayload: Record<string, any> = {
+        tradingSymbol: params.tradingSymbol,
+        exchange: EL.mapExchange(ctx.exchange),
+        transactionType: params.transactionType,
+        quantity: String(params.quantity),
+        productType: actualProductType,
+        priceType: actualPriceType,
+        price: actualPrice,
+        validity: l.validity || "DAY",
+        afterMarket: "NO"
+      };
+
+      const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
+      if (!orderResult.success) {
+        return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
+      }
+      orderId = orderResult.data?.orderNo;
+      productType = params.productCode;
+
+      // 🛡️ API THROTTLING: 100ms delay
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } else {
+      orderId = `PT-${Date.now()}-L${i}`;
+    }
+
+    const fillPrice = (broker === "kotak_neo" && orderId)
+      ? await getFillPrice(brokerConfig, orderId, ctx.price)
+      : ctx.price;
+
+    const trade = await storage.createStrategyTrade({
+      planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${i}`,
+      tradingSymbol: params.tradingSymbol, exchange: ctx.exchange, quantity: params.quantity, price: fillPrice, 
+      action: leg.action ? leg.action.toUpperCase() : "SELL", 
+      blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
+      webhookDataId: ctx.data.id || undefined,
+    });
+
+    trades.push(trade);
+    if (orderId) orderIds.push(orderId);
+  }
+
+  tradingCache.invalidateOpenTrades(plan.id);
+
+  if (plan.awaitingCleanEntry) {
+    await storage.updateStrategyPlan(plan.id, { awaitingCleanEntry: false });
+    if (plan.configId) tradingCache.invalidatePlans(plan.configId);
+  }
+
+  return { success: true, action: "open", broker, planId: plan.id, trade: trades[0], orderId: orderIds[0], pnl: closePnl, message: `ENTRY success`, executionTimeMs: Date.now() - ctx.startTime };
+}

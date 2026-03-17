@@ -310,6 +310,8 @@ async function executeTradeForPlan(
 
   const legs = selectLegs(tradeParams, resolvedBlockType);
   const blockConfig = getBlockConfig(tradeParams, resolvedBlockType);
+  const neutralLegsRaw = tradeParams?.neutralLegs;
+  const neutralLegs: PlanTradeLeg[] = Array.isArray(neutralLegsRaw) ? neutralLegsRaw : [];
 
   if (legs.length === 0) {
     const skipMsg = `No legs configured for ${resolvedBlockType} — signal skipped`;
@@ -353,7 +355,7 @@ async function executeTradeForPlan(
     tradingCache.setOpenTradesByPlanId(plan.id, openTrades);
   }
 
-  const ctx: TradeContext = { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, blockConfig, instrumentConfig, targetExpiryDate };
+  const ctx: TradeContext = { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, neutralLegs, blockConfig, instrumentConfig, targetExpiryDate };
 
   if (signalType === "buy") {
     return executeBuySignal(storage, plan, brokerConfig, ctx);
@@ -374,7 +376,7 @@ async function executeTradeForPlan(
 // TRADE CONTEXT & ORDER PARAMETER RESOLUTION
 // ═══════════════════════════════════════════════════════════════════════════════
 interface TradeContext {
-  ticker: string; exchange: string; price: number; resolvedBlockType: string; lotMultiplier: number; now: string; today: string; data: WebhookData; openTrades: StrategyTrade[]; signalContext?: SignalContext; startTime: number; legs: PlanTradeLeg[]; blockConfig: Record<string, any>; instrumentConfig?: InstrumentConfig; targetExpiryDate?: string;
+  ticker: string; exchange: string; price: number; resolvedBlockType: string; lotMultiplier: number; now: string; today: string; data: WebhookData; openTrades: StrategyTrade[]; signalContext?: SignalContext; startTime: number; legs: PlanTradeLeg[]; neutralLegs: PlanTradeLeg[]; blockConfig: Record<string, any>; instrumentConfig?: InstrumentConfig; targetExpiryDate?: string;
 }
 
 function resolveOrderParams(
@@ -469,6 +471,81 @@ function resolveOrderParams(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// SHARED BASKET EXECUTOR
+// Places an ordered list of legs sequentially.
+// Caller MUST sort BUY-first before passing. Early return on any failure acts
+// as the circuit breaker — SELL legs never fire if a preceding BUY failed.
+// ═══════════════════════════════════════════════════════════════════════════════
+type BasketItem = { leg: PlanTradeLeg; blockType: string; legIndex: number };
+
+async function executeLegBasket(
+  storage: IStorage, plan: StrategyPlan, brokerConfig: BrokerConfig, ctx: TradeContext,
+  items: BasketItem[], orderTypeForRecord: string,
+): Promise<{ trades: any[]; orderIds: string[]; error?: string }> {
+  const broker = brokerConfig.brokerName;
+  const trades: any[] = [];
+  const orderIds: string[] = [];
+
+  for (const { leg, blockType, legIndex } of items) {
+    const resolved = resolveOrderParams(leg, ctx, legIndex);
+    if ("error" in resolved) return { trades, orderIds, error: resolved.error };
+
+    let orderId: string | undefined;
+    let productType = "PAPER";
+
+    if (broker === "kotak_neo") {
+      const l = leg as Record<string, any>;
+      const actualPriceType = l.priceType || orderTypeForRecord || "MKT";
+      const orderResult = await EL.placeOrder(brokerConfig, {
+        tradingSymbol: resolved.tradingSymbol, exchange: EL.mapExchange(ctx.exchange),
+        transactionType: resolved.transactionType, quantity: String(resolved.quantity),
+        productType: l.productType || leg.orderType || resolved.productCode,
+        priceType: actualPriceType, price: actualPriceType === "LMT" ? String(l.limitPrice || ctx.price) : "0",
+        validity: l.validity || "DAY", afterMarket: "NO",
+      });
+      if (!orderResult.success) return { trades, orderIds, error: `Kotak Neo order failed: ${orderResult.error}` };
+      orderId = orderResult.data?.orderNo;
+      productType = resolved.productCode;
+      if (items.length > 1) await new Promise(r => setTimeout(r, 100));
+    } else {
+      orderId = `PT-${Date.now()}-L${legIndex}`;
+    }
+
+    const fillPrice = broker === "kotak_neo" && orderId ? await getFillPrice(brokerConfig, orderId, ctx.price) : ctx.price;
+    const trade = await storage.createStrategyTrade({
+      planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${legIndex}`,
+      tradingSymbol: resolved.tradingSymbol, exchange: ctx.exchange, quantity: resolved.quantity,
+      price: fillPrice, action: (leg.action || "BUY").toUpperCase(), blockType, legIndex,
+      orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice,
+      executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now,
+      timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker,
+      indicator: ctx.data.indicator || null, alert: ctx.data.alert || null,
+      localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
+      webhookDataId: ctx.data.id || undefined,
+    });
+    trades.push(trade);
+    if (orderId) orderIds.push(orderId);
+  }
+  return { trades, orderIds };
+}
+
+// Assembles the entry basket for a signal: neutral hedge BUYs first (if not
+// already open), then directional legs. Sorted BUY-before-SELL universally.
+// currentOpen = openTrades AFTER any preceding close (excludes just-closed legs).
+function buildEntryBasket(ctx: TradeContext, currentOpen: StrategyTrade[]): BasketItem[] {
+  const hasOpenNeutral = currentOpen.some(t => t.blockType === "neutralLegs");
+  const items: BasketItem[] = [];
+  if (!hasOpenNeutral) ctx.neutralLegs.forEach((leg, i) => items.push({ leg, blockType: "neutralLegs", legIndex: i }));
+  ctx.legs.forEach((leg, i) => items.push({ leg, blockType: ctx.resolvedBlockType, legIndex: i }));
+  items.sort((a, b) => {
+    const aB = (a.leg.action || "BUY").toUpperCase() === "BUY";
+    const bB = (b.leg.action || "BUY").toUpperCase() === "BUY";
+    return aB === bB ? 0 : aB ? -1 : 1;
+  });
+  return items;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // BUY EXECUTION (HANDLES "ENTRY" SIGNALS)
 // ═══════════════════════════════════════════════════════════════════════════════
 async function executeBuySignal(
@@ -482,29 +559,30 @@ async function executeBuySignal(
     return { success: true, action: "hold", broker, planId: plan.id, message: `${ctx.resolvedBlockType} position already open`, executionTimeMs: Date.now() - ctx.startTime };
   }
 
-  // 2. STRICT REVERSALS: Close only the exact opposite directional block (Protects Neutral hedges)
+  // 2. REVERSALS: Close opposite directional block + neutralLegs together (full basket close)
   let targetOppositeBlock: string | null = null;
   if (ctx.resolvedBlockType === "uptrendLegs") targetOppositeBlock = "downtrendLegs";
   else if (ctx.resolvedBlockType === "downtrendLegs") targetOppositeBlock = "uptrendLegs";
 
-  const openOpposite = targetOppositeBlock ? ctx.openTrades.find((t) => t.blockType === targetOppositeBlock) : undefined;
+  const openOpposites = targetOppositeBlock
+    ? ctx.openTrades.filter(t => t.blockType === targetOppositeBlock || t.blockType === "neutralLegs")
+    : [];
 
-  if (openOpposite) {
-    console.log(`[PFL] Plan "${plan.name}" ENTRY — closing existing opposite position (${openOpposite.tradingSymbol})`);
-    const closedTrade = await closeTrade(storage, openOpposite, ctx.price, ctx.now, brokerConfig);
-    deferDailyPnlUpdate(storage, plan.id, ctx.today, closedTrade.pnl || 0);
-
-    // THE GUARD: Stop here if it's a pure EXIT signal
+  if (openOpposites.length > 0) {
+    openOpposites.sort((a, b) => {
+      const aFirst = a.action === "SELL"; const bFirst = b.action === "SELL";
+      return aFirst === bFirst ? 0 : aFirst ? -1 : 1;
+    });
+    let closePnl = 0;
+    for (let ci = 0; ci < openOpposites.length; ci++) {
+      const closed = await closeTrade(storage, openOpposites[ci], ctx.price, ctx.now, brokerConfig);
+      closePnl += closed.pnl || 0;
+      if (ci < openOpposites.length - 1) await new Promise(r => setTimeout(r, 100));
+    }
+    deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
     if (ctx.signalContext?.resolvedAction === "EXIT") {
-      console.log(`[TE] Plan "${plan.name}" — Pure EXIT signal processed. Halting before opening new positions.`);
-      return {
-        success: true,
-        action: "close",
-        broker,
-        planId: plan.id,
-        message: "Successfully closed existing opposite position (Pure EXIT).",
-        executionTimeMs: Date.now() - ctx.startTime,
-      };
+      return { success: true, action: "close", broker, planId: plan.id,
+        message: "Successfully closed all positions (Pure EXIT).", executionTimeMs: Date.now() - ctx.startTime };
     }
   }
 
@@ -514,68 +592,11 @@ async function executeBuySignal(
 
   const dbOrderType = TL.getDefaultByUniversalName("priceType", "order_place");
   const orderTypeForRecord = dbOrderType || "MKT";
-
-  const trades: any[] = [];
-  const orderIds: string[] = [];
-
-  for (let i = 0; i < ctx.legs.length; i++) {
-    const leg = ctx.legs[i];
-    const resolved = resolveOrderParams(leg, ctx, i);
-    if ("error" in resolved) {
-      return { success: false, action: "error", broker, planId: plan.id, message: resolved.error, executionTimeMs: Date.now() - ctx.startTime };
-    }
-    const params = resolved;
-
-    let orderId: string | undefined;
-    let productType = "PAPER";
-
-    if (broker === "kotak_neo") {
-      // ═══════════════════════════════════════════════════════════════════════════
-      // FIX 1 & 2: RESOLVED TERMINOLOGY & ELIMINATED PAYLOAD STARVATION
-      // ═══════════════════════════════════════════════════════════════════════════
-      const l = leg as Record<string, any>;
-      const actualProductType = l.productType || leg.orderType || params.productCode;
-      const actualPriceType = l.priceType || orderTypeForRecord || "MKT";
-      const actualPrice = actualPriceType === "LMT" ? String(l.limitPrice || ctx.price) : "0";
-
-      const universalPayload: Record<string, any> = {
-        tradingSymbol: params.tradingSymbol,
-        exchange: EL.mapExchange(ctx.exchange),
-        transactionType: params.transactionType,
-        quantity: String(params.quantity),
-        productType: actualProductType,
-        priceType: actualPriceType,
-        price: actualPrice,
-        validity: l.validity || "DAY",
-        afterMarket: "NO",
-      };
-
-      const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
-      if (!orderResult.success) {
-        return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
-      }
-      orderId = orderResult.data?.orderNo;
-      productType = params.productCode;
-    } else {
-      orderId = `PT-${Date.now()}-L${i}`;
-    }
-
-    const fillPrice = (broker === "kotak_neo" && orderId)
-      ? await getFillPrice(brokerConfig, orderId, ctx.price)
-      : ctx.price;
-
-    const trade = await storage.createStrategyTrade({
-      planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${i}`,
-      tradingSymbol: params.tradingSymbol, exchange: ctx.exchange, quantity: params.quantity, price: fillPrice, 
-
-      action: leg.action ? leg.action.toUpperCase() : "BUY", 
-
-      blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
-      webhookDataId: ctx.data.id || undefined,
-    });
-
-    trades.push(trade);
-    if (orderId) orderIds.push(orderId);
+  const remainingOpen = ctx.openTrades.filter(t => !openOpposites.some(o => o.id === t.id));
+  const basket = buildEntryBasket(ctx, remainingOpen);
+  const result = await executeLegBasket(storage, plan, brokerConfig, ctx, basket, orderTypeForRecord);
+  if (result.error) {
+    return { success: false, action: "error", broker, planId: plan.id, message: result.error, executionTimeMs: Date.now() - ctx.startTime };
   }
 
   tradingCache.invalidateOpenTrades(plan.id);
@@ -585,7 +606,7 @@ async function executeBuySignal(
     if (plan.configId) tradingCache.invalidatePlans(plan.configId);
   }
 
-  return { success: true, action: "open", broker, planId: plan.id, trade: trades[0], orderId: orderIds[0], message: `ENTRY success`, executionTimeMs: Date.now() - ctx.startTime };
+  return { success: true, action: "open", broker, planId: plan.id, trade: result.trades[0], orderId: result.orderIds[0], message: `ENTRY success`, executionTimeMs: Date.now() - ctx.startTime };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -597,43 +618,39 @@ async function executeSellSignal(
   const broker = brokerConfig.brokerName;
   let closePnl = 0;
 
-  // 4. BLOCKTYPE FIX: Find the trade for THIS exact block to close it
-  const existingToClose = ctx.openTrades.find((t) => t.blockType === ctx.resolvedBlockType);
-  if (existingToClose) {
-    console.log(`[PFL] Plan "${plan.name}" EXIT — closing existing position (${existingToClose.tradingSymbol})`);
-    const closedTrade = await closeTrade(storage, existingToClose, ctx.price, ctx.now, brokerConfig);
-    closePnl = closedTrade.pnl || 0;
+  // EXIT: Close directional block + neutralLegs together (full basket close)
+  const allToClose = ctx.openTrades.filter(t => t.blockType === ctx.resolvedBlockType || t.blockType === "neutralLegs");
+  if (allToClose.length > 0) {
+    // Sort: BUY-to-cover SELL positions first (margin safety)
+    allToClose.sort((a, b) => {
+      const aFirst = a.action === "SELL"; const bFirst = b.action === "SELL";
+      return aFirst === bFirst ? 0 : aFirst ? -1 : 1;
+    });
+    let anyFailed = false;
+    for (let ci = 0; ci < allToClose.length; ci++) {
+      const closed = await closeTrade(storage, allToClose[ci], ctx.price, ctx.now, brokerConfig);
+      closePnl += closed.pnl || 0;
+      if (closed.status === "close_failed") anyFailed = true;
+      if (ci < allToClose.length - 1) await new Promise(r => setTimeout(r, 100));
+    }
     deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
-
-    if (closedTrade.status === "close_failed") {
+    if (anyFailed) {
       console.warn(`[TE] Plan "${plan.name}" — leg close_failed, starting persistent retry loop`);
       startPersistentSquareOff(storage, plan.id, brokerConfig);
     }
-
-    // THE GUARD: Stop here if it's a pure EXIT signal
     if (ctx.signalContext?.resolvedAction === "EXIT") {
-      console.log(`[TE] Plan "${plan.name}" — Pure EXIT signal processed. Halting before opening new positions.`);
-      return {
-        success: true,
-        action: "close",
-        broker,
-        planId: plan.id,
-        pnl: closePnl,
-        message: closedTrade.status === "close_failed"
-          ? "Leg close failed — persistent retry started."
-          : "Successfully closed existing position (Pure EXIT).",
-        executionTimeMs: Date.now() - ctx.startTime,
-      };
+      return { success: true, action: "close", broker, planId: plan.id, pnl: closePnl,
+        message: anyFailed ? "Leg close failed — persistent retry started." : "Successfully closed all positions (Pure EXIT).",
+        executionTimeMs: Date.now() - ctx.startTime };
     }
   }
 
-  // 5. STRICT OPPOSITE CHECK: Prevent duplicate entries only against the exact opposite directional block
+  // OPPOSITE CHECK: Prevent duplicate entries against the exact opposite directional block
   let targetOppositeBlock: string | null = null;
   if (ctx.resolvedBlockType === "uptrendLegs") targetOppositeBlock = "downtrendLegs";
   else if (ctx.resolvedBlockType === "downtrendLegs") targetOppositeBlock = "uptrendLegs";
 
-  const existingOpenOther = targetOppositeBlock ? ctx.openTrades.find((t) => t.blockType === targetOppositeBlock) : undefined;
-
+  const existingOpenOther = targetOppositeBlock ? ctx.openTrades.find(t => t.blockType === targetOppositeBlock) : undefined;
   if (existingOpenOther) {
     return { success: true, action: "hold", broker, planId: plan.id, message: "Opposite position already open", pnl: closePnl, executionTimeMs: Date.now() - ctx.startTime };
   }
@@ -644,68 +661,11 @@ async function executeSellSignal(
 
   const dbOrderType = TL.getDefaultByUniversalName("priceType", "order_place");
   const orderTypeForRecord = dbOrderType || "MKT";
-
-  const trades: any[] = [];
-  const orderIds: string[] = [];
-
-  for (let i = 0; i < ctx.legs.length; i++) {
-    const leg = ctx.legs[i];
-    const resolved = resolveOrderParams(leg, ctx, i);
-    if ("error" in resolved) {
-      return { success: false, action: "error", broker, planId: plan.id, message: resolved.error, executionTimeMs: Date.now() - ctx.startTime };
-    }
-    const params = resolved;
-
-    let orderId: string | undefined;
-    let productType = "PAPER";
-
-    if (broker === "kotak_neo") {
-      // ═══════════════════════════════════════════════════════════════════════════
-      // FIX 1 & 2: RESOLVED TERMINOLOGY & ELIMINATED PAYLOAD STARVATION
-      // ═══════════════════════════════════════════════════════════════════════════
-      const l = leg as Record<string, any>;
-      const actualProductType = l.productType || leg.orderType || params.productCode;
-      const actualPriceType = l.priceType || orderTypeForRecord || "MKT";
-      const actualPrice = actualPriceType === "LMT" ? String(l.limitPrice || ctx.price) : "0";
-
-      const universalPayload: Record<string, any> = {
-        tradingSymbol: params.tradingSymbol,
-        exchange: EL.mapExchange(ctx.exchange),
-        transactionType: params.transactionType,
-        quantity: String(params.quantity),
-        productType: actualProductType,
-        priceType: actualPriceType,
-        price: actualPrice,
-        validity: l.validity || "DAY",
-        afterMarket: "NO",
-      };
-
-      const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
-      if (!orderResult.success) {
-        return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
-      }
-      orderId = orderResult.data?.orderNo;
-      productType = params.productCode;
-    } else {
-      orderId = `PT-${Date.now()}-L${i}`;
-    }
-
-    const fillPrice = (broker === "kotak_neo" && orderId)
-      ? await getFillPrice(brokerConfig, orderId, ctx.price)
-      : ctx.price;
-
-    const trade = await storage.createStrategyTrade({
-      planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${i}`,
-      tradingSymbol: params.tradingSymbol, exchange: ctx.exchange, quantity: params.quantity, price: fillPrice, 
-
-      action: leg.action ? leg.action.toUpperCase() : "SELL", 
-
-      blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
-      webhookDataId: ctx.data.id || undefined,
-    });
-
-    trades.push(trade);
-    if (orderId) orderIds.push(orderId);
+  const remainingOpen = ctx.openTrades.filter(t => !allToClose.some(o => o.id === t.id));
+  const basket = buildEntryBasket(ctx, remainingOpen);
+  const result = await executeLegBasket(storage, plan, brokerConfig, ctx, basket, orderTypeForRecord);
+  if (result.error) {
+    return { success: false, action: "error", broker, planId: plan.id, message: result.error, pnl: closePnl, executionTimeMs: Date.now() - ctx.startTime };
   }
 
   tradingCache.invalidateOpenTrades(plan.id);
@@ -715,7 +675,7 @@ async function executeSellSignal(
     if (plan.configId) tradingCache.invalidatePlans(plan.configId);
   }
 
-  return { success: true, action: "open", broker, planId: plan.id, trade: trades[0], orderId: orderIds[0], pnl: closePnl, message: `ENTRY success`, executionTimeMs: Date.now() - ctx.startTime };
+  return { success: true, action: "open", broker, planId: plan.id, trade: result.trades[0], orderId: result.orderIds[0], pnl: closePnl, message: `ENTRY success`, executionTimeMs: Date.now() - ctx.startTime };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
