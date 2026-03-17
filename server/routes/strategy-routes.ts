@@ -499,7 +499,7 @@ export function registerStrategyRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: "Broker not connected. Please login first." });
       }
 
-      const { runScripMasterSync } = await import("../scrip-master-sync");
+      const { runScripMasterSync } = await import("../smc-kotak-neo-v3");
       const result = await runScripMasterSync(storage, brokerConfig);
       res.json(result);
     } catch (error: any) {

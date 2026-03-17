@@ -334,7 +334,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       if (result.success && updated) {
         setImmediate(async () => {
           try {
-            const { runScripMasterSync } = await import("../scrip-master-sync");
+            const { runScripMasterSync } = await import("../smc-kotak-neo-v3");
             const syncResult = await runScripMasterSync(storage, updated);
             console.log(`[BROKER-AUTH] Post-login scrip master sync: ${syncResult.success ? `${syncResult.synced} instruments synced` : syncResult.error}`);
           } catch (err: any) {
@@ -870,7 +870,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
           scripSyncInProgress.add(brokerConfigId);
           setImmediate(async () => {
             try {
-              const { runScripMasterSync } = await import("../scrip-master-sync");
+              const { runScripMasterSync } = await import("../smc-kotak-neo-v3");
               const result = await runScripMasterSync(storage, brokerConfig);
               console.log(`[TE-READINESS] Auto-sync (no data): ${result.success ? `${result.synced} instruments` : result.error}`);
             } catch (err: any) {
@@ -910,7 +910,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         scripSyncInProgress.add(brokerConfigId);
         setImmediate(async () => {
           try {
-            const { runScripMasterSync } = await import("../scrip-master-sync");
+            const { runScripMasterSync } = await import("../smc-kotak-neo-v3");
             const result = await runScripMasterSync(storage, brokerConfig);
             console.log(`[TE-READINESS] Auto-sync (stale data): ${result.success ? `${result.synced} instruments` : result.error}`);
           } catch (err: any) {

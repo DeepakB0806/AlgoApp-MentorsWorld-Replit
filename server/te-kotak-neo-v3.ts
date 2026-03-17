@@ -24,7 +24,7 @@ import {
   getOTMStrike,
   getTargetExpiry,
 } from "./option-symbol-builder";
-import { liveContractCache } from "./scrip-master-sync";
+import { liveContractCache } from "./smc-kotak-neo-v3";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // FILL PRICE LOOKUP

@@ -9,7 +9,7 @@ import { tradingCache } from "./cache";
 import TL from "./tl-kotak-neo-v3";
 import EL from "./el-kotak-neo-v3";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
-import { runScripMasterSync } from "./scrip-master-sync";
+import { runScripMasterSync } from "./smc-kotak-neo-v3";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
 import { resolveAllSignalsFromActionMapper, processTradeSignal } from "./te-kotak-neo-v3";
