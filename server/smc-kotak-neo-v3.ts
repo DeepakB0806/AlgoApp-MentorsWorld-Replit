@@ -288,22 +288,50 @@ export async function runScripMasterSync(storage: IStorage, brokerConfig: Broker
     const exchangeMaps = await storage.getBrokerExchangeMaps(brokerConfig.brokerName || "kotak_neo_v3");
     const brokerCodeByExchange = new Map(exchangeMaps.map(m => [m.universalCode.toUpperCase(), m.brokerCode.toLowerCase()]));
 
-    // ── Step 3: Fetch all available scrip master file paths ────────────────────
-    const filePathsResult = await EL.getScripMasterFilePaths(brokerConfig);
-    if (!filePathsResult.success) return { success: false, synced: 0, error: filePathsResult.error };
+    // ── Step 3: Fetch all available scrip master file paths (WITH TIMEOUT) ─────
+    console.log(`${LOG_PREFIX} Requesting file paths from broker...`);
+
+    const filePathsPromise = EL.getScripMasterFilePaths(brokerConfig);
+    const timeoutPromise = new Promise<{success: boolean, error: string}>((resolve) => {
+      setTimeout(() => resolve({ success: false, error: "Timed out waiting for Kotak scrip master file paths (30s)" }), 30000);
+    });
+
+    const filePathsResult = await Promise.race([filePathsPromise, timeoutPromise]) as any;
+
+    if (!filePathsResult.success) {
+      return { success: false, synced: 0, error: filePathsResult.error };
+    }
 
     const data: any = filePathsResult.data;
+
+    // Log raw Kotak response (truncated) for production diagnostics
+    const rawResponseStr = JSON.stringify(data || {});
+    console.log(`${LOG_PREFIX} Raw broker response: ${rawResponseStr.slice(0, 1000)}${rawResponseStr.length > 1000 ? "..." : ""}`);
+
     const flatItems: any[] = Array.isArray(data)
       ? data
       : Array.isArray(data?.filesPaths) ? data.filesPaths
       : Array.isArray(data?.data?.filesPaths) ? data.data.filesPaths
       : [];
 
-    const findUrl = (keywords: string[]): string | null => {
+    const findUrl = (keywords: string[], isNFO: boolean = false): string | null => {
+      let firstAvailablePath: string | null = null;
+
       for (const item of flatItems) {
         const path = typeof item === 'string' ? item : (item?.filePath || item?.path || item?.url || item?.fileUrl || "");
-        if (path && keywords.some(kw => path.toLowerCase().includes(kw))) return path;
+        if (path) {
+          if (!firstAvailablePath) firstAvailablePath = path;
+          if (keywords.some(kw => path.toLowerCase().includes(kw))) return path;
+        }
       }
+
+      console.warn(`${LOG_PREFIX} No exact keyword match found for keywords: [${keywords.join(", ")}]. Available paths: ${JSON.stringify(flatItems).slice(0, 300)}`);
+
+      if (isNFO && firstAvailablePath) {
+        console.warn(`${LOG_PREFIX} [WARN] Using first available path as last resort for NFO: ${firstAvailablePath}`);
+        return firstAvailablePath;
+      }
+
       return null;
     };
 
@@ -314,9 +342,8 @@ export async function runScripMasterSync(storage: IStorage, brokerConfig: Broker
 
     for (const [exchange, tickers] of tickersByExchange.entries()) {
       const brokerCode = brokerCodeByExchange.get(exchange);
-      // Build URL keywords: prefer broker_code from DB, fall back to exchange name itself
       const keywords = brokerCode ? [brokerCode, exchange.toLowerCase()] : [exchange.toLowerCase()];
-      const csvUrl = findUrl(keywords);
+      const csvUrl = findUrl(keywords, exchange === "NFO");
 
       if (!csvUrl) {
         if (exchange === "NFO") {
@@ -327,15 +354,28 @@ export async function runScripMasterSync(storage: IStorage, brokerConfig: Broker
       }
 
       try {
-        const csvText = await (await fetch(csvUrl)).text();
+        console.log(`${LOG_PREFIX} Downloading CSV for ${exchange} from ${csvUrl}...`);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+        const response = await fetch(csvUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        }
+
+        const csvText = await response.text();
         const parsed = parseScripMasterCSV(csvText, exchange, tickers);
         console.log(`${LOG_PREFIX} ${exchange}: ${parsed.instruments.length} tickers, ${parsed.rawContracts.length} contracts`);
         allRawContracts.push(...parsed.rawContracts);
         allInstruments.push(...parsed.instruments);
         atLeastOneRequired = true;
       } catch (fetchErr: any) {
-        if (exchange === "NFO") return { success: false, synced: 0, error: `Failed to download ${exchange} CSV: ${fetchErr.message}` };
-        console.warn(`${LOG_PREFIX} ${exchange} CSV download failed (non-fatal): ${fetchErr.message}`);
+        const errMsg = fetchErr.name === 'AbortError' ? 'Download timed out after 120s' : fetchErr.message;
+        if (exchange === "NFO") return { success: false, synced: 0, error: `Failed to download ${exchange} CSV: ${errMsg}` };
+        console.warn(`${LOG_PREFIX} ${exchange} CSV download failed (non-fatal): ${errMsg}`);
       }
     }
 
