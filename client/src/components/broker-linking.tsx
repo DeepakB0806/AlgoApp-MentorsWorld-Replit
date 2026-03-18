@@ -18,7 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl, Position } from "@shared/schema";
 import type { TradeParams, TimeLogicConfig } from "@shared/schema";
 import { buildBrokerOrderParams } from "@shared/schema";
-import type { BrokerConfig } from "@shared/schema";
+import type { BrokerConfig, Webhook } from "@shared/schema";
 
 function parseJsonSafe<T>(val: string | null | undefined, fallback: T): T {
   if (!val) return fallback;
@@ -378,6 +378,10 @@ export function BrokerLinking() {
     queryKey: ["/api/broker-configs"],
   });
 
+  const { data: webhooks = [] } = useQuery<Webhook[]>({
+    queryKey: ["/api/webhooks"],
+  });
+
   const activePlans = plans.filter((p) => p.status === "active");
 
   const [localState, setLocalState] = useState<Record<string, { brokerConfigId: string; isProxyMode: boolean }>>({});
@@ -625,6 +629,10 @@ export function BrokerLinking() {
             const allBtns = actions.length + 1;
             const isCorrelationExpanded = expandedCorrelationMaps.has(plan.id);
             const isStrategyConfigExpanded = expandedStrategyConfigs.has(plan.id);
+            const planWebhook = parentConfig?.webhookId ? webhooks.find((w) => w.id === parentConfig.webhookId) : undefined;
+            const chainP = planWebhook?.uniqueCode ? `P-${planWebhook.uniqueCode}` : null;
+            const chainMc = parentConfig?.uniqueCode ?? null;
+            const chainTps = plan.uniqueCode ?? null;
             const strategyConfigSummary = [
               blockGroups.length > 0 ? `${blockGroups.length} block${blockGroups.length > 1 ? "s" : ""}` : null,
               tp.stoploss?.enabled ? `SL: ${tp.stoploss.value}${tp.stoploss.mode === "percentage" ? "%" : ""}` : null,
@@ -680,13 +688,11 @@ export function BrokerLinking() {
                       </button>
                       {isStrategyConfigExpanded && (
                         <div className="px-3 pb-3 pt-1 bg-muted/20 space-y-2">
-                          {(plan.linkedPlanCode || parentConfig?.uniqueCode || plan.uniqueCode) && (
-                            <div className="flex flex-wrap items-center gap-1 text-xs font-mono">
-                              {plan.linkedPlanCode && <span className="text-amber-400">{plan.linkedPlanCode}</span>}
-                              {plan.linkedPlanCode && (parentConfig?.uniqueCode || plan.uniqueCode) && <span className="text-muted-foreground">›</span>}
-                              {parentConfig?.uniqueCode && <span className="text-emerald-400">{parentConfig.uniqueCode}</span>}
-                              {parentConfig?.uniqueCode && plan.uniqueCode && <span className="text-muted-foreground">›</span>}
-                              {plan.uniqueCode && <span className="text-blue-400">{plan.uniqueCode}</span>}
+                          {(chainP || chainMc || chainTps) && (
+                            <div className="flex items-center gap-1 text-xs font-mono text-muted-foreground">
+                              {chainP && <><span className="text-amber-500">{chainP}</span><ChevronRight className="w-3 h-3" /></>}
+                              {chainMc && <><span className="text-blue-500">{chainMc}</span><ChevronRight className="w-3 h-3" /></>}
+                              {chainTps && <span className="text-emerald-500">{chainTps}</span>}
                             </div>
                           )}
                           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
