@@ -739,14 +739,18 @@ export function BrokerLinking() {
                       <div className="flex flex-wrap items-center gap-1.5" data-testid={`container-deployment-actions-${plan.id}`}>
                         {actions.map((a) => {
                           const ActionIcon = a.icon;
-                          const isSquareOff = a.action === "squared_off";
+                          const btnCls: Record<string, string> = {
+                            paused: "bg-slate-500 hover:bg-slate-600 text-white border-transparent",
+                            squared_off: "bg-red-600 hover:bg-red-700 text-white border-transparent",
+                            closed: "bg-blue-600 hover:bg-blue-700 text-white border-transparent",
+                          };
                           const onClick = a.action === "deployed" && canRedeploy ? () => initDeployConfig(plan) : () => handleDeploymentAction(plan.id, a.action);
                           return (
                             <Button
                               key={a.action}
                               size="sm"
-                              variant={isSquareOff ? "outline" : a.variant}
-                              className={isSquareOff ? "border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white" : ""}
+                              variant="outline"
+                              className={btnCls[a.action] ?? ""}
                               onClick={onClick}
                               disabled={deploymentMutation.isPending}
                               data-testid={`button-${a.action}-${plan.id}`}
@@ -758,6 +762,7 @@ export function BrokerLinking() {
                         <Button
                           size="sm"
                           variant="outline"
+                          className="bg-emerald-700 hover:bg-emerald-800 text-white border-transparent"
                           onClick={() => setPnlSheetPlanId(plan.id)}
                           data-testid={`button-daily-pnl-${plan.id}`}
                         >
