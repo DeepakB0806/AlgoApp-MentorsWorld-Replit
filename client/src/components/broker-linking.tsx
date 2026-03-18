@@ -537,40 +537,40 @@ export function BrokerLinking() {
     return (tp.uptrendLegs || []).length > 0 || (tp.downtrendLegs || []).length > 0 || (tp.neutralLegs || []).length > 0 || (tp.legs || []).length > 0;
   };
 
-  const getDeploymentActions = (status: string): { action: string; label: string; icon: typeof Play; variant: "default" | "outline" | "destructive" }[] => {
+  const getDeploymentActions = (status: string): { action: string; label: string; icon: typeof Play }[] => {
     switch (status) {
       case "draft":
         return [];
       case "deployed":
         return [
-          { action: "active", label: "Activate", icon: Play, variant: "default" },
-          { action: "closed", label: "Close", icon: Power, variant: "destructive" },
+          { action: "active", label: "Activate", icon: Play },
+          { action: "closed", label: "Close", icon: Power },
         ];
       case "active":
         return [
-          { action: "paused", label: "Pause", icon: Pause, variant: "outline" },
-          { action: "squared_off", label: "Square Off", icon: Square, variant: "destructive" },
-          { action: "closed", label: "Close", icon: Power, variant: "destructive" },
+          { action: "paused", label: "Pause", icon: Pause },
+          { action: "squared_off", label: "Square Off", icon: Square },
+          { action: "closed", label: "Close", icon: Power },
         ];
       case "paused":
         return [
-          { action: "active", label: "Resume", icon: Play, variant: "default" },
-          { action: "squared_off", label: "Square Off", icon: Square, variant: "destructive" },
-          { action: "closed", label: "Close", icon: Power, variant: "destructive" },
+          { action: "active", label: "Resume", icon: Play },
+          { action: "squared_off", label: "Square Off", icon: Square },
+          { action: "closed", label: "Close", icon: Power },
         ];
       case "squared_off":
         return [
-          { action: "active", label: "Reactivate", icon: Play, variant: "default" },
-          { action: "closed", label: "Close", icon: Power, variant: "destructive" },
+          { action: "active", label: "Reactivate", icon: Play },
+          { action: "closed", label: "Close", icon: Power },
         ];
       case "closed":
         return [
-          { action: "archived", label: "Archive", icon: Archive, variant: "outline" },
-          { action: "deployed", label: "Re-deploy", icon: Rocket, variant: "default" },
+          { action: "archived", label: "Archive", icon: Archive },
+          { action: "deployed", label: "Re-deploy", icon: Rocket },
         ];
       case "archived":
         return [
-          { action: "deployed", label: "Re-deploy", icon: Rocket, variant: "default" },
+          { action: "deployed", label: "Re-deploy", icon: Rocket },
         ];
       default:
         return [];
