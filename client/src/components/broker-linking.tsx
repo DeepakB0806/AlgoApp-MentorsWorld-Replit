@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, Trash2, Settings, Link2, Loader2, X, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, Activity, BarChart3, Archive, AlertTriangle, Maximize2, Minimize2, ChevronDown, ChevronUp, Search } from "lucide-react";
+import { Plus, Trash2, Settings, Link2, Loader2, X, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, Activity, BarChart3, Archive, AlertTriangle, Maximize2, Minimize2, ChevronDown, ChevronUp, ChevronRight, Search } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl, Position } from "@shared/schema";
@@ -675,7 +675,7 @@ export function BrokerLinking() {
                           {!isStrategyConfigExpanded && strategyConfigSummary && (
                             <span className="text-[10px] text-muted-foreground/70 font-normal normal-case tracking-normal">{strategyConfigSummary}</span>
                           )}
-                          {isStrategyConfigExpanded ? <ChevronUp className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}
+                          {isStrategyConfigExpanded ? <ChevronUp className="w-3 h-3 text-muted-foreground" /> : <ChevronRight className="w-3 h-3 text-muted-foreground" />}
                         </span>
                       </button>
                       {isStrategyConfigExpanded && (
