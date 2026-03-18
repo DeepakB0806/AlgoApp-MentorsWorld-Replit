@@ -625,7 +625,7 @@ export function BrokerLinking() {
             const tl = (tp.timeLogic || {}) as TimeLogicConfig;
             const expiryOffset = tl.expiryWeekOffset ?? 0;
             const expType = tl.expiryType || "weekly";
-            const dayRange = `(${tl.weeklyStartDay || "Mon"}–${tl.weeklyEndDay || "Thu"})`;
+            const dayRange = `(${tl.weeklyStartDay || "Mon"}-${tl.weeklyEndDay || "Thu"})`;
             const expiryLabel = expType === "weekly" && expiryOffset === 1
               ? `Expiry: Next Week ${dayRange}`
               : expType === "weekly"
@@ -644,6 +644,7 @@ export function BrokerLinking() {
               tp.stoploss?.enabled ? `SL: ${tp.stoploss.value}${tp.stoploss.mode === "percentage" ? "%" : ""}` : null,
               tl.exitTime ? `Exit ${tl.exitTime}` : null,
               tl.exitOnExpiry ? expiryLabel : null,
+              (tl.exitAfterDays ?? 0) > 0 ? `Exit +${tl.exitAfterDays}d` : null,
             ].filter(Boolean).join(" · ");
 
             return (
