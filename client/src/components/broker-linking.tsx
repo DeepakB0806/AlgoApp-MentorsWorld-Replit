@@ -385,6 +385,7 @@ export function BrokerLinking() {
   const [deployConfig, setDeployConfig] = useState<Record<string, { lotMultiplier: number; stoploss: number; profitTarget: number; baseStoploss: number; baseProfitTarget: number; brokerConfigId?: string }>>({});
   const [pnlSheetPlanId, setPnlSheetPlanId] = useState<string | null>(null);
   const [expandedCorrelationMaps, setExpandedCorrelationMaps] = useState<Set<string>>(new Set());
+  const [expandedStrategyConfigs, setExpandedStrategyConfigs] = useState<Set<string>>(new Set());
 
   const plansKey = activePlans.map((p) => `${p.id}:${p.brokerConfigId}:${p.isProxyMode}`).join(",");
   useEffect(() => {
@@ -623,6 +624,13 @@ export function BrokerLinking() {
             const expiryRange = tl.weeklyStartDay && tl.weeklyEndDay ? ` (${tl.weeklyStartDay}–${tl.weeklyEndDay})` : "";
             const allBtns = actions.length + 1;
             const isCorrelationExpanded = expandedCorrelationMaps.has(plan.id);
+            const isStrategyConfigExpanded = expandedStrategyConfigs.has(plan.id);
+            const strategyConfigSummary = [
+              blockGroups.length > 0 ? `${blockGroups.length} block${blockGroups.length > 1 ? "s" : ""}` : null,
+              tp.stoploss?.enabled ? `SL: ${tp.stoploss.value}${tp.stoploss.mode === "percentage" ? "%" : ""}` : null,
+              tl.exitTime ? `Exit ${tl.exitTime}` : null,
+              tl.expiryType ? expiryLabel : null,
+            ].filter(Boolean).join(" · ");
 
             return (
               <Card key={plan.id} data-testid={`card-broker-link-${plan.id}`} className={`border-l-4 ${borderCls}`}>
@@ -654,31 +662,50 @@ export function BrokerLinking() {
                   })()}
                 </CardHeader>
                 <CardContent className="space-y-3 pt-0">
-                  {/* ── Section 2: Strategy Configuration ── */}
+                  {/* ── Section 2: Strategy Configuration (collapsible) ── */}
                   {blockGroups.length > 0 && (
-                    <div className="bg-muted/20 rounded-lg p-3">
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Strategy Configuration</p>
-                      {(plan.linkedPlanCode || parentConfig?.uniqueCode || plan.uniqueCode) && (
-                        <div className="flex flex-wrap items-center gap-1 text-xs font-mono mb-2">
-                          {plan.linkedPlanCode && <span className="text-amber-400">{plan.linkedPlanCode}</span>}
-                          {plan.linkedPlanCode && (parentConfig?.uniqueCode || plan.uniqueCode) && <span className="text-muted-foreground">›</span>}
-                          {parentConfig?.uniqueCode && <span className="text-emerald-400">{parentConfig.uniqueCode}</span>}
-                          {parentConfig?.uniqueCode && plan.uniqueCode && <span className="text-muted-foreground">›</span>}
-                          {plan.uniqueCode && <span className="text-blue-400">{plan.uniqueCode}</span>}
-                        </div>
-                      )}
-                      {blockGroups.map((g) => (
-                        <div key={g.label} className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs mb-1">
-                          <span className={`font-medium ${g.color}`}>{g.label} ({g.productMode}):</span>
-                          <span className="font-mono text-foreground">{g.legs.map((l) => `${l.action} ${l.type} ${l.strike} x${l.lots || 1}`).join(", ")}</span>
-                        </div>
-                      ))}
-                      {(tp.stoploss?.enabled || tl.exitTime || (tl.exitAfterDays ?? 0) > 0 || tl.expiryType) && (
-                        <div className="flex flex-wrap gap-1.5 mt-2">
-                          {tp.stoploss?.enabled && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">SL: {tp.stoploss.value}{tp.stoploss.mode === "percentage" ? "%" : ""}</span>}
-                          {tl.exitTime && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Exit @ {tl.exitTime}</span>}
-                          {tl.expiryType && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Expiry: {expiryLabel}{expiryRange}</span>}
-                          {(tl.exitAfterDays ?? 0) > 0 && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">+{tl.exitAfterDays}d</span>}
+                    <div className="border border-border/30 rounded-lg overflow-hidden">
+                      <button
+                        className="flex items-center justify-between w-full px-3 py-2 text-xs hover:bg-muted/30 transition-colors"
+                        onClick={() => setExpandedStrategyConfigs(prev => { const next = new Set(prev); next.has(plan.id) ? next.delete(plan.id) : next.add(plan.id); return next; })}
+                        data-testid={`button-toggle-strategy-config-${plan.id}`}
+                      >
+                        <span className="font-semibold uppercase tracking-widest text-[10px] text-muted-foreground">Strategy Configuration</span>
+                        <span className="flex items-center gap-2">
+                          {!isStrategyConfigExpanded && strategyConfigSummary && (
+                            <span className="text-[10px] text-muted-foreground/70 font-normal normal-case tracking-normal">{strategyConfigSummary}</span>
+                          )}
+                          {isStrategyConfigExpanded ? <ChevronUp className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}
+                        </span>
+                      </button>
+                      {isStrategyConfigExpanded && (
+                        <div className="px-3 pb-3 pt-1 bg-muted/20 space-y-2">
+                          {(plan.linkedPlanCode || parentConfig?.uniqueCode || plan.uniqueCode) && (
+                            <div className="flex flex-wrap items-center gap-1 text-xs font-mono">
+                              {plan.linkedPlanCode && <span className="text-amber-400">{plan.linkedPlanCode}</span>}
+                              {plan.linkedPlanCode && (parentConfig?.uniqueCode || plan.uniqueCode) && <span className="text-muted-foreground">›</span>}
+                              {parentConfig?.uniqueCode && <span className="text-emerald-400">{parentConfig.uniqueCode}</span>}
+                              {parentConfig?.uniqueCode && plan.uniqueCode && <span className="text-muted-foreground">›</span>}
+                              {plan.uniqueCode && <span className="text-blue-400">{plan.uniqueCode}</span>}
+                            </div>
+                          )}
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+                            {blockGroups.map((g, i) => (
+                              <span key={g.label} className="flex items-center gap-1">
+                                {i > 0 && <span className="text-muted-foreground/40">·</span>}
+                                <span className={`font-medium ${g.color}`}>{g.label} ({g.productMode}):</span>
+                                <span className="font-mono text-foreground">{g.legs.map((l) => `${l.action} ${l.type} ${l.strike} x${l.lots || 1}`).join(", ")}</span>
+                              </span>
+                            ))}
+                          </div>
+                          {(tp.stoploss?.enabled || tl.exitTime || (tl.exitAfterDays ?? 0) > 0 || tl.expiryType) && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {tp.stoploss?.enabled && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">SL: {tp.stoploss.value}{tp.stoploss.mode === "percentage" ? "%" : ""}</span>}
+                              {tl.exitTime && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Exit @ {tl.exitTime}</span>}
+                              {tl.expiryType && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Expiry: {expiryLabel}{expiryRange}</span>}
+                              {(tl.exitAfterDays ?? 0) > 0 && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">+{tl.exitAfterDays}d</span>}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
