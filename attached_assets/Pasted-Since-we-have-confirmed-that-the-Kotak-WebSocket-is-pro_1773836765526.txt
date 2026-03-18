@@ -1,0 +1,61 @@
+Since we have confirmed that the Kotak WebSocket is prone to intermittent drops, we are going to build a High-Availability (HA) Hybrid Engine. This architecture uses the WebSocket for speed but relies on the REST API for "Truth" whenever the feed lags.
+
+This is the comprehensive prompt to give Replit. It covers the Modular Separation, the RAM Cache, and the Failover Logic in one go.
+
+The Master Prompt for Replit (High-Availability Hybrid Engine)
+"We are upgrading the system architecture to a 'Hybrid-Monolith' to support 50+ users with high-speed Trailing Stop Loss (TSL) and automated P&L settlement. The goal is to use a WebSocket for speed but automatically fall back to REST API polling if the WebSocket drops.
+
+Task 1: The Database Foundation (shared/schema.ts)
+
+Update strategyTrades with: pnlCalculated (boolean), initialSlPrice, trailingStep, currentSlPrice, and highWaterMark (all numeric).
+
+Task 2: The Settlement Service (server/se-kotak.ts)
+
+Create a background worker that sweeps the DB every 10 seconds for trades where status === 'closed' and pnlCalculated === false.
+
+It must calculate P&L, update strategyDailyPnl, and mark the trade as calculated. This replaces the old deferDailyPnlUpdate logic.
+
+Task 3: The Market Data Manager (server/market-data.ts)
+
+Create a Singleton class with a RAM-based Map to store live prices and timestamps.
+
+Core Logic: Implement an async getPrice(symbol) function.
+
+If RAM price is < 2000ms old, return it immediately.
+
+If RAM price is older than 2000ms or missing, it must automatically trigger a REST API getQuote call to Kotak Neo, update the RAM, and return the fresh price.
+
+Task 4: The Event-Driven TSL Engine (server/tsl-engine.ts)
+
+Create a RAM-based TSL Engine that holds active trade states.
+
+It should check marketData.getPrice() every 1 second for all open trades.
+
+Safety: Add a SIMULATION_MODE = true flag. When true, it logs 'TSL Breach' to an audit table but does NOT call the broker's Exit API.
+
+Every 15 seconds, 'Dirty Flush' any moved TSL prices (Current SL, High Water Mark) from RAM to the Database.
+
+Task 5: The Kotak WebSocket Gateway (server/ws-kotak.ts)
+
+Implement the WebSocket connection using the HSM (HyperSync Market) protocol (sid, token, dataCenter).
+
+Every incoming tick must update the MarketDataManager RAM cache.
+
+Ensure silent auto-reconnect logic is included so a WebSocket crash doesn't stop the main app.
+
+Task 6: Trade Engine (TE) Integration (server/te-kotak-neo-v3.ts)
+
+Remove all old P&L accounting logic.
+
+On NRML entry, seed the TSL fields in the DB and call tslEngine.registerNewTrail(trade).
+
+Replace direct API price calls with calls to the new MarketDataManager.
+
+Please review this architecture and generate a step-by-step task list for implementation."
+
+Why this prompt is bulletproof:
+Isolation: By defining Task 3 (Market Data Manager) first, you ensure the TSL Engine doesn't care how it gets the price. It just asks for it, and the system decides (WS vs API) in the background.
+
+Simulation Mode: You can deploy this to your production environment safely. The logs will show you: "TSL Engine triggered at 105.50 (WebSocket Data)" while your old engine is still running. You can verify they match before turning off the old logic.
+
+Self-Healing: If the WebSocket (Task 5) fails due to the high failure rates we researched, Task 3's getPrice will naturally start hitting the API without the TSL Engine even knowing there was a problem.

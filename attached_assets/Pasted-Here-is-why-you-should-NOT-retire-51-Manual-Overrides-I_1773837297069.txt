@@ -1,0 +1,44 @@
+Here is why you should NOT retire #51:
+
+Manual Overrides: If you ever need to manually force a price update for a stuck trade from a dashboard or a mobile script, having this endpoint allows you to "poke" the TSL engine instantly.
+
+Testing/Postman: You can use Postman to send a fake "Stop Loss Breach" price to the app to verify the SIMULATION_MODE logs without waiting for the market to move.
+
+Future-Proofing: If you ever do decide to move the WebSocket back to a separate server for scale, the "plumbing" is already there.
+
+Updated Task Instructions for Replit
+Tell Replit: "Do not retire Task #51. Instead, repurpose it as a 'Manual/External Price Override' endpoint."
+
+Revised Scope Notes for Tasks #48, #49, and #50
+Tell Replit to update the scope of these tasks as follows:
+
+Task #48: Trade Engine (TE) Cleanup
+Update: Replace all direct calls to getQuote() with marketData.getPrice().
+
+Update: When an NRML entry is confirmed, it must now:
+
+Seed the 5 new DB columns (Task #46).
+
+Call marketData.subscribe(symbol) to tell the WebSocket to start watching this scrip.
+
+Call tslEngine.registerNewTrail(trade) to start the RAM monitoring.
+
+Task #49: TSL Engine (High-Performance RAM Logic)
+Update: Implement the SIMULATION_MODE flag (default: true).
+
+Update: The engine must loop through active trails in RAM and pull prices using marketData.getPrice(). This ensures the TSL engine automatically benefits from the WebSocket speed OR the API fallback without extra code.
+
+Update: Add logic to log "TSL Breach" events to a new audit_logs table instead of firing an exit when in Simulation Mode.
+
+Task #50: Boot Wiring
+Update: Initialize the services in this specific order:
+
+MarketDataManager (The data foundation)
+
+SettlementEngine (The accountant)
+
+TSLEngine (The risk manager)
+
+WebSocketGateway (The data fuel)
+
+Update: Ensure WebSocketGateway is configured to "Auto-Rehydrate": it should read the database for all currently "Open" trades and automatically subscribe to their WebSocket feeds on startup.

@@ -16,7 +16,7 @@ import { Plus, Trash2, Settings, Link2, Loader2, X, Clock, Shield, Target, Trend
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl, Position } from "@shared/schema";
-import type { TradeParams } from "@shared/schema";
+import type { TradeParams, TimeLogicConfig } from "@shared/schema";
 import { buildBrokerOrderParams } from "@shared/schema";
 import type { BrokerConfig } from "@shared/schema";
 
@@ -603,153 +603,171 @@ export function BrokerLinking() {
             const canRedeploy = depStatus === "closed" || depStatus === "archived";
             const isDeployed = depStatus !== "draft";
             const actions = getDeploymentActions(depStatus);
+            const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [], uptrendLegs: [], downtrendLegs: [], neutralLegs: [] });
+            const parentConfig = configs.find((c) => c.id === plan.configId);
+            const linkedBroker = brokerConfigs.find((b) => b.id === plan.brokerConfigId);
+            const blockGroups = [
+              ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400", productMode: tp.uptrendConfig?.productMode || "MIS" }] : [],
+              ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400", productMode: tp.downtrendConfig?.productMode || "MIS" }] : [],
+              ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400", productMode: tp.neutralConfig?.productMode || "MIS" }] : [],
+              ...((tp.legs || []).length > 0 && !((tp.uptrendLegs || []).length > 0) ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground", productMode: "MIS" as const }] : []),
+            ];
+            const effectiveSL = plan.deployStoploss ?? (tp.stoploss?.enabled ? tp.stoploss.value : null);
+            const effectivePT = plan.deployProfitTarget ?? (tp.profitTarget?.enabled ? tp.profitTarget.value : null);
+            const effectiveMultiplier = plan.lotMultiplier || 1;
+            const borderCls = ({ active: "border-l-emerald-500", paused: "border-l-amber-400", squared_off: "border-l-red-400", deployed: "border-l-blue-500" } as Record<string, string>)[depStatus] ?? "border-l-border/30";
+            const badgeCls = ({ active: "bg-emerald-500 text-white border-transparent", paused: "bg-amber-400 text-black border-transparent", squared_off: "bg-red-500 text-white border-transparent", deployed: "bg-blue-500 text-white border-transparent" } as Record<string, string>)[depStatus] ?? "";
+            const tl = (tp.timeLogic || {}) as TimeLogicConfig;
+            const expiryOffset = tl.expiryWeekOffset ?? 0;
+            const expiryLabel = tl.expiryType === "monthly" ? (expiryOffset === 1 ? "Next Month" : "Current Month") : tl.expiryType === "custom" ? "Custom" : expiryOffset === 1 ? "Next Week" : "Current Week";
+            const expiryRange = tl.weeklyStartDay && tl.weeklyEndDay ? ` (${tl.weeklyStartDay}–${tl.weeklyEndDay})` : "";
+            const allBtns = actions.length + 1;
+            const isCorrelationExpanded = expandedCorrelationMaps.has(plan.id);
 
             return (
-              <Card key={plan.id} data-testid={`card-broker-link-${plan.id}`}>
+              <Card key={plan.id} data-testid={`card-broker-link-${plan.id}`} className={`border-l-4 ${borderCls}`}>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2 flex-wrap" data-testid={`text-broker-plan-name-${plan.id}`}>
-                    {plan.name}
-                    <Badge variant="default">{plan.status}</Badge>
-                    {plan.brokerConfigId && (
-                      <Badge variant="secondary" className="text-xs">
-                        <Link2 className="w-3 h-3 mr-1" />
-                        Linked
-                      </Badge>
-                    )}
-                    {isDeployed && (
-                      <Badge variant="outline" className={`text-xs ${depConfig.color}`} data-testid={`badge-deployment-${plan.id}`}>
-                        <DepIcon className="w-3 h-3 mr-1" />
-                        {depConfig.label}
-                      </Badge>
-                    )}
-                  </CardTitle>
-                  <p className="text-xs text-muted-foreground">
-                    Config: {getConfigName(plan.configId)}
-                    {plan.exchange && <span className="ml-2">{plan.exchange}</span>}
-                    {plan.ticker && <span className="ml-1">/ {plan.ticker}</span>}
+                  <div className="flex flex-wrap items-center gap-2" data-testid={`text-broker-plan-name-${plan.id}`}>
+                    <span className="text-base font-bold leading-tight">{plan.name}</span>
+                    {isDeployed && <Badge className={`text-xs ${badgeCls}`}>{depConfig.label}</Badge>}
+                    {plan.brokerConfigId && <Badge variant="secondary" className="text-xs"><Link2 className="w-3 h-3 mr-1" />Linked</Badge>}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Config: {getConfigName(plan.configId)}{plan.exchange && <> · {plan.exchange}</>}{plan.ticker && <> / {plan.ticker}</>}
                   </p>
+                  {(effectiveMultiplier > 1 || (effectiveSL != null && effectiveSL > 0) || (effectivePT != null && effectivePT > 0)) && (
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {effectiveMultiplier > 1 && <Badge variant="outline" className="text-xs text-blue-400 border-blue-400/30">{effectiveMultiplier}x Lots</Badge>}
+                      {effectiveSL != null && effectiveSL > 0 && <Badge variant="outline" className="text-xs text-red-400 border-red-400/30">SL: {effectiveSL}</Badge>}
+                      {effectivePT != null && effectivePT > 0 && <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">PT: {effectivePT}</Badge>}
+                    </div>
+                  )}
                   {isDeployed && (() => {
-                    const parentCfg = configs.find((c) => c.id === plan.configId);
-                    const parentVersion = parentCfg?.configVersion || 1;
+                    const parentVersion = parentConfig?.configVersion || 1;
                     const deployedVersion = plan.deployedConfigVersion || 1;
-                    if (parentVersion > deployedVersion) {
-                      return (
-                        <div className="flex items-center gap-1 mt-1" data-testid={`badge-new-version-${plan.id}`}>
-                          <AlertTriangle className="w-3 h-3 text-amber-400" />
-                          <span className="text-xs text-amber-400 font-medium">New Version Available (v{parentVersion}) — Archive & Re-deploy to update</span>
-                        </div>
-                      );
-                    }
-                    return null;
-                  })()}
-                  {isDeployed && (() => {
-                    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] });
-                    const effectiveSL = plan.deployStoploss ?? (tp.stoploss?.enabled ? tp.stoploss.value : null);
-                    const effectivePT = plan.deployProfitTarget ?? (tp.profitTarget?.enabled ? tp.profitTarget.value : null);
-                    const effectiveMultiplier = plan.lotMultiplier || 1;
-                    if (effectiveMultiplier <= 1 && !effectiveSL && !effectivePT) return null;
-                    return (
-                      <div className="flex items-center gap-2 mt-1 flex-wrap">
-                        {effectiveMultiplier > 1 && (
-                          <Badge variant="outline" className="text-xs text-blue-400 border-blue-400/30">{effectiveMultiplier}x Lots</Badge>
-                        )}
-                        {effectiveSL != null && effectiveSL > 0 && (
-                          <Badge variant="outline" className="text-xs text-red-400 border-red-400/30">SL: {effectiveSL}</Badge>
-                        )}
-                        {effectivePT != null && effectivePT > 0 && (
-                          <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">PT: {effectivePT}</Badge>
-                        )}
+                    return parentVersion > deployedVersion ? (
+                      <div className="flex items-center gap-1 mt-1" data-testid={`badge-new-version-${plan.id}`}>
+                        <AlertTriangle className="w-3 h-3 text-amber-400" />
+                        <span className="text-xs text-amber-400 font-medium">New Version Available (v{parentVersion}) — Archive & Re-deploy to update</span>
                       </div>
-                    );
+                    ) : null;
                   })()}
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div>
-                    <Label className="text-xs">Broker Configuration</Label>
-                    <Select
-                      value={state.brokerConfigId}
-                      onValueChange={(v) => updateLocalState(plan.id, "brokerConfigId", v)}
-                      disabled={isDeployed}
-                    >
-                      <SelectTrigger data-testid={`select-broker-${plan.id}`}>
-                        <SelectValue placeholder="Select broker" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">None</SelectItem>
-                        {brokerConfigs.map((bc) => (
-                          <SelectItem key={bc.id} value={bc.id}>
-                            {bc.name || bc.brokerName} {bc.ucc ? `(${bc.ucc})` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={state.isProxyMode}
-                        onCheckedChange={(v) => updateLocalState(plan.id, "isProxyMode", v)}
-                        disabled={isDeployed}
-                        data-testid={`switch-proxy-${plan.id}`}
-                      />
-                      <Label className="text-xs cursor-pointer">Proxy Mode</Label>
-                    </div>
-                    <div className="flex gap-2">
-                      {!isDeployed && (
-                        <>
-                          <Button
-                            size="sm"
-                            onClick={() => handleLink(plan.id)}
-                            disabled={linkMutation.isPending}
-                            data-testid={`button-link-${plan.id}`}
-                          >
-                            {linkMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Link2 className="w-3 h-3 mr-1" />}
-                            Link
-                          </Button>
-                          {plan.brokerConfigId && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleUnlink(plan.id)}
-                              disabled={linkMutation.isPending}
-                              data-testid={`button-unlink-${plan.id}`}
-                            >
-                              Unlink
-                            </Button>
-                          )}
-                        </>
+                <CardContent className="space-y-3 pt-0">
+                  {/* ── Section 2: Strategy Configuration ── */}
+                  {blockGroups.length > 0 && (
+                    <div className="bg-muted/20 rounded-lg p-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Strategy Configuration</p>
+                      {(plan.linkedPlanCode || parentConfig?.uniqueCode || plan.uniqueCode) && (
+                        <div className="flex flex-wrap items-center gap-1 text-xs font-mono mb-2">
+                          {plan.linkedPlanCode && <span className="text-amber-400">{plan.linkedPlanCode}</span>}
+                          {plan.linkedPlanCode && (parentConfig?.uniqueCode || plan.uniqueCode) && <span className="text-muted-foreground">›</span>}
+                          {parentConfig?.uniqueCode && <span className="text-emerald-400">{parentConfig.uniqueCode}</span>}
+                          {parentConfig?.uniqueCode && plan.uniqueCode && <span className="text-muted-foreground">›</span>}
+                          {plan.uniqueCode && <span className="text-blue-400">{plan.uniqueCode}</span>}
+                        </div>
+                      )}
+                      {blockGroups.map((g) => (
+                        <div key={g.label} className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs mb-1">
+                          <span className={`font-medium ${g.color}`}>{g.label} ({g.productMode}):</span>
+                          <span className="font-mono text-foreground">{g.legs.map((l) => `${l.action} ${l.type} ${l.strike} x${l.lots || 1}`).join(", ")}</span>
+                        </div>
+                      ))}
+                      {(tp.stoploss?.enabled || tl.exitTime || (tl.exitAfterDays ?? 0) > 0 || tl.expiryType) && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {tp.stoploss?.enabled && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">SL: {tp.stoploss.value}{tp.stoploss.mode === "percentage" ? "%" : ""}</span>}
+                          {tl.exitTime && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Exit @ {tl.exitTime}</span>}
+                          {tl.expiryType && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Expiry: {expiryLabel}{expiryRange}</span>}
+                          {(tl.exitAfterDays ?? 0) > 0 && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">+{tl.exitAfterDays}d</span>}
+                        </div>
                       )}
                     </div>
-                  </div>
+                  )}
 
-                  {plan.brokerConfigId && plan.tradeParams && (() => {
-                    const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [], uptrendLegs: [], downtrendLegs: [], neutralLegs: [] });
-                    const parentConfig = configs.find((c) => c.id === plan.configId);
-                    const blockGroups = [
-                      ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400", productMode: tp.uptrendConfig?.productMode || "MIS" }] : [],
-                      ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400", productMode: tp.downtrendConfig?.productMode || "MIS" }] : [],
-                      ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400", productMode: tp.neutralConfig?.productMode || "MIS" }] : [],
-                      ...(tp.legs || []).length > 0 ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground", productMode: "MIS" as const }] : [],
-                    ];
-                    if (blockGroups.length === 0) return null;
-                    const isCorrelationExpanded = expandedCorrelationMaps.has(plan.id);
-                    return (
-                      <div className="mt-3 border-t border-border/50 pt-3" data-testid={`container-field-correlation-${plan.id}`}>
-                        <button
-                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-full"
-                          onClick={() => setExpandedCorrelationMaps(prev => {
-                            const next = new Set(prev);
-                            if (next.has(plan.id)) next.delete(plan.id);
-                            else next.add(plan.id);
-                            return next;
-                          })}
-                          data-testid={`button-toggle-correlation-${plan.id}`}
-                        >
-                          {isCorrelationExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                          <span>Field Correlation Map</span>
-                        </button>
-                        {isCorrelationExpanded && (
+                  {/* ── Section 3: Broker + Controls ── */}
+                  {isDeployed ? (
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <div className="flex-1 border border-border/40 rounded-lg px-3 py-2 bg-muted/30">
+                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Broker Configuration</p>
+                        <p className="text-sm font-semibold">
+                          {linkedBroker ? `${linkedBroker.name || linkedBroker.brokerName}${linkedBroker.ucc ? ` (${linkedBroker.ucc})` : ""}` : "—"}
+                        </p>
+                      </div>
+                      {actions.length > 0 && (
+                        <div className="flex-1">
+                          <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Strategy Controls</p>
+                          <div className="grid grid-cols-2 gap-2" data-testid={`container-deployment-actions-${plan.id}`}>
+                            {actions.map((a) => {
+                              const ActionIcon = a.icon;
+                              const isSquareOff = a.action === "squared_off";
+                              const onClick = a.action === "deployed" && canRedeploy ? () => initDeployConfig(plan) : () => handleDeploymentAction(plan.id, a.action);
+                              return (
+                                <Button
+                                  key={a.action}
+                                  variant={isSquareOff ? "outline" : a.variant}
+                                  className={`min-h-11 text-sm${isSquareOff ? " border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white" : ""}`}
+                                  onClick={onClick}
+                                  disabled={deploymentMutation.isPending}
+                                  data-testid={`button-${a.action}-${plan.id}`}
+                                >
+                                  <ActionIcon className="w-4 h-4 mr-1.5" />{a.label}
+                                </Button>
+                              );
+                            })}
+                            <Button
+                              variant="outline"
+                              className={`min-h-11 text-sm${allBtns % 2 !== 0 ? " col-span-2" : ""}`}
+                              onClick={() => setPnlSheetPlanId(plan.id)}
+                              data-testid={`button-daily-pnl-${plan.id}`}
+                            >
+                              <BarChart3 className="w-4 h-4 mr-1.5" />P&L Log
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <Label className="text-xs">Broker Configuration</Label>
+                        <Select value={state.brokerConfigId} onValueChange={(v) => updateLocalState(plan.id, "brokerConfigId", v)} disabled={isDeployed}>
+                          <SelectTrigger data-testid={`select-broker-${plan.id}`}><SelectValue placeholder="Select broker" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">None</SelectItem>
+                            {brokerConfigs.map((bc) => (
+                              <SelectItem key={bc.id} value={bc.id}>{bc.name || bc.brokerName} {bc.ucc ? `(${bc.ucc})` : ""}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center justify-between gap-4 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <Switch checked={state.isProxyMode} onCheckedChange={(v) => updateLocalState(plan.id, "isProxyMode", v)} disabled={isDeployed} data-testid={`switch-proxy-${plan.id}`} />
+                          <Label className="text-xs cursor-pointer">Proxy Mode</Label>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => handleLink(plan.id)} disabled={linkMutation.isPending} data-testid={`button-link-${plan.id}`}>
+                            {linkMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Link2 className="w-3 h-3 mr-1" />}Link
+                          </Button>
+                          {plan.brokerConfigId && (
+                            <Button variant="outline" size="sm" onClick={() => handleUnlink(plan.id)} disabled={linkMutation.isPending} data-testid={`button-unlink-${plan.id}`}>Unlink</Button>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {blockGroups.length > 0 && (
+                    <div className="border-t border-border/40 pt-3" data-testid={`container-field-correlation-${plan.id}`}>
+                      <button
+                        className="flex items-center justify-between w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
+                        onClick={() => setExpandedCorrelationMaps(prev => { const next = new Set(prev); next.has(plan.id) ? next.delete(plan.id) : next.add(plan.id); return next; })}
+                        data-testid={`button-toggle-correlation-${plan.id}`}
+                      >
+                        <span>Field Correlation Map</span>
+                        {isCorrelationExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      </button>
+                      {isCorrelationExpanded && (
                         <div className="overflow-x-auto mt-2">
                           <table className="w-full text-xs">
                             <thead>
@@ -763,16 +781,10 @@ export function BrokerLinking() {
                             <tbody>
                               {blockGroups.map((group) =>
                                 group.legs.map((leg, i) => {
-                                  const params = buildBrokerOrderParams(leg, {
-                                    exchange: parentConfig?.exchange,
-                                    ticker: parentConfig?.ticker,
-                                    productMode: group.productMode as "MIS" | "NRML",
-                                  });
+                                  const params = buildBrokerOrderParams(leg, { exchange: parentConfig?.exchange, ticker: parentConfig?.ticker, productMode: group.productMode as "MIS" | "NRML" });
                                   return (
                                     <tr key={`${group.label}-${i}`} className="border-b border-border/20">
-                                      {i === 0 && (
-                                        <td className={`px-2 py-1.5 font-medium ${group.color}`} rowSpan={group.legs.length}>{group.label}</td>
-                                      )}
+                                      {i === 0 && <td className={`px-2 py-1.5 font-medium ${group.color}`} rowSpan={group.legs.length}>{group.label}</td>}
                                       <td className="px-2 py-1.5 font-mono">#{i + 1}</td>
                                       <td className="px-2 py-1.5">
                                         <div className="flex flex-wrap gap-1">
@@ -798,10 +810,9 @@ export function BrokerLinking() {
                             </tbody>
                           </table>
                         </div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                      )}
+                    </div>
+                  )}
 
                   {(canDeploy || (canRedeploy && deployConfig[plan.id])) && (
                     <div className="mt-3 border-t border-border/50 pt-3 space-y-3">
@@ -937,53 +948,6 @@ export function BrokerLinking() {
                     </div>
                   )}
 
-                  {isDeployed && actions.length > 0 && (
-                    <div className="mt-3 border-t border-border/50 pt-3" data-testid={`container-deployment-actions-${plan.id}`}>
-                      <Label className="text-xs mb-2 block text-muted-foreground">Strategy Controls</Label>
-                      <div className="flex gap-2 flex-wrap">
-                        {actions.map((a) => {
-                          const ActionIcon = a.icon;
-                          if (a.action === "deployed" && canRedeploy) {
-                            return (
-                              <Button
-                                key={a.action}
-                                variant={a.variant}
-                                size="sm"
-                                onClick={() => initDeployConfig(plan)}
-                                disabled={deploymentMutation.isPending}
-                                data-testid={`button-${a.action}-${plan.id}`}
-                              >
-                                <ActionIcon className="w-3 h-3 mr-1" />
-                                {a.label}
-                              </Button>
-                            );
-                          }
-                          return (
-                            <Button
-                              key={a.action}
-                              variant={a.variant}
-                              size="sm"
-                              onClick={() => handleDeploymentAction(plan.id, a.action)}
-                              disabled={deploymentMutation.isPending}
-                              data-testid={`button-${a.action}-${plan.id}`}
-                            >
-                              <ActionIcon className="w-3 h-3 mr-1" />
-                              {a.label}
-                            </Button>
-                          );
-                        })}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setPnlSheetPlanId(plan.id)}
-                          data-testid={`button-daily-pnl-${plan.id}`}
-                        >
-                          <BarChart3 className="w-3 h-3 mr-1" />
-                          P&L Log
-                        </Button>
-                      </div>
-                    </div>
-                  )}
 
                 </CardContent>
               </Card>
