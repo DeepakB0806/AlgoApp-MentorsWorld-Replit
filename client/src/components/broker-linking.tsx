@@ -624,8 +624,14 @@ export function BrokerLinking() {
             const badgeCls = ({ active: "bg-emerald-500 text-white border-transparent", paused: "bg-amber-400 text-black border-transparent", squared_off: "bg-red-500 text-white border-transparent", deployed: "bg-blue-500 text-white border-transparent" } as Record<string, string>)[depStatus] ?? "";
             const tl = (tp.timeLogic || {}) as TimeLogicConfig;
             const expiryOffset = tl.expiryWeekOffset ?? 0;
-            const expiryLabel = tl.expiryType === "monthly" ? (expiryOffset === 1 ? "Next Month" : "Current Month") : tl.expiryType === "custom" ? "Custom" : expiryOffset === 1 ? "Next Week" : "Current Week";
-            const expiryRange = tl.weeklyStartDay && tl.weeklyEndDay ? ` (${tl.weeklyStartDay}–${tl.weeklyEndDay})` : "";
+            const expType = tl.expiryType || "weekly";
+            const dayRange = `(${tl.weeklyStartDay || "Mon"}–${tl.weeklyEndDay || "Thu"})`;
+            const expiryLabel = expType === "weekly" && expiryOffset === 1
+              ? `Expiry: Next Week ${dayRange}`
+              : expType === "weekly"
+              ? `Expiry: Weekly · Current ${dayRange}`
+              : expType === "monthly" ? "Expiry: Monthly"
+              : "Expiry: Custom";
             const allBtns = actions.length + 1;
             const isCorrelationExpanded = expandedCorrelationMaps.has(plan.id);
             const isStrategyConfigExpanded = expandedStrategyConfigs.has(plan.id);
@@ -637,7 +643,7 @@ export function BrokerLinking() {
               blockGroups.length > 0 ? `${blockGroups.length} block${blockGroups.length > 1 ? "s" : ""}` : null,
               tp.stoploss?.enabled ? `SL: ${tp.stoploss.value}${tp.stoploss.mode === "percentage" ? "%" : ""}` : null,
               tl.exitTime ? `Exit ${tl.exitTime}` : null,
-              tl.expiryType ? expiryLabel : null,
+              tl.exitOnExpiry ? expiryLabel : null,
             ].filter(Boolean).join(" · ");
 
             return (
@@ -704,12 +710,12 @@ export function BrokerLinking() {
                               </span>
                             ))}
                           </div>
-                          {(tp.stoploss?.enabled || tl.exitTime || (tl.exitAfterDays ?? 0) > 0 || tl.expiryType) && (
+                          {(tp.stoploss?.enabled || tl.exitTime || (tl.exitAfterDays ?? 0) > 0 || tl.exitOnExpiry) && (
                             <div className="flex flex-wrap gap-1.5">
                               {tp.stoploss?.enabled && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">SL: {tp.stoploss.value}{tp.stoploss.mode === "percentage" ? "%" : ""}</span>}
                               {tl.exitTime && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Exit @ {tl.exitTime}</span>}
-                              {tl.expiryType && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Expiry: {expiryLabel}{expiryRange}</span>}
-                              {(tl.exitAfterDays ?? 0) > 0 && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">+{tl.exitAfterDays}d</span>}
+                              {tl.exitOnExpiry && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">{expiryLabel}</span>}
+                              {(tl.exitAfterDays ?? 0) > 0 && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Exit +{tl.exitAfterDays}d</span>}
                             </div>
                           )}
                         </div>
