@@ -658,6 +658,9 @@ export function BrokerLinking() {
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Config: {getConfigName(plan.configId)}{plan.exchange && <> · {plan.exchange}</>}{plan.ticker && <> / {plan.ticker}</>}
                   </p>
+                  {plan.description && (
+                    <p className="text-sm text-muted-foreground mt-0.5" data-testid={`text-broker-plan-desc-${plan.id}`}>{plan.description}</p>
+                  )}
                   {(effectiveMultiplier > 1 || (effectiveSL != null && effectiveSL > 0) || (effectivePT != null && effectivePT > 0)) && (
                     <div className="flex flex-wrap gap-1.5 mt-1.5">
                       {effectiveMultiplier > 1 && <Badge variant="outline" className="text-xs text-blue-400 border-blue-400/30">{effectiveMultiplier}x Lots</Badge>}
