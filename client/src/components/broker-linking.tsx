@@ -686,45 +686,41 @@ export function BrokerLinking() {
 
                   {/* ── Section 3: Broker + Controls ── */}
                   {isDeployed ? (
-                    <div className="flex flex-col sm:flex-row gap-3">
-                      <div className="flex-1 border border-border/40 rounded-lg px-3 py-2 bg-muted/30">
-                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Broker Configuration</p>
-                        <p className="text-sm font-semibold">
+                    <div className="flex flex-wrap items-center gap-2 border border-border/40 rounded-lg px-3 py-2 bg-muted/30">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Broker</p>
+                        <p className="text-xs font-semibold truncate">
                           {linkedBroker ? `${linkedBroker.name || linkedBroker.brokerName}${linkedBroker.ucc ? ` (${linkedBroker.ucc})` : ""}` : "—"}
                         </p>
                       </div>
-                      {actions.length > 0 && (
-                        <div className="flex-1">
-                          <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Strategy Controls</p>
-                          <div className="grid grid-cols-2 gap-2" data-testid={`container-deployment-actions-${plan.id}`}>
-                            {actions.map((a) => {
-                              const ActionIcon = a.icon;
-                              const isSquareOff = a.action === "squared_off";
-                              const onClick = a.action === "deployed" && canRedeploy ? () => initDeployConfig(plan) : () => handleDeploymentAction(plan.id, a.action);
-                              return (
-                                <Button
-                                  key={a.action}
-                                  variant={isSquareOff ? "outline" : a.variant}
-                                  className={`min-h-11 text-sm${isSquareOff ? " border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white" : ""}`}
-                                  onClick={onClick}
-                                  disabled={deploymentMutation.isPending}
-                                  data-testid={`button-${a.action}-${plan.id}`}
-                                >
-                                  <ActionIcon className="w-4 h-4 mr-1.5" />{a.label}
-                                </Button>
-                              );
-                            })}
+                      <div className="flex flex-wrap items-center gap-1.5" data-testid={`container-deployment-actions-${plan.id}`}>
+                        {actions.map((a) => {
+                          const ActionIcon = a.icon;
+                          const isSquareOff = a.action === "squared_off";
+                          const onClick = a.action === "deployed" && canRedeploy ? () => initDeployConfig(plan) : () => handleDeploymentAction(plan.id, a.action);
+                          return (
                             <Button
-                              variant="outline"
-                              className={`min-h-11 text-sm${allBtns % 2 !== 0 ? " col-span-2" : ""}`}
-                              onClick={() => setPnlSheetPlanId(plan.id)}
-                              data-testid={`button-daily-pnl-${plan.id}`}
+                              key={a.action}
+                              size="sm"
+                              variant={isSquareOff ? "outline" : a.variant}
+                              className={isSquareOff ? "border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white" : ""}
+                              onClick={onClick}
+                              disabled={deploymentMutation.isPending}
+                              data-testid={`button-${a.action}-${plan.id}`}
                             >
-                              <BarChart3 className="w-4 h-4 mr-1.5" />P&L Log
+                              <ActionIcon className="w-3 h-3 mr-1" />{a.label}
                             </Button>
-                          </div>
-                        </div>
-                      )}
+                          );
+                        })}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setPnlSheetPlanId(plan.id)}
+                          data-testid={`button-daily-pnl-${plan.id}`}
+                        >
+                          <BarChart3 className="w-3 h-3 mr-1" />P&L Log
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <>
