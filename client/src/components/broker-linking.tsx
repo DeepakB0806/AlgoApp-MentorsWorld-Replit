@@ -649,20 +649,20 @@ export function BrokerLinking() {
 
             return (
               <Card key={plan.id} data-testid={`card-broker-link-${plan.id}`} className={`border-l-4 ${borderCls}`}>
-                <CardHeader className="pb-2">
+                <CardHeader className="px-3 pt-3 pb-2">
                   <div className="flex flex-wrap items-center gap-2" data-testid={`text-broker-plan-name-${plan.id}`}>
                     <span className="text-base font-bold leading-tight">{plan.name}</span>
                     {isDeployed && <Badge className={`text-xs ${badgeCls}`}>{depConfig.label}</Badge>}
                     {plan.brokerConfigId && <Badge variant="secondary" className="text-xs"><Link2 className="w-3 h-3 mr-1" />Linked</Badge>}
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+                  <p className="text-xs text-muted-foreground">
                     Config: {getConfigName(plan.configId)}{plan.exchange && <> · {plan.exchange}</>}{plan.ticker && <> / {plan.ticker}</>}
                   </p>
                   {plan.description && (
-                    <p className="text-sm text-muted-foreground mt-0.5" data-testid={`text-broker-plan-desc-${plan.id}`}>{plan.description}</p>
+                    <p className="text-sm text-muted-foreground" data-testid={`text-broker-plan-desc-${plan.id}`}>{plan.description}</p>
                   )}
                   {(effectiveMultiplier > 1 || (effectiveSL != null && effectiveSL > 0) || (effectivePT != null && effectivePT > 0)) && (
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    <div className="flex flex-wrap gap-1.5 mt-1">
                       {effectiveMultiplier > 1 && <Badge variant="outline" className="text-xs text-blue-400 border-blue-400/30">{effectiveMultiplier}x Lots</Badge>}
                       {effectiveSL != null && effectiveSL > 0 && <Badge variant="outline" className="text-xs text-red-400 border-red-400/30">SL: {effectiveSL}</Badge>}
                       {effectivePT != null && effectivePT > 0 && <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30">PT: {effectivePT}</Badge>}
@@ -679,7 +679,7 @@ export function BrokerLinking() {
                     ) : null;
                   })()}
                 </CardHeader>
-                <CardContent className="space-y-3 pt-0">
+                <CardContent className="px-3 pb-3 space-y-2 pt-0">
                   {/* ── Section 2: Strategy Configuration (collapsible) ── */}
                   {blockGroups.length > 0 && (
                     <div className="border border-border/30 rounded-lg overflow-hidden">
