@@ -1546,19 +1546,39 @@ interface PFLEntry {
 }
 
 function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfig[] }) {
+  const { toast } = useToast();
+  const [isDownloading, setIsDownloading] = useState(false);
+
   const kotakConfigs = brokerConfigs.filter(c => c.brokerName === "kotak_neo");
   const selectedConfig = kotakConfigs.find(c => c.consumerKey) || kotakConfigs[0];
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!selectedConfig) return;
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const filename = `scrip_master_nfo_${dateStr}.csv`;
-    const a = document.createElement("a");
-    a.href = `/api/broker-configs/${selectedConfig.id}/scrip-master-download`;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    setIsDownloading(true);
+    try {
+      const res = await fetch(`/api/broker-configs/${selectedConfig.id}/scrip-master-download`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `Download failed (${res.status})` }));
+        throw new Error(err.error || `Download failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      const filename = match?.[1] || `scrip_master_nfo_${new Date().toISOString().slice(0, 10)}.csv`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: "Scrip master CSV downloaded" });
+    } catch (err: any) {
+      toast({ title: "Download failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   return (
@@ -1574,11 +1594,15 @@ function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfig[] }) {
           </div>
           <Button
             onClick={handleDownload}
-            disabled={!selectedConfig?.consumerKey}
+            disabled={isDownloading || !selectedConfig?.consumerKey}
             data-testid="button-download-scrip-master"
           >
-            <Download className="w-4 h-4 mr-2" />
-            Download CSV
+            {isDownloading ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4 mr-2" />
+            )}
+            {isDownloading ? "Downloading…" : "Download CSV"}
           </Button>
         </div>
         {!selectedConfig?.consumerKey && (
