@@ -529,13 +529,11 @@ async function executeLegBasket(
   return { trades, orderIds };
 }
 
-// Assembles the entry basket for a signal: neutral hedge BUYs first (if not
-// already open), then directional legs. Sorted BUY-before-SELL universally.
-// currentOpen = openTrades AFTER any preceding close (excludes just-closed legs).
+// Assembles the entry basket for the resolved block only. Sorted BUY-before-SELL universally.
+// Neutral legs are NOT auto-entered here — they enter only when the configurator
+// explicitly dispatches ENTRY@neutralLegs as its own processTradeSignal call.
 function buildEntryBasket(ctx: TradeContext, currentOpen: StrategyTrade[]): BasketItem[] {
-  const hasOpenNeutral = currentOpen.some(t => t.blockType === "neutralLegs");
   const items: BasketItem[] = [];
-  if (!hasOpenNeutral) ctx.neutralLegs.forEach((leg, i) => items.push({ leg, blockType: "neutralLegs", legIndex: i }));
   ctx.legs.forEach((leg, i) => items.push({ leg, blockType: ctx.resolvedBlockType, legIndex: i }));
   items.sort((a, b) => {
     const aB = (a.leg.action || "BUY").toUpperCase() === "BUY";
@@ -559,13 +557,13 @@ async function executeBuySignal(
     return { success: true, action: "hold", broker, planId: plan.id, message: `${ctx.resolvedBlockType} position already open`, executionTimeMs: Date.now() - ctx.startTime };
   }
 
-  // 2. REVERSALS: Close opposite directional block + neutralLegs together (full basket close)
+  // 2. REVERSALS: Close opposite directional block ONLY (Preserve neutralLegs)
   let targetOppositeBlock: string | null = null;
   if (ctx.resolvedBlockType === "uptrendLegs") targetOppositeBlock = "downtrendLegs";
   else if (ctx.resolvedBlockType === "downtrendLegs") targetOppositeBlock = "uptrendLegs";
 
   const openOpposites = targetOppositeBlock
-    ? ctx.openTrades.filter(t => t.blockType === targetOppositeBlock || t.blockType === "neutralLegs")
+    ? ctx.openTrades.filter(t => t.blockType === targetOppositeBlock)
     : [];
 
   if (openOpposites.length > 0) {
@@ -584,6 +582,10 @@ async function executeBuySignal(
       return { success: true, action: "close", broker, planId: plan.id,
         message: "Successfully closed all positions (Pure EXIT).", executionTimeMs: Date.now() - ctx.startTime };
     }
+  } else if (ctx.signalContext?.resolvedAction === "EXIT") {
+    return { success: true, action: "hold", broker, planId: plan.id, pnl: 0,
+      message: "Nothing to close (Pure EXIT on empty positions).",
+      executionTimeMs: Date.now() - ctx.startTime };
   }
 
   if (broker === "kotak_neo" && (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl)) {
@@ -618,8 +620,8 @@ async function executeSellSignal(
   const broker = brokerConfig.brokerName;
   let closePnl = 0;
 
-  // EXIT: Close directional block + neutralLegs together (full basket close)
-  const allToClose = ctx.openTrades.filter(t => t.blockType === ctx.resolvedBlockType || t.blockType === "neutralLegs");
+  // EXIT: Close directional block ONLY (Preserve neutralLegs)
+  const allToClose = ctx.openTrades.filter(t => t.blockType === ctx.resolvedBlockType);
   if (allToClose.length > 0) {
     // Sort: BUY-to-cover SELL positions first (margin safety)
     allToClose.sort((a, b) => {
@@ -643,6 +645,10 @@ async function executeSellSignal(
         message: anyFailed ? "Leg close failed — persistent retry started." : "Successfully closed all positions (Pure EXIT).",
         executionTimeMs: Date.now() - ctx.startTime };
     }
+  } else if (ctx.signalContext?.resolvedAction === "EXIT") {
+    return { success: true, action: "hold", broker, planId: plan.id, pnl: 0,
+      message: "Nothing to close (Pure EXIT on empty positions).",
+      executionTimeMs: Date.now() - ctx.startTime };
   }
 
   // OPPOSITE CHECK: Prevent duplicate entries against the exact opposite directional block
@@ -749,6 +755,12 @@ export async function squareOffPlan(
   brokerConfig: BrokerConfig,
 ): Promise<{ closed: number; failed: number; errors: string[] }> {
   const openTrades = await storage.getUnclosedTradesByPlan(planId);
+  // MARGIN SAFETY: Close short positions (SELL-opened) first to free margin before closing longs
+  openTrades.sort((a, b) => {
+    const aFirst = a.action === "SELL";
+    const bFirst = b.action === "SELL";
+    return aFirst === bFirst ? 0 : aFirst ? -1 : 1;
+  });
   const now = new Date().toISOString();
   const today = now.slice(0, 10);
   const plan = await storage.getStrategyPlan(planId);
