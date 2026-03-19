@@ -1098,61 +1098,9 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return sendCsv(cached);
       }
 
-      // ── Cache cold: fall back to fresh download from Kotak ──────────────────
-      console.log(`[BROKER] NFO CSV cache cold — fetching fresh from Kotak...`);
-      const { default: EL } = await import("../el-kotak-neo-v3");
-      const filePathsResult = await EL.getScripMasterFilePaths(brokerConfig);
-      if (!filePathsResult.success) {
-        return res.status(502).json({ error: filePathsResult.error || "Failed to get scrip master file paths from broker" });
-      }
-
-      const data = filePathsResult.data;
-      let nfoFileUrl: string | null = null;
-
-      const flatItems: any[] = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.filesPaths) ? data.filesPaths
-        : Array.isArray(data?.data?.filesPaths) ? data.data.filesPaths
-        : [];
-
-      for (const item of flatItems) {
-        const path = typeof item === "string" ? item : (item?.filePath || item?.path || item?.url || item?.fileUrl || "");
-        if (path && (path.toLowerCase().includes("nse_fo") || path.toLowerCase().includes("nfo"))) {
-          nfoFileUrl = path;
-          break;
-        }
-      }
-
-      if (!nfoFileUrl && flatItems.length > 0) {
-        const first = flatItems[0];
-        nfoFileUrl = typeof first === "string" ? first : (first?.filePath || first?.path || first?.url || null);
-      }
-
-      if (!nfoFileUrl) {
-        return res.status(404).json({ error: "Could not find NFO scrip master file URL in broker response" });
-      }
-
-      try {
-        const parsed = new URL(nfoFileUrl);
-        if (parsed.protocol !== "https:") {
-          return res.status(400).json({ error: "Scrip master URL must use HTTPS" });
-        }
-        const host = parsed.hostname.toLowerCase();
-        if (!host.endsWith("kotaksecurities.com") && !host.endsWith("kotak.com") && !host.endsWith("neo.kotak.com")) {
-          return res.status(400).json({ error: `Untrusted scrip master host: ${host}` });
-        }
-      } catch {
-        return res.status(400).json({ error: "Invalid scrip master URL" });
-      }
-
-      const csvResponse = await fetch(nfoFileUrl, { signal: AbortSignal.timeout(180000) });
-      if (!csvResponse.ok) {
-        return res.status(502).json({ error: `CSV download failed: ${csvResponse.status} ${csvResponse.statusText}` });
-      }
-
-      const csvText = await csvResponse.text();
-      rawCsvCache.set("NFO", csvText);
-      sendCsv(csvText);
+      // ── Cache cold — do NOT call Kotak. Download is strictly cache-only. ─────
+      console.warn(`[BROKER] NFO CSV cache cold — scrip master sync not yet complete`);
+      return res.status(503).json({ error: "Scrip master cache not ready — auto-sync runs at startup. Please wait a moment and retry." });
     } catch (error: any) {
       console.error(`[BROKER] Scrip master download error:`, error.message);
       res.status(500).json({ error: error.message || "Scrip master download failed" });
