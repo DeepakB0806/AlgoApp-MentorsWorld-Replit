@@ -33,9 +33,9 @@ export type PredefinedIndicator = typeof PREDEFINED_INDICATORS[number];
 export type ActionMapperEntry = {
   signalValue: string;
   fieldKey?: string;
-  uptrend: "ENTRY" | "EXIT" | "HOLD" | "--" | null;
-  downtrend: "ENTRY" | "EXIT" | "HOLD" | "--" | null;
-  neutral: "ENTRY" | "EXIT" | "HOLD" | "--" | null;
+  uptrend: "ENTRY" | "EXIT" | "HOLD" | null;
+  downtrend: "ENTRY" | "EXIT" | "HOLD" | null;
+  neutral: "ENTRY" | "EXIT" | "HOLD" | null;
 };
 
 export type TradeLeg = {

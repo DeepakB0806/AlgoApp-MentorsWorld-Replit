@@ -15,7 +15,7 @@ import { useAuth } from "@/hooks/use-auth";
 import type { StrategyConfig, Webhook } from "@shared/schema";
 import type { ActionMapperEntry } from "@shared/schema";
 
-const ACTION_OPTIONS = ["--", "ENTRY", "EXIT", "HOLD"] as const;
+const ACTION_OPTIONS = ["NA", "ENTRY", "EXIT", "HOLD"] as const;
 
 function parseJsonSafe<T>(val: string | null | undefined, fallback: T): T {
   if (!val) return fallback;
@@ -565,9 +565,51 @@ export function MotherConfigurator() {
                 <thead>
                   <tr className="border-b border-border">
                     <th className="text-left px-3 py-2 font-medium text-muted-foreground">Signal Name</th>
-                    <th className="text-center px-3 py-2 font-medium text-emerald-400" colSpan={1}>Uptrend Action</th>
-                    <th className="text-center px-3 py-2 font-medium text-red-400" colSpan={1}>Downtrend Action</th>
-                    <th className="text-center px-3 py-2 font-medium text-blue-400" colSpan={1}>Neutral Action</th>
+                    <th className="text-center px-3 py-2 font-medium text-emerald-400" colSpan={1}>
+                      <span className="inline-flex items-center gap-1">
+                        Uptrend Action
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="w-3 h-3 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="text-xs">NA = Not Applicable — this signal will not affect this block.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </span>
+                    </th>
+                    <th className="text-center px-3 py-2 font-medium text-red-400" colSpan={1}>
+                      <span className="inline-flex items-center gap-1">
+                        Downtrend Action
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="w-3 h-3 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="text-xs">NA = Not Applicable — this signal will not affect this block.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </span>
+                    </th>
+                    <th className="text-center px-3 py-2 font-medium text-blue-400" colSpan={1}>
+                      <span className="inline-flex items-center gap-1">
+                        Neutral Action
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="w-3 h-3 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="text-xs">NA = Not Applicable — this signal will not affect this block.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -614,7 +656,7 @@ export function MotherConfigurator() {
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        <Select value={entry.uptrend || "--"} onValueChange={(v) => updateMapperEntry(idx, "uptrend", v === "--" ? null : v)}>
+                        <Select value={entry.uptrend || "NA"} onValueChange={(v) => updateMapperEntry(idx, "uptrend", v === "NA" ? null : v)}>
                           <SelectTrigger className="w-28" data-testid={`select-uptrend-${idx}`}>
                             <SelectValue />
                           </SelectTrigger>
@@ -626,7 +668,7 @@ export function MotherConfigurator() {
                         </Select>
                       </td>
                       <td className="px-3 py-2">
-                        <Select value={entry.downtrend || "--"} onValueChange={(v) => updateMapperEntry(idx, "downtrend", v === "--" ? null : v)}>
+                        <Select value={entry.downtrend || "NA"} onValueChange={(v) => updateMapperEntry(idx, "downtrend", v === "NA" ? null : v)}>
                           <SelectTrigger className="w-28" data-testid={`select-downtrend-${idx}`}>
                             <SelectValue />
                           </SelectTrigger>
@@ -638,7 +680,7 @@ export function MotherConfigurator() {
                         </Select>
                       </td>
                       <td className="px-3 py-2">
-                        <Select value={entry.neutral || "--"} onValueChange={(v) => updateMapperEntry(idx, "neutral", v === "--" ? null : v)}>
+                        <Select value={entry.neutral || "NA"} onValueChange={(v) => updateMapperEntry(idx, "neutral", v === "NA" ? null : v)}>
                           <SelectTrigger className="w-28" data-testid={`select-neutral-${idx}`}>
                             <SelectValue />
                           </SelectTrigger>
