@@ -125,9 +125,9 @@ export function resolveAllSignalsFromActionMapper(
         if (entry.downtrend === "EXIT") actions.push({ signalType: "sell", blockType: "downtrendLegs", resolvedAction: "EXIT" });
         if (entry.neutral === "EXIT") actions.push({ signalType: "sell", blockType: "neutralLegs", resolvedAction: "EXIT" });
 
+        if (entry.neutral === "ENTRY") actions.push({ signalType: "buy", blockType: "neutralLegs", resolvedAction: "ENTRY" });
         if (entry.uptrend === "ENTRY") actions.push({ signalType: "buy", blockType: "uptrendLegs", resolvedAction: "ENTRY" });
         if (entry.downtrend === "ENTRY") actions.push({ signalType: "buy", blockType: "downtrendLegs", resolvedAction: "ENTRY" });
-        if (entry.neutral === "ENTRY") actions.push({ signalType: "buy", blockType: "neutralLegs", resolvedAction: "ENTRY" });
 
         if (actions.length > 0) {
           console.log(`[SIGNAL] Resolved ${actions.length} action(s) for signal "${fieldValue}": ${actions.map((a) => `${a.resolvedAction}@${a.blockType}`).join(", ")}`);
