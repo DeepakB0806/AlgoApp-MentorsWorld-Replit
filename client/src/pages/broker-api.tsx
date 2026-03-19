@@ -1642,14 +1642,11 @@ function ProcessFlowLogCard() {
   const plans = pflQuery.data?.plans || [];
   const total = pflQuery.data?.total || 0;
 
-  const formatTimestamp = (ts: string) => {
+  const formatTimestampIST = (ts: string) => {
     try {
-      const normalised = ts.includes("Z") || ts.includes("+")
-        ? ts
-        : ts.replace(" ", "T") + "Z";
-      const date = new Date(normalised);
+      const date = new Date(ts);
       if (isNaN(date.getTime())) return ts;
-      return date.toLocaleString(undefined, { hour12: false });
+      return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
     } catch {
       return ts;
     }
@@ -1764,7 +1761,7 @@ function ProcessFlowLogCard() {
                 <tbody>
                   {logs.map((log) => (
                     <tr key={log.id} className="border-b border-border/50 last:border-0" data-testid={`row-pfl-${log.id}`}>
-                      <td className="py-2 px-3 font-mono whitespace-nowrap text-muted-foreground">{formatTimestamp(log.timestamp)}</td>
+                      <td className="py-2 px-3 font-mono whitespace-nowrap text-muted-foreground">{formatTimestampIST(log.timestamp)}</td>
                       <td className="py-2 px-3 whitespace-nowrap font-medium">{log.planName}</td>
                       <td className="py-2 px-3 whitespace-nowrap font-mono text-blue-400">{log.alert || "—"}</td>
                       <td className="py-2 px-3 whitespace-nowrap">
