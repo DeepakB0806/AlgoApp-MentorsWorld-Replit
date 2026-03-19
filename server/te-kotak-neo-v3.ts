@@ -866,7 +866,7 @@ export function startPersistentSquareOff(
     console.log(`[TE] PersistentSquareOff — ${unclosed.length} unclosed leg(s) for plan ${planId}, retrying...`);
     await squareOffPlan(storage, planId, brokerConfig);
     const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
-    const intervalMs = settingRow?.value ? Math.max(500, parseInt(settingRow.value, 10)) : 2000;
+    const intervalMs = settingRow?.value ? parseInt(settingRow.value, 10) : 2000;
     setTimeout(attempt, intervalMs);
   }
 
@@ -908,7 +908,7 @@ export function startPersistentExit(
     }
     tradingCache.invalidateOpenTrades(planId);
     const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
-    const intervalMs = settingRow?.value ? Math.max(500, parseInt(settingRow.value, 10)) : 2000;
+    const intervalMs = settingRow?.value ? parseInt(settingRow.value, 10) : 2000;
     setTimeout(attempt, intervalMs);
   }
 
@@ -950,7 +950,7 @@ export function startPersistentEntry(
         .catch(err => console.error(`[TE] PersistentEntry retry error:`, err));
     }
     const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
-    const intervalMs = settingRow?.value ? Math.max(500, parseInt(settingRow.value, 10)) : 2000;
+    const intervalMs = settingRow?.value ? parseInt(settingRow.value, 10) : 2000;
     setTimeout(attempt, intervalMs);
   }
 

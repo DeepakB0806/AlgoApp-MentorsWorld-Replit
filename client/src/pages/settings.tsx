@@ -419,9 +419,10 @@ function GeneralTradingSettings() {
               Retry Interval (ms)
             </Label>
             <p className="text-sm text-muted-foreground">
-              Delay between retry attempts for all persistent loops (entry, exit, square-off). Minimum effective value is 500ms. Increase if the broker rejects rapid repeated orders.
+              Delay between retry attempts after a failed exit order. Set to 0 for immediate retry — the broker API response time is the natural throttle. Increase only if the broker rejects rapid repeated orders.
             </p>
             <div className="flex items-center gap-3 max-w-xs">
+              <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
               <Input
                 id="input-squareoff-interval"
                 data-testid="input-squareoff-interval"
@@ -430,10 +431,11 @@ function GeneralTradingSettings() {
                 step="50"
                 value={intervalValue}
                 onChange={(e) => setIntervalValue(e.target.value)}
-                placeholder="0"
+                placeholder="2000"
               />
               <span className="text-sm text-muted-foreground whitespace-nowrap">ms</span>
             </div>
+            <p className="text-xs text-muted-foreground">Kotak Neo's RMS registers in 400–800ms.</p>
             <Button
               data-testid="button-save-squareoff-interval"
               onClick={() => saveMutation.mutate()}
