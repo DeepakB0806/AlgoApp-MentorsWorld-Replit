@@ -1,0 +1,100 @@
+To implement Task #70 flawlessly, we need to do exactly what Replit outlined:
+
+Write the string to disk immediately after parsing in smc-kotak-neo-v3.ts.
+
+Delete it from RAM (rawCsvCache.delete).
+
+Stream it from disk inside your Express route (broker-routes.ts).
+
+Here are the exact changes for both files to implement this memory-safe architecture.
+
+1. Update server/smc-kotak-neo-v3.ts
+First, add the Node file-system imports to the very top of smc-kotak-neo-v3.ts:
+
+TypeScript
+import fs from "fs";
+import path from "path";
+Next, scroll down to the runScripMasterSync function (around line 375), specifically inside the try/catch block where the CSV is downloaded.
+
+Replace this block:
+
+TypeScript
+        const csvText = await response.text();
+        rawCsvCache.set(exchange, csvText);
+        const parsed = parseScripMasterCSV(csvText, exchange, tickers);
+        console.log(`${LOG_PREFIX} ${exchange}: ${parsed.instruments.length} tickers, ${parsed.rawContracts.length} contracts`);
+        allRawContracts.push(...parsed.rawContracts);
+        allInstruments.push(...parsed.instruments);
+        atLeastOneRequired = true;
+With this memory-safe block:
+
+TypeScript
+        const csvText = await response.text();
+        rawCsvCache.set(exchange, csvText);
+        const parsed = parseScripMasterCSV(csvText, exchange, tickers);
+        console.log(`${LOG_PREFIX} ${exchange}: ${parsed.instruments.length} tickers, ${parsed.rawContracts.length} contracts`);
+        allRawContracts.push(...parsed.rawContracts);
+        allInstruments.push(...parsed.instruments);
+        atLeastOneRequired = true;
+
+        // 🔥 TASK #70: Write CSV to disk and free up RAM!
+        try {
+          const today = new Date();
+          const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+          const filename = `scrip_master_${exchange.toLowerCase()}_${dateStr}.csv`;
+          const filePath = path.resolve(process.cwd(), filename);
+          
+          fs.writeFileSync(filePath, csvText);
+          rawCsvCache.delete(exchange); // Dump the 50MB string from memory!
+          console.log(`${LOG_PREFIX} Saved ${exchange} CSV to disk (${filename}) and cleared from RAM.`);
+        } catch (fileErr) {
+          console.error(`${LOG_PREFIX} Failed to write ${exchange} CSV to disk:`, fileErr);
+        }
+2. Update server/routes/broker-routes.ts
+Now we need to update the download route so it streams the file from the disk instead of trying to read it from the rawCsvCache that we just cleared.
+
+Open server/routes/broker-routes.ts, add import fs from "fs"; and import path from "path"; at the top (if not already there), and locate the app.get("/api/broker-configs/:id/scrip-master-download") route (around line 1072).
+
+Replace the entire route with this:
+
+TypeScript
+  app.get("/api/broker-configs/:id/scrip-master-download", async (req, res) => {
+    try {
+      const today = new Date();
+      const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const filename = `scrip_master_nfo_${dateStr}.csv`;
+      const filePath = path.resolve(process.cwd(), filename);
+
+      // Check if the file exists on disk
+      if (!fs.existsSync(filePath)) {
+        return res.status(503).json({ 
+          error: "Scrip master file not found on disk. Please trigger a manual sync first to download today's file." 
+        });
+      }
+
+      console.log(`[DOWNLOAD] Streaming file to client: ${filePath}`);
+
+      // Set headers before piping
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      
+      // Stream the file directly from disk to the network response
+      const fileStream = fs.createReadStream(filePath);
+      
+      fileStream.on('error', (error) => {
+        console.error("[DOWNLOAD] Error streaming file:", error);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Failed to stream the file to the browser." });
+        }
+      });
+
+      fileStream.pipe(res);
+
+    } catch (error: any) {
+      console.error("[DOWNLOAD] Route crash:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Internal server error during download preparation." });
+      }
+    }
+  });
+Make these two changes and restart your server. The sync process will now write the file directly to your disk and instantly release the memory. When you click the Download button on the frontend, Node will stream it seamlessly without crashing.

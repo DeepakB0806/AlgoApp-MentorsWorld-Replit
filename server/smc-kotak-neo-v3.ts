@@ -1,6 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // IMPORTS & CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════════
+import fs from "fs";
+import path from "path";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
 import EL from "./el-kotak-neo-v3";
@@ -392,6 +394,19 @@ export async function runScripMasterSync(storage: IStorage, brokerConfig: Broker
         allRawContracts.push(...parsed.rawContracts);
         allInstruments.push(...parsed.instruments);
         atLeastOneRequired = true;
+
+        // Write to disk then free RAM — download route streams from disk
+        try {
+          const today = new Date();
+          const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+          const filename = `scrip_master_${exchange.toLowerCase()}_${dateStr}.csv`;
+          const filePath = path.resolve(process.cwd(), filename);
+          fs.writeFileSync(filePath, csvText);
+          rawCsvCache.delete(exchange);
+          console.log(`${LOG_PREFIX} Saved ${exchange} CSV to disk (${filename}) and freed from RAM.`);
+        } catch (fileErr) {
+          console.error(`${LOG_PREFIX} Failed to write ${exchange} CSV to disk:`, fileErr);
+        }
       } catch (fetchErr: any) {
         const errMsg = fetchErr.name === 'AbortError' ? 'Download timed out after 120s' : fetchErr.message;
         if (exchange === "NFO") return { success: false, synced: 0, error: `Failed to download ${exchange} CSV: ${errMsg}` };

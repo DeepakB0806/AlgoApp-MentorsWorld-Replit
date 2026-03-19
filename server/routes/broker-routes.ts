@@ -1,3 +1,6 @@
+import fs from "fs";
+import path from "path";
+import zlib from "zlib";
 import type { Express } from "express";
 import type { IStorage } from "../storage";
 import { insertBrokerConfigSchema, webhookStatusLogs, brokerTestLogs, brokerSessionLogs } from "@shared/schema";
@@ -1084,23 +1087,27 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
       const filename = `scrip_master_nfo_${dateStr}.csv`;
 
-      const sendCsv = (csvText: string) => {
-        res.setHeader("Content-Type", "text/csv; charset=utf-8");
-        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-        res.send(csvText);
-      };
+      const filePath = path.resolve(process.cwd(), filename);
 
-      // ── Serve from in-memory cache if available (populated by startup sync) ──
-      const { rawCsvCache } = await import("../smc-kotak-neo-v3");
-      const cached = rawCsvCache.get("NFO");
-      if (cached) {
-        console.log(`[BROKER] Serving NFO scrip master CSV from cache (${cached.length} bytes)`);
-        return sendCsv(cached);
+      if (!fs.existsSync(filePath)) {
+        console.warn(`[BROKER] NFO CSV not on disk — scrip master sync not yet complete`);
+        return res.status(503).json({ error: "Scrip master file not ready — auto-sync runs at startup. Please wait a moment and retry." });
       }
 
-      // ── Cache cold — do NOT call Kotak. Download is strictly cache-only. ─────
-      console.warn(`[BROKER] NFO CSV cache cold — scrip master sync not yet complete`);
-      return res.status(503).json({ error: "Scrip master cache not ready — auto-sync runs at startup. Please wait a moment and retry." });
+      console.log(`[BROKER] Streaming NFO scrip master CSV from disk (gzip): ${filePath}`);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Encoding", "gzip");
+
+      const fileStream = fs.createReadStream(filePath);
+      const gzip = zlib.createGzip();
+
+      fileStream.on("error", (err) => {
+        console.error("[BROKER] Stream error:", err);
+        if (!res.headersSent) res.status(500).json({ error: "Failed to stream scrip master file." });
+      });
+
+      fileStream.pipe(gzip).pipe(res);
     } catch (error: any) {
       console.error(`[BROKER] Scrip master download error:`, error.message);
       res.status(500).json({ error: error.message || "Scrip master download failed" });
