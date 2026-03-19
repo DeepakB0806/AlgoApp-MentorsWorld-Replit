@@ -1642,11 +1642,14 @@ function ProcessFlowLogCard() {
   const plans = pflQuery.data?.plans || [];
   const total = pflQuery.data?.total || 0;
 
-  const formatTimestampIST = (ts: string) => {
+  const formatTimestamp = (ts: string) => {
     try {
-      const date = new Date(ts);
+      const normalised = ts.includes("Z") || ts.includes("+")
+        ? ts
+        : ts.replace(" ", "T") + "Z";
+      const date = new Date(normalised);
       if (isNaN(date.getTime())) return ts;
-      return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+      return date.toLocaleString(undefined, { hour12: false });
     } catch {
       return ts;
     }
@@ -1761,7 +1764,7 @@ function ProcessFlowLogCard() {
                 <tbody>
                   {logs.map((log) => (
                     <tr key={log.id} className="border-b border-border/50 last:border-0" data-testid={`row-pfl-${log.id}`}>
-                      <td className="py-2 px-3 font-mono whitespace-nowrap text-muted-foreground">{formatTimestampIST(log.timestamp)}</td>
+                      <td className="py-2 px-3 font-mono whitespace-nowrap text-muted-foreground">{formatTimestamp(log.timestamp)}</td>
                       <td className="py-2 px-3 whitespace-nowrap font-medium">{log.planName}</td>
                       <td className="py-2 px-3 whitespace-nowrap font-mono text-blue-400">{log.alert || "—"}</td>
                       <td className="py-2 px-3 whitespace-nowrap">
@@ -1800,11 +1803,14 @@ function ErrorLogCard() {
   const errors = errorLogsQuery.data?.errors || [];
   const total = errorLogsQuery.data?.total || 0;
 
-  const formatTimestampIST = (ts: string) => {
+  const formatTimestamp = (ts: string) => {
     try {
-      const date = new Date(ts);
+      const normalised = ts.includes("Z") || ts.includes("+")
+        ? ts
+        : ts.replace(" ", "T") + "Z";
+      const date = new Date(normalised);
       if (isNaN(date.getTime())) return ts;
-      return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+      return date.toLocaleString(undefined, { hour12: false });
     } catch {
       return ts;
     }
@@ -1893,7 +1899,7 @@ function ErrorLogCard() {
               <table className="w-full text-xs" data-testid="table-error-logs">
                 <thead>
                   <tr className="border-b border-border bg-muted/30">
-                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Timestamp (IST)</th>
+                    <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Timestamp (Local)</th>
                     <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Source</th>
                     <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Category</th>
                     <th className="text-left py-2 px-3 text-muted-foreground font-medium">Message</th>
@@ -1903,7 +1909,7 @@ function ErrorLogCard() {
                 <tbody>
                   {errors.map((err) => (
                     <tr key={err.id} className="border-b border-border/50 last:border-0" data-testid={`row-error-${err.id}`}>
-                      <td className="py-2 px-3 font-mono whitespace-nowrap text-muted-foreground">{formatTimestampIST(err.timestamp)}</td>
+                      <td className="py-2 px-3 font-mono whitespace-nowrap text-muted-foreground">{formatTimestamp(err.timestamp)}</td>
                       <td className="py-2 px-3 whitespace-nowrap">{err.source}</td>
                       <td className="py-2 px-3">{getCategoryBadge(err.category)}</td>
                       <td className="py-2 px-3 max-w-[300px] truncate text-destructive" title={err.message}>{err.message}</td>
