@@ -407,7 +407,7 @@ function GeneralTradingSettings() {
           Trading Execution
         </CardTitle>
         <CardDescription>
-          Controls how the platform retries exit orders when a leg fails to close.
+          Controls the delay between retry attempts for all persistent loops — entry, exit, and square-off.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -416,10 +416,10 @@ function GeneralTradingSettings() {
         ) : (
           <div className="space-y-3">
             <Label htmlFor="input-squareoff-interval">
-              Square-off Retry Interval (ms)
+              Retry Interval (ms)
             </Label>
             <p className="text-sm text-muted-foreground">
-              Delay between retry attempts after a failed exit order. Set to <strong>0</strong> for immediate retry — the broker API response time is the natural throttle. Increase only if the broker rejects rapid repeated orders.
+              Delay between retry attempts for all persistent loops (entry, exit, square-off). Minimum effective value is 500ms. Increase if the broker rejects rapid repeated orders.
             </p>
             <div className="flex items-center gap-3 max-w-xs">
               <Input

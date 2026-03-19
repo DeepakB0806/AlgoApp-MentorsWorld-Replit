@@ -637,8 +637,8 @@ async function executeSellSignal(
     }
     deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
     if (anyFailed) {
-      console.warn(`[TE] Plan "${plan.name}" — leg close_failed, starting persistent retry loop`);
-      startPersistentSquareOff(storage, plan.id, brokerConfig);
+      console.warn(`[TE] Plan "${plan.name}" — leg close_failed on ${ctx.resolvedBlockType}, starting persistent exit retry`);
+      startPersistentExit(storage, plan.id, ctx.resolvedBlockType, brokerConfig);
     }
     if (ctx.signalContext?.resolvedAction === "EXIT") {
       return { success: true, action: "close", broker, planId: plan.id, pnl: closePnl,
@@ -866,13 +866,55 @@ export function startPersistentSquareOff(
     console.log(`[TE] PersistentSquareOff — ${unclosed.length} unclosed leg(s) for plan ${planId}, retrying...`);
     await squareOffPlan(storage, planId, brokerConfig);
     const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
-    const intervalMs = settingRow?.value ? Math.max(0, parseInt(settingRow.value, 10)) : 0;
+    const intervalMs = settingRow?.value ? Math.max(500, parseInt(settingRow.value, 10)) : 2000;
     setTimeout(attempt, intervalMs);
   }
 
   attempt().catch((err) => {
     console.error(`[TE] PersistentSquareOff error for plan ${planId}:`, err?.message || err);
     persistentSquareOffActive.delete(planId);
+  });
+}
+
+export const persistentExitActive = new Set<string>();
+
+export function startPersistentExit(
+  storage: IStorage,
+  planId: string,
+  blockType: string,
+  brokerConfig: BrokerConfig,
+): void {
+  const key = `${planId}:${blockType}`;
+  if (persistentExitActive.has(key)) {
+    console.log(`[TE] PersistentExit already running for plan ${planId} block ${blockType}, skipping duplicate`);
+    return;
+  }
+  persistentExitActive.add(key);
+
+  async function attempt() {
+    const unclosed = await storage.getUnclosedTradesByPlan(planId);
+    const toRetry = unclosed.filter(t => t.blockType === blockType);
+    if (toRetry.length === 0) {
+      console.log(`[TE] PersistentExit complete — all ${blockType} legs exited for plan ${planId}`);
+      persistentExitActive.delete(key);
+      return;
+    }
+    console.log(`[TE] PersistentExit — ${toRetry.length} unclosed ${blockType} leg(s) for plan ${planId}, retrying...`);
+    const now = new Date().toISOString();
+    for (const trade of toRetry) {
+      const currentPrice = trade.ltp || trade.price || 0;
+      await closeTrade(storage, trade, currentPrice, now, brokerConfig)
+        .catch(err => console.error(`[TE] PersistentExit closeTrade error:`, err?.message || err));
+    }
+    tradingCache.invalidateOpenTrades(planId);
+    const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
+    const intervalMs = settingRow?.value ? Math.max(500, parseInt(settingRow.value, 10)) : 2000;
+    setTimeout(attempt, intervalMs);
+  }
+
+  attempt().catch((err) => {
+    console.error(`[TE] PersistentExit error for plan ${planId} block ${blockType}:`, err?.message || err);
+    persistentExitActive.delete(key);
   });
 }
 
