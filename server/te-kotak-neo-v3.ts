@@ -506,7 +506,11 @@ async function executeLegBasket(
       if (!orderResult.success) return { trades, orderIds, error: `Kotak Neo order failed: ${orderResult.error}` };
       orderId = orderResult.data?.orderNo;
       productType = resolved.productCode;
-      if (items.length > 1) await new Promise(r => setTimeout(r, 100));
+      if (items.length > 1) {
+        const settingRow = await storage.getSetting("order_execution_delay_ms");
+        const delayMs = settingRow?.value ? Math.max(0, parseInt(settingRow.value, 10)) : 200;
+        await new Promise(r => setTimeout(r, delayMs));
+      }
     } else {
       orderId = `PT-${Date.now()}-L${legIndex}`;
     }
@@ -572,10 +576,13 @@ async function executeBuySignal(
       return aFirst === bFirst ? 0 : aFirst ? -1 : 1;
     });
     let closePnl = 0;
+    const delaySetting = await storage.getSetting("order_execution_delay_ms");
+    const delayMs = delaySetting?.value ? Math.max(0, parseInt(delaySetting.value, 10)) : 200;
+
     for (let ci = 0; ci < openOpposites.length; ci++) {
       const closed = await closeTrade(storage, openOpposites[ci], ctx.price, ctx.now, brokerConfig);
       closePnl += closed.pnl || 0;
-      if (ci < openOpposites.length - 1) await new Promise(r => setTimeout(r, 100));
+      if (ci < openOpposites.length - 1) await new Promise(r => setTimeout(r, delayMs));
     }
     deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
     if (ctx.signalContext?.resolvedAction === "EXIT") {
@@ -629,11 +636,14 @@ async function executeSellSignal(
       return aFirst === bFirst ? 0 : aFirst ? -1 : 1;
     });
     let anyFailed = false;
+    const delaySetting = await storage.getSetting("order_execution_delay_ms");
+    const delayMs = delaySetting?.value ? Math.max(0, parseInt(delaySetting.value, 10)) : 200;
+
     for (let ci = 0; ci < allToClose.length; ci++) {
       const closed = await closeTrade(storage, allToClose[ci], ctx.price, ctx.now, brokerConfig);
       closePnl += closed.pnl || 0;
       if (closed.status === "close_failed") anyFailed = true;
-      if (ci < allToClose.length - 1) await new Promise(r => setTimeout(r, 100));
+      if (ci < allToClose.length - 1) await new Promise(r => setTimeout(r, delayMs));
     }
     deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
     if (anyFailed) {
@@ -771,6 +781,9 @@ export async function squareOffPlan(
 
   console.log(`[TE] squareOffPlan: planId=${planId}, unclosedTrades=${openTrades.length}`);
 
+  const delaySetting = await storage.getSetting("order_execution_delay_ms");
+  const delayMs = delaySetting?.value ? Math.max(0, parseInt(delaySetting.value, 10)) : 200;
+
   for (const trade of openTrades) {
     try {
       const currentPrice = trade.ltp || trade.price || 0;
@@ -815,6 +828,8 @@ export async function squareOffPlan(
           });
         }
       }
+      // Add delay to prevent rate limits and allow RMS to update margin
+      await new Promise(r => setTimeout(r, delayMs));
     } catch (err: any) {
       failed++;
       const errMsg = `Error closing trade ${trade.id}: ${err?.message || err}`;
