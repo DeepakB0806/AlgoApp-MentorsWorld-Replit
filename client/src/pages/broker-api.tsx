@@ -2331,7 +2331,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                               You are ready to trade
                               {teReadiness.lastUpdated && (
                                 <span className="text-[10px] text-muted-foreground ml-1">
-                                  (synced {new Date(teReadiness.lastUpdated).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })} IST)
+                                  (synced {new Date(teReadiness.lastUpdated).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })} IST)
                                 </span>
                               )}
                             </span>
