@@ -2327,12 +2327,14 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                         <span className="flex items-center gap-1 flex-nowrap">
                         {isKotakNeo && teReadiness && (
                           teReadiness.ready && !teReadiness.stale && !teReadiness.syncing ? (
-                            <span className="flex items-center gap-1 text-emerald-500" data-testid="te-readiness-ready">
-                              <CheckCircle className="w-4 h-4" />
-                              You are ready to trade
+                            <span className="flex flex-col gap-0.5" data-testid="te-readiness-ready">
+                              <span className="flex items-center gap-1 text-emerald-500">
+                                <CheckCircle className="w-4 h-4" />
+                                <span className="whitespace-nowrap">You are ready to trade</span>
+                              </span>
                               {teReadiness.lastUpdated && (
-                                <span className="text-[10px] text-muted-foreground ml-1">
-                                  (synced {new Date(teReadiness.lastUpdated).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })} IST)
+                                <span className="text-[10px] text-muted-foreground">
+                                  Synced {new Date(teReadiness.lastUpdated).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })} IST
                                 </span>
                               )}
                             </span>
