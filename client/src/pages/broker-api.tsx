@@ -2324,6 +2324,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                           <CheckCircle className="w-4 h-4" />
                           {isPaperTrade ? "Always Connected — Simulated Trading Engine" : isBinance ? "Authenticated - API Key Validated" : "Connected - Session Active"}
                         </span>
+                        <span className="flex items-center gap-1 flex-nowrap">
                         {isKotakNeo && teReadiness && (
                           teReadiness.ready && !teReadiness.stale && !teReadiness.syncing ? (
                             <span className="flex items-center gap-1 text-emerald-500" data-testid="te-readiness-ready">
@@ -2390,6 +2391,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                             {isResyncing ? "Syncing..." : "Resync"}
                           </Button>
                         )}
+                        </span>
                       </span>
                       {!isBinance && config.accessToken && (() => {
                         try {
