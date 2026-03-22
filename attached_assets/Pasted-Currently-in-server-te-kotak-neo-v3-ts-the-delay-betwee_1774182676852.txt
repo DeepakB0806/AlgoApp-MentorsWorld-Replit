@@ -1,0 +1,69 @@
+Currently, in server/te-kotak-neo-v3.ts, the delay between placing/closing legs is hardcoded to 100ms in the Entry, Exit, and Reversal loops. Furthermore, the squareOffPlan loop is completely missing a delay, meaning it fires closing orders instantly, which can trigger broker rate limits or Risk Management (RMS) margin rejections if the broker hasn't processed the previous leg yet.
+We need to replace the hardcoded 100ms with a dynamic fetch from the database (order_execution_delay_ms) and inject this delay into the squareOffPlan loop.
+
+Target File: server/te-kotak-neo-v3.ts
+
+Step-by-Step Instructions for the Agent:
+
+1. Update executeLegBasket (Entry Sequence)
+Locate the executeLegBasket function. Inside the if (broker === "kotak_neo") block:
+
+Find: if (items.length > 1) await new Promise(r => setTimeout(r, 100));
+
+Replace with:
+
+TypeScript
+      if (items.length > 1) {
+        const settingRow = await storage.getSetting("order_execution_delay_ms");
+        const delayMs = settingRow?.value ? Math.max(0, parseInt(settingRow.value, 10)) : 200;
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+2. Update executeBuySignal (Reversal Sequence)
+Locate the openOpposites loop inside executeBuySignal.
+
+Replace the loop block with:
+
+TypeScript
+    let closePnl = 0;
+    const delaySetting = await storage.getSetting("order_execution_delay_ms");
+    const delayMs = delaySetting?.value ? Math.max(0, parseInt(delaySetting.value, 10)) : 200;
+    
+    for (let ci = 0; ci < openOpposites.length; ci++) {
+      const closed = await closeTrade(storage, openOpposites[ci], ctx.price, ctx.now, brokerConfig);
+      closePnl += closed.pnl || 0;
+      if (ci < openOpposites.length - 1) await new Promise(r => setTimeout(r, delayMs));
+    }
+3. Update executeSellSignal (Exit Sequence)
+Locate the allToClose loop inside executeSellSignal.
+
+Replace the loop block with:
+
+TypeScript
+    let anyFailed = false;
+    const delaySetting = await storage.getSetting("order_execution_delay_ms");
+    const delayMs = delaySetting?.value ? Math.max(0, parseInt(delaySetting.value, 10)) : 200;
+
+    for (let ci = 0; ci < allToClose.length; ci++) {
+      const closed = await closeTrade(storage, allToClose[ci], ctx.price, ctx.now, brokerConfig);
+      closePnl += closed.pnl || 0;
+      if (closed.status === "close_failed") anyFailed = true;
+      if (ci < allToClose.length - 1) await new Promise(r => setTimeout(r, delayMs));
+    }
+4. Update squareOffPlan (Add Missing Delay)
+Locate the squareOffPlan function.
+
+Just BEFORE the for (const trade of openTrades) loop, add:
+
+TypeScript
+  const delaySetting = await storage.getSetting("order_execution_delay_ms");
+  const delayMs = delaySetting?.value ? Math.max(0, parseInt(delaySetting.value, 10)) : 200;
+Inside the for (const trade of openTrades) loop, at the very end of the try block (right after the if/else for logging), add the delay so it pauses before the next iteration:
+
+TypeScript
+      // Add delay to prevent rate limits and allow RMS to update margin
+      await new Promise(r => setTimeout(r, delayMs));
+Done Looks Like:
+
+There are no setTimeout(r, 100) hardcodes left in te-kotak-neo-v3.ts.
+
+Entry, Reversal, Exit, and Square-Off loops all dynamically fetch "order_execution_delay_ms" from storage and apply it between leg executions.
