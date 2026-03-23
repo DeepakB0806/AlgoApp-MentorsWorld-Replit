@@ -1,0 +1,30 @@
+Feedback on Task #85 Draft:
+
+Your draft has three severe loopholes that will crash the Trade Engine. Please correct your execution plan based on these constraints:
+
+1. CRITICAL: The "Ghost ID" Crash in executeLegBasket
+In your draft for Fix 3, you try to run await storage.updateStrategyTrade(landed.id, ...). However, landed is just a temporary RAM object; it has no .id and isn't in the database yet.
+
+Correction: You must refactor executeLegBasket to write trades to the database immediately. Right after if (orderId) { ... }, construct the full stagedTrade object and run const savedTrade = await storage.createStrategyTrade({ ...stagedTrade, status: "pending_basket" }).
+
+Push savedTrade into landedLegs so that it actually has a database .id to use during the margin rollback loop.
+
+If the entire basket succeeds (!attemptFailed), loop through attemptTrades and UPDATE them from "pending_basket" to "open".
+
+2. HIGH: Ignored Retry Limit in startPersistentRollback
+You fetch maxRetries from rollback_api_retry_count, but you never use it. The loop will retry forever.
+
+Correction: Above the startPersistentRollback function, initialize a tracking map: const rollbackAttempts = new Map<string, number>();
+
+Inside the loop, check the attempts: const attempts = rollbackAttempts.get(trade.id) || 0;
+
+If attempts >= maxRetries, log a [FATAL] Process Flow Log error that retries are exhausted, and use continue to skip that trade so you don't hammer the Kotak API infinitely.
+
+Otherwise, increment the map: rollbackAttempts.set(trade.id, attempts + 1); before placing the order.
+
+3. BUG: Type Crash in logPFL
+Inside startPersistentRollback, you wrote logPFL(null, ...). logPFL expects a StrategyPlan object, not null.
+
+Correction: Fetch the plan inside the function: const plan = await storage.getStrategyPlan(planId); and pass plan into logPFL. If plan is undefined, skip the logging or handle it gracefully.
+
+Please update your code plan for Task #85 to reflect these structural fixes, especially writing the pending_basket trades to the database immediately in executeLegBasket.

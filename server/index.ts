@@ -12,7 +12,7 @@ import { ensureBrokerEndpoints } from "./seed-broker-el";
 import { runScripMasterSync } from "./smc-kotak-neo-v3";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
-import { resolveAllSignalsFromActionMapper, processTradeSignal } from "./te-kotak-neo-v3";
+import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback } from "./te-kotak-neo-v3";
 
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err.stack || err.message || err);
@@ -240,6 +240,45 @@ app.use((req, res, next) => {
   } catch (err) {
     log(`Data retention job startup warning: ${err}`);
   }
+
+  // FIX 4b: Reboot Amnesia Catcher — re-ignite persistent retry loops for any
+  // trades left in a failed/in-progress state from before the server restarted.
+  setTimeout(async () => {
+    try {
+      const allBrokerConfigs = await storage.getBrokerConfigs();
+      const liveBrokers = allBrokerConfigs.filter(bc => bc.isConnected === true && bc.brokerName === "kotak_neo");
+      if (liveBrokers.length === 0) return;
+      const brokerConfig = liveBrokers[0];
+
+      const stalledTrades = await storage.getTradesByStatuses(["close_failed", "rollback_failed", "rolling_back"]);
+      if (stalledTrades.length === 0) return;
+
+      log(`[RECOVERY] Found ${stalledTrades.length} stalled trade(s) — re-igniting persistent retry loops...`);
+
+      // Group close_failed by planId + blockType → re-fire startPersistentExit
+      const closeFailedMap = new Map<string, string>();
+      for (const t of stalledTrades.filter(t => t.status === "close_failed")) {
+        const key = `${t.planId}:${t.blockType}`;
+        if (!closeFailedMap.has(key) && t.blockType) {
+          closeFailedMap.set(key, t.planId);
+          startPersistentExit(storage, t.planId, t.blockType, brokerConfig);
+          log(`[RECOVERY] Re-ignited PersistentExit for plan ${t.planId.slice(0, 8)} block ${t.blockType}`);
+        }
+      }
+
+      // Group rollback_failed/rolling_back by planId → re-fire startPersistentRollback
+      const rollbackPlanIds = new Set<string>();
+      for (const t of stalledTrades.filter(t => t.status === "rollback_failed" || t.status === "rolling_back")) {
+        if (!rollbackPlanIds.has(t.planId)) {
+          rollbackPlanIds.add(t.planId);
+          startPersistentRollback(storage, t.planId, brokerConfig);
+          log(`[RECOVERY] Re-ignited PersistentRollback for plan ${t.planId.slice(0, 8)}`);
+        }
+      }
+    } catch (err) {
+      log(`[RECOVERY] Reboot amnesia catcher error: ${err}`);
+    }
+  }, 5000);
 
   setInterval(async () => {
     if (!EL.isReady()) {

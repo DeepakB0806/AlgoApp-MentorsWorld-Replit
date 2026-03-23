@@ -136,6 +136,7 @@ export interface IStorage {
   getStrategyTradesByPlan(planId: string): Promise<StrategyTrade[]>;
   getOpenTradesByPlan(planId: string): Promise<StrategyTrade[]>;
   getUnclosedTradesByPlan(planId: string): Promise<StrategyTrade[]>;
+  getTradesByStatuses(statuses: string[]): Promise<StrategyTrade[]>;
   createStrategyTrade(trade: InsertStrategyTrade): Promise<StrategyTrade>;
   updateStrategyTrade(id: string, trade: Partial<InsertStrategyTrade>): Promise<StrategyTrade | undefined>;
   deleteStrategyTradesByPlan(planId: string, olderThanDays?: number): Promise<number>;
@@ -911,6 +912,12 @@ export class DatabaseStorage implements IStorage {
         eq(strategyTrades.planId, planId),
         inArray(strategyTrades.status, ["open", "close_failed"])
       ));
+  }
+
+  async getTradesByStatuses(statuses: string[]): Promise<StrategyTrade[]> {
+    return await db.select().from(strategyTrades)
+      .where(inArray(strategyTrades.status, statuses))
+      .orderBy(desc(strategyTrades.createdAt));
   }
 
   async createStrategyTrade(trade: InsertStrategyTrade): Promise<StrategyTrade> {

@@ -517,10 +517,10 @@ function resolveOrderParams(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SHARED BASKET EXECUTOR (WITH ATOMIC MARGIN ROLLBACK)
-// Places legs sequentially. On margin shortfall: atomically reverses already-
-// landed legs with market orders, then retries at a lower lotMultiplier.
-// DB writes happen ONLY after the full basket succeeds — no ghost records.
+// SHARED BASKET EXECUTOR (ENTERPRISE STATE MACHINE ROLLBACK)
+// Places legs sequentially. On margin shortfall: writes each leg to DB as
+// "pending_basket" BEFORE placement so rollback has a real DB ID to update.
+// Rollback transitions: pending_basket → rolling_back → rolled_back/rollback_failed
 // ═══════════════════════════════════════════════════════════════════════════════
 type BasketItem = { leg: PlanTradeLeg; blockType: string; legIndex: number };
 
@@ -529,7 +529,7 @@ async function executeLegBasket(
   items: BasketItem[], orderTypeForRecord: string,
 ): Promise<{ trades: any[]; orderIds: string[]; error?: string }> {
   const broker = brokerConfig.brokerName;
-  let finalTrades: any[] = [];
+  let finalTrades: StrategyTrade[] = [];
   let finalOrderIds: string[] = [];
   let finalError: string | undefined;
 
@@ -537,8 +537,7 @@ async function executeLegBasket(
   const maxRetries = retrySetting?.value ? parseInt(retrySetting.value, 10) : 0;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const landedLegs: any[] = [];
-    const attemptTrades: any[] = [];
+    const landedLegs: StrategyTrade[] = [];
     const attemptOrderIds: string[] = [];
     let attemptFailed = false;
 
@@ -558,6 +557,9 @@ async function executeLegBasket(
       let orderStatus = "COMPLETE";
       let orderReason = "";
       let fillPrice = ctx.price;
+
+      // FIX 2: Track actual filled quantity from broker confirmation
+      let actualFilledQty = resolved.quantity;
 
       if (broker === "kotak_neo") {
         const l = leg as Record<string, any>;
@@ -581,14 +583,19 @@ async function executeLegBasket(
             fillPrice = statusObj.fillPrice;
             orderStatus = statusObj.status;
             orderReason = statusObj.reason;
+
+            // FIX 2: Persist partial fill data when broker fills less than ordered
+            if (statusObj.filledQty > 0 && statusObj.filledQty !== resolved.quantity) {
+              actualFilledQty = statusObj.filledQty;
+              logPFL(plan, broker, ctx.data, "warn", `[WARN] Partial fill detected for ${resolved.tradingSymbol}: Ordered ${resolved.quantity}, Filled ${actualFilledQty}`);
+            }
           }
         }
 
-        // Log every order result to Process Flow Log for audit trail
         if (orderStatus === "REJECTED" || orderStatus === "CANCELLED") {
           logPFL(plan, broker, ctx.data, "error", `[ORDER] ${orderId || "N/A"} → ${orderStatus} | symbol: ${resolved.tradingSymbol} | reason: ${orderReason}`);
         } else {
-          logPFL(plan, broker, ctx.data, "info", `[ORDER] ${orderId || "N/A"} → ${orderStatus} | symbol: ${resolved.tradingSymbol} | qty: ${resolved.quantity}`);
+          logPFL(plan, broker, ctx.data, "info", `[ORDER] ${orderId || "N/A"} → ${orderStatus} | symbol: ${resolved.tradingSymbol} | qty: ${actualFilledQty}`);
         }
 
         if (items.length > 1) {
@@ -601,63 +608,81 @@ async function executeLegBasket(
         orderId = `PT-${Date.now()}-L${legIndex}`;
       }
 
-      // Detect rejection after placement
+      // Rejection handling with Enterprise State Machine Rollback
       if (orderStatus === "REJECTED" || orderStatus === "CANCELLED") {
         const lowerReason = orderReason.toLowerCase();
         if (lowerReason.includes("margin") || lowerReason.includes("rms") || lowerReason.includes("shortfall")) {
-          // Atomic rollback: reverse all legs that already landed before retrying
-          console.warn(`[TE] Margin shortfall on attempt ${attempt + 1}. Initiating atomic rollback for ${landedLegs.length} landed leg(s)...`);
+          console.warn(`[TE] Margin shortfall detected. Initiating Enterprise State Machine Rollback for attempt ${attempt + 1}...`);
+
+          // FIX 3b: State machine rollback — each landed leg already has a DB record
           for (const landed of landedLegs) {
+            await storage.updateStrategyTrade(landed.id, { status: "rolling_back", updatedAt: ctx.now });
+
             const reverseAction = landed.action?.toUpperCase() === "BUY" ? "SELL" : "BUY";
             logPFL(plan, broker, ctx.data, "warn", `[ROLLBACK] Reversing ${landed.tradingSymbol} qty=${landed.quantity}`);
-            await EL.placeOrder(brokerConfig, {
+
+            const rbResult = await EL.placeOrder(brokerConfig, {
               tradingSymbol: landed.tradingSymbol, exchange: EL.mapExchange(ctx.exchange),
               transactionType: mapTransactionType(reverseAction), quantity: String(landed.quantity),
-              productType: landed.productCode, priceType: "MKT", price: "0",
+              productType: landed.productType || "MIS", priceType: "MKT", price: "0",
               validity: "DAY", afterMarket: "NO",
             });
+
+            if (rbResult.success) {
+              await storage.updateStrategyTrade(landed.id, { status: "rolled_back", exitedAt: ctx.now, updatedAt: ctx.now });
+              logPFL(plan, broker, ctx.data, "info", `[ROLLBACK] Successfully reversed ${landed.tradingSymbol}`);
+            } else {
+              await storage.updateStrategyTrade(landed.id, { status: "rollback_failed", updatedAt: ctx.now });
+              logPFL(plan, broker, ctx.data, "error", `[FATAL] ROLLBACK FAILED for ${landed.tradingSymbol}. Initiating persistent background recovery.`);
+              startPersistentRollback(storage, plan.id, brokerConfig);
+            }
           }
+
           finalError = `Margin shortfall: ${orderReason}`;
           attemptFailed = true;
+
+          // FIX 1: Circuit breaker AFTER rollback — rollback landed legs first, THEN abort
+          if (effectiveMultiplier <= 1) {
+            const msg = `Margin shortfall at minimum lot size (1x): ${orderReason}. Cannot reduce further. Aborting.`;
+            logPFL(plan, broker, ctx.data, "error", `[ABORT] ${msg}`);
+            return { trades: [], orderIds: [], error: msg };
+          }
+
           break;
         } else {
-          // Non-margin rejection — hard stop, no retry
           finalError = `Order rejected: ${orderReason}`;
           return { trades: [], orderIds: [], error: finalError };
         }
       }
 
-      // Order landed successfully — track for potential rollback and stage for DB write
-      landedLegs.push({
-        tradingSymbol: resolved.tradingSymbol, quantity: resolved.quantity,
-        productCode: resolved.productCode, action: leg.action,
-      });
-
-      attemptTrades.push({
+      // FIX 3a: Immediate DB write as "pending_basket" — leg gets a real ID before any rollback can occur
+      const stagedTrade = {
         planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${legIndex}`,
-        tradingSymbol: resolved.tradingSymbol, exchange: ctx.exchange, quantity: resolved.quantity,
+        tradingSymbol: resolved.tradingSymbol, exchange: ctx.exchange, quantity: actualFilledQty,
         price: fillPrice, action: (leg.action || "BUY").toUpperCase(), blockType, legIndex,
-        orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice,
+        orderType: orderTypeForRecord, productType, status: "pending_basket", pnl: 0, ltp: fillPrice,
         executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now,
         timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker,
         indicator: ctx.data.indicator || null, alert: ctx.data.alert || null,
         localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
         webhookDataId: ctx.data.id || undefined,
         rejectedReason: orderReason || null,
-      });
+      };
+
+      const savedTrade = await storage.createStrategyTrade(stagedTrade as any);
+      landedLegs.push(savedTrade);
       if (orderId) attemptOrderIds.push(orderId);
     }
 
     if (!attemptFailed) {
-      // Full basket succeeded — write all trade records to DB atomically
-      for (const staged of attemptTrades) {
-        const trade = await storage.createStrategyTrade(staged);
-        finalTrades.push(trade);
+      // Basket succeeded: promote all "pending_basket" records to "open"
+      for (const landed of landedLegs) {
+        const updated = await storage.updateStrategyTrade(landed.id, { status: "open", updatedAt: ctx.now });
+        finalTrades.push(updated || landed);
       }
       finalOrderIds = attemptOrderIds;
       return { trades: finalTrades, orderIds: finalOrderIds };
     } else if (attempt < maxRetries && finalError?.includes("Margin shortfall")) {
-      // Wait before retrying with reduced lot size
       const retryRow = await storage.getSetting("squareoff_retry_interval_ms");
       const retryDelay = retryRow?.value ? Math.max(0, parseInt(retryRow.value, 10)) : 1000;
       console.log(`[TE] Retrying basket at lotMultiplier=${Math.max(1, ctx.lotMultiplier - attempt - 1)} in ${retryDelay}ms...`);
@@ -867,6 +892,16 @@ async function closeTrade(
     const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
     if (!orderResult.success) {
       console.error(`[TE] Failed to close Kotak trade: ${orderResult.error}`);
+
+      // FIX 4a: If broker says position no longer exists, treat as manually closed
+      const errStr = String(orderResult.error).toLowerCase();
+      if (errStr.includes("insufficient") && (errStr.includes("holding") || errStr.includes("balance"))) {
+        console.warn(`[TE] Insufficient holdings for ${trade.tradingSymbol}. Marking as manually closed.`);
+        const manualUpdate = await storage.updateStrategyTrade(trade.id, { status: "closed", pnl: 0, exitedAt: now, updatedAt: now, exitPrice: currentPrice, exitAction });
+        tradingCache.invalidateOpenTrades(trade.planId);
+        return manualUpdate || trade;
+      }
+
       const failedUpdate = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
       tradingCache.invalidateOpenTrades(trade.planId);
       return failedUpdate || trade;
@@ -1071,6 +1106,93 @@ export function startPersistentExit(
     console.error(`[TE] PersistentExit error for plan ${planId} block ${blockType}:`, err?.message || err);
     persistentExitActive.delete(key);
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FIX 3c: THE PERSISTENT ROLLBACK ENGINE
+// Background retry loop for legs stuck in rollback_failed or rolling_back.
+// Per-trade attempt tracking via Map; fresh DB queries each cycle.
+// ═══════════════════════════════════════════════════════════════════════════════
+export const persistentRollbackActive = new Set<string>();
+const rollbackAttempts = new Map<string, number>();
+
+export function startPersistentRollback(
+  storage: IStorage,
+  planId: string,
+  brokerConfig: BrokerConfig,
+): void {
+  if (persistentRollbackActive.has(planId)) return;
+  persistentRollbackActive.add(planId);
+
+  async function attempt() {
+    try {
+      // Fresh query at the START of each cycle (not stale array)
+      const allTrades = await storage.getStrategyTradesByPlan(planId);
+      const toRetry = allTrades.filter(t => t.status === "rollback_failed" || t.status === "rolling_back");
+
+      if (toRetry.length === 0) {
+        persistentRollbackActive.delete(planId);
+        return;
+      }
+
+      const plan = await storage.getStrategyPlan(planId);
+      const rbRetrySetting = await storage.getSetting("rollback_api_retry_count");
+      const maxRetries = rbRetrySetting?.value ? parseInt(rbRetrySetting.value, 10) : 5;
+      const now = new Date().toISOString();
+      const mockWebhookData = { signalType: "rollback", alert: "Persistent Margin Recovery" } as WebhookData;
+
+      for (const trade of toRetry) {
+        const attempts = rollbackAttempts.get(trade.id) || 0;
+        if (attempts >= maxRetries) {
+          if (plan) logPFL(plan, brokerConfig.brokerName, mockWebhookData, "error", `[FATAL] Rollback retries exhausted for ${trade.tradingSymbol}. Manual intervention required!`);
+          continue;
+        }
+
+        rollbackAttempts.set(trade.id, attempts + 1);
+
+        const reverseAction = trade.action === "BUY" ? "SELL" : "BUY";
+        const revTransactionType = mapTransactionType(reverseAction);
+
+        const rbResult = await EL.placeOrder(brokerConfig, {
+          tradingSymbol: trade.tradingSymbol,
+          exchange: EL.mapExchange(trade.exchange || "NFO"),
+          transactionType: revTransactionType,
+          quantity: String(trade.quantity),
+          productType: trade.productType || "MIS",
+          priceType: "MKT",
+          price: "0",
+          validity: "DAY",
+          afterMarket: "NO",
+        });
+
+        if (rbResult.success) {
+          await storage.updateStrategyTrade(trade.id, { status: "rolled_back", exitedAt: now, updatedAt: now });
+          if (plan) logPFL(plan, brokerConfig.brokerName, mockWebhookData, "info", `[ROLLBACK] Recovered & reversed ${trade.tradingSymbol} on retry ${attempts + 1}`);
+        } else {
+          await storage.updateStrategyTrade(trade.id, { status: "rollback_failed", updatedAt: now });
+        }
+      }
+
+      // Fresh query at the END of the loop to check remaining (prevents stale-data infinite loop)
+      const freshTrades = await storage.getStrategyTradesByPlan(planId);
+      const remaining = freshTrades.filter(
+        t => (t.status === "rollback_failed" || t.status === "rolling_back") && (rollbackAttempts.get(t.id) || 0) < maxRetries,
+      );
+
+      if (remaining.length > 0) {
+        const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
+        const intervalMs = settingRow?.value ? parseInt(settingRow.value, 10) : 2000;
+        setTimeout(attempt, intervalMs);
+      } else {
+        persistentRollbackActive.delete(planId);
+      }
+    } catch (err) {
+      console.error(`[TE] PersistentRollback error for plan ${planId}:`, err);
+      persistentRollbackActive.delete(planId);
+    }
+  }
+
+  attempt();
 }
 
 export const persistentEntryActive = new Set<string>();
