@@ -5,7 +5,6 @@ import type { IStorage } from "./storage";
 import type {
   StrategyPlan,
   StrategyTrade,
-  StrategyConfig,
   BrokerConfig,
   WebhookData,
   ActionMapperEntry,
@@ -30,7 +29,7 @@ import { liveContractCache } from "./smc-kotak-neo-v3";
 // FILL PRICE LOOKUP
 // After a Kotak order is placed, fetch actual execution price from order history
 // ═══════════════════════════════════════════════════════════════════════════════
-async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallback: number): Promise<number> {
+async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallback: number): Promise<{ fillPrice: number; status: string; reason: string; filledQty: number }> {
   try {
     const histResult = await EL.getOrderHistory(brokerConfig, orderId);
     if (histResult.success && Array.isArray(histResult.data) && histResult.data.length > 0) {
@@ -40,15 +39,19 @@ async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallbac
         latest?.flprc  || latest?.fillPrice || latest?.fill_price ||
         latest?.prc    || latest?.pr || 0
       );
+      const status = latest?.ordSt || latest?.stText || "UNKNOWN";
+      const reason = latest?.rejReason || latest?.rjBy || "";
+      const filledQty = Number(latest?.filledShares || latest?.fldQty || latest?.fil_qty || 0);
       if (fill > 0) {
         console.log(`[TE] Fill price from order history (${orderId.slice(0,8)}): ${fill} (fallback was ${fallback})`);
-        return fill;
+        return { fillPrice: fill, status, reason, filledQty };
       }
+      return { fillPrice: fallback, status, reason, filledQty };
     }
   } catch (err) {
     console.warn(`[TE] Could not fetch fill price for order ${orderId.slice(0,8)}: ${err}`);
   }
-  return fallback;
+  return { fillPrice: fallback, status: "UNKNOWN", reason: "", filledQty: 0 };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -340,7 +343,13 @@ async function executeTradeForPlan(
     const timeLogic = tradeParams?.timeLogic as { expiryType?: string; expiryWeekOffset?: number } | undefined;
     const expiryType = timeLogic?.expiryType || "weekly";
     const weekOffset = timeLogic?.expiryWeekOffset || 0;
-    const expiryDay = instrumentConfig.expiryDay || "Thursday";
+    const expiryDay = instrumentConfig.expiryDay;
+    if (!expiryDay) {
+      const msg = `CRITICAL: expiryDay missing in instrument_config for ${ticker}. Cannot calculate target expiry.`;
+      console.error(`[TE] ✗ ${msg}`);
+      logPFL(plan, broker, data, "error", msg, { resolvedAction, ticker, exchange, price, executionTimeMs: Date.now() - startTime });
+      return { success: false, action: "error", broker, planId: plan.id, message: msg, executionTimeMs: Date.now() - startTime };
+    }
     const targetDate = getTargetExpiry(expiryDay, expiryType, weekOffset);
     const ey = targetDate.getFullYear();
     const em = String(targetDate.getMonth() + 1).padStart(2, "0");
@@ -471,10 +480,10 @@ function resolveOrderParams(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SHARED BASKET EXECUTOR
-// Places an ordered list of legs sequentially.
-// Caller MUST sort BUY-first before passing. Early return on any failure acts
-// as the circuit breaker — SELL legs never fire if a preceding BUY failed.
+// SHARED BASKET EXECUTOR (WITH ATOMIC MARGIN ROLLBACK)
+// Places legs sequentially. On margin shortfall: atomically reverses already-
+// landed legs with market orders, then retries at a lower lotMultiplier.
+// DB writes happen ONLY after the full basket succeeds — no ghost records.
 // ═══════════════════════════════════════════════════════════════════════════════
 type BasketItem = { leg: PlanTradeLeg; blockType: string; legIndex: number };
 
@@ -483,55 +492,144 @@ async function executeLegBasket(
   items: BasketItem[], orderTypeForRecord: string,
 ): Promise<{ trades: any[]; orderIds: string[]; error?: string }> {
   const broker = brokerConfig.brokerName;
-  const trades: any[] = [];
-  const orderIds: string[] = [];
+  let finalTrades: any[] = [];
+  let finalOrderIds: string[] = [];
+  let finalError: string | undefined;
 
-  for (const { leg, blockType, legIndex } of items) {
-    const resolved = resolveOrderParams(leg, ctx, legIndex);
-    if ("error" in resolved) return { trades, orderIds, error: resolved.error };
+  const retrySetting = await storage.getSetting("margin_shortfall_retry_count");
+  const maxRetries = retrySetting?.value ? parseInt(retrySetting.value, 10) : 0;
 
-    let orderId: string | undefined;
-    let productType = "PAPER";
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const landedLegs: any[] = [];
+    const attemptTrades: any[] = [];
+    const attemptOrderIds: string[] = [];
+    let attemptFailed = false;
 
-    if (broker === "kotak_neo") {
-      const l = leg as Record<string, any>;
-      const actualPriceType = l.priceType || orderTypeForRecord || "MKT";
-      const orderResult = await EL.placeOrder(brokerConfig, {
-        tradingSymbol: resolved.tradingSymbol, exchange: EL.mapExchange(ctx.exchange),
-        transactionType: resolved.transactionType, quantity: String(resolved.quantity),
-        productType: l.productType || leg.orderType || resolved.productCode,
-        priceType: actualPriceType, price: actualPriceType === "LMT" ? String(l.limitPrice || ctx.price) : "0",
-        validity: l.validity || "DAY", afterMarket: "NO",
-      });
-      if (!orderResult.success) return { trades, orderIds, error: `Kotak Neo order failed: ${orderResult.error}` };
-      orderId = orderResult.data?.orderNo;
-      productType = resolved.productCode;
-      if (items.length > 1) {
-        const settingRow = await storage.getSetting("order_execution_delay_ms");
-        const _parsed = parseInt(settingRow?.value ?? "", 10);
-        const delayMs = Number.isFinite(_parsed) ? Math.max(0, _parsed) : 200;
-        await new Promise(r => setTimeout(r, delayMs));
+    const effectiveMultiplier = Math.max(1, ctx.lotMultiplier - attempt);
+
+    for (const { leg, blockType, legIndex } of items) {
+      const tempCtx = { ...ctx, lotMultiplier: effectiveMultiplier };
+      const resolved = resolveOrderParams(leg, tempCtx, legIndex);
+      if ("error" in resolved) {
+        finalError = resolved.error;
+        attemptFailed = true;
+        break;
       }
-    } else {
-      orderId = `PT-${Date.now()}-L${legIndex}`;
+
+      let orderId: string | undefined;
+      let productType = "PAPER";
+      let orderStatus = "COMPLETE";
+      let orderReason = "";
+      let fillPrice = ctx.price;
+
+      if (broker === "kotak_neo") {
+        const l = leg as Record<string, any>;
+        const actualPriceType = l.priceType || orderTypeForRecord || "MKT";
+        const orderResult = await EL.placeOrder(brokerConfig, {
+          tradingSymbol: resolved.tradingSymbol, exchange: EL.mapExchange(ctx.exchange),
+          transactionType: resolved.transactionType, quantity: String(resolved.quantity),
+          productType: l.productType || leg.orderType || resolved.productCode,
+          priceType: actualPriceType, price: actualPriceType === "LMT" ? String(l.limitPrice || ctx.price) : "0",
+          validity: l.validity || "DAY", afterMarket: "NO",
+        });
+
+        if (!orderResult.success) {
+          orderStatus = "REJECTED";
+          orderReason = orderResult.error || "Unknown placeOrder error";
+        } else {
+          orderId = orderResult.data?.orderNo;
+          productType = resolved.productCode;
+          if (orderId) {
+            const statusObj = await getFillPrice(brokerConfig, orderId, ctx.price);
+            fillPrice = statusObj.fillPrice;
+            orderStatus = statusObj.status;
+            orderReason = statusObj.reason;
+          }
+        }
+
+        // Log every order result to Process Flow Log for audit trail
+        if (orderStatus === "REJECTED" || orderStatus === "CANCELLED") {
+          logPFL(plan, broker, ctx.data, "error", `[ORDER] ${orderId || "N/A"} → ${orderStatus} | symbol: ${resolved.tradingSymbol} | reason: ${orderReason}`);
+        } else {
+          logPFL(plan, broker, ctx.data, "info", `[ORDER] ${orderId || "N/A"} → ${orderStatus} | symbol: ${resolved.tradingSymbol} | qty: ${resolved.quantity}`);
+        }
+
+        if (items.length > 1) {
+          const settingRow = await storage.getSetting("order_execution_delay_ms");
+          const _parsed = parseInt(settingRow?.value ?? "", 10);
+          const delayMs = Number.isFinite(_parsed) ? Math.max(0, _parsed) : 200;
+          await new Promise(r => setTimeout(r, delayMs));
+        }
+      } else {
+        orderId = `PT-${Date.now()}-L${legIndex}`;
+      }
+
+      // Detect rejection after placement
+      if (orderStatus === "REJECTED" || orderStatus === "CANCELLED") {
+        const lowerReason = orderReason.toLowerCase();
+        if (lowerReason.includes("margin") || lowerReason.includes("rms") || lowerReason.includes("shortfall")) {
+          // Atomic rollback: reverse all legs that already landed before retrying
+          console.warn(`[TE] Margin shortfall on attempt ${attempt + 1}. Initiating atomic rollback for ${landedLegs.length} landed leg(s)...`);
+          for (const landed of landedLegs) {
+            const reverseAction = landed.action?.toUpperCase() === "BUY" ? "SELL" : "BUY";
+            logPFL(plan, broker, ctx.data, "warn", `[ROLLBACK] Reversing ${landed.tradingSymbol} qty=${landed.quantity}`);
+            await EL.placeOrder(brokerConfig, {
+              tradingSymbol: landed.tradingSymbol, exchange: EL.mapExchange(ctx.exchange),
+              transactionType: mapTransactionType(reverseAction), quantity: String(landed.quantity),
+              productType: landed.productCode, priceType: "MKT", price: "0",
+              validity: "DAY", afterMarket: "NO",
+            });
+          }
+          finalError = `Margin shortfall: ${orderReason}`;
+          attemptFailed = true;
+          break;
+        } else {
+          // Non-margin rejection — hard stop, no retry
+          finalError = `Order rejected: ${orderReason}`;
+          return { trades: [], orderIds: [], error: finalError };
+        }
+      }
+
+      // Order landed successfully — track for potential rollback and stage for DB write
+      landedLegs.push({
+        tradingSymbol: resolved.tradingSymbol, quantity: resolved.quantity,
+        productCode: resolved.productCode, action: leg.action,
+      });
+
+      attemptTrades.push({
+        planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${legIndex}`,
+        tradingSymbol: resolved.tradingSymbol, exchange: ctx.exchange, quantity: resolved.quantity,
+        price: fillPrice, action: (leg.action || "BUY").toUpperCase(), blockType, legIndex,
+        orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice,
+        executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now,
+        timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker,
+        indicator: ctx.data.indicator || null, alert: ctx.data.alert || null,
+        localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
+        webhookDataId: ctx.data.id || undefined,
+      });
+      if (orderId) attemptOrderIds.push(orderId);
     }
 
-    const fillPrice = broker === "kotak_neo" && orderId ? await getFillPrice(brokerConfig, orderId, ctx.price) : ctx.price;
-    const trade = await storage.createStrategyTrade({
-      planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${legIndex}`,
-      tradingSymbol: resolved.tradingSymbol, exchange: ctx.exchange, quantity: resolved.quantity,
-      price: fillPrice, action: (leg.action || "BUY").toUpperCase(), blockType, legIndex,
-      orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice,
-      executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now,
-      timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker,
-      indicator: ctx.data.indicator || null, alert: ctx.data.alert || null,
-      localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
-      webhookDataId: ctx.data.id || undefined,
-    });
-    trades.push(trade);
-    if (orderId) orderIds.push(orderId);
+    if (!attemptFailed) {
+      // Full basket succeeded — write all trade records to DB atomically
+      for (const staged of attemptTrades) {
+        const trade = await storage.createStrategyTrade(staged);
+        finalTrades.push(trade);
+      }
+      finalOrderIds = attemptOrderIds;
+      return { trades: finalTrades, orderIds: finalOrderIds };
+    } else if (attempt < maxRetries && finalError?.includes("Margin shortfall")) {
+      // Wait before retrying with reduced lot size
+      const retryRow = await storage.getSetting("squareoff_retry_interval_ms");
+      const retryDelay = retryRow?.value ? Math.max(0, parseInt(retryRow.value, 10)) : 1000;
+      console.log(`[TE] Retrying basket at lotMultiplier=${Math.max(1, ctx.lotMultiplier - attempt - 1)} in ${retryDelay}ms...`);
+      await new Promise(r => setTimeout(r, retryDelay));
+    } else {
+      break;
+    }
   }
-  return { trades, orderIds };
+
+  return { trades: [], orderIds: [], error: finalError };
 }
 
 // Assembles the entry basket for the resolved block only. Sorted BUY-before-SELL universally.
@@ -738,7 +836,7 @@ async function closeTrade(
 
     const closeOrderId = orderResult.data?.orderNo;
     if (closeOrderId) {
-      exitPrice = await getFillPrice(brokerConfig, closeOrderId, exitPrice);
+      exitPrice = (await getFillPrice(brokerConfig, closeOrderId, exitPrice)).fillPrice;
     }
   }
 
