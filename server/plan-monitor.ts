@@ -64,15 +64,25 @@ async function checkPlans(storage: IStorage): Promise<void> {
 
       const { exitTime, exitOnExpiry } = timeLogic;
 
+      // Fetch unclosed trades first — productType from DB drives the gate logic,
+      // not the plan config JSON. Each trade stores what was actually placed.
+      const unclosedTrades = await storage.getUnclosedTradesByPlan(plan.id);
+      if (unclosedTrades.length === 0) continue;
+
+      const hasMIS  = unclosedTrades.some(t => t.productType?.toUpperCase() === "MIS");
+      const hasNRML = unclosedTrades.some(t => ["NRML", "CNC"].includes(t.productType?.toUpperCase() ?? ""));
+
       let shouldSquareOff = false;
       let reason = "";
 
-      if (exitTime && istTime >= exitTime) {
+      // exitTime applies ONLY to MIS positions — broker forces intraday close anyway
+      if (exitTime && hasMIS && istTime >= exitTime) {
         shouldSquareOff = true;
-        reason = `exitTime reached (configured ${exitTime} IST, current ${istTime} IST)`;
+        reason = `exitTime reached for MIS position(s) (configured ${exitTime} IST, current ${istTime} IST)`;
       }
 
-      if (!shouldSquareOff && exitOnExpiry) {
+      // exitOnExpiry applies ONLY to NRML/CNC positions, and only on expiry day
+      if (!shouldSquareOff && exitOnExpiry && hasNRML) {
         const ticker = plan.ticker;
         const exchange = plan.exchange || "NFO";
         if (ticker) {
@@ -89,12 +99,6 @@ async function checkPlans(storage: IStorage): Promise<void> {
       }
 
       if (!shouldSquareOff) continue;
-
-      const unclosedTrades = await storage.getUnclosedTradesByPlan(plan.id);
-
-      if (unclosedTrades.length === 0) {
-        continue;
-      }
 
       const brokerConfig = await storage.getBrokerConfig(plan.brokerConfigId!);
       if (!brokerConfig) {

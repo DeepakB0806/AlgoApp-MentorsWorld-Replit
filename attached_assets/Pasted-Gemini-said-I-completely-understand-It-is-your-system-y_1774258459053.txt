@@ -1,0 +1,61 @@
+Gemini said
+I completely understand. It is your system, your capital, and your strategy. If you are comfortable absorbing the potential slippage costs during those rollback cycles to ensure the system aggressively tries to enter the trade at a smaller size, then the retry loop is exactly what you need.
+
+You are building a highly resilient machine, and having it auto-scale down and retry on the fly is an impressive capability.
+
+Here is the exact, copy-pasteable prompt for Replit based on our First Option (Atomic Rollback + Stepping Down the Lot Multiplier).
+
+Copy and paste everything below this line into Replit:
+
+# Task: Task #75 - Kotak Status Logging & Margin-Shortfall Retry Engine with Atomic Rollback
+
+What & Why
+Because Kotak's API cannot calculate hedged margin for multi-leg baskets in advance, we must place the Long leg before the Short leg. If the Short leg is rejected by Kotak's RMS due to a margin shortfall, the Long leg is left orphaned as a live "Ghost Order".
+To fix this, we need to implement "Atomic Rollback" inside executeLegBasket. If a leg fails due to margin, the engine must immediately market-sell the previously successful legs in that basket to neutralize risk. Then, it must reduce the lotMultiplier by 1, wait the configured delay, and retry the entire basket. We also need to capture actual Kotak execution statuses.
+
+Target File: server/te-kotak-neo-v3.ts
+
+Step-by-Step Instructions for the Agent:
+
+1. Upgrade getFillPrice
+
+Modify the getFillPrice function to return a structured object instead of just a number: Promise<{ fillPrice: number, status: string, reason: string, filledQty: number }>.
+
+Extract the status (ordSt/stText) and rejection reason (rejReason/rjBy) from the Kotak order history API response.
+
+CRITICAL: Find every place in te-kotak-neo-v3.ts that currently calls getFillPrice (e.g., inside executeLegBasket and closeTrade) and update it to correctly extract the .fillPrice property from the new return object so PNL calculations do not become NaN.
+
+2. Implement Atomic Rollback & Retry Loop in executeLegBasket
+
+Fetch the margin_shortfall_retry_count from storage.getSetting(). Default to 0 if not found.
+
+Wrap the leg execution flow inside executeLegBasket in a retry loop: for (let attempt = 0; attempt <= maxRetries; attempt++).
+
+Inside the loop, recalculate the basket quantities. The effective multiplier for the current attempt should be Math.max(1, ctx.lotMultiplier - attempt). Update resolved.quantity accordingly.
+
+If EL.placeOrder fails, or if the updated getFillPrice returns a status of "REJECTED" or "CANCELLED":
+
+Check if the error string or rejection reason contains "margin", "rms", or "shortfall" (case-insensitive).
+
+If it IS a margin error: 1. Stop processing the rest of the current basket attempt.
+2. ATOMIC ROLLBACK: Iterate through the trades array (the legs that successfully executed in this specific attempt). Fire a new EL.placeOrder for each, reversing the transactionType (Buy to Sell, Sell to Buy) at "MKT" price to instantly neutralize the ghost orders.
+3. Clear the trades and orderIds arrays.
+4. If attempt < maxRetries, wait order_execution_delay_ms and let the loop continue to the next attempt. If out of retries, return the error.
+
+If it is NOT a margin error: Return the error immediately to abort. Do not write failed trades to the database.
+
+3. Database Recording Guard
+
+Ensure storage.createStrategyTrade is ONLY called if every single leg in the basket executes successfully (no rejections). Move this out of the placement loop and execute it only when the full basket is confirmed.
+
+If a trade is successfully recorded, pass the rejection reason (if any, e.g., for partial fills) to an optional rejected_reason field in the database payload.
+
+Add comprehensive console.log / PFL logging: [INFO] for COMPLETE, [ERROR] for REJECTED/CANCELLED with the reason, and [WARN] for partial fills.
+
+Done Looks Like:
+
+executeLegBasket handles Kotak RMS rejections by rolling back partial baskets, reducing the lot size, and safely retrying.
+
+Ghost trades are completely eliminated because failed baskets are never written to strategy_trades.
+
+PNL math remains perfectly intact because closeTrade properly extracts .fillPrice.
