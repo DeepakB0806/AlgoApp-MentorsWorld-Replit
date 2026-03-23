@@ -366,6 +366,34 @@ async function executeTradeForPlan(
 
   const ctx: TradeContext = { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, neutralLegs, blockConfig, instrumentConfig, targetExpiryDate };
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // POST-EOD ENTRY GATE
+  // Blocks new ENTRY signals after the plan's configured exitTime (IST).
+  // Applies universally to all strategies. EXIT signals always bypass.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const resolvedAction2 = signalContext?.resolvedAction || (signalType === "buy" ? "ENTRY" : signalType === "sell" ? "EXIT" : "HOLD");
+
+  if (resolvedAction2 === "ENTRY") {
+    const eodTimeLogic = tradeParams?.timeLogic as { exitTime?: string } | undefined;
+    const exitTimeStr = eodTimeLogic?.exitTime;
+
+    if (exitTimeStr) {
+      const [exitHour, exitMinute] = exitTimeStr.split(":").map(Number);
+      const istDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const currentHour = istDate.getHours();
+      const currentMinute = istDate.getMinutes();
+      const isPastExitTime = (currentHour > exitHour) || (currentHour === exitHour && currentMinute >= exitMinute);
+
+      if (isPastExitTime) {
+        const curTime = `${String(currentHour).padStart(2, "0")}:${String(currentMinute).padStart(2, "0")}`;
+        const msg = `Signal held — entry blocked after EOD exitTime (${exitTimeStr} IST, current ${curTime} IST)`;
+        console.log(`[TE] ${msg}`);
+        logPFL(plan, broker, data, "held", msg, { resolvedAction: "ENTRY", ticker, exchange, price, executionTimeMs: Date.now() - startTime });
+        return { success: true, action: "hold", broker, planId: plan.id, message: msg, executionTimeMs: Date.now() - startTime };
+      }
+    }
+  }
+
   if (signalType === "buy") {
     return executeBuySignal(storage, plan, brokerConfig, ctx);
   }
