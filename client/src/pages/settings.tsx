@@ -369,10 +369,15 @@ function EmailTemplates() {
 
 function GeneralTradingSettings() {
   const [intervalValue, setIntervalValue] = useState<string>("");
+  const [shortfallRetryCount, setShortfallRetryCount] = useState<string>("");
   const { toast } = useToast();
 
   const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
     queryKey: ["/api/settings/squareoff_retry_interval_ms"],
+  });
+
+  const { data: shortfallSetting, isLoading: shortfallLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/margin_shortfall_retry_count"],
   });
 
   useEffect(() => {
@@ -382,6 +387,14 @@ function GeneralTradingSettings() {
       setIntervalValue("0");
     }
   }, [setting, isLoading]);
+
+  useEffect(() => {
+    if (shortfallSetting?.value !== undefined && shortfallSetting?.value !== null) {
+      setShortfallRetryCount(shortfallSetting.value);
+    } else if (!shortfallLoading) {
+      setShortfallRetryCount("0");
+    }
+  }, [shortfallSetting, shortfallLoading]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -393,6 +406,22 @@ function GeneralTradingSettings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings/squareoff_retry_interval_ms"] });
       toast({ title: "Saved", description: "Square-off retry interval updated." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const saveShortfallMutation = useMutation({
+    mutationFn: async () => {
+      const count = parseInt(shortfallRetryCount, 10);
+      if (isNaN(count) || count < 0) throw new Error("Enter a valid non-negative number");
+      const res = await apiRequest("POST", "/api/settings/margin_shortfall_retry_count", { value: String(count) });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/margin_shortfall_retry_count"] });
+      toast({ title: "Saved", description: "Margin shortfall retry count updated." });
     },
     onError: (err: any) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -411,39 +440,72 @@ function GeneralTradingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isLoading ? (
+        {isLoading || shortfallLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
-          <div className="space-y-3">
-            <Label htmlFor="input-squareoff-interval">
-              Retry Interval (ms)
-            </Label>
-            <p className="text-sm text-muted-foreground">
-              Delay between retry attempts after a failed exit order. Set to 0 for immediate retry — the broker API response time is the natural throttle. Increase only if the broker rejects rapid repeated orders.
-            </p>
-            <div className="flex items-center gap-3 max-w-xs">
-              <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
-              <Input
-                id="input-squareoff-interval"
-                data-testid="input-squareoff-interval"
-                type="number"
-                min="0"
-                step="50"
-                value={intervalValue}
-                onChange={(e) => setIntervalValue(e.target.value)}
-                placeholder="2000"
-              />
-              <span className="text-sm text-muted-foreground whitespace-nowrap">ms</span>
+          <>
+            <div className="space-y-3">
+              <Label htmlFor="input-squareoff-interval">
+                Retry Interval (ms)
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Delay between retry attempts after a failed exit order. Set to 0 for immediate retry — the broker API response time is the natural throttle. Increase only if the broker rejects rapid repeated orders.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Input
+                  id="input-squareoff-interval"
+                  data-testid="input-squareoff-interval"
+                  type="number"
+                  min="0"
+                  step="50"
+                  value={intervalValue}
+                  onChange={(e) => setIntervalValue(e.target.value)}
+                  placeholder="2000"
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">ms</span>
+              </div>
+              <p className="text-xs text-muted-foreground">Kotak Neo's RMS registers in 400–800ms.</p>
+              <Button
+                data-testid="button-save-squareoff-interval"
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending}
+              >
+                {saveMutation.isPending ? "Saving..." : "Save"}
+              </Button>
             </div>
-            <p className="text-xs text-muted-foreground">Kotak Neo's RMS registers in 400–800ms.</p>
-            <Button
-              data-testid="button-save-squareoff-interval"
-              onClick={() => saveMutation.mutate()}
-              disabled={saveMutation.isPending}
-            >
-              {saveMutation.isPending ? "Saving..." : "Save"}
-            </Button>
-          </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="input-shortfall-retry-count">
+                Retry in case Margin Shortfall
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Number of times to retry the entire basket at a reduced lot multiplier when Kotak rejects an order due to margin shortfall. Each retry steps the multiplier down by 1x. Set to 0 to disable automatic retry.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Input
+                  id="input-shortfall-retry-count"
+                  data-testid="input-shortfall-retry-count"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={shortfallRetryCount}
+                  onChange={(e) => setShortfallRetryCount(e.target.value)}
+                  placeholder="0"
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">retries</span>
+              </div>
+              <p className="text-xs text-muted-foreground">e.g. set to 2 at 3x: tries 3x → 2x → 1x before giving up.</p>
+              <Button
+                data-testid="button-save-shortfall-retry-count"
+                onClick={() => saveShortfallMutation.mutate()}
+                disabled={saveShortfallMutation.isPending}
+              >
+                {saveShortfallMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>

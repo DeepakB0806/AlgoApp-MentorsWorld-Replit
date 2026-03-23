@@ -539,6 +539,7 @@ export default function Dashboard() {
                         <TableHead className="text-right">Qty</TableHead>
                         <TableHead className="text-right">Price</TableHead>
                         <TableHead>Status</TableHead>
+                        <TableHead>Reason</TableHead>
                         <TableHead>Time</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -563,11 +564,15 @@ export default function Dashboard() {
                           <TableCell className="text-right">{order.quantity}</TableCell>
                           <TableCell className="text-right">{Number(order.price || 0).toFixed(2)}</TableCell>
                           <TableCell>
-                            <Badge 
-                              variant={order.status === "COMPLETE" ? "default" : order.status === "CANCELLED" ? "destructive" : "secondary"}
+                            <Badge
+                              variant={order.status === "COMPLETE" ? "default" : (order.status === "CANCELLED" || order.status === "REJECTED") ? "destructive" : "secondary"}
+                              data-testid={`status-order-${order.order_id}`}
                             >
                               {order.status}
                             </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate" data-testid={`text-rejection-reason-${order.order_id}`}>
+                            {order.rejection_reason || ""}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">{order.timestamp}</TableCell>
                         </TableRow>

@@ -681,6 +681,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
             price: Number(o.avgPrc || o.prc || o.price || o.pr || 0),
             status: o.status || o.stat || o.ordSt || "",
             timestamp: o.timestamp || o.plDate || o.time || o.ordTm || "",
+            rejection_reason: o.rejReason || o.rej_reason || o.rjBy || o.reason || "",
           }));
           return res.json(normalized);
         }

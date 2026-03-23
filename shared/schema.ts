@@ -542,6 +542,7 @@ export interface Order {
   order_type: string;
   exchange: string;
   timestamp: string;
+  rejection_reason?: string;
 }
 
 // Holding - matches Kotak Neo INVESTMENTS layout
