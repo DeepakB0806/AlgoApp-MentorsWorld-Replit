@@ -384,7 +384,16 @@ async function executeTradeForPlan(
       const currentMinute = istDate.getMinutes();
       const isPastExitTime = (currentHour > exitHour) || (currentHour === exitHour && currentMinute >= exitMinute);
 
-      if (isPastExitTime) {
+      const productMode = ctx.blockConfig.productMode as string | undefined;
+      let shouldBlock = false;
+      if (productMode === "MIS" && isPastExitTime) {
+        shouldBlock = true;
+      } else if (productMode === "NRML" && isPastExitTime && ctx.targetExpiryDate === ctx.today) {
+        shouldBlock = true;
+      }
+      // No default fallback — unknown productMode does not block
+
+      if (shouldBlock) {
         const curTime = `${String(currentHour).padStart(2, "0")}:${String(currentMinute).padStart(2, "0")}`;
         const msg = `Signal held — entry blocked after EOD exitTime (${exitTimeStr} IST, current ${curTime} IST)`;
         console.log(`[TE] ${msg}`);
