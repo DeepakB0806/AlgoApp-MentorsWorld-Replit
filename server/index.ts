@@ -226,6 +226,14 @@ app.use((req, res, next) => {
     log(`Plan monitor startup warning: ${err}`);
   }
 
+  // Seed default settings (only writes if key is absent)
+  try {
+    const existingRollback = await storage.getSetting("rollback_api_retry_count");
+    if (!existingRollback) await storage.setSetting("rollback_api_retry_count", "5");
+  } catch (err) {
+    log(`[STARTUP] Default settings seed warning: ${err}`);
+  }
+
   // Start scheduled data retention job — prunes old rows from all major tables daily
   try {
     startDataRetentionJob(storage);

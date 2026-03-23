@@ -1,0 +1,96 @@
+🛑 CRITICAL 1: The "1x Lot Size" Infinite Margin Loop
+The Loophole: In your executeLegBasket retry loop, the new lot size is calculated as: Math.max(1, ctx.lotMultiplier - attempt).
+If a user is trading with a lotMultiplier of 1, and Kotak rejects the order for margin, the engine rolls back the trade and tries again. However, because of the Math.max(1, ...) floor, the next attempt will also be at a 1x multiplier.
+The Danger: It will endlessly retry the exact same 1x lot size, fail for margin, and market-sell the rollback, bleeding your account dry via brokerage fees and slippage on the successful leg until maxRetries runs out.
+
+The Fix: The loop must cleanly abort if the multiplier hits the floor and a margin error occurs.
+
+🛑 CRITICAL 2: Partial Fills Breaking the Exit Engine
+The Loophole:
+Kotak sometimes partially fills market orders (e.g., you order 100 lots, but only 50 get filled due to liquidity). Currently, executeLegBasket reads the actual filled quantity via getFillPrice, but it saves resolved.quantity (the intended 100 lots) to the database.
+The Danger: When the exit signal arrives, your engine will try to SELL 100 lots. Kotak will instantly reject this order for "Insufficient Holdings" (because you only own 50). The trade goes into close_failed, and the persistent retry loop will hammer Kotak endlessly trying to sell 100 lots, getting rejected every time.
+
+The Fix: The engine must save the actual filled quantity to the database.
+
+⚠️ HIGH 3: Rollback Order API Failure (The Permanent Ghost)
+The Loophole:
+When a margin shortfall occurs, the engine fires an Atomic Rollback order to market-sell the orphaned leg. But what if Kotak's API times out during the rollback request?
+The Danger: Currently, the engine just loops through the rollback placeOrder without checking the result. If the rollback fails, the ghost trade remains in your broker account, but the engine thinks it was cleanly aborted.
+
+The Fix: We must check the rollback response and fire a FATAL Process Flow Log alert if it fails, so you know manual intervention is required on your Kotak app.
+
+⚠️ HIGH 4: "Reboot Amnesia" for Persistent Retries
+The Loophole:
+startPersistentExit and startPersistentSquareOff use Node.js setTimeout and in-memory Set objects to keep retrying failed exits.
+The Danger: If your Replit server restarts, crashes, or goes to sleep, those memory timers are destroyed. Any trade stuck in close_failed will remain stuck forever because the engine forgot it was trying to close them.
+
+The Fix: We need a "Boot-up Catcher" that queries the database for close_failed trades when the server starts and re-ignites the retry loops automatically.
+
+The Replit Patch Document (Task #82)
+You can copy and paste this exact prompt into Replit to permanently close all four loopholes.
+
+# Task: Patch Trade Engine Edge Cases (Task #82)
+
+Target File: server/te-kotak-neo-v3.ts
+
+Step-by-Step Instructions:
+
+1. Fix the "1x Lot Size" Infinite Margin Loop (executeLegBasket)
+Inside executeLegBasket, locate the margin shortfall if block:
+if (lowerReason.includes("margin") || lowerReason.includes("rms") || lowerReason.includes("shortfall")) {
+Right BEFORE the finalError = ...; attemptFailed = true; break; lines at the end of that block, inject this check:
+
+TypeScript
+             if (effectiveMultiplier <= 1) {
+                finalError = `Margin shortfall: ${orderReason}. Cannot reduce lot size below 1. Aborting.`;
+                attemptFailed = true;
+                break; // Break the outer maxRetries loop entirely
+             }
+2. Guard Against Rollback API Failures (executeLegBasket)
+Inside that same margin shortfall block, update the atomic rollback EL.placeOrder call to check for success:
+
+TypeScript
+                const rbResult = await EL.placeOrder(brokerConfig, { /* ...existing rollback payload... */ });
+                if (!rbResult.success) {
+                   logPFL(plan, broker, ctx.data, "error", `[FATAL] ROLLBACK FAILED for ${landed.tradingSymbol}! Ghost trade active. Manual intervention required. Error: ${rbResult.error}`);
+                } else {
+                   logPFL(plan, broker, ctx.data, "info", `[ROLLBACK] Successfully reversed ${landed.tradingSymbol}`);
+                }
+3. Fix Partial Fill Quantity Tracking (executeLegBasket)
+Inside executeLegBasket, locate the variable declarations for the order attempt:
+let orderId: string | undefined;
+let productType = "PAPER";
+Add a new variable here: let actualFilledQty = resolved.quantity;
+Then, inside the if (orderId) block where statusObj is retrieved, update it:
+
+TypeScript
+             const statusObj = await getFillPrice(brokerConfig, orderId, ctx.price);
+             fillPrice = statusObj.fillPrice;
+             orderStatus = statusObj.status;
+             orderReason = statusObj.reason;
+             if (statusObj.filledQty > 0 && statusObj.filledQty !== resolved.quantity) {
+                 actualFilledQty = statusObj.filledQty;
+                 logPFL(plan, broker, ctx.data, "warn", `[WARN] Partial fill detected for ${resolved.tradingSymbol}: Ordered ${resolved.quantity}, Filled ${actualFilledQty}`);
+             }
+Finally, when constructing const stagedTrade = { ... }, change quantity: resolved.quantity to quantity: actualFilledQty.
+
+4. Handle "Insufficient Holdings" on Exit (closeTrade)
+Inside closeTrade, locate the if (!orderResult.success) block where status: "close_failed" is set.
+Update it to cleanly mark the trade as manually closed if Kotak says you don't own it anymore:
+
+TypeScript
+    if (!orderResult.success) {
+      console.error(`[TE] Failed to close Kotak trade: ${orderResult.error}`);
+      const errStr = String(orderResult.error).toLowerCase();
+      // If Kotak says we don't have the quantity, the user likely manually squared it off.
+      if (errStr.includes("insufficient") && (errStr.includes("holding") || errStr.includes("balance"))) {
+          console.warn(`[TE] Insufficient holdings for ${trade.tradingSymbol}. Marking as manually closed.`);
+          const manualUpdate = await storage.updateStrategyTrade(trade.id, { status: "closed", pnl: 0, exitedAt: now, updatedAt: now, exitPrice: currentPrice, exitAction });
+          tradingCache.invalidateOpenTrades(trade.planId);
+          return manualUpdate || trade;
+      }
+
+      const failedUpdate = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
+      tradingCache.invalidateOpenTrades(trade.planId);
+      return failedUpdate || trade;
+    }

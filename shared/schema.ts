@@ -196,6 +196,8 @@ export const strategyTrades = pgTable("strategy_trades", {
   legIndex: integer("leg_index").notNull().default(0),
   orderType: text("order_type"),
   productType: text("product_type"),
+  // Valid states: "pending" | "open" | "closed" | "close_failed"
+  // Rollback states: "pending_basket" | "rolling_back" | "rolled_back" | "rollback_failed"
   status: text("status").notNull().default("pending"),
   pnl: real("pnl").default(0),
   ltp: real("ltp").default(0),

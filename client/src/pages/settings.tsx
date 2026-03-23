@@ -370,6 +370,7 @@ function EmailTemplates() {
 function GeneralTradingSettings() {
   const [intervalValue, setIntervalValue] = useState<string>("");
   const [shortfallRetryCount, setShortfallRetryCount] = useState<string>("");
+  const [rollbackRetryCount, setRollbackRetryCount] = useState<string>("");
   const { toast } = useToast();
 
   const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
@@ -378,6 +379,10 @@ function GeneralTradingSettings() {
 
   const { data: shortfallSetting, isLoading: shortfallLoading } = useQuery<{ key: string; value: string | null }>({
     queryKey: ["/api/settings/margin_shortfall_retry_count"],
+  });
+
+  const { data: rollbackSetting, isLoading: rollbackLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/rollback_api_retry_count"],
   });
 
   useEffect(() => {
@@ -395,6 +400,14 @@ function GeneralTradingSettings() {
       setShortfallRetryCount("0");
     }
   }, [shortfallSetting, shortfallLoading]);
+
+  useEffect(() => {
+    if (rollbackSetting?.value !== undefined && rollbackSetting?.value !== null) {
+      setRollbackRetryCount(rollbackSetting.value);
+    } else if (!rollbackLoading) {
+      setRollbackRetryCount("5");
+    }
+  }, [rollbackSetting, rollbackLoading]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -428,6 +441,22 @@ function GeneralTradingSettings() {
     },
   });
 
+  const saveRollbackMutation = useMutation({
+    mutationFn: async () => {
+      const count = parseInt(rollbackRetryCount, 10);
+      if (isNaN(count) || count < 0) throw new Error("Enter a valid non-negative number");
+      const res = await apiRequest("POST", "/api/settings/rollback_api_retry_count", { value: String(count) });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/rollback_api_retry_count"] });
+      toast({ title: "Saved", description: "Rollback retry count updated." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   return (
     <Card data-testid="card-general-trading-settings">
       <CardHeader>
@@ -440,7 +469,7 @@ function GeneralTradingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isLoading || shortfallLoading ? (
+        {isLoading || shortfallLoading || rollbackLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
           <>
@@ -503,6 +532,37 @@ function GeneralTradingSettings() {
                 disabled={saveShortfallMutation.isPending}
               >
                 {saveShortfallMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="input-rollback-retry-count">
+                Retry API Crashes During ATOMIC ROLLBACK
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Number of times to persistently retry market-selling a ghost leg if the broker API crashes during an Atomic Margin Rollback. Set to 0 to disable automatic retry.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Input
+                  id="input-rollback-retry-count"
+                  data-testid="input-rollback-retry-count"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={rollbackRetryCount}
+                  onChange={(e) => setRollbackRetryCount(e.target.value)}
+                  placeholder="5"
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">retries</span>
+              </div>
+              <p className="text-xs text-muted-foreground">e.g. set to 5: engine retries the market-sell 5 times before declaring a ghost.</p>
+              <Button
+                data-testid="button-save-rollback-retry-count"
+                onClick={() => saveRollbackMutation.mutate()}
+                disabled={saveRollbackMutation.isPending}
+              >
+                {saveRollbackMutation.isPending ? "Saving..." : "Save"}
               </Button>
             </div>
           </>
