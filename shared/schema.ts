@@ -213,6 +213,7 @@ export const strategyTrades = pgTable("strategy_trades", {
   mode: text("mode"),
   modeDesc: text("mode_desc"),
   webhookDataId: varchar("webhook_data_id", { length: 36 }),
+  rejectedReason: text("rejected_reason"),
 }, (table) => [
   index("idx_strategy_trades_plan_id").on(table.planId),
   index("idx_strategy_trades_status").on(table.status),

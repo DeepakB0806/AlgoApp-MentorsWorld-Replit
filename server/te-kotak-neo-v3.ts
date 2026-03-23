@@ -643,6 +643,7 @@ async function executeLegBasket(
         indicator: ctx.data.indicator || null, alert: ctx.data.alert || null,
         localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
         webhookDataId: ctx.data.id || undefined,
+        rejectedReason: orderReason || null,
       });
       if (orderId) attemptOrderIds.push(orderId);
     }
