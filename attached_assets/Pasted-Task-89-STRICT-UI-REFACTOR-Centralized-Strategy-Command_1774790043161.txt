@@ -1,0 +1,86 @@
+Task #89: [STRICT UI REFACTOR] Centralized Strategy Command Center
+CRITICAL MANDATE: You are moving the Product Type (NRML/MIS) and Execution Mode (LMT/MKT) toggles from the individual blocks to a centralized "Command Center" at the top of the Strategy Execution section. You must NOT touch any bracketOrder logic or its visibility state.
+
+File: client/src/components/trade-planning.tsx
+
+Step 1: The "Search & Destroy" (Clean the Blocks)
+Action: Find the Uptrend, Downtrend, and Neutral blocks.
+
+Delete: Completely remove any <Select>, <Label>, or toggle UI for productMode and priceMode from the block headers and block setting panels.
+
+Step 2: Build the Command Center (Row 1 & Row 2)
+Locate: Find the Strategy Execution section where the Exchange and Ticker / Symbol selects are currently rendered.
+
+Replace: Replace that entire row with this 2-row grid layout:
+
+TypeScript
+{/* --- GLOBAL STRATEGY COMMAND CENTER --- */}
+<div className="flex flex-col gap-4 mb-8 p-6 bg-primary/5 rounded-xl border border-primary/10 shadow-sm">
+  
+  {/* Row 1: Exchange | Ticker / Symbol */}
+  <div className="grid grid-cols-2 gap-4">
+    <div className="space-y-2">
+      <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Exchange</Label>
+      {/* Keep your existing Exchange Select here */}
+    </div>
+    <div className="space-y-2">
+      <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ticker / Symbol</Label>
+      {/* Keep your existing Ticker / Symbol Select here */}
+    </div>
+  </div>
+
+  {/* Row 2: Product Type | Execution Mode */}
+  <div className="grid grid-cols-2 gap-4 pt-4 border-t border-primary/10">
+    <div className="space-y-2">
+      <Label className="text-xs font-bold uppercase tracking-wider text-primary/70">Product Type (Strategy Wide)</Label>
+      <Select 
+        value={uptrendConfig.productMode || "NRML"} 
+        onValueChange={(v) => {
+          const mode = v as "MIS" | "NRML";
+          const update = (prev: any) => ({ 
+            ...prev, 
+            productMode: mode, 
+            bracketOrder: mode === "NRML" ? undefined : prev.bracketOrder 
+          });
+          setUptrendConfig(update);
+          setDowntrendConfig(update);
+          setNeutralConfig(update);
+        }}
+      >
+        <SelectTrigger className="w-full h-10 bg-background border-primary/20 font-semibold">
+          <SelectValue placeholder="NRML / MIS" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="NRML">NRML (Overnight / Standard)</SelectItem>
+          <SelectItem value="MIS">MIS (Intraday / Margin)</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+
+    <div className="space-y-2">
+      <Label className="text-xs font-bold uppercase tracking-wider text-primary/70">Execution Mode (SEBI Compliant)</Label>
+      <Select 
+        value={uptrendConfig.priceMode || "LMT"} 
+        onValueChange={(v) => {
+          const mode = v as "LMT" | "MKT";
+          const update = (prev: any) => ({ ...prev, priceMode: mode });
+          setUptrendConfig(update);
+          setDowntrendConfig(update);
+          setNeutralConfig(update);
+        }}
+      >
+        <SelectTrigger className="w-full h-10 bg-background border-primary/20 font-semibold">
+          <SelectValue placeholder="LMT / MKT" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="LMT">LMT (Buffered Limit - Safe)</SelectItem>
+          <SelectItem value="MKT">MKT (Market Order - Unsafe)</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  </div>
+</div>
+Step 3: Update State Logic
+hasMISLegs: Update the constant to use the centralized state: const hasMISLegs = uptrendConfig.productMode === "MIS";.
+
+Save Payload: Ensure that on savePlan, all three configs (uptrend, downtrend, neutral) are bundled with the current shared productMode and priceMode.
