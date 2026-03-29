@@ -66,7 +66,7 @@ export function TradePlanning() {
   const [uptrendLegs, setUptrendLegs] = useState<PlanTradeLeg[]>([]);
   const [downtrendLegs, setDowntrendLegs] = useState<PlanTradeLeg[]>([]);
   const [neutralLegs, setNeutralLegs] = useState<PlanTradeLeg[]>([]);
-  const defaultBlockConfig: BlockConfig = { productMode: "MIS" };
+  const defaultBlockConfig: BlockConfig = { productMode: "NRML", priceMode: "LMT" };
   const [uptrendConfig, setUptrendConfig] = useState<BlockConfig>(defaultBlockConfig);
   const [downtrendConfig, setDowntrendConfig] = useState<BlockConfig>(defaultBlockConfig);
   const [neutralConfig, setNeutralConfig] = useState<BlockConfig>(defaultBlockConfig);
@@ -184,9 +184,9 @@ export function TradePlanning() {
     setUptrendLegs([]);
     setDowntrendLegs([]);
     setNeutralLegs([]);
-    setUptrendConfig({ productMode: "MIS" });
-    setDowntrendConfig({ productMode: "MIS" });
-    setNeutralConfig({ productMode: "MIS" });
+    setUptrendConfig({ productMode: "NRML", priceMode: "LMT" });
+    setDowntrendConfig({ productMode: "NRML", priceMode: "LMT" });
+    setNeutralConfig({ productMode: "NRML", priceMode: "LMT" });
     setStoploss({ enabled: false, mode: "amount", value: 0 });
     setProfitTarget({ enabled: false, mode: "amount", value: 0 });
     setTrailingSL({ enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
@@ -213,9 +213,9 @@ export function TradePlanning() {
       if (legs.length > 0 && legs.every((l) => l.orderType === "NRML")) return "NRML";
       return "MIS";
     };
-    setUptrendConfig(tp.uptrendConfig || { productMode: deriveMode(loadedUptrend) });
-    setDowntrendConfig(tp.downtrendConfig || { productMode: deriveMode(loadedDowntrend) });
-    setNeutralConfig(tp.neutralConfig || { productMode: deriveMode(loadedNeutral) });
+    setUptrendConfig(tp.uptrendConfig ? { priceMode: "LMT", ...tp.uptrendConfig } : { productMode: deriveMode(loadedUptrend), priceMode: "LMT" });
+    setDowntrendConfig(tp.downtrendConfig ? { priceMode: "LMT", ...tp.downtrendConfig } : { productMode: deriveMode(loadedDowntrend), priceMode: "LMT" });
+    setNeutralConfig(tp.neutralConfig ? { priceMode: "LMT", ...tp.neutralConfig } : { productMode: deriveMode(loadedNeutral), priceMode: "LMT" });
     setStoploss(tp.stoploss || { enabled: false, mode: "amount", value: 0 });
     setProfitTarget(tp.profitTarget || { enabled: false, mode: "amount", value: 0 });
     setTrailingSL(tp.trailingSL || { enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
@@ -428,6 +428,15 @@ export function TradePlanning() {
                           <SelectContent>
                             <SelectItem value="MIS">MIS</SelectItem>
                             <SelectItem value="NRML">NRML</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={block.config.priceMode || "LMT"} onValueChange={(v) => block.configSetter((prev) => ({ ...prev, priceMode: v as "LMT" | "MKT" }))}>
+                          <SelectTrigger className="w-20 h-6 text-xs" data-testid={`select-price-mode-${block.key}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="LMT">LMT</SelectItem>
+                            <SelectItem value="MKT">MKT</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1031,10 +1040,10 @@ export function TradePlanning() {
                   {plan.tradeParams && (() => {
                     const tp = parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [], uptrendLegs: [], downtrendLegs: [], neutralLegs: [] });
                     const allLegs = [
-                      ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400", mode: tp.uptrendConfig?.productMode || "MIS" }] : [],
-                      ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400", mode: tp.downtrendConfig?.productMode || "MIS" }] : [],
-                      ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400", mode: tp.neutralConfig?.productMode || "MIS" }] : [],
-                      ...(tp.legs || []).length > 0 ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground", mode: "MIS" }] : [],
+                      ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400", mode: `${tp.uptrendConfig?.productMode || "NRML"} ${tp.uptrendConfig?.priceMode || "LMT"}` }] : [],
+                      ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400", mode: `${tp.downtrendConfig?.productMode || "NRML"} ${tp.downtrendConfig?.priceMode || "LMT"}` }] : [],
+                      ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400", mode: `${tp.neutralConfig?.productMode || "NRML"} ${tp.neutralConfig?.priceMode || "LMT"}` }] : [],
+                      ...(tp.legs || []).length > 0 ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground", mode: "NRML LMT" }] : [],
                     ];
                     return allLegs.length > 0 ? (
                       <div className="space-y-1" data-testid={`container-plan-legs-${plan.id}`}>

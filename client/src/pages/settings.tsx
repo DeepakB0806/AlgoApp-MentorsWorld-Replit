@@ -371,6 +371,7 @@ function GeneralTradingSettings() {
   const [intervalValue, setIntervalValue] = useState<string>("");
   const [shortfallRetryCount, setShortfallRetryCount] = useState<string>("");
   const [rollbackRetryCount, setRollbackRetryCount] = useState<string>("");
+  const [bufferPoints, setBufferPoints] = useState<string>("");
   const { toast } = useToast();
 
   const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
@@ -383,6 +384,10 @@ function GeneralTradingSettings() {
 
   const { data: rollbackSetting, isLoading: rollbackLoading } = useQuery<{ key: string; value: string | null }>({
     queryKey: ["/api/settings/rollback_api_retry_count"],
+  });
+
+  const { data: bufferSetting, isLoading: bufferLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/limit_order_buffer_points"],
   });
 
   useEffect(() => {
@@ -408,6 +413,14 @@ function GeneralTradingSettings() {
       setRollbackRetryCount("5");
     }
   }, [rollbackSetting, rollbackLoading]);
+
+  useEffect(() => {
+    if (bufferSetting?.value !== undefined && bufferSetting?.value !== null) {
+      setBufferPoints(bufferSetting.value);
+    } else if (!bufferLoading) {
+      setBufferPoints("1");
+    }
+  }, [bufferSetting, bufferLoading]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -457,6 +470,22 @@ function GeneralTradingSettings() {
     },
   });
 
+  const saveBufferMutation = useMutation({
+    mutationFn: async () => {
+      const pts = parseFloat(bufferPoints);
+      if (isNaN(pts) || pts < 0) throw new Error("Enter a valid non-negative number");
+      const res = await apiRequest("POST", "/api/settings/limit_order_buffer_points", { value: String(pts) });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/limit_order_buffer_points"] });
+      toast({ title: "Saved", description: "Limit order buffer updated." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   return (
     <Card data-testid="card-general-trading-settings">
       <CardHeader>
@@ -469,7 +498,7 @@ function GeneralTradingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isLoading || shortfallLoading || rollbackLoading ? (
+        {isLoading || shortfallLoading || rollbackLoading || bufferLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
           <>
@@ -563,6 +592,37 @@ function GeneralTradingSettings() {
                 disabled={saveRollbackMutation.isPending}
               >
                 {saveRollbackMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="input-limit-order-buffer">
+                Limit Order Buffer (Points)
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Points added to (BUY) or subtracted from (SELL) the current price when placing a Limit Order. Ensures the order gets filled even if the price moves slightly. Set to 0 for exact price. Applies to all LMT order placements.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Input
+                  id="input-limit-order-buffer"
+                  data-testid="input-limit-order-buffer"
+                  type="number"
+                  min="0"
+                  step="0.05"
+                  value={bufferPoints}
+                  onChange={(e) => setBufferPoints(e.target.value)}
+                  placeholder="1"
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">pts</span>
+              </div>
+              <p className="text-xs text-muted-foreground">e.g. set to 1: BUY at ltp+1, SELL at ltp-1. Price rounded to nearest 0.05.</p>
+              <Button
+                data-testid="button-save-limit-order-buffer"
+                onClick={() => saveBufferMutation.mutate()}
+                disabled={saveBufferMutation.isPending}
+              >
+                {saveBufferMutation.isPending ? "Saving..." : "Save"}
               </Button>
             </div>
           </>

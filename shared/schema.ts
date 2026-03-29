@@ -62,6 +62,7 @@ export type PlanTradeLeg = {
 
 export type BlockConfig = {
   productMode: "MIS" | "NRML";
+  priceMode?: "LMT" | "MKT";
   bracketOrder?: {
     enabled: boolean;
     stoplossSpread?: number;
@@ -745,7 +746,8 @@ export function buildBrokerOrderParams(leg: PlanTradeLeg, config: { exchange?: s
   const exchange = leg.exchange || config.exchange || "NFO";
   const ticker = config.ticker || "";
   const ts = buildTradingSymbol(ticker, leg.type, leg.strike);
-  const product = leg.orderType || config.productMode || "MIS";
+  const product = config.productMode;
+  if (!product) throw new Error("Product Type (NRML/MIS) is missing from database configuration.");
   return {
     transaction_type: txMap[leg.action] || "B",
     product: product,

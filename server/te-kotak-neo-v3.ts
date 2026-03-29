@@ -425,11 +425,20 @@ interface TradeContext {
   ticker: string; exchange: string; price: number; resolvedBlockType: string; lotMultiplier: number; now: string; today: string; data: WebhookData; openTrades: StrategyTrade[]; signalContext?: SignalContext; startTime: number; legs: PlanTradeLeg[]; neutralLegs: PlanTradeLeg[]; blockConfig: Record<string, any>; instrumentConfig?: InstrumentConfig; targetExpiryDate?: string;
 }
 
+function getBufferedLimitPrice(currentPrice: number, action: string, bufferPoints: number): string {
+  if (!currentPrice || currentPrice <= 0) return "0";
+  const rawPrice = action.toUpperCase() === "BUY"
+    ? currentPrice + bufferPoints
+    : Math.max(0.05, currentPrice - bufferPoints);
+  const roundedPrice = Math.round(rawPrice * 20) / 20;
+  return roundedPrice.toFixed(2);
+}
+
 function resolveOrderParams(
   leg: PlanTradeLeg,
   ctx: TradeContext,
   legIndex: number,
-): { tradingSymbol: string; quantity: number; productCode: string; transactionType: string } | { error: string } {
+): { tradingSymbol: string; quantity: number; productCode: string; priceMode: string; transactionType: string } | { error: string } {
   const isOption = isOptionExchange(ctx.exchange) && (leg.type === "CE" || leg.type === "PE");
 
   if (isOption && !ctx.instrumentConfig) {
@@ -508,12 +517,19 @@ function resolveOrderParams(
   }
 
   const quantity = (leg.lots || 1) * lotSize * ctx.lotMultiplier;
+
   const dbProductDefault = TL.isReady() ? TL.getDefaultByUniversalName("productType", "order_place") : null;
-  const productCode = leg.orderType || ctx.blockConfig.productMode || dbProductDefault || "MIS";
+  const productCode = ctx.blockConfig.productMode || dbProductDefault;
+  if (!productCode) return { error: "ABORT: Product Type (NRML/MIS) not found in plan config or global DB defaults." };
+
+  const dbPriceDefault = TL.isReady() ? TL.getDefaultByUniversalName("priceType", "order_place") : null;
+  const priceMode = ctx.blockConfig.priceMode || dbPriceDefault;
+  if (!priceMode) return { error: "ABORT: Price Type (LMT/MKT) not found in plan config or global DB defaults." };
+
   const transactionType = mapTransactionType(leg.action);
 
-  console.log(`[TRADE] Leg[${legIndex}] order params: symbol=${tradingSymbol} qty=${quantity}`);
-  return { tradingSymbol, quantity, productCode, transactionType };
+  console.log(`[TRADE] Leg[${legIndex}] order params: symbol=${tradingSymbol} qty=${quantity} product=${productCode} price=${priceMode}`);
+  return { tradingSymbol, quantity, productCode, priceMode, transactionType };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -562,14 +578,23 @@ async function executeLegBasket(
       let actualFilledQty = resolved.quantity;
 
       if (broker === "kotak_neo") {
-        const l = leg as Record<string, any>;
-        const actualPriceType = l.priceType || orderTypeForRecord || "MKT";
+        const bufferSetting = await storage.getSetting("limit_order_buffer_points");
+        if (!bufferSetting?.value && resolved.priceMode === "LMT") {
+          const abortMsg = "ABORT: limit_order_buffer_points is missing from app_settings.";
+          logPFL(plan, broker, ctx.data, "error", abortMsg);
+          throw new Error(abortMsg);
+        }
+        const bufferPoints = parseFloat(bufferSetting?.value || "0");
+        const entryPrice = ctx.price || 0;
+        const finalPrice = resolved.priceMode === "LMT"
+          ? getBufferedLimitPrice(entryPrice, leg.action, bufferPoints)
+          : "0";
         const orderResult = await EL.placeOrder(brokerConfig, {
           tradingSymbol: resolved.tradingSymbol, exchange: EL.mapExchange(ctx.exchange),
           transactionType: resolved.transactionType, quantity: String(resolved.quantity),
-          productType: l.productType || leg.orderType || resolved.productCode,
-          priceType: actualPriceType, price: actualPriceType === "LMT" ? String(l.limitPrice || ctx.price) : "0",
-          validity: l.validity || "DAY", afterMarket: "NO",
+          productType: resolved.productCode,
+          priceType: resolved.priceMode, price: finalPrice,
+          validity: "DAY", afterMarket: "NO",
         });
 
         if (!orderResult.success) {
@@ -621,10 +646,18 @@ async function executeLegBasket(
             const reverseAction = landed.action?.toUpperCase() === "BUY" ? "SELL" : "BUY";
             logPFL(plan, broker, ctx.data, "warn", `[ROLLBACK] Reversing ${landed.tradingSymbol} qty=${landed.quantity}`);
 
+            const rbBufferSetting = await storage.getSetting("limit_order_buffer_points");
+            const rbBufferPoints = parseFloat(rbBufferSetting?.value || "0");
+            const rbPriceMode = (ctx.blockConfig.priceMode as string | undefined)
+              || (TL.isReady() ? TL.getDefaultByUniversalName("priceType", "order_place") : null)
+              || "MKT";
+            const rbPrice = rbPriceMode === "LMT"
+              ? getBufferedLimitPrice(landed.ltp || landed.price || 0, reverseAction, rbBufferPoints)
+              : "0";
             const rbResult = await EL.placeOrder(brokerConfig, {
               tradingSymbol: landed.tradingSymbol, exchange: EL.mapExchange(ctx.exchange),
               transactionType: mapTransactionType(reverseAction), quantity: String(landed.quantity),
-              productType: landed.productType || "MIS", priceType: "MKT", price: "0",
+              productType: landed.productType, priceType: rbPriceMode, price: rbPrice,
               validity: "DAY", afterMarket: "NO",
             });
 
@@ -877,14 +910,23 @@ async function closeTrade(
       return failedUpdate || trade;
     }
 
+    const ctPriceMode = TL.isReady()
+      ? TL.getDefaultByUniversalName("priceType", "order_place") || "MKT"
+      : "MKT";
+    const ctBufferSetting = await storage.getSetting("limit_order_buffer_points");
+    const ctBufferPoints = parseFloat(ctBufferSetting?.value || "0");
+    const ctFinalPrice = ctPriceMode === "LMT"
+      ? getBufferedLimitPrice(exitPrice, exitAction, ctBufferPoints)
+      : "0";
+
     const universalPayload: Record<string, any> = {
       tradingSymbol: trade.tradingSymbol,
       exchange: EL.mapExchange(trade.exchange),
       transactionType,
       quantity: String(trade.quantity),
       productType: trade.productType,
-      priceType: "MKT",
-      price: "0",
+      priceType: ctPriceMode,
+      price: ctFinalPrice,
       validity: "DAY",
       afterMarket: "NO",
     };
@@ -1153,14 +1195,23 @@ export function startPersistentRollback(
         const reverseAction = trade.action === "BUY" ? "SELL" : "BUY";
         const revTransactionType = mapTransactionType(reverseAction);
 
+        const prBufferSetting = await storage.getSetting("limit_order_buffer_points");
+        const prBufferPoints = parseFloat(prBufferSetting?.value || "0");
+        const prPriceMode = TL.isReady()
+          ? TL.getDefaultByUniversalName("priceType", "order_place") || "MKT"
+          : "MKT";
+        const prFinalPrice = prPriceMode === "LMT"
+          ? getBufferedLimitPrice(trade.ltp || trade.price || 0, reverseAction, prBufferPoints)
+          : "0";
+
         const rbResult = await EL.placeOrder(brokerConfig, {
           tradingSymbol: trade.tradingSymbol,
           exchange: EL.mapExchange(trade.exchange || "NFO"),
           transactionType: revTransactionType,
           quantity: String(trade.quantity),
-          productType: trade.productType || "MIS",
-          priceType: "MKT",
-          price: "0",
+          productType: trade.productType,
+          priceType: prPriceMode,
+          price: prFinalPrice,
           validity: "DAY",
           afterMarket: "NO",
         });
