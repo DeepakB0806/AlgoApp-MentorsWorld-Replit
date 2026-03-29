@@ -421,24 +421,6 @@ export function TradePlanning() {
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
                         <h4 className={`font-bold text-xs ${block.textColor}`}>{block.label}</h4>
-                        <Select value={block.config.productMode} onValueChange={(v) => block.configSetter((prev) => ({ ...prev, productMode: v as "MIS" | "NRML", bracketOrder: v === "NRML" ? undefined : prev.bracketOrder }))}>
-                          <SelectTrigger className="w-20 h-6 text-xs" data-testid={`select-product-mode-${block.key}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="MIS">MIS</SelectItem>
-                            <SelectItem value="NRML">NRML</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Select value={block.config.priceMode || "LMT"} onValueChange={(v) => block.configSetter((prev) => ({ ...prev, priceMode: v as "LMT" | "MKT" }))}>
-                          <SelectTrigger className="w-20 h-6 text-xs" data-testid={`select-price-mode-${block.key}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="LMT">LMT</SelectItem>
-                            <SelectItem value="MKT">MKT</SelectItem>
-                          </SelectContent>
-                        </Select>
                       </div>
                       <Button
                         variant="outline"
@@ -448,6 +430,45 @@ export function TradePlanning() {
                       >
                         <Plus className="w-3 h-3 mr-1" /> Add Leg
                       </Button>
+                    </div>
+                    <div className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg border border-border">
+                      <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs text-muted-foreground font-semibold">Product Type (Block Level)</Label>
+                        <Select
+                          value={block.config.productMode || "NRML"}
+                          onValueChange={(v) => block.configSetter((prev) => ({
+                            ...prev,
+                            productMode: v as "MIS" | "NRML",
+                            bracketOrder: v === "NRML" ? undefined : prev.bracketOrder,
+                          }))}
+                        >
+                          <SelectTrigger className="w-[140px] h-8 text-xs font-semibold" data-testid={`select-product-mode-${block.key}`}>
+                            <SelectValue placeholder="Product" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="NRML">NRML (Overnight)</SelectItem>
+                            <SelectItem value="MIS">MIS (Intraday)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs text-muted-foreground font-semibold">Order Type (Block Level)</Label>
+                        <Select
+                          value={block.config.priceMode || "LMT"}
+                          onValueChange={(v) => block.configSetter((prev) => ({
+                            ...prev,
+                            priceMode: v as "LMT" | "MKT",
+                          }))}
+                        >
+                          <SelectTrigger className="w-[140px] h-8 text-xs font-semibold" data-testid={`select-price-mode-${block.key}`}>
+                            <SelectValue placeholder="Order Type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="LMT">LMT (Buffered)</SelectItem>
+                            <SelectItem value="MKT">MKT (Unsafe)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                     {block.legs.length === 0 && (
                       <p className="text-xs text-muted-foreground">No legs configured for {block.key} condition.</p>
