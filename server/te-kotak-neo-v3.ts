@@ -446,7 +446,7 @@ function resolveOrderParams(
   }
 
   const lotSize = ctx.instrumentConfig?.lotSize ?? 1;
-  const strikeInterval = ctx.instrumentConfig!.strikeInterval;
+  const strikeInterval = ctx.instrumentConfig!.strikeInterval ?? 50;
 
   let tradingSymbol = ctx.ticker;
   if (isOption && isStrikeSpec(leg.strike) && (leg.type === "CE" || leg.type === "PE")) {
@@ -542,7 +542,7 @@ type BasketItem = { leg: PlanTradeLeg; blockType: string; legIndex: number };
 
 async function executeLegBasket(
   storage: IStorage, plan: StrategyPlan, brokerConfig: BrokerConfig, ctx: TradeContext,
-  items: BasketItem[], orderTypeForRecord: string,
+  items: BasketItem[],
 ): Promise<{ trades: any[]; orderIds: string[]; error?: string }> {
   const broker = brokerConfig.brokerName;
   let finalTrades: StrategyTrade[] = [];
@@ -563,6 +563,7 @@ async function executeLegBasket(
       const tempCtx = { ...ctx, lotMultiplier: effectiveMultiplier };
       const resolved = resolveOrderParams(leg, tempCtx, legIndex);
       if ("error" in resolved) {
+        logPFL(plan, broker, ctx.data, "error", `[TE] ${resolved.error}`);
         finalError = resolved.error;
         attemptFailed = true;
         break;
@@ -649,8 +650,19 @@ async function executeLegBasket(
             const rbBufferSetting = await storage.getSetting("limit_order_buffer_points");
             const rbBufferPoints = parseFloat(rbBufferSetting?.value || "0");
             const rbPriceMode = (ctx.blockConfig.priceMode as string | undefined)
-              || (TL.isReady() ? TL.getDefaultByUniversalName("priceType", "order_place") : null)
-              || "MKT";
+              || (TL.isReady() ? TL.getDefaultByUniversalName("priceType", "order_place") : null);
+            if (!rbPriceMode) {
+              logPFL(plan, broker, ctx.data, "error", `ABORT: Price Type (LMT/MKT) missing for rollback of ${landed.tradingSymbol}. Marking rollback_failed.`);
+              await storage.updateStrategyTrade(landed.id, { status: "rollback_failed", updatedAt: ctx.now });
+              startPersistentRollback(storage, plan.id, brokerConfig);
+              continue;
+            }
+            if (!landed.productType) {
+              logPFL(plan, broker, ctx.data, "error", `ABORT: productType missing for rollback of ${landed.tradingSymbol}. Marking rollback_failed.`);
+              await storage.updateStrategyTrade(landed.id, { status: "rollback_failed", updatedAt: ctx.now });
+              startPersistentRollback(storage, plan.id, brokerConfig);
+              continue;
+            }
             const rbPrice = rbPriceMode === "LMT"
               ? getBufferedLimitPrice(landed.ltp || landed.price || 0, reverseAction, rbBufferPoints)
               : "0";
@@ -693,7 +705,7 @@ async function executeLegBasket(
         planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${legIndex}`,
         tradingSymbol: resolved.tradingSymbol, exchange: ctx.exchange, quantity: actualFilledQty,
         price: fillPrice, action: (leg.action || "BUY").toUpperCase(), blockType, legIndex,
-        orderType: orderTypeForRecord, productType, status: "pending_basket", pnl: 0, ltp: fillPrice,
+        orderType: resolved.priceMode, productType, status: "pending_basket", pnl: 0, ltp: fillPrice,
         executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now,
         timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker,
         indicator: ctx.data.indicator || null, alert: ctx.data.alert || null,
@@ -795,11 +807,9 @@ async function executeBuySignal(
     return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired", executionTimeMs: Date.now() - ctx.startTime };
   }
 
-  const dbOrderType = TL.getDefaultByUniversalName("priceType", "order_place");
-  const orderTypeForRecord = dbOrderType || "MKT";
   const remainingOpen = ctx.openTrades.filter(t => !openOpposites.some(o => o.id === t.id));
   const basket = buildEntryBasket(ctx, remainingOpen);
-  const result = await executeLegBasket(storage, plan, brokerConfig, ctx, basket, orderTypeForRecord);
+  const result = await executeLegBasket(storage, plan, brokerConfig, ctx, basket);
   if (result.error) {
     return { success: false, action: "error", broker, planId: plan.id, message: result.error, executionTimeMs: Date.now() - ctx.startTime };
   }
@@ -872,11 +882,9 @@ async function executeSellSignal(
     return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired", executionTimeMs: Date.now() - ctx.startTime };
   }
 
-  const dbOrderType = TL.getDefaultByUniversalName("priceType", "order_place");
-  const orderTypeForRecord = dbOrderType || "MKT";
   const remainingOpen = ctx.openTrades.filter(t => !allToClose.some(o => o.id === t.id));
   const basket = buildEntryBasket(ctx, remainingOpen);
-  const result = await executeLegBasket(storage, plan, brokerConfig, ctx, basket, orderTypeForRecord);
+  const result = await executeLegBasket(storage, plan, brokerConfig, ctx, basket);
   if (result.error) {
     return { success: false, action: "error", broker, planId: plan.id, message: result.error, pnl: closePnl, executionTimeMs: Date.now() - ctx.startTime };
   }
@@ -911,8 +919,14 @@ async function closeTrade(
     }
 
     const ctPriceMode = TL.isReady()
-      ? TL.getDefaultByUniversalName("priceType", "order_place") || "MKT"
-      : "MKT";
+      ? TL.getDefaultByUniversalName("priceType", "order_place")
+      : null;
+    if (!ctPriceMode) {
+      console.error(`[TE] ABORT: Price Type (LMT/MKT) missing from TL defaults for closeTrade on ${trade.tradingSymbol}. Marking close_failed.`);
+      const failedUpdate = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
+      tradingCache.invalidateOpenTrades(trade.planId);
+      return failedUpdate || trade;
+    }
     const ctBufferSetting = await storage.getSetting("limit_order_buffer_points");
     const ctBufferPoints = parseFloat(ctBufferSetting?.value || "0");
     const ctFinalPrice = ctPriceMode === "LMT"
@@ -1195,11 +1209,23 @@ export function startPersistentRollback(
         const reverseAction = trade.action === "BUY" ? "SELL" : "BUY";
         const revTransactionType = mapTransactionType(reverseAction);
 
+        const prPriceMode = TL.isReady()
+          ? TL.getDefaultByUniversalName("priceType", "order_place")
+          : null;
+        if (!prPriceMode) {
+          console.error(`[TE] ABORT: Price Type (LMT/MKT) missing from TL defaults for persistent rollback of ${trade.tradingSymbol}. Marking rollback_failed.`);
+          const now2 = new Date().toISOString();
+          await storage.updateStrategyTrade(trade.id, { status: "rollback_failed", updatedAt: now2 });
+          continue;
+        }
+        if (!trade.productType) {
+          console.error(`[TE] ABORT: productType missing for persistent rollback of ${trade.tradingSymbol}. Marking rollback_failed.`);
+          const now2 = new Date().toISOString();
+          await storage.updateStrategyTrade(trade.id, { status: "rollback_failed", updatedAt: now2 });
+          continue;
+        }
         const prBufferSetting = await storage.getSetting("limit_order_buffer_points");
         const prBufferPoints = parseFloat(prBufferSetting?.value || "0");
-        const prPriceMode = TL.isReady()
-          ? TL.getDefaultByUniversalName("priceType", "order_place") || "MKT"
-          : "MKT";
         const prFinalPrice = prPriceMode === "LMT"
           ? getBufferedLimitPrice(trade.ltp || trade.price || 0, reverseAction, prBufferPoints)
           : "0";
