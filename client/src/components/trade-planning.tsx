@@ -94,7 +94,7 @@ export function TradePlanning() {
   const activeConfigs = configs.filter((c) => c.status === "active" || c.status === "draft");
   const selectedConfig = configs.find((c) => c.id === configId);
   const allLegsFlat = [...uptrendLegs, ...downtrendLegs, ...neutralLegs];
-  const hasMISLegs = uptrendConfig.productMode === "MIS" || downtrendConfig.productMode === "MIS" || neutralConfig.productMode === "MIS";
+  const hasMISLegs = uptrendConfig.productMode === "MIS";
 
   useEffect(() => {
     if (selectedConfig && !editingPlan) {
@@ -349,44 +349,97 @@ export function TradePlanning() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Exchange</Label>
-                <Select value={planExchange || "auto"} onValueChange={(v) => setPlanExchange(v === "auto" ? "" : v)}>
-                  <SelectTrigger data-testid="select-plan-exchange">
-                    <SelectValue placeholder="Auto-detect" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Auto-detect</SelectItem>
-                    <SelectItem value="NSE">NSE (National Stock Exchange)</SelectItem>
-                    <SelectItem value="BSE">BSE (Bombay Stock Exchange)</SelectItem>
-                    <SelectItem value="NFO">NFO (NSE Futures & Options)</SelectItem>
-                    <SelectItem value="BFO">BFO (BSE Futures & Options)</SelectItem>
-                    <SelectItem value="MCX">MCX (Multi Commodity Exchange)</SelectItem>
-                    <SelectItem value="CDS">CDS (Currency Derivatives)</SelectItem>
-                  </SelectContent>
-                </Select>
+            {/* --- GLOBAL STRATEGY COMMAND CENTER --- */}
+            <div className="flex flex-col gap-4 mb-2 p-4 bg-primary/5 rounded-xl border border-primary/10 shadow-sm">
+              {/* Row 1: Exchange | Ticker / Symbol */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Exchange</Label>
+                  <Select value={planExchange || "auto"} onValueChange={(v) => setPlanExchange(v === "auto" ? "" : v)}>
+                    <SelectTrigger data-testid="select-plan-exchange">
+                      <SelectValue placeholder="Auto-detect" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto-detect</SelectItem>
+                      <SelectItem value="NSE">NSE (National Stock Exchange)</SelectItem>
+                      <SelectItem value="BSE">BSE (Bombay Stock Exchange)</SelectItem>
+                      <SelectItem value="NFO">NFO (NSE Futures & Options)</SelectItem>
+                      <SelectItem value="BFO">BFO (BSE Futures & Options)</SelectItem>
+                      <SelectItem value="MCX">MCX (Multi Commodity Exchange)</SelectItem>
+                      <SelectItem value="CDS">CDS (Currency Derivatives)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ticker / Symbol</Label>
+                  <Select value={planTicker || "auto"} onValueChange={(v) => setPlanTicker(v === "auto" ? "" : v)}>
+                    <SelectTrigger data-testid="select-plan-ticker">
+                      <SelectValue placeholder="Auto-detect" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto-detect</SelectItem>
+                      <SelectItem value="NIFTY">NIFTY</SelectItem>
+                      <SelectItem value="BANKNIFTY">BANKNIFTY</SelectItem>
+                      <SelectItem value="FINNIFTY">FINNIFTY</SelectItem>
+                      <SelectItem value="MIDCPNIFTY">MIDCPNIFTY</SelectItem>
+                      <SelectItem value="SENSEX">SENSEX</SelectItem>
+                      <SelectItem value="BANKEX">BANKEX</SelectItem>
+                      <SelectItem value="CRUDEOIL">CRUDEOIL</SelectItem>
+                      <SelectItem value="GOLD">GOLD</SelectItem>
+                      <SelectItem value="SILVER">SILVER</SelectItem>
+                      <SelectItem value="USDINR">USDINR</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div>
-                <Label>Ticker / Symbol</Label>
-                <Select value={planTicker || "auto"} onValueChange={(v) => setPlanTicker(v === "auto" ? "" : v)}>
-                  <SelectTrigger data-testid="select-plan-ticker">
-                    <SelectValue placeholder="Auto-detect" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Auto-detect</SelectItem>
-                    <SelectItem value="NIFTY">NIFTY</SelectItem>
-                    <SelectItem value="BANKNIFTY">BANKNIFTY</SelectItem>
-                    <SelectItem value="FINNIFTY">FINNIFTY</SelectItem>
-                    <SelectItem value="MIDCPNIFTY">MIDCPNIFTY</SelectItem>
-                    <SelectItem value="SENSEX">SENSEX</SelectItem>
-                    <SelectItem value="BANKEX">BANKEX</SelectItem>
-                    <SelectItem value="CRUDEOIL">CRUDEOIL</SelectItem>
-                    <SelectItem value="GOLD">GOLD</SelectItem>
-                    <SelectItem value="SILVER">SILVER</SelectItem>
-                    <SelectItem value="USDINR">USDINR</SelectItem>
-                  </SelectContent>
-                </Select>
+              {/* Row 2: Product Type | Execution Mode */}
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-primary/10">
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-primary/70">Product Type (Strategy Wide)</Label>
+                  <Select
+                    value={uptrendConfig.productMode || "NRML"}
+                    onValueChange={(v) => {
+                      const mode = v as "MIS" | "NRML";
+                      const update = (prev: BlockConfig) => ({
+                        ...prev,
+                        productMode: mode,
+                        bracketOrder: mode === "NRML" ? undefined : prev.bracketOrder,
+                      });
+                      setUptrendConfig(update);
+                      setDowntrendConfig(update);
+                      setNeutralConfig(update);
+                    }}
+                  >
+                    <SelectTrigger className="w-full h-10 bg-background border-primary/20 font-semibold" data-testid="select-strategy-product-mode">
+                      <SelectValue placeholder="NRML / MIS" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NRML">NRML (Overnight / Standard)</SelectItem>
+                      <SelectItem value="MIS">MIS (Intraday / Margin)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-primary/70">Execution Mode (SEBI Compliant)</Label>
+                  <Select
+                    value={uptrendConfig.priceMode || "LMT"}
+                    onValueChange={(v) => {
+                      const mode = v as "LMT" | "MKT";
+                      const update = (prev: BlockConfig) => ({ ...prev, priceMode: mode });
+                      setUptrendConfig(update);
+                      setDowntrendConfig(update);
+                      setNeutralConfig(update);
+                    }}
+                  >
+                    <SelectTrigger className="w-full h-10 bg-background border-primary/20 font-semibold" data-testid="select-strategy-price-mode">
+                      <SelectValue placeholder="LMT / MKT" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="LMT">LMT (Buffered Limit - Safe)</SelectItem>
+                      <SelectItem value="MKT">MKT (Market Order - Unsafe)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
             {selectedConfig && selectedConfig.indicators && selectedConfig.indicators.length > 0 && (
@@ -430,45 +483,6 @@ export function TradePlanning() {
                       >
                         <Plus className="w-3 h-3 mr-1" /> Add Leg
                       </Button>
-                    </div>
-                    <div className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg border border-border">
-                      <div className="flex flex-col gap-1.5">
-                        <Label className="text-xs text-muted-foreground font-semibold">Product Type (Block Level)</Label>
-                        <Select
-                          value={block.config.productMode || "NRML"}
-                          onValueChange={(v) => block.configSetter((prev) => ({
-                            ...prev,
-                            productMode: v as "MIS" | "NRML",
-                            bracketOrder: v === "NRML" ? undefined : prev.bracketOrder,
-                          }))}
-                        >
-                          <SelectTrigger className="w-[140px] h-8 text-xs font-semibold" data-testid={`select-product-mode-${block.key}`}>
-                            <SelectValue placeholder="Product" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="NRML">NRML (Overnight)</SelectItem>
-                            <SelectItem value="MIS">MIS (Intraday)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <Label className="text-xs text-muted-foreground font-semibold">Order Type (Block Level)</Label>
-                        <Select
-                          value={block.config.priceMode || "LMT"}
-                          onValueChange={(v) => block.configSetter((prev) => ({
-                            ...prev,
-                            priceMode: v as "LMT" | "MKT",
-                          }))}
-                        >
-                          <SelectTrigger className="w-[140px] h-8 text-xs font-semibold" data-testid={`select-price-mode-${block.key}`}>
-                            <SelectValue placeholder="Order Type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="LMT">LMT (Buffered)</SelectItem>
-                            <SelectItem value="MKT">MKT (Unsafe)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
                     </div>
                     {block.legs.length === 0 && (
                       <p className="text-xs text-muted-foreground">No legs configured for {block.key} condition.</p>
