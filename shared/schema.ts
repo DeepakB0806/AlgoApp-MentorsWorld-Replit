@@ -740,7 +740,7 @@ export function buildTradingSymbol(ticker: string, legType: string, strike: stri
   return `${ticker}-${strikeLabel}-${legType}`;
 }
 
-export function buildBrokerOrderParams(leg: PlanTradeLeg, config: { exchange?: string | null; ticker?: string | null; productMode?: "MIS" | "NRML" }): Partial<OrderParams> {
+export function buildBrokerOrderParams(leg: PlanTradeLeg, config: { exchange?: string | null; ticker?: string | null; productMode?: "MIS" | "NRML"; priceMode?: "LMT" | "MKT" }): Partial<OrderParams> {
   const exchangeMap: Record<string, string> = { NSE: "nse_cm", BSE: "bse_cm", NFO: "nse_fo", BFO: "bse_fo", MCX: "mcx_fo", CDS: "cde_fo" };
   const txMap: Record<string, string> = { BUY: "B", SELL: "S" };
   const exchange = leg.exchange || config.exchange || "NFO";
@@ -748,12 +748,14 @@ export function buildBrokerOrderParams(leg: PlanTradeLeg, config: { exchange?: s
   const ts = buildTradingSymbol(ticker, leg.type, leg.strike);
   const product = config.productMode;
   if (!product) throw new Error("Product Type (NRML/MIS) is missing from database configuration.");
+  const priceMode = config.priceMode;
+  if (!priceMode) throw new Error("Price Type (LMT/MKT) is missing from database configuration.");
   return {
     transaction_type: txMap[leg.action] || "B",
     product: product,
     exchange_segment: exchangeMap[exchange as string] || "nse_fo",
     quantity: String(leg.lots),
-    order_type: "MKT",
+    order_type: priceMode,
     validity: "DAY",
     price: "0",
     trading_symbol: ts,

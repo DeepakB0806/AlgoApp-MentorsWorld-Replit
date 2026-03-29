@@ -612,10 +612,10 @@ export function BrokerLinking() {
             const parentConfig = configs.find((c) => c.id === plan.configId);
             const linkedBroker = brokerConfigs.find((b) => b.id === plan.brokerConfigId);
             const blockGroups = [
-              ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400", productMode: tp.uptrendConfig?.productMode || "MIS" }] : [],
-              ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400", productMode: tp.downtrendConfig?.productMode || "MIS" }] : [],
-              ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400", productMode: tp.neutralConfig?.productMode || "MIS" }] : [],
-              ...((tp.legs || []).length > 0 && !((tp.uptrendLegs || []).length > 0) ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground", productMode: "MIS" as const }] : []),
+              ...(tp.uptrendLegs || []).length > 0 ? [{ label: "Uptrend", legs: tp.uptrendLegs!, color: "text-emerald-400", productMode: tp.uptrendConfig?.productMode || "MIS", priceMode: (tp.uptrendConfig?.priceMode || "LMT") as "LMT" | "MKT" }] : [],
+              ...(tp.downtrendLegs || []).length > 0 ? [{ label: "Downtrend", legs: tp.downtrendLegs!, color: "text-red-400", productMode: tp.downtrendConfig?.productMode || "MIS", priceMode: (tp.downtrendConfig?.priceMode || "LMT") as "LMT" | "MKT" }] : [],
+              ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400", productMode: tp.neutralConfig?.productMode || "MIS", priceMode: (tp.neutralConfig?.priceMode || "LMT") as "LMT" | "MKT" }] : [],
+              ...((tp.legs || []).length > 0 && !((tp.uptrendLegs || []).length > 0) ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground", productMode: "MIS" as const, priceMode: "LMT" as const }] : []),
             ];
             const effectiveSL = plan.deployStoploss ?? (tp.stoploss?.enabled ? tp.stoploss.value : null);
             const effectivePT = plan.deployProfitTarget ?? (tp.profitTarget?.enabled ? tp.profitTarget.value : null);
@@ -825,7 +825,7 @@ export function BrokerLinking() {
                             <tbody>
                               {blockGroups.map((group) =>
                                 group.legs.map((leg, i) => {
-                                  const params = buildBrokerOrderParams(leg, { exchange: parentConfig?.exchange, ticker: parentConfig?.ticker, productMode: group.productMode as "MIS" | "NRML" });
+                                  const params = buildBrokerOrderParams(leg, { exchange: parentConfig?.exchange, ticker: parentConfig?.ticker, productMode: group.productMode as "MIS" | "NRML", priceMode: group.priceMode });
                                   return (
                                     <tr key={`${group.label}-${i}`} className="border-b border-border/20">
                                       {i === 0 && <td className={`px-2 py-1.5 font-medium ${group.color}`} rowSpan={group.legs.length}>{group.label}</td>}
