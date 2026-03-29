@@ -842,6 +842,7 @@ export function BrokerLinking() {
                                         <div className="flex flex-wrap gap-1">
                                           <Badge variant="secondary" className="text-xs font-mono">tt={params.transaction_type}</Badge>
                                           <Badge variant="secondary" className="text-xs font-mono">pc={params.product}</Badge>
+                                          {params.order_type && <Badge variant="secondary" className="text-xs font-mono">ot={params.order_type}</Badge>}
                                           <Badge variant="secondary" className="text-xs font-mono">es={params.exchange_segment}</Badge>
                                           <Badge variant="secondary" className="text-xs font-mono">qt={params.quantity}</Badge>
                                           {params.trading_symbol && <Badge variant="secondary" className="text-xs font-mono">ts={params.trading_symbol}</Badge>}
