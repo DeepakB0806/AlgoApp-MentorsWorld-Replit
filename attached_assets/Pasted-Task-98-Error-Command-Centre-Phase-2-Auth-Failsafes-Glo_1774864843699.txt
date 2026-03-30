@@ -1,0 +1,49 @@
+Task #98: Error Command Centre Phase 2 (Auth Failsafes & Global Routing)
+
+What & Why
+Task #97 successfully created the error_routing table, but the Trade Engine currently only supports the terminal_close action for exit orders. We need to expand this into a centralized Action Switchboard to handle Auth/Session failures (which must halt the system, not close the trade) and Entry Leg failures (which must cancel the overarching plan).
+
+Done looks like
+
+New Action Types: The error_routing table supports new actionType values: system_halt and cancel_plan.
+
+Auth Guard (System Halt): If an order (entry or exit) receives a session error (401, Invalid TOTP, etc.), the system updates a global setting trading_halted to true, rejects all incoming webhooks, and shows a persistent Red Banner on the frontend.
+
+Entry Guard (Cancel Plan): If an entry order hits a terminal Kotak error (e.g., Invalid Symbol/Quantity), the Trade Plan is marked failed and aborted instantly.
+
+Centralized Error Handler: te-kotak-neo-v3.ts routes all Kotak API errors through a single handleBrokerError() switchboard that reads the DB action and executes the correct intervention.
+
+Tasks:
+
+Task 1 — Update DB Seed & Settings
+Files: server/index.ts and server/storage.ts
+
+Seed Auth Errors: Add the following rows to the error_routing seed with actionType = 'system_halt': "401", "expired session", "invalid totp", "invalid mpin".
+
+Global Halt Setting: Ensure a boolean setting key trading_halted exists in app_settings (default false).
+
+Task 2 — The Central Error Switchboard
+File: server/te-kotak-neo-v3.ts
+Create a new exported function: handleBrokerError(errorStr: string, context: { trade?: StrategyTrade, plan?: TradePlan }).
+This function queries storage.getActiveErrorRoutes(), finds a match, and switches on the actionType:
+
+case "terminal_close": (Run the existing Task #97 logic for exits).
+
+case "cancel_plan": (Update the context.plan.status to failed, log PFL: Plan aborted due to terminal entry error).
+
+case "system_halt": (Call storage.upsertSetting('trading_halted', 'true'), log PFL: CRITICAL: System halted due to Auth error).
+
+default: Return false (unhandled/transient, allow normal retry loops).
+
+Task 3 — Inject the Switchboard into Entry & Exit Paths
+File: server/te-kotak-neo-v3.ts
+
+Exits: Replace the inline Task #97 logic in closeTrade() with a call to handleBrokerError().
+
+Entries: Inside executeTradePlan(), if the basket placement fails, call handleBrokerError(). If it returns a plan-level action (like cancel_plan or system_halt), abort the entry sequence immediately.
+
+Task 4 — Webhook Block & Frontend Alert
+
+Backend (server/routes/webhook-routes.ts): At the very top of the webhook receiver, check the trading_halted setting. If true, instantly return a 403 Forbidden with message "System Halted: Resolve Auth Error". Do not process the signal.
+
+Frontend (client/src/pages/dashboard.tsx or global layout): Query the trading_halted setting. If true, render a massive sticky Red Banner at the top of the screen: "CRITICAL: Trading Halted due to Broker Session Error. Please Re-Login." Add a "Resume Trading" button that calls a new endpoint POST /api/settings/resume-trading to set the flag back to false.
