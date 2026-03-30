@@ -235,6 +235,8 @@ app.use((req, res, next) => {
     if (!existingSyncClock) await storage.setSetting("scrip_master_sync_time", "09:10");
     const existingMaxClose = await storage.getSetting("max_close_retry_count");
     if (!existingMaxClose) await storage.setSetting("max_close_retry_count", "0");
+    const existingHalted = await storage.getSetting("trading_halted");
+    if (!existingHalted) await storage.setSetting("trading_halted", "false");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
   }
@@ -257,11 +259,15 @@ app.use((req, res, next) => {
         { errorPattern: "no open position",             actionType: "terminal_close", description: "Broker has no record of this open position" },
         { errorPattern: "delisted",                     actionType: "terminal_close", description: "Instrument has been delisted" },
         { errorPattern: "suspended",                    actionType: "terminal_close", description: "Instrument is suspended from trading" },
+        { errorPattern: "401",                          actionType: "system_halt",    description: "Kotak Auth: Unauthorized — session expired or invalid token" },
+        { errorPattern: "expired session",              actionType: "system_halt",    description: "Kotak Auth: Session has expired — re-login required" },
+        { errorPattern: "invalid totp",                 actionType: "system_halt",    description: "Kotak Auth: TOTP rejected — re-authentication required" },
+        { errorPattern: "invalid mpin",                 actionType: "system_halt",    description: "Kotak Auth: MPIN rejected — re-authentication required" },
       ];
       for (const route of SEED_ROUTES) {
         await storage.createErrorRoute(route).catch(() => {});
       }
-      log("[STARTUP] Error routing rules seeded with default Kotak terminal patterns.");
+      log("[STARTUP] Error routing rules seeded with default Kotak terminal + system_halt patterns.");
     }
   } catch (err) {
     log(`[STARTUP] Error routing seed warning: ${err}`);

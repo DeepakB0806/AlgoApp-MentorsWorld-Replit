@@ -3,6 +3,7 @@ import type { IStorage } from "../storage";
 import { sendEmail } from "../services/email";
 import { rescheduleScripMasterSync } from "../scrip-sync-scheduler";
 import { insertErrorRoutingSchema } from "@shared/schema";
+import { resetTradingHaltCache } from "./webhook-routes";
 
 export function registerAdminRoutes(app: Express, storage: IStorage) {
   app.get("/api/settings/mail", async (req, res) => {
@@ -199,6 +200,16 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete error route" });
+    }
+  });
+
+  app.post("/api/settings/resume-trading", async (req, res) => {
+    try {
+      await storage.setSetting("trading_halted", "false");
+      resetTradingHaltCache();
+      res.json({ success: true, message: "Trading Resumed" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to resume trading" });
     }
   });
 }

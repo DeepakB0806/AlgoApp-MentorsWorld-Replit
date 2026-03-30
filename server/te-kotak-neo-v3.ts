@@ -10,6 +10,7 @@ import type {
   ActionMapperEntry,
   PlanTradeLeg,
   InstrumentConfig,
+  ErrorRouting,
 } from "@shared/schema";
 import { tradingCache } from "./cache";
 import EL from "./el-kotak-neo-v3";
@@ -675,6 +676,18 @@ async function executeLegBasket(
       // Rejection handling with Enterprise State Machine Rollback
       if (orderStatus === "REJECTED" || orderStatus === "CANCELLED") {
         const lowerReason = orderReason.toLowerCase();
+
+        // ── Entry guard: check routing switchboard before margin step-down ──────
+        const entryHandledAction = await handleBrokerError(storage, orderReason, {
+          planId: plan.id, now: ctx.now,
+        });
+        if (entryHandledAction === "system_halt" || entryHandledAction === "cancel_plan") {
+          finalError = orderReason;
+          attemptFailed = true;
+          break; // Abort basket instantly — skip margin step-down and rollback
+        }
+        // ── end entry guard ───────────────────────────────────────────────────
+
         if (lowerReason.includes("margin") || lowerReason.includes("rms") || lowerReason.includes("shortfall")) {
           console.warn(`[TE] Margin shortfall detected. Initiating Enterprise State Machine Rollback for attempt ${attempt + 1}...`);
 
@@ -976,7 +989,116 @@ async function executeSellSignal(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TRADE CLOSING & PNL
+// CENTRALISED ERROR ROUTING SWITCHBOARD
+// Matches a broker error string against active DB rules. Executes the mapped
+// action (system_halt | cancel_plan | terminal_close) and returns the action
+// type so callers can abort their retry loops. Returns null if no rule matched.
+// ═══════════════════════════════════════════════════════════════════════════════
+async function handleBrokerError(
+  storage: IStorage,
+  errorStr: string,
+  context: { trade?: StrategyTrade; planId?: string; now: string; exitAction?: string },
+): Promise<string | null> {
+  const errStrLower = String(errorStr || "").toLowerCase();
+  let activeRoutes: ErrorRouting[];
+  try {
+    activeRoutes = await storage.getActiveErrorRoutes();
+  } catch {
+    return null;
+  }
+
+  const matchedRoute = activeRoutes.find(r =>
+    errStrLower.includes(r.errorPattern.toLowerCase())
+  );
+  if (!matchedRoute) return null;
+
+  switch (matchedRoute.actionType) {
+    case "system_halt": {
+      const haltMsg = `CRITICAL: System halted due to Auth/Session error: ${errorStr}`;
+      console.error(haltMsg);
+      try {
+        await storage.setSetting("trading_halted", "true");
+        if (context.planId) {
+          addProcessFlowLog({
+            planId: context.planId,
+            planName: "System",
+            signalType: "N/A",
+            alert: "N/A",
+            resolvedAction: "N/A",
+            blockType: "N/A",
+            actionTaken: "system_halt",
+            message: haltMsg,
+            broker: "kotak_neo",
+          });
+        }
+      } catch (e) {
+        console.error(`[TE] system_halt DB write failed (non-fatal): ${e}`);
+      }
+      return "system_halt";
+    }
+
+    case "cancel_plan": {
+      if (context.planId) {
+        const cancelMsg = `[TE] Plan aborted due to terminal entry error (rule #${matchedRoute.id} — "${matchedRoute.errorPattern}"): ${errorStr}`;
+        console.warn(cancelMsg);
+        try {
+          await storage.updateStrategyPlan(context.planId, { deploymentStatus: "paused", status: "failed" });
+          addProcessFlowLog({
+            planId: context.planId,
+            planName: "N/A",
+            signalType: "N/A",
+            alert: "N/A",
+            resolvedAction: "N/A",
+            blockType: "N/A",
+            actionTaken: "plan_aborted",
+            message: cancelMsg,
+            broker: "kotak_neo",
+          });
+        } catch (e) {
+          console.error(`[TE] cancel_plan DB write failed (non-fatal): ${e}`);
+        }
+      }
+      return "cancel_plan";
+    }
+
+    case "terminal_close": {
+      if (context.trade) {
+        const ea = context.exitAction || (context.trade.action === "BUY" ? "SELL" : "BUY");
+        const terminalMsg = `[TE] Terminal rejection (rule #${matchedRoute.id} — "${matchedRoute.errorPattern}"): "${errorStr}". Marking ${context.trade.tradingSymbol} as closed to stop zombie retries.`;
+        console.warn(terminalMsg);
+        try {
+          await storage.updateStrategyTrade(context.trade.id, {
+            status: "closed", pnl: 0,
+            exitedAt: context.now, updatedAt: context.now,
+            exitPrice: context.trade.ltp || context.trade.price || 0,
+            exitAction: ea,
+          });
+          tradingCache.invalidateOpenTrades(context.trade.planId);
+          if (context.planId) {
+            addProcessFlowLog({
+              planId: context.planId,
+              planName: "N/A",
+              signalType: "N/A",
+              alert: "N/A",
+              resolvedAction: "N/A",
+              blockType: "N/A",
+              actionTaken: "force_closed",
+              message: terminalMsg,
+              broker: "kotak_neo",
+            });
+          }
+        } catch (e) {
+          console.error(`[TE] terminal_close DB write failed (non-fatal): ${e}`);
+        }
+      }
+      return "terminal_close";
+    }
+
+    default:
+      return null;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 async function closeTrade(
   storage: IStorage, trade: StrategyTrade, currentPrice: number, now: string, brokerConfig: BrokerConfig,
@@ -1049,29 +1171,16 @@ async function closeTrade(
     if (!orderResult.success) {
       console.error(`[TE] Failed to close Kotak trade: ${orderResult.error}`);
 
-      // ── Relational Error Routing ─────────────────────────────────────────────
-      // Query active error routing rules from DB. Terminal match → mark closed,
-      // stop retry loop. Transient errors fall through to close_failed.
-      const errStr = String(orderResult.error || "").toLowerCase();
-      try {
-        const activeRoutes = await storage.getActiveErrorRoutes();
-        const matchedRoute = activeRoutes.find(route =>
-          errStr.includes(route.errorPattern.toLowerCase())
-        );
-        if (matchedRoute && matchedRoute.actionType === "terminal_close") {
-          console.warn(`[TE] Terminal rejection (rule #${matchedRoute.id} — "${matchedRoute.errorPattern}"): "${orderResult.error}". Marking ${trade.tradingSymbol} as closed to stop zombie retries.`);
-          const closedUpdate = await storage.updateStrategyTrade(trade.id, {
-            status: "closed", pnl: 0,
-            exitedAt: now, updatedAt: now,
-            exitPrice: exitPrice, exitAction,
-          });
-          tradingCache.invalidateOpenTrades(trade.planId);
-          return closedUpdate || trade;
-        }
-      } catch (routingErr) {
-        console.error(`[TE] Error routing DB query failed (non-fatal): ${routingErr}`);
+      // ── Centralised Error Routing Switchboard ────────────────────────────────
+      const handledAction = await handleBrokerError(storage, orderResult.error || "", {
+        trade, planId: trade.planId, now, exitAction,
+      });
+      if (handledAction) {
+        // Switchboard completed all DB updates (terminal_close/system_halt) or
+        // aborted the plan (cancel_plan). Either way — stop the retry loop.
+        return trade;
       }
-      // ── end Relational Error Routing ─────────────────────────────────────────
+      // ── end Error Routing ─────────────────────────────────────────────────────
 
       const failedUpdate = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
       tradingCache.invalidateOpenTrades(trade.planId);

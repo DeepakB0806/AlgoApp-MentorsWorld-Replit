@@ -1,11 +1,11 @@
 import { lazy, Suspense, Component, type ReactNode } from "react";
 import { Switch, Route } from "wouter";
-import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "./lib/queryClient";
+import { QueryClientProvider, useQuery, useMutation } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, ProtectedRoute } from "@/hooks/use-auth";
-import { Loader2, AlertTriangle } from "lucide-react";
+import { Loader2, AlertTriangle, ShieldX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import Home from "@/pages/home";
@@ -121,12 +121,54 @@ function Router() {
   );
 }
 
+function TradingHaltBanner() {
+  const { data } = useQuery<{ key: string; value: string } | null>({
+    queryKey: ["/api/settings/trading_halted"],
+    refetchInterval: 15000,
+    retry: false,
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/settings/resume-trading"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/trading_halted"] });
+    },
+  });
+
+  if (data?.value !== "true") return null;
+
+  return (
+    <div
+      className="fixed top-0 left-0 right-0 z-50 bg-red-600 text-white px-4 py-3 flex items-center justify-between gap-4 shadow-lg"
+      data-testid="banner-trading-halted"
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <ShieldX className="h-5 w-5 shrink-0" />
+        <span className="text-sm font-semibold truncate">
+          CRITICAL: Trading Halted — Broker Auth/Session Error. Re-login to Kotak Neo and click Resume.
+        </span>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        className="shrink-0 bg-white text-red-700 hover:bg-red-50 border-white font-semibold"
+        onClick={() => resumeMutation.mutate()}
+        disabled={resumeMutation.isPending}
+        data-testid="button-resume-trading"
+      >
+        {resumeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Resume Trading"}
+      </Button>
+    </div>
+  );
+}
+
 function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <AuthProvider>
+            <TradingHaltBanner />
             <Toaster />
             <Router />
           </AuthProvider>

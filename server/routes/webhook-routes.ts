@@ -6,6 +6,17 @@ import { resolveSignalFromActionMapper, resolveAllSignalsFromActionMapper, proce
 import { getBaseUrlFromRequest } from "../services/email";
 import { parseNumeric } from "./helpers";
 
+// ── In-memory halt cache ──────────────────────────────────────────────────────
+// Prevents a DB SELECT on every incoming webhook during a signal barrage.
+// Refreshed from DB at most once every 10 seconds. Reset immediately on resume.
+let isHaltedCache: boolean | null = null;
+let lastHaltCheck = 0;
+export function resetTradingHaltCache(): void {
+  isHaltedCache = null;
+  lastHaltCheck = 0;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function registerWebhookRoutes(app: Express, storage: IStorage) {
   app.get("/api/webhooks", async (req, res) => {
     try {
@@ -228,6 +239,19 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
     const timing: Record<string, number> = {};
     
     try {
+      // ── System Halt guard (in-memory cached, refreshes every 10 s) ─────────
+      const nowMs = Date.now();
+      if (isHaltedCache === null || nowMs - lastHaltCheck > 10000) {
+        const haltSetting = await storage.getSetting("trading_halted");
+        isHaltedCache = haltSetting?.value === "true";
+        lastHaltCheck = nowMs;
+      }
+      if (isHaltedCache) {
+        console.warn(`[WEBHOOK] Blocked signal for ${webhookId} — System is HALTED.`);
+        return res.status(403).json({ error: "System Halted: Resolve Auth Error before sending new signals." });
+      }
+      // ── end halt guard ────────────────────────────────────────────────────
+
       let webhook = tradingCache.getWebhook(webhookId);
       if (!webhook) {
         webhook = await storage.getWebhook(webhookId) || undefined;

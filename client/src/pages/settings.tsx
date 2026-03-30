@@ -982,6 +982,8 @@ function ErrorRoutingSettings() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="terminal_close">terminal_close</SelectItem>
+                    <SelectItem value="system_halt">system_halt</SelectItem>
+                    <SelectItem value="cancel_plan">cancel_plan</SelectItem>
                     <SelectItem value="ignore">ignore</SelectItem>
                   </SelectContent>
                 </Select>
