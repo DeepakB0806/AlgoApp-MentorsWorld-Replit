@@ -263,6 +263,8 @@ app.use((req, res, next) => {
         { errorPattern: "expired session",              actionType: "system_halt",    description: "Kotak Auth: Session has expired — re-login required" },
         { errorPattern: "invalid totp",                 actionType: "system_halt",    description: "Kotak Auth: TOTP rejected — re-authentication required" },
         { errorPattern: "invalid mpin",                 actionType: "system_halt",    description: "Kotak Auth: MPIN rejected — re-authentication required" },
+        { errorPattern: "token not found",               actionType: "terminal_close", description: "Internal guard: token missing from Scrip Master (expired contract)" },
+        { errorPattern: "quote fetch failed",            actionType: "terminal_close", description: "Internal guard: options live quote API failure" },
       ];
       for (const route of SEED_ROUTES) {
         await storage.createErrorRoute(route).catch(() => {});
@@ -272,10 +274,12 @@ app.use((req, res, next) => {
       // Existing deployments: ensure the 4 auth system_halt patterns are present
       // (they were added in Task #98 and won't exist in pre-#98 databases).
       const SYSTEM_HALT_PATTERNS = [
-        { errorPattern: "401",             actionType: "system_halt", description: "Kotak Auth: Unauthorized — session expired or invalid token" },
-        { errorPattern: "expired session", actionType: "system_halt", description: "Kotak Auth: Session has expired — re-login required" },
-        { errorPattern: "invalid totp",    actionType: "system_halt", description: "Kotak Auth: TOTP rejected — re-authentication required" },
-        { errorPattern: "invalid mpin",    actionType: "system_halt", description: "Kotak Auth: MPIN rejected — re-authentication required" },
+        { errorPattern: "401",             actionType: "system_halt",    description: "Kotak Auth: Unauthorized — session expired or invalid token" },
+        { errorPattern: "expired session", actionType: "system_halt",    description: "Kotak Auth: Session has expired — re-login required" },
+        { errorPattern: "invalid totp",    actionType: "system_halt",    description: "Kotak Auth: TOTP rejected — re-authentication required" },
+        { errorPattern: "invalid mpin",    actionType: "system_halt",    description: "Kotak Auth: MPIN rejected — re-authentication required" },
+        { errorPattern: "token not found", actionType: "terminal_close", description: "Internal guard: token missing from Scrip Master (expired contract)" },
+        { errorPattern: "quote fetch failed", actionType: "terminal_close", description: "Internal guard: options live quote API failure" },
       ];
       const existingPatterns = new Set(existingRoutes.map(r => r.errorPattern.toLowerCase()));
       let added = 0;

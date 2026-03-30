@@ -1116,6 +1116,36 @@ async function closeTrade(
       return failedUpdate || trade;
     }
 
+    // PRE-FLIGHT DEAD CONTRACT GUARD
+    if (isOptionExchange(trade.exchange)) {
+      const preflightToken = brokerSymbolToTokenMap.get(trade.tradingSymbol);
+      if (!preflightToken) {
+        const msg = `[TE] Pre-flight Abort: Contract ${trade.tradingSymbol} missing from Scrip Master (expired).`;
+        console.warn(msg);
+        addProcessFlowLog({
+          planId: trade.planId,
+          planName: "Auto-Close Guard",
+          signalType: "SYSTEM",
+          alert: "EXPIRED_CONTRACT",
+          resolvedAction: exitAction,
+          blockType: "SQUARE_OFF",
+          actionTaken: "force_closed",
+          message: msg,
+          broker,
+        });
+        const closedUpdate = await storage.updateStrategyTrade(trade.id, {
+          status: "closed",
+          pnl: 0,
+          exitedAt: now,
+          updatedAt: now,
+          exitPrice: trade.ltp || trade.price || 0,
+          exitAction,
+        });
+        tradingCache.invalidateOpenTrades(trade.planId);
+        return closedUpdate || trade;
+      }
+    }
+
     const ctPriceMode = TL.isReady()
       ? TL.getDefaultByUniversalName("priceType", "order_place")
       : null;
@@ -1144,10 +1174,29 @@ async function closeTrade(
       }
       const ctQuoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(trade.exchange), ctToken);
       if (!ctQuoteRes.success || !ctQuoteRes.ltp) {
-        console.error(`[TE] ABORT: Live quote fetch failed for ${trade.tradingSymbol} in closeTrade: ${ctQuoteRes.error}. Marking close_failed.`);
-        const failedUpd = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
+        const qfMsg = ctQuoteRes.error || "live quote fetch failed";
+        console.warn(`[TE] Quote fetch failed for ${trade.tradingSymbol}: ${qfMsg}. Marking as closed.`);
+        addProcessFlowLog({
+          planId: trade.planId,
+          planName: "Auto-Close Guard",
+          signalType: "SYSTEM",
+          alert: "QUOTE_FETCH_FAILED",
+          resolvedAction: exitAction,
+          blockType: "SQUARE_OFF",
+          actionTaken: "force_closed",
+          message: qfMsg,
+          broker,
+        });
+        const closedUpdate = await storage.updateStrategyTrade(trade.id, {
+          status: "closed",
+          pnl: 0,
+          exitedAt: now,
+          updatedAt: now,
+          exitPrice: trade.ltp || trade.price || 0,
+          exitAction,
+        });
         tradingCache.invalidateOpenTrades(trade.planId);
-        return failedUpd || trade;
+        return closedUpdate || trade;
       }
       ctBasePriceForLimit = ctQuoteRes.ltp;
     }
