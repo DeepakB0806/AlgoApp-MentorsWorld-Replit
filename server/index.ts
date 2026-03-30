@@ -232,54 +232,14 @@ app.use((req, res, next) => {
     const existingRollback = await storage.getSetting("rollback_api_retry_count");
     if (!existingRollback) await storage.setSetting("rollback_api_retry_count", "5");
     const existingSyncClock = await storage.getSetting("scrip_master_sync_time");
-    if (!existingSyncClock) await storage.setSetting("scrip_master_sync_time", "09:15");
+    if (!existingSyncClock) await storage.setSetting("scrip_master_sync_time", "09:10");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
   }
 
-  // Daily scrip master scheduled sync — fires at the user-configured IST time (default 09:15)
+  // Daily scrip master scheduled sync — fires at the user-configured IST time (default 09:10)
   try {
-    const syncClockSetting = await storage.getSetting("scrip_master_sync_time");
-    const syncClockStr = syncClockSetting?.value || "09:15";
-    const [syncHH, syncMM] = syncClockStr.split(":").map(Number);
-    const scheduleNextSync = async () => {
-      const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-      const targetIST = new Date(nowIST);
-      targetIST.setUTCHours(syncHH - 5, syncMM - 30, 0, 0); // convert IST target → UTC
-      if (targetIST.getTime() <= Date.now()) targetIST.setUTCDate(targetIST.getUTCDate() + 1);
-      const msUntil = targetIST.getTime() - Date.now();
-      log(`[SCRIP-MASTER] Daily sync scheduled at ${syncClockStr} IST (in ${Math.round(msUntil / 60000)} min)`);
-      setTimeout(async () => {
-        try {
-          const allBrokerConfigs = await storage.getBrokerConfigs();
-          const liveBrokers = allBrokerConfigs.filter(bc => bc.isConnected && bc.brokerName === "kotak_neo");
-          if (liveBrokers.length === 0) {
-            log(`[SCRIP-MASTER] Scheduled sync at ${syncClockStr} IST — no connected Kotak brokers, skipping`);
-          } else {
-            for (const bc of liveBrokers) {
-              const result = await runScripMasterSync(storage, bc);
-              log(`[SCRIP-MASTER] Scheduled daily sync (${syncClockStr} IST): ${result.success ? `${result.synced} contracts loaded` : result.error}`);
-            }
-          }
-        } catch (err) {
-          log(`[SCRIP-MASTER] Scheduled sync error: ${err}`);
-        }
-        setInterval(async () => {
-          try {
-            const allBrokerConfigs = await storage.getBrokerConfigs();
-            const liveBrokers = allBrokerConfigs.filter(bc => bc.isConnected && bc.brokerName === "kotak_neo");
-            if (liveBrokers.length === 0) return;
-            for (const bc of liveBrokers) {
-              const result = await runScripMasterSync(storage, bc);
-              log(`[SCRIP-MASTER] Scheduled daily sync (${syncClockStr} IST): ${result.success ? `${result.synced} contracts loaded` : result.error}`);
-            }
-          } catch (err) {
-            log(`[SCRIP-MASTER] Scheduled sync error: ${err}`);
-          }
-        }, 24 * 60 * 60 * 1000);
-      }, msUntil);
-    };
-    await scheduleNextSync();
+    await rescheduleScripMasterSync(storage);
   } catch (err) {
     log(`[SCRIP-MASTER] Daily sync scheduler startup warning: ${err}`);
   }

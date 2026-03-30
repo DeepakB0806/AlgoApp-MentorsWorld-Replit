@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import type { IStorage } from "../storage";
 import { sendEmail } from "../services/email";
+import { rescheduleScripMasterSync } from "../scrip-sync-scheduler";
 
 export function registerAdminRoutes(app: Express, storage: IStorage) {
   app.get("/api/settings/mail", async (req, res) => {
@@ -76,6 +77,11 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: "Value must be a string" });
       }
       const setting = await storage.setSetting(req.params.key, value);
+      if (req.params.key === "scrip_master_sync_time") {
+        rescheduleScripMasterSync(storage).catch(err =>
+          console.error(`[SCRIP-MASTER] Failed to reschedule after settings save: ${err}`)
+        );
+      }
       res.json(setting);
     } catch (error) {
       res.status(500).json({ error: "Failed to save setting" });

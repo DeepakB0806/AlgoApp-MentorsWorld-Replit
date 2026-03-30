@@ -372,7 +372,7 @@ function GeneralTradingSettings() {
   const [shortfallRetryCount, setShortfallRetryCount] = useState<string>("");
   const [rollbackRetryCount, setRollbackRetryCount] = useState<string>("");
   const [bufferPoints, setBufferPoints] = useState<string>("");
-  const [syncClockValue, setSyncClockValue] = useState<string>("09:15");
+  const [syncClockValue, setSyncClockValue] = useState<string>("09:10");
   const { toast } = useToast();
 
   const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
@@ -431,7 +431,7 @@ function GeneralTradingSettings() {
     if (syncClockSetting?.value) {
       setSyncClockValue(syncClockSetting.value);
     } else if (!syncClockLoading) {
-      setSyncClockValue("09:15");
+      setSyncClockValue("09:10");
     }
   }, [syncClockSetting, syncClockLoading]);
 
@@ -507,7 +507,7 @@ function GeneralTradingSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings/scrip_master_sync_time"] });
-      toast({ title: "Saved", description: "Scrip master sync time updated. Will take effect after next server restart." });
+      toast({ title: "Saved", description: "Scrip master sync time updated. New schedule is active immediately." });
     },
     onError: (err: any) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -659,7 +659,7 @@ function GeneralTradingSettings() {
                 Kotak Scrip Master Sync Clock (IST)
               </Label>
               <p className="text-sm text-muted-foreground">
-                Daily time at which the server automatically re-downloads the Kotak Neo scrip master to pick up post-expiry rolled-over contracts. Takes effect after the next server restart.
+                Daily time at which the server automatically re-downloads the Kotak Neo scrip master to pick up post-expiry rolled-over contracts. Takes effect immediately — no restart required.
               </p>
               <div className="flex items-center gap-3 max-w-xs">
                 <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
@@ -671,7 +671,7 @@ function GeneralTradingSettings() {
                   onChange={(e) => setSyncClockValue(e.target.value)}
                 />
               </div>
-              <p className="text-xs text-muted-foreground">Default: 09:15. Exchange rolls over contract lists after 09:00 on expiry settlement days.</p>
+              <p className="text-xs text-muted-foreground">Default: 09:10. Exchange rolls over contract lists after 09:00 on expiry settlement days.</p>
               <Button
                 data-testid="button-save-scrip-sync-clock"
                 onClick={() => saveSyncClockMutation.mutate()}
