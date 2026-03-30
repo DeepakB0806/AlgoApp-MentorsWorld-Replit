@@ -1,0 +1,251 @@
+Task #98: Error Command Centre Phase 2 (Optimized Auth Failsafes & Global Routing)
+
+What & Why
+Expand the error_routing switchboard to handle system_halt (Auth failures) and cancel_plan (Entry failures).
+Optimization Mandate: To prevent database thrashing, the trading_halted status must be cached in memory inside the webhook router. We cannot do a DB SELECT on every single incoming webhook during a signal barrage.
+
+Critical Instruction: Use the EXACT code snippets provided below. Do NOT overwrite existing execution logic (specifically the Margin Shortfall step-down logic and Atomic Rollback loops) outside of these specific injection points.
+
+Done looks like
+
+Schema Updated: error_routing table added to schema.ts and seeded.
+
+Central Switchboard: handleBrokerError() processes all rejections dynamically.
+
+Auth Guard (System Halt): Auth errors set trading_halted=true in DB and memory, blocking webhooks instantly.
+
+Entry Guard (Cancel Plan): Terminal entry errors gracefully abort the trade plan.
+
+Optimized Webhook Block: The webhook endpoint checks an in-memory variable before querying the DB.
+
+UI Halt Banner: A sticky red banner appears on the frontend when the system halts, offering a "Resume Trading" button.
+
+Task 1 — Schema Addition & Seed
+File: shared/schema.ts
+Add the new Error Routing table definition below the existing tables.
+
+TypeScript
+export const errorRouting = pgTable("error_routing", {
+  id: serial("id").primaryKey(),
+  errorPattern: text("error_pattern").notNull().unique(), 
+  actionType: text("action_type").notNull().default("terminal_close"), // "terminal_close", "system_halt", "cancel_plan"
+  isActive: boolean("is_active").notNull().default(true),
+  description: text("description"),
+});
+
+export type ErrorRoute = typeof errorRouting.$inferSelect;
+export type InsertErrorRoute = typeof errorRouting.$inferInsert;
+File: server/index.ts (or your seed file)
+Seed the table with these exact patterns mapped to their respective actions:
+
+system_halt: ["401", "expired session", "invalid totp", "invalid mpin"]
+
+terminal_close / cancel_plan: ["1006", "1007", "1009", "400", "invalid symbol", "invalid exchange", "invalid quantity", "request format error", "instrument has been expired", "order type is invalid", "insufficient holding", "insufficient balance", "scrip not found", "position not found", "delisted"]
+
+Task 2 — Optimized Webhook Guard
+File: server/routes/webhook-routes.ts
+Place the caching variables globally at the top of the file (outside of registerWebhookRoutes). Then, inject the guard at the very beginning of the POST /api/webhook/:id handler.
+
+TypeScript
+// 1. ADD GLOBALLY NEAR TOP OF FILE
+let isHaltedCache: boolean | null = null;
+let lastHaltCheck = 0;
+
+// ... inside registerWebhookRoutes ...
+app.post("/api/webhook/:id", async (req, res) => {
+  try {
+    // 2. INJECT THIS GUARD FIRST: Memory-cached System Halt check
+    const now = Date.now();
+    if (isHaltedCache === null || now - lastHaltCheck > 10000) {
+      const haltSetting = await storage.getSetting("trading_halted");
+      isHaltedCache = haltSetting?.value === "true";
+      lastHaltCheck = now;
+    }
+
+    if (isHaltedCache) {
+      console.warn(`[WEBHOOK] Blocked signal for ${req.params.id} - System is HALTED.`);
+      return res.status(403).json({ error: "System Halted: Resolve Auth Error before sending new signals." });
+    }
+    
+    // ... existing webhook lookup and processing logic remains untouched ...
+Task 3 — The Central Switchboard
+File: server/te-kotak-neo-v3.ts
+Add this function at the top level of the file. Note: ensure storage.getActiveErrorRoutes() is implemented in storage.ts.
+
+TypeScript
+export async function handleBrokerError(errorStr: string, context: { trade?: StrategyTrade, plan?: StrategyPlan }) {
+  const activeRoutes = await storage.getActiveErrorRoutes(); 
+  const errStrLower = String(errorStr || "").toLowerCase();
+  
+  const matchedRoute = activeRoutes.find((route: any) => 
+    errStrLower.includes(route.errorPattern.toLowerCase())
+  );
+
+  if (!matchedRoute) return false; // Not mapped, fall back to existing retry loops
+
+  switch (matchedRoute.actionType) {
+    case "system_halt":
+      const haltMsg = `CRITICAL: System halted due to Auth error: ${errorStr}`;
+      console.error(haltMsg);
+      await storage.upsertSetting("trading_halted", "true");
+      if (context.plan) await addProcessFlowLog(context.plan.id, "N/A", "system_halt", haltMsg);
+      return "system_halt";
+
+    case "cancel_plan":
+      if (context.plan) {
+        const cancelMsg = `Plan aborted due to terminal entry error: ${errorStr}`;
+        console.warn(cancelMsg);
+        await storage.updateStrategyPlan(context.plan.id, { deploymentStatus: "paused", status: "failed" });
+        await addProcessFlowLog(context.plan.id, "N/A", "plan_aborted", cancelMsg);
+      }
+      return "cancel_plan";
+
+    case "terminal_close":
+      if (context.trade && context.plan) {
+        const terminalMsg = `[TE] Terminal rejection mapped by rule #${matchedRoute.id}: "${errorStr}". Marking as closed.`;
+        console.warn(terminalMsg);
+        await addProcessFlowLog(context.plan.id, context.trade.entryLegId || "N/A", "force_closed", terminalMsg);
+        await storage.updateStrategyTrade(context.trade.id, {
+          status: "closed", pnl: 0, exitedAt: new Date(), updatedAt: new Date(), 
+          exitPrice: context.trade.ltp || context.trade.price || 0, exitAction: context.plan.exitAction || "SELL"
+        });
+        tradingCache.invalidateOpenTrades(context.plan.id);
+      }
+      return "terminal_close";
+
+    default:
+      return false;
+  }
+}
+Task 4 — Injecting Guards into Entry & Exit Paths
+File: server/te-kotak-neo-v3.ts
+
+1. Entry Guard (inside executeLegBasket):
+Look for the catch block where you handle EL.placeOrder failures (if (!orderRes.success)). Inject the switchboard check right before your existing Margin Shortfall logic.
+
+TypeScript
+if (!orderRes.success) {
+  // INJECT SWITCHBOARD CHECK HERE
+  const handledAction = await handleBrokerError(orderRes.error, { plan });
+  if (handledAction === "system_halt" || handledAction === "cancel_plan") {
+    finalError = orderRes.error;
+    break; // Abort basket instantly. Do not proceed to rollback or margin step-downs.
+  }
+
+  // ... your existing Margin Shortfall logic ("insufficient margin for order") goes here ...
+2. Exit Guard (inside closeTrade):
+Look for the block where !orderResult.success is checked.
+
+TypeScript
+if (!orderResult.success) {
+  const errStr = String(orderResult.error || "").toLowerCase();
+  
+  // INJECT SWITCHBOARD CHECK HERE
+  const handledAction = await handleBrokerError(errStr, { trade, plan });
+  if (handledAction === "terminal_close" || handledAction === "system_halt") {
+    return trade; // Switchboard handled the DB updates; abort infinite retry loop.
+  }
+
+  // ... existing close_failed fallback ...
+Task 5 — Resume Endpoint & UI Banner
+Backend (server/routes/admin-routes.ts or broker-routes.ts): ```typescript
+router.post("/api/settings/resume-trading", async (req, res) => {
+await storage.upsertSetting("trading_halted", "false");
+res.json({ success: true, message: "Trading Resumed" });
+});
+
+2. **Frontend (`client/src/pages/dashboard.tsx`):** Query the `trading_halted` setting using React Query with a `refetchInterval: 15000`. If `true`, render a sticky Red Banner (`fixed top-0 z-50 w-full bg-red-600 text-white p-3`) that says: *"CRITICAL: Trading Halted due to Broker Session Error. Please Re-Login."* Include a "Resume Trading" button that calls the new POST endpoint and invalidates the query.
+3. **Settings UI:** Update the Error Routing Admin Data Table to include `system_halt` and `cancel_plan` in the `actionType` dropdown menu for creating/editing rules.
+
+***
+
+Snippet 1: The Pre-Flight Token Guard
+(To be injected in closeTrade() right before the ctPriceMode check, around line 1119)
+
+TypeScript
+// INJECT PRE-FLIGHT DEAD CONTRACT GUARD
+if (isOptionExchange(trade.exchange)) {
+  const token = brokerSymbolToTokenMap.get(trade.tradingSymbol);
+  if (!token) {
+    const msg = `[TE] Pre-flight Abort: Contract ${trade.tradingSymbol} missing from Scrip Master (expired).`;
+    console.warn(msg);
+    
+    // Strict object payload as per constraints
+    await addProcessFlowLog({
+      planId: trade.planId,
+      planName: "Auto-Close Guard", 
+      signalType: "SYSTEM",
+      alert: "EXPIRED_CONTRACT",
+      resolvedAction: exitAction, 
+      blockType: "SQUARE_OFF",
+      actionTaken: "force_closed",
+      message: msg,
+      broker: "kotak_neo_v3"
+    });
+    
+    const closedUpdate = await storage.updateStrategyTrade(trade.id, {
+      status: "closed", 
+      pnl: 0, 
+      exitedAt: now,     // Using string 'now' as constrained
+      updatedAt: now, 
+      exitPrice: trade.ltp || trade.price || 0, 
+      exitAction: exitAction 
+    });
+    
+    tradingCache.invalidateOpenTrades(trade.planId);
+    return closedUpdate || trade;
+  }
+}
+Snippet 2: The Quote-Fetch Failure Guard
+(To replace the direct close_failed fallback around lines 1146-1150)
+
+TypeScript
+// REPLACE EXISTING CLOSE_FAILED WITH TERMINAL CLOSE
+const msg = ctQuoteRes.error || "live quote fetch failed";
+console.warn(`[TE] Quote fetch failed for ${trade.tradingSymbol}: ${msg}. Marking as closed.`);
+
+await addProcessFlowLog({
+  planId: trade.planId,
+  planName: "Auto-Close Guard",
+  signalType: "SYSTEM",
+  alert: "QUOTE_FETCH_FAILED",
+  resolvedAction: exitAction,
+  blockType: "SQUARE_OFF",
+  actionTaken: "force_closed",
+  message: msg,
+  broker: "kotak_neo_v3"
+});
+
+const closedUpdate = await storage.updateStrategyTrade(trade.id, {
+  status: "closed", 
+  pnl: 0, 
+  exitedAt: now, 
+  updatedAt: now, 
+  exitPrice: trade.ltp || trade.price || 0, 
+  exitAction: exitAction 
+});
+
+tradingCache.invalidateOpenTrades(trade.planId);
+return closedUpdate || trade;
+Snippet 3: Defence-in-Depth Database Seeds
+(To be added in server/index.ts where the error_routing table is seeded)
+
+TypeScript
+// Add to the existing error_routing seed list with actionType "terminal_close"
+try {
+  await storage.createErrorRoute({
+    errorPattern: "token not found",
+    actionType: "terminal_close",
+    description: "Internal guard for missing tokens in Scrip Master",
+    isActive: true
+  });
+} catch (e) { /* duplicate safe */ }
+
+try {
+  await storage.createErrorRoute({
+    errorPattern: "quote fetch failed",
+    actionType: "terminal_close",
+    description: "Internal guard for options live quote API failure",
+    isActive: true
+  });
+} catch (e) { /* duplicate safe */ }

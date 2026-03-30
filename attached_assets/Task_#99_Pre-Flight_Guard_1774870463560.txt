@@ -1,0 +1,51 @@
+Task #99: Pre-Flight Guard (Terminal Abort for Expired/Missing Contracts)
+
+What & Why
+The Error Command Centre (Task #98) successfully routes Kotak API errors, but fails to catch internal pre-flight aborts. Specifically, if an Options contract has expired, it disappears from today's Scrip Master (brokerSymbolToTokenMap). When closeTrade() tries to exit this position, it fails to find the token locally and throws an internal error. Because this isn't a Kotak API error, it falls back to the default infinite retry loop ("zombie loop").
+
+Done looks like
+
+Pre-Flight Guard in closeTrade: Before doing any price calculations or API calls, closeTrade() checks if the Option symbol exists in today's brokerSymbolToTokenMap.
+
+Instant Terminal Close: If the token is missing, the system recognizes the contract is dead (expired), logs a PFL entry, and instantly marks the trade as closed (pnl=0), completely bypassing the retry loop.
+
+Internal Error Seed: The error_routing seed is updated to include our internal local abort strings just in case.
+
+Tasks:
+
+Task 1 — Inject the Pre-Flight Guard
+File: server/te-kotak-neo-v3.ts
+Locate the closeTrade function. Inject this Pre-Flight Guard at the very beginning of the function body, right after verifying the trade exists and isn't already closed.
+
+TypeScript
+// INJECT PRE-FLIGHT DEAD CONTRACT GUARD
+if (isOptionExchange(trade.exchange)) {
+  const token = brokerSymbolToTokenMap.get(trade.tradingSymbol);
+  if (!token) {
+    const msg = `[TE] Pre-flight Abort: Contract ${trade.tradingSymbol} is missing from today's Scrip Master (likely expired). Marking as closed automatically.`;
+    console.warn(msg);
+    
+    await addProcessFlowLog(plan.id, trade.entryLegId || "N/A", "force_closed", msg);
+    
+    const closedUpdate = await storage.updateStrategyTrade(trade.id, {
+      status: "closed", 
+      pnl: 0, 
+      exitedAt: new Date(), 
+      updatedAt: new Date(),
+      exitPrice: trade.ltp || trade.price || 0, 
+      exitAction: plan.exitAction || "SELL"
+    });
+    
+    tradingCache.invalidateOpenTrades(trade.planId);
+    return closedUpdate || trade;
+  }
+}
+Task 2 — Update the Error Routing Seed
+File: server/index.ts (or wherever the errorRouting table is seeded)
+To ensure the Command Centre acts as a perfect fallback, add our internal abort strings to the terminal_close seed array.
+Add these exact strings to the array: "could not find token", "failed to fetch live quote", "abort:".
+
+Why this completely solves the issue:
+Zero API Calls: By checking the local brokerSymbolToTokenMap first, we don't even waste a millisecond asking Kotak about a contract we know is dead.
+
+Instant Cleanup: The next time your 60-second monitor sweeps those close_failed trades, this new guard will instantly say, "Wait, NIFTY26MAR? That's not in today's CSV!" It will mark them as closed, and the loop will permanently end.
