@@ -10,6 +10,7 @@ import TL from "./tl-kotak-neo-v3";
 import EL from "./el-kotak-neo-v3";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
 import { runScripMasterSync } from "./smc-kotak-neo-v3";
+import { rescheduleScripMasterSync } from "./scrip-sync-scheduler";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
 import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback } from "./te-kotak-neo-v3";
