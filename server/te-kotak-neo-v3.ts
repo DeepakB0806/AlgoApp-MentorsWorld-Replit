@@ -69,6 +69,11 @@ function mapTransactionType(action: string): string {
   return action;
 }
 
+function mapPriceType(pt: string | null | undefined): string {
+  if (pt === "LMT") return "L";
+  return pt || "MKT";
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TYPES & INTERFACES
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -602,7 +607,7 @@ async function executeLegBasket(
           tradingSymbol: resolved.tradingSymbol, exchange: EL.mapExchange(ctx.exchange),
           transactionType: resolved.transactionType, quantity: String(resolved.quantity),
           productType: resolved.productCode,
-          priceType: resolved.priceMode, price: finalPrice,
+          priceType: mapPriceType(resolved.priceMode), price: finalPrice,
           validity: "DAY", afterMarket: "NO",
         });
 
@@ -677,7 +682,7 @@ async function executeLegBasket(
             const rbResult = await EL.placeOrder(brokerConfig, {
               tradingSymbol: landed.tradingSymbol, exchange: EL.mapExchange(ctx.exchange),
               transactionType: mapTransactionType(reverseAction), quantity: String(landed.quantity),
-              productType: landed.productType, priceType: rbPriceMode, price: rbPrice,
+              productType: landed.productType, priceType: mapPriceType(rbPriceMode), price: rbPrice,
               validity: "DAY", afterMarket: "NO",
             });
 
@@ -947,7 +952,7 @@ async function closeTrade(
       transactionType,
       quantity: String(trade.quantity),
       productType: trade.productType,
-      priceType: ctPriceMode,
+      priceType: mapPriceType(ctPriceMode),
       price: ctFinalPrice,
       validity: "DAY",
       afterMarket: "NO",
@@ -1244,7 +1249,7 @@ export function startPersistentRollback(
           transactionType: revTransactionType,
           quantity: String(trade.quantity),
           productType: trade.productType,
-          priceType: prPriceMode,
+          priceType: mapPriceType(prPriceMode),
           price: prFinalPrice,
           validity: "DAY",
           afterMarket: "NO",
