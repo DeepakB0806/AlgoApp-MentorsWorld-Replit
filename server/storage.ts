@@ -4,7 +4,7 @@ import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
   brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades, strategyDailyPnl,
-  broker_field_mappings, universal_fields, instrumentConfigs, broker_exchange_maps,
+  broker_field_mappings, universal_fields, instrumentConfigs, broker_exchange_maps, processFlowLogs,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -22,6 +22,7 @@ import {
   type BrokerFieldMapping, type InsertBrokerFieldMapping,
   type UniversalField, type InsertUniversalField,
   type InstrumentConfig, type InsertInstrumentConfig,
+  type ProcessFlowLog, type InsertProcessFlowLog,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 

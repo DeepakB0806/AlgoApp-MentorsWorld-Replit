@@ -484,6 +484,33 @@ export const insertBrokerConfigSchema = createInsertSchema(brokerConfigs).omit({
 export type InsertBrokerConfig = z.infer<typeof insertBrokerConfigSchema>;
 export type BrokerConfig = typeof brokerConfigs.$inferSelect;
 
+// Process Flow Logs - persisted to DB for post-restart audit
+export const processFlowLogs = pgTable("process_flow_logs", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  planId: text("plan_id").notNull(),
+  planName: text("plan_name").notNull(),
+  signalType: text("signal_type").notNull(),
+  alert: text("alert").notNull(),
+  resolvedAction: text("resolved_action").notNull(),
+  blockType: text("block_type").notNull(),
+  actionTaken: text("action_taken").notNull(),
+  message: text("message").notNull(),
+  broker: text("broker").notNull(),
+  ticker: text("ticker"),
+  exchange: text("exchange"),
+  price: real("price"),
+  orderId: text("order_id"),
+  executionTimeMs: integer("execution_time_ms"),
+  timestamp: text("timestamp").notNull(),
+}, (t) => [
+  index("pfl_plan_id_idx").on(t.planId),
+  index("pfl_timestamp_idx").on(t.timestamp),
+]);
+
+export const insertProcessFlowLogSchema = createInsertSchema(processFlowLogs).omit({ id: true });
+export type InsertProcessFlowLog = z.infer<typeof insertProcessFlowLogSchema>;
+export type ProcessFlowLog = typeof processFlowLogs.$inferSelect;
+
 // Broker Test Connection Logs
 export const brokerTestLogs = pgTable("broker_test_logs", {
   id: varchar("id", { length: 36 }).primaryKey(),
