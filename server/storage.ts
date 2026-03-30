@@ -4,7 +4,7 @@ import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
   brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades, strategyDailyPnl,
-  broker_field_mappings, universal_fields, instrumentConfigs, broker_exchange_maps, processFlowLogs,
+  broker_field_mappings, universal_fields, instrumentConfigs, broker_exchange_maps, processFlowLogs, errorRouting,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -23,6 +23,7 @@ import {
   type UniversalField, type InsertUniversalField,
   type InstrumentConfig, type InsertInstrumentConfig,
   type ProcessFlowLog, type InsertProcessFlowLog,
+  type ErrorRouting, type InsertErrorRouting,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -134,6 +135,7 @@ export interface IStorage {
   deleteStrategyPlan(id: string): Promise<boolean>;
 
   // Strategy Trades - records trades executed by strategy plans
+  getStrategyTrade(id: string): Promise<StrategyTrade | undefined>;
   getStrategyTradesByPlan(planId: string): Promise<StrategyTrade[]>;
   getOpenTradesByPlan(planId: string): Promise<StrategyTrade[]>;
   getUnclosedTradesByPlan(planId: string): Promise<StrategyTrade[]>;
@@ -177,6 +179,13 @@ export interface IStorage {
   getProcessFlowLogsFromDB(planId?: string, limit?: number): Promise<ProcessFlowLog[]>;
   getProcessFlowPlansFromDB(): Promise<{ planId: string; planName: string; count: number }[]>;
   deleteProcessFlowLogsOlderThan(days: number): Promise<number>;
+
+  // Error Routing
+  getAllErrorRoutes(): Promise<ErrorRouting[]>;
+  getActiveErrorRoutes(): Promise<ErrorRouting[]>;
+  createErrorRoute(route: InsertErrorRouting): Promise<ErrorRouting>;
+  updateErrorRoute(id: number, patch: Partial<InsertErrorRouting>): Promise<ErrorRouting | undefined>;
+  deleteErrorRoute(id: number): Promise<boolean>;
 
   // Startup utilities
   backfillUniqueCodes(): Promise<void>;
@@ -901,6 +910,11 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  async getStrategyTrade(id: string): Promise<StrategyTrade | undefined> {
+    const [result] = await db.select().from(strategyTrades).where(eq(strategyTrades.id, id));
+    return result;
+  }
+
   async getStrategyTradesByPlan(planId: string): Promise<StrategyTrade[]> {
     return await db.select().from(strategyTrades).where(eq(strategyTrades.planId, planId)).orderBy(desc(strategyTrades.createdAt));
   }
@@ -1519,6 +1533,29 @@ export class DatabaseStorage implements IStorage {
       .where(lt(processFlowLogs.timestamp, cutoff.toISOString()))
       .returning();
     return result.length;
+  }
+
+  async getAllErrorRoutes(): Promise<ErrorRouting[]> {
+    return db.select().from(errorRouting).orderBy(errorRouting.id);
+  }
+
+  async getActiveErrorRoutes(): Promise<ErrorRouting[]> {
+    return db.select().from(errorRouting).where(eq(errorRouting.isActive, true)).orderBy(errorRouting.id);
+  }
+
+  async createErrorRoute(route: InsertErrorRouting): Promise<ErrorRouting> {
+    const [result] = await db.insert(errorRouting).values(route).returning();
+    return result;
+  }
+
+  async updateErrorRoute(id: number, patch: Partial<InsertErrorRouting>): Promise<ErrorRouting | undefined> {
+    const [result] = await db.update(errorRouting).set(patch).where(eq(errorRouting.id, id)).returning();
+    return result;
+  }
+
+  async deleteErrorRoute(id: number): Promise<boolean> {
+    const result = await db.delete(errorRouting).where(eq(errorRouting.id, id)).returning();
+    return result.length > 0;
   }
 
   async backfillUniqueCodes(): Promise<void> {

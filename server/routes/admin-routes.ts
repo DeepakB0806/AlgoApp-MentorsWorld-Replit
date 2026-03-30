@@ -2,6 +2,7 @@ import type { Express } from "express";
 import type { IStorage } from "../storage";
 import { sendEmail } from "../services/email";
 import { rescheduleScripMasterSync } from "../scrip-sync-scheduler";
+import { insertErrorRoutingSchema } from "@shared/schema";
 
 export function registerAdminRoutes(app: Express, storage: IStorage) {
   app.get("/api/settings/mail", async (req, res) => {
@@ -149,6 +150,55 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
     } catch (error: any) {
       console.error("Sync data error:", error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ── Error Routing CRUD ────────────────────────────────────────────────────
+
+  app.get("/api/error-routes", async (req, res) => {
+    try {
+      const routes = await storage.getAllErrorRoutes();
+      res.json(routes);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch error routes" });
+    }
+  });
+
+  app.post("/api/error-routes", async (req, res) => {
+    try {
+      const parsed = insertErrorRoutingSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+      const route = await storage.createErrorRoute(parsed.data);
+      res.status(201).json(route);
+    } catch (error: any) {
+      if (error.message?.includes("unique")) {
+        return res.status(409).json({ error: "Error pattern already exists" });
+      }
+      res.status(500).json({ error: "Failed to create error route" });
+    }
+  });
+
+  app.patch("/api/error-routes/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+      const route = await storage.updateErrorRoute(id, req.body);
+      if (!route) return res.status(404).json({ error: "Route not found" });
+      res.json(route);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update error route" });
+    }
+  });
+
+  app.delete("/api/error-routes/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+      const deleted = await storage.deleteErrorRoute(id);
+      if (!deleted) return res.status(404).json({ error: "Route not found" });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete error route" });
     }
   });
 }

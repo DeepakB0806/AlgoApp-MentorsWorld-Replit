@@ -759,6 +759,19 @@ export const insertInstrumentConfigSchema = createInsertSchema(instrumentConfigs
 export type InsertInstrumentConfig = z.infer<typeof insertInstrumentConfigSchema>;
 export type InstrumentConfig = typeof instrumentConfigs.$inferSelect;
 
+// ====== ERROR ROUTING ======
+export const errorRouting = pgTable("error_routing", {
+  id: serial("id").primaryKey(),
+  errorPattern: text("error_pattern").notNull().unique(),
+  actionType: text("action_type").notNull().default("terminal_close"),
+  isActive: boolean("is_active").notNull().default(true),
+  description: text("description"),
+});
+
+export const insertErrorRoutingSchema = createInsertSchema(errorRouting).omit({ id: true });
+export type InsertErrorRouting = z.infer<typeof insertErrorRoutingSchema>;
+export type ErrorRouting = typeof errorRouting.$inferSelect;
+
 // ====== HELPER FUNCTIONS ======
 export function buildTradingSymbol(ticker: string, legType: string, strike: string): string {
   if (!ticker) return "";

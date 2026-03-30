@@ -520,6 +520,43 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.post("/api/trades/:tradeId/force-close", async (req, res) => {
+    try {
+      const { tradeId } = req.params;
+      const trade = await storage.getStrategyTrade(tradeId);
+      if (!trade) return res.status(404).json({ error: "Trade not found" });
+      if (trade.status !== "close_failed") {
+        return res.status(400).json({ error: "Trade is not in close_failed status" });
+      }
+      const now = new Date().toISOString();
+      const exitAction = trade.action === "BUY" ? "SELL" : "BUY";
+      const updated = await storage.updateStrategyTrade(tradeId, {
+        status: "closed",
+        pnl: 0,
+        exitedAt: now,
+        updatedAt: now,
+        exitPrice: trade.ltp || trade.price || 0,
+        exitAction,
+      });
+      tradingCache.invalidateOpenTrades(trade.planId);
+      addProcessFlowLog({
+        planId: trade.planId,
+        planName: trade.planId,
+        signalType: "manual",
+        alert: "force_close",
+        resolvedAction: "force_closed",
+        blockType: trade.blockType || "unknown",
+        actionTaken: "force_closed",
+        message: `Manual operator force-close executed for ${trade.tradingSymbol}`,
+        broker: "manual",
+        ticker: trade.tradingSymbol || undefined,
+      });
+      return res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to force-close trade" });
+    }
+  });
+
   app.get("/api/strategy-daily-pnl/:planId", async (req, res) => {
     try {
       const { planId } = req.params;
@@ -681,8 +718,8 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
             quantity: Number(o.quantity || o.qt || 0),
             price: Number(o.avgPrc || o.prc || o.price || o.pr || 0),
             status: o.status || o.stat || o.ordSt || "",
-            timestamp: o.timestamp || o.plDate || o.time || o.ordTm || "",
-            rejection_reason: o.rejReason || o.rej_reason || o.rjBy || o.reason || "",
+            timestamp: o.ordDtTm || o.ordEntTm || o.timestamp || o.plDate || o.time || o.ordTm || "",
+            rejection_reason: o.rejRsn || o.rejReason || o.rej_reason || o.rjBy || o.reason || "",
           }));
           return res.json(normalized);
         }

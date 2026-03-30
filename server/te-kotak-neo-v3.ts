@@ -1049,14 +1049,29 @@ async function closeTrade(
     if (!orderResult.success) {
       console.error(`[TE] Failed to close Kotak trade: ${orderResult.error}`);
 
-      // FIX 4a: If broker says position no longer exists, treat as manually closed
-      const errStr = String(orderResult.error).toLowerCase();
-      if (errStr.includes("insufficient") && (errStr.includes("holding") || errStr.includes("balance"))) {
-        console.warn(`[TE] Insufficient holdings for ${trade.tradingSymbol}. Marking as manually closed.`);
-        const manualUpdate = await storage.updateStrategyTrade(trade.id, { status: "closed", pnl: 0, exitedAt: now, updatedAt: now, exitPrice: currentPrice, exitAction });
-        tradingCache.invalidateOpenTrades(trade.planId);
-        return manualUpdate || trade;
+      // ── Relational Error Routing ─────────────────────────────────────────────
+      // Query active error routing rules from DB. Terminal match → mark closed,
+      // stop retry loop. Transient errors fall through to close_failed.
+      const errStr = String(orderResult.error || "").toLowerCase();
+      try {
+        const activeRoutes = await storage.getActiveErrorRoutes();
+        const matchedRoute = activeRoutes.find(route =>
+          errStr.includes(route.errorPattern.toLowerCase())
+        );
+        if (matchedRoute && matchedRoute.actionType === "terminal_close") {
+          console.warn(`[TE] Terminal rejection (rule #${matchedRoute.id} — "${matchedRoute.errorPattern}"): "${orderResult.error}". Marking ${trade.tradingSymbol} as closed to stop zombie retries.`);
+          const closedUpdate = await storage.updateStrategyTrade(trade.id, {
+            status: "closed", pnl: 0,
+            exitedAt: now, updatedAt: now,
+            exitPrice: exitPrice, exitAction,
+          });
+          tradingCache.invalidateOpenTrades(trade.planId);
+          return closedUpdate || trade;
+        }
+      } catch (routingErr) {
+        console.error(`[TE] Error routing DB query failed (non-fatal): ${routingErr}`);
       }
+      // ── end Relational Error Routing ─────────────────────────────────────────
 
       const failedUpdate = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
       tradingCache.invalidateOpenTrades(trade.planId);
@@ -1207,6 +1222,8 @@ export function startPersistentSquareOff(
   }
   persistentSquareOffActive.add(planId);
 
+  let retryAttempt = 0;
+
   async function attempt() {
     const unclosed = await storage.getUnclosedTradesByPlan(planId);
     if (unclosed.length === 0) {
@@ -1214,7 +1231,18 @@ export function startPersistentSquareOff(
       persistentSquareOffActive.delete(planId);
       return;
     }
-    console.log(`[TE] PersistentSquareOff — ${unclosed.length} unclosed leg(s) for plan ${planId}, retrying...`);
+
+    // Max retry cap — if configured, stop retrying after N attempts and leave for Force-Close
+    const maxRetrySetting = await storage.getSetting("max_close_retry_count");
+    const maxRetries = parseInt(maxRetrySetting?.value || "0", 10);
+    if (maxRetries > 0 && retryAttempt >= maxRetries) {
+      console.error(`[TE] PersistentSquareOff cap reached (${maxRetries} attempts) for plan ${planId}. Stopping — use Force-Close button to manually clear.`);
+      persistentSquareOffActive.delete(planId);
+      return;
+    }
+    retryAttempt++;
+
+    console.log(`[TE] PersistentSquareOff — ${unclosed.length} unclosed leg(s) for plan ${planId}, attempt ${retryAttempt}${maxRetries > 0 ? `/${maxRetries}` : ""}...`);
     await squareOffPlan(storage, planId, brokerConfig);
     const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
     if (!settingRow?.value && settingRow?.value !== "0") {

@@ -4,16 +4,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
   ArrowLeft, Mail, Key, CheckCircle, XCircle, 
-  Eye, EyeOff, AlertTriangle, FileText, Settings as SettingsIcon, Database
+  Eye, EyeOff, AlertTriangle, FileText, Settings as SettingsIcon, Database,
+  ShieldAlert, Trash2, Plus, ToggleLeft, ToggleRight
 } from "lucide-react";
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
+import type { ErrorRouting } from "@shared/schema";
 
 interface MailSettings {
   apiKeyConfigured: boolean;
@@ -24,7 +29,7 @@ interface MailSettings {
   fromName: string;
 }
 
-type SettingsSection = "general" | "mail" | "templates" | "retention";
+type SettingsSection = "general" | "mail" | "templates" | "retention" | "error-routing";
 
 function MailApiSettings() {
   const [showApiKey, setShowApiKey] = useState(false);
@@ -371,6 +376,7 @@ function GeneralTradingSettings() {
   const [intervalValue, setIntervalValue] = useState<string>("");
   const [shortfallRetryCount, setShortfallRetryCount] = useState<string>("");
   const [rollbackRetryCount, setRollbackRetryCount] = useState<string>("");
+  const [maxCloseRetryCount, setMaxCloseRetryCount] = useState<string>("");
   const [bufferPoints, setBufferPoints] = useState<string>("");
   const [orderDelayMs, setOrderDelayMs] = useState<string>("");
   const [syncClockValue, setSyncClockValue] = useState<string>("09:10");
@@ -386,6 +392,10 @@ function GeneralTradingSettings() {
 
   const { data: rollbackSetting, isLoading: rollbackLoading } = useQuery<{ key: string; value: string | null }>({
     queryKey: ["/api/settings/rollback_api_retry_count"],
+  });
+
+  const { data: maxCloseRetrySetting, isLoading: maxCloseRetryLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/max_close_retry_count"],
   });
 
   const { data: bufferSetting, isLoading: bufferLoading } = useQuery<{ key: string; value: string | null }>({
@@ -423,6 +433,14 @@ function GeneralTradingSettings() {
       setRollbackRetryCount("5");
     }
   }, [rollbackSetting, rollbackLoading]);
+
+  useEffect(() => {
+    if (maxCloseRetrySetting?.value !== undefined && maxCloseRetrySetting?.value !== null) {
+      setMaxCloseRetryCount(maxCloseRetrySetting.value);
+    } else if (!maxCloseRetryLoading) {
+      setMaxCloseRetryCount("0");
+    }
+  }, [maxCloseRetrySetting, maxCloseRetryLoading]);
 
   useEffect(() => {
     if (bufferSetting?.value !== undefined && bufferSetting?.value !== null) {
@@ -494,6 +512,22 @@ function GeneralTradingSettings() {
     },
   });
 
+  const saveMaxCloseRetryMutation = useMutation({
+    mutationFn: async () => {
+      const count = parseInt(maxCloseRetryCount, 10);
+      if (isNaN(count) || count < 0) throw new Error("Enter a valid non-negative number");
+      const res = await apiRequest("POST", "/api/settings/max_close_retry_count", { value: String(count) });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/max_close_retry_count"] });
+      toast({ title: "Saved", description: "Max exit retry count updated." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   const saveBufferMutation = useMutation({
     mutationFn: async () => {
       const pts = parseFloat(bufferPoints);
@@ -553,7 +587,7 @@ function GeneralTradingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isLoading || shortfallLoading || rollbackLoading || bufferLoading || orderDelayLoading || syncClockLoading ? (
+        {isLoading || shortfallLoading || rollbackLoading || maxCloseRetryLoading || bufferLoading || orderDelayLoading || syncClockLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
           <>
@@ -651,6 +685,37 @@ function GeneralTradingSettings() {
             </div>
 
             <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="input-max-close-retry-count">
+                Max Exit Retry Attempts
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Maximum times the persistent square-off loop retries a failed exit. Set to 0 for unlimited. When the cap is reached, the trade stays in 'close_failed' and the Force-Close button becomes the only resolution.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Input
+                  id="input-max-close-retry-count"
+                  data-testid="input-max-close-retry-count"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={maxCloseRetryCount}
+                  onChange={(e) => setMaxCloseRetryCount(e.target.value)}
+                  placeholder="0"
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">retries</span>
+              </div>
+              <p className="text-xs text-muted-foreground">e.g. set to 5: loop retries 5 times then stops. Use Force-Close button to manually clear stuck trades.</p>
+              <Button
+                data-testid="button-save-max-close-retry-count"
+                onClick={() => saveMaxCloseRetryMutation.mutate()}
+                disabled={saveMaxCloseRetryMutation.isPending}
+              >
+                {saveMaxCloseRetryMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
               <Label htmlFor="input-limit-order-buffer">
                 Limit Order Buffer (Points)
               </Label>
@@ -742,6 +807,210 @@ function GeneralTradingSettings() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function ErrorRoutingSettings() {
+  const [newPattern, setNewPattern] = useState("");
+  const [newActionType, setNewActionType] = useState("terminal_close");
+  const [newDescription, setNewDescription] = useState("");
+  const { toast } = useToast();
+
+  const { data: routes = [], isLoading } = useQuery<ErrorRouting[]>({
+    queryKey: ["/api/error-routes"],
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      if (!newPattern.trim()) throw new Error("Pattern is required");
+      const res = await apiRequest("POST", "/api/error-routes", {
+        errorPattern: newPattern.trim().toLowerCase(),
+        actionType: newActionType,
+        description: newDescription.trim() || null,
+        isActive: true,
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to create rule");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/error-routes"] });
+      setNewPattern("");
+      setNewDescription("");
+      toast({ title: "Rule added", description: "Error routing rule created." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: number; isActive: boolean }) => {
+      const res = await apiRequest("PATCH", `/api/error-routes/${id}`, { isActive });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/error-routes"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/error-routes/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/error-routes"] });
+      toast({ title: "Rule deleted" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <Card data-testid="card-error-routing">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldAlert className="w-5 h-5" />
+            Error Routing Rules
+          </CardTitle>
+          <CardDescription>
+            Define exact Kotak error patterns and the action to take when they occur in a failed exit order.
+            Terminal patterns stop the retry loop and mark the trade closed. Rules are checked in order — first match wins.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {isLoading ? (
+            <div className="text-center py-8 text-muted-foreground">Loading rules…</div>
+          ) : routes.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4">No error routing rules configured. Add one below.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-8">#</TableHead>
+                    <TableHead>Pattern (case-insensitive)</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="text-center w-20">Active</TableHead>
+                    <TableHead className="w-10"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {routes.map((route) => (
+                    <TableRow key={route.id} data-testid={`row-error-route-${route.id}`}
+                      className={!route.isActive ? "opacity-50" : ""}>
+                      <TableCell className="text-xs text-muted-foreground font-mono">{route.id}</TableCell>
+                      <TableCell>
+                        <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">{route.errorPattern}</code>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={route.actionType === "terminal_close"
+                            ? "text-red-400 border-red-400/50 text-xs"
+                            : "text-muted-foreground text-xs"}
+                          data-testid={`badge-action-${route.id}`}
+                        >
+                          {route.actionType === "terminal_close" ? "terminal_close" : route.actionType}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
+                        {route.description || "—"}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Switch
+                          data-testid={`toggle-error-route-${route.id}`}
+                          checked={route.isActive}
+                          onCheckedChange={(checked) => toggleMutation.mutate({ id: route.id, isActive: checked })}
+                          disabled={toggleMutation.isPending}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          data-testid={`button-delete-error-route-${route.id}`}
+                          onClick={() => {
+                            if (confirm(`Delete rule for "${route.errorPattern}"?`)) {
+                              deleteMutation.mutate(route.id);
+                            }
+                          }}
+                          disabled={deleteMutation.isPending}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          <div className="border-t pt-4">
+            <p className="text-sm font-medium mb-3 flex items-center gap-2">
+              <Plus className="w-4 h-4" />
+              Add New Rule
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto_1fr_auto] items-end">
+              <div className="space-y-1">
+                <Label htmlFor="input-new-error-pattern" className="text-xs">Error Pattern</Label>
+                <Input
+                  id="input-new-error-pattern"
+                  data-testid="input-new-error-pattern"
+                  placeholder="e.g. instrument has been expired"
+                  value={newPattern}
+                  onChange={(e) => setNewPattern(e.target.value)}
+                  className="h-8 text-sm font-mono"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="select-new-action-type" className="text-xs">Action</Label>
+                <Select value={newActionType} onValueChange={setNewActionType}>
+                  <SelectTrigger id="select-new-action-type" data-testid="select-new-action-type" className="h-8 text-sm w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="terminal_close">terminal_close</SelectItem>
+                    <SelectItem value="ignore">ignore</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="input-new-error-description" className="text-xs">Description (optional)</Label>
+                <Input
+                  id="input-new-error-description"
+                  data-testid="input-new-error-description"
+                  placeholder="Context for this rule"
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <Button
+                data-testid="button-add-error-route"
+                onClick={() => createMutation.mutate()}
+                disabled={createMutation.isPending || !newPattern.trim()}
+                className="h-8"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" />
+                {createMutation.isPending ? "Adding…" : "Add"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -864,6 +1133,11 @@ export default function Settings() {
       label: "Data Retention",
       icon: Database,
     },
+    {
+      id: "error-routing" as const,
+      label: "Error Routing",
+      icon: ShieldAlert,
+    },
   ];
 
   return (
@@ -916,6 +1190,7 @@ export default function Settings() {
             {activeSection === "mail" && <MailApiSettings />}
             {activeSection === "templates" && <EmailTemplates />}
             {activeSection === "retention" && <DataRetentionSettings />}
+            {activeSection === "error-routing" && <ErrorRoutingSettings />}
           </div>
         </main>
       </div>

@@ -83,6 +83,7 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
   const { toast } = useToast();
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const [searchPositions, setSearchPositions] = useState("");
+  const [forceCloseTradeId, setForceCloseTradeId] = useState<string | null>(null);
 
   const { data: rawEntries = [], isLoading, refetch } = useQuery<StrategyDailyPnl[]>({
     queryKey: ["/api/strategy-daily-pnl", plan.id],
@@ -154,6 +155,26 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
     },
     onError: () => {
       toast({ title: "Failed to clear daily P&L data", variant: "destructive" });
+    },
+  });
+
+  const forceCloseMutation = useMutation({
+    mutationFn: async (tradeId: string) => {
+      const res = await apiRequest("POST", `/api/trades/${tradeId}/force-close`);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Force-close failed");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/strategy-trades", plan.id] });
+      setForceCloseTradeId(null);
+      toast({ title: "Force-closed", description: "Trade marked as closed. Retry loop terminated." });
+    },
+    onError: (err: any) => {
+      setForceCloseTradeId(null);
+      toast({ title: "Force-close failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -347,6 +368,102 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
               </div>
             )}
           </div>
+
+          {(() => {
+            const stuckTrades = trades.filter((t) => t.status === "close_failed");
+            if (stuckTrades.length === 0) return null;
+            return (
+              <div data-testid={`section-stuck-exits-${plan.id}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle className="w-3.5 h-3.5 text-destructive" />
+                  <p className="text-xs font-semibold text-destructive uppercase tracking-wide">Stuck Exits ({stuckTrades.length})</p>
+                </div>
+                <div className="overflow-x-auto rounded-md border border-destructive/30 bg-destructive/5">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="text-xs">Symbol</TableHead>
+                        <TableHead className="text-xs">Side</TableHead>
+                        <TableHead className="text-xs text-right">Entry ₹</TableHead>
+                        <TableHead className="text-xs">Reason</TableHead>
+                        <TableHead className="text-xs text-center">Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {stuckTrades.map((t) => (
+                        <TableRow key={t.id} data-testid={`row-stuck-trade-${t.id}`} className="hover:bg-destructive/10">
+                          <TableCell>
+                            <code className="text-xs font-mono">{t.tradingSymbol || "—"}</code>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={`text-xs ${t.action === "BUY" ? "text-emerald-400 border-emerald-400/50" : "text-red-400 border-red-400/50"}`}
+                              data-testid={`badge-trade-side-${t.id}`}
+                            >
+                              {t.action || "—"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs">
+                            {t.price != null ? Number(t.price).toFixed(2) : "—"}
+                          </TableCell>
+                          <TableCell className="max-w-[200px]">
+                            <span className="text-xs text-muted-foreground truncate block" title={t.rejectedReason || ""}>
+                              {t.rejectedReason || "—"}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              className="h-6 text-xs px-2"
+                              data-testid={`button-force-close-${t.id}`}
+                              onClick={() => setForceCloseTradeId(t.id)}
+                              disabled={forceCloseMutation.isPending && forceCloseTradeId === t.id}
+                            >
+                              {forceCloseMutation.isPending && forceCloseTradeId === t.id ? "Closing…" : "Force Close"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <Dialog open={forceCloseTradeId !== null} onOpenChange={(open) => { if (!open) setForceCloseTradeId(null); }}>
+                  <DialogContent data-testid="dialog-force-close-confirm">
+                    <DialogHeader>
+                      <DialogTitle className="text-destructive flex items-center gap-2">
+                        <AlertTriangle className="w-5 h-5" />
+                        Confirm Force-Close
+                      </DialogTitle>
+                      <DialogDescription>
+                        This will mark the stuck trade as <strong>closed</strong> with P&L = 0 and permanently stop the retry loop.
+                        No exit order will be sent to the broker — use only when the position is already gone or you accept the loss.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex gap-3 justify-end mt-2">
+                      <Button
+                        variant="outline"
+                        data-testid="button-force-close-cancel"
+                        onClick={() => setForceCloseTradeId(null)}
+                        disabled={forceCloseMutation.isPending}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        data-testid="button-force-close-confirm"
+                        onClick={() => { if (forceCloseTradeId) forceCloseMutation.mutate(forceCloseTradeId); }}
+                        disabled={forceCloseMutation.isPending}
+                      >
+                        {forceCloseMutation.isPending ? "Closing…" : "Yes, Force Close"}
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            );
+          })()}
 
           <div>
             <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Daily P&L Log</p>

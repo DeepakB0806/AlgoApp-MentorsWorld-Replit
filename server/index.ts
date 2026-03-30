@@ -233,8 +233,38 @@ app.use((req, res, next) => {
     if (!existingRollback) await storage.setSetting("rollback_api_retry_count", "5");
     const existingSyncClock = await storage.getSetting("scrip_master_sync_time");
     if (!existingSyncClock) await storage.setSetting("scrip_master_sync_time", "09:10");
+    const existingMaxClose = await storage.getSetting("max_close_retry_count");
+    if (!existingMaxClose) await storage.setSetting("max_close_retry_count", "0");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
+  }
+
+  // Seed default error routing rules if table is empty
+  try {
+    const existingRoutes = await storage.getAllErrorRoutes();
+    if (existingRoutes.length === 0) {
+      const SEED_ROUTES = [
+        { errorPattern: "instrument has been expired",  actionType: "terminal_close", description: "Kotak RMS: expired contract — exact string" },
+        { errorPattern: "order type is invalid",        actionType: "terminal_close", description: "Kotak RMS: invalid contract type" },
+        { errorPattern: "1007",                         actionType: "terminal_close", description: "Kotak API V3 code: Invalid Symbol" },
+        { errorPattern: "invalid symbol",               actionType: "terminal_close", description: "Kotak: symbol not found in scrip master" },
+        { errorPattern: "scrip not found",              actionType: "terminal_close", description: "Kotak: scrip lookup failure" },
+        { errorPattern: "1009",                         actionType: "terminal_close", description: "Kotak API V3 code: Invalid Quantity" },
+        { errorPattern: "invalid quantity",             actionType: "terminal_close", description: "Kotak: lot/quantity mismatch" },
+        { errorPattern: "1006",                         actionType: "terminal_close", description: "Kotak API V3 code: Invalid Exchange" },
+        { errorPattern: "insufficient holding",         actionType: "terminal_close", description: "Kotak RMS: position already gone from account" },
+        { errorPattern: "insufficient balance",         actionType: "terminal_close", description: "Kotak RMS: funds exhausted — cannot close" },
+        { errorPattern: "no open position",             actionType: "terminal_close", description: "Broker has no record of this open position" },
+        { errorPattern: "delisted",                     actionType: "terminal_close", description: "Instrument has been delisted" },
+        { errorPattern: "suspended",                    actionType: "terminal_close", description: "Instrument is suspended from trading" },
+      ];
+      for (const route of SEED_ROUTES) {
+        await storage.createErrorRoute(route).catch(() => {});
+      }
+      log("[STARTUP] Error routing rules seeded with default Kotak terminal patterns.");
+    }
+  } catch (err) {
+    log(`[STARTUP] Error routing seed warning: ${err}`);
   }
 
   // Daily scrip master scheduled sync — fires at the user-configured IST time (default 09:10)
