@@ -1,0 +1,48 @@
+Task #91: STRICT FIX - Stale Expiry Guard in Trade Engine
+
+CRITICAL MANDATE: The system attempted to trade an expired contract today because the Trade Engine did not validate the requested expiry date against the current IST date. You must inject a strict IST date-guard into te-kotak-neo-v3.ts byte-for-byte as shown below.
+
+File: server/te-kotak-neo-v3.ts
+
+Step 1: Locate buildOptionSymbol
+Find the buildOptionSymbol function. It currently looks like this:
+
+TypeScript
+export function buildOptionSymbol(baseSymbol: string, optType: "CE" | "PE", strike: number, targetDateStr?: string): { brokerSymbol: string, token: string } {
+  const today = toZonedTime(new Date(), "Asia/Kolkata");
+  // ... gets datesToTry
+  for (const dateStr of datesToTry) {
+    const cacheKey = `${baseSymbol}_${dateStr}_${strike}_${optType}`;
+// ...
+Step 2: Replace with this Date-Guarded Logic
+Replace the entire buildOptionSymbol function with this exact code:
+
+TypeScript
+export function buildOptionSymbol(baseSymbol: string, optType: "CE" | "PE", strike: number, targetDateStr?: string): { brokerSymbol: string, token: string } {
+  const today = toZonedTime(new Date(), "Asia/Kolkata");
+  const todayStr = format(today, "yyyy-MM-dd");
+  
+  const datesToTry = targetDateStr ? [targetDateStr] : [
+    format(getNearestThursday(today), "yyyy-MM-dd"),
+    format(getNearestThursday(addDays(today, 7)), "yyyy-MM-dd"),
+    format(getNearestThursday(addDays(today, 14)), "yyyy-MM-dd")
+  ];
+
+  for (const dateStr of datesToTry) {
+    // STRICT IST DATE GUARD: Never return a contract that expired yesterday or earlier
+    if (dateStr < todayStr) {
+      console.warn(`${LOG_PREFIX} [GUARD] Skipping expired contract date ${dateStr} for ${baseSymbol}`);
+      continue; 
+    }
+
+    const cacheKey = `${baseSymbol}_${dateStr}_${strike}_${optType}`;
+    const contract = SMC.liveContractCache.get(cacheKey);
+    
+    if (contract) {
+      return contract;
+    }
+  }
+
+  throw new Error(`Contract not found for ${baseSymbol} ${strike} ${optType} (Checked from ${todayStr} onwards. SMC may need sync)`);
+}
+Why this works: If the plan requests a stale date (like 2026-03-26 on 2026-03-30), the engine skips it and throws a safe, clear error before sending anything to Kotak. This prevents the vague "order type is invalid" error.

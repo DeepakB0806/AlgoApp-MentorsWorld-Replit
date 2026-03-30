@@ -382,6 +382,11 @@ export function BrokerLinking() {
     queryKey: ["/api/webhooks"],
   });
 
+  const { data: scripStatus } = useQuery<{ lastSyncDateIST: string; lastSyncTimeIST: string; isStale: boolean; todayIST: string }>({
+    queryKey: ["/api/broker/kotak/scrip-status"],
+    refetchInterval: 5 * 60 * 1000,
+  });
+
   const activePlans = plans.filter((p) => p.status === "active");
 
   const [localState, setLocalState] = useState<Record<string, { brokerConfigId: string; isProxyMode: boolean }>>({});
@@ -588,6 +593,36 @@ export function BrokerLinking() {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold" data-testid="text-broker-linking-title">Broker Linking</h2>
+
+      {scripStatus?.isStale && (
+        <div className="flex items-center gap-3 bg-red-500/10 text-red-500 p-3 rounded-md border border-red-500/20 shadow-sm" data-testid="banner-stale-scrip-master">
+          <AlertTriangle className="w-5 h-5 shrink-0" />
+          <span className="text-sm font-semibold flex-1">
+            Stale scrip data — last synced {scripStatus.lastSyncDateIST} at {scripStatus.lastSyncTimeIST} IST. Contracts from today may not be available.
+          </span>
+          <Button
+            size="sm"
+            variant="destructive"
+            data-testid="button-force-scrip-sync"
+            onClick={async () => {
+              const kotakBroker = brokerConfigs.find(b => b.brokerName === "kotak_neo" && b.isConnected);
+              if (!kotakBroker) {
+                toast({ title: "No broker", description: "No connected Kotak Neo broker found.", variant: "destructive" });
+                return;
+              }
+              try {
+                await apiRequest("POST", `/api/broker-configs/${kotakBroker.id}/sync-scrip-master`);
+                queryClient.invalidateQueries({ queryKey: ["/api/broker/kotak/scrip-status"] });
+                toast({ title: "Sync triggered", description: "Scrip master sync started." });
+              } catch {
+                toast({ title: "Sync failed", description: "Could not trigger scrip master sync.", variant: "destructive" });
+              }
+            }}
+          >
+            Force Sync Now
+          </Button>
+        </div>
+      )}
 
       {activePlans.length === 0 ? (
         <Card className="text-center py-12">

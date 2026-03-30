@@ -466,6 +466,14 @@ function resolveOrderParams(
     const fallbackNow = new Date();
     const fallbackDate = `${fallbackNow.getFullYear()}-${String(fallbackNow.getMonth() + 1).padStart(2, "0")}-${String(fallbackNow.getDate()).padStart(2, "0")}`;
     const expiryDateStr = ctx.targetExpiryDate || fallbackDate;
+
+    // IST stale-expiry guard — abort if requested expiry is already in the past
+    const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    const todayISTStr = `${nowIST.getUTCFullYear()}-${String(nowIST.getUTCMonth() + 1).padStart(2, "0")}-${String(nowIST.getUTCDate()).padStart(2, "0")}`;
+    if (expiryDateStr < todayISTStr) {
+      return { error: `ABORT: Resolved expiry ${expiryDateStr} is in the past (today IST is ${todayISTStr}). Scrip master may not have rolled over yet — trigger a manual sync or wait for the scheduled daily sync.` };
+    }
+
     const cacheKey = `${ctx.ticker}_${expiryDateStr}_${targetStrike}_${leg.type}`;
 
     let resolvedContract = liveContractCache.get(cacheKey);

@@ -9,6 +9,7 @@ import { db } from "../db";
 import { desc, eq, sql, or } from "drizzle-orm";
 import EL from "../el-kotak-neo-v3";
 import { startPersistentSquareOff } from "../te-kotak-neo-v3";
+import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
 import { addProcessFlowLog, getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
 import {
   testBinanceConnectivity,
@@ -1071,6 +1072,31 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     const { entries, totalCount } = getProcessFlowLogs(req.params.planId, limit);
     const plans = getProcessFlowPlans();
     res.json({ logs: entries, plans, total: totalCount });
+  });
+
+  app.get("/api/broker/kotak/scrip-status", (req, res) => {
+    const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    const todayIST = `${nowIST.getUTCFullYear()}-${String(nowIST.getUTCMonth() + 1).padStart(2, "0")}-${String(nowIST.getUTCDate()).padStart(2, "0")}`;
+    const isStale = scripMasterSyncStatus.lastSyncDateIST !== todayIST;
+    res.json({ ...scripMasterSyncStatus, isStale, todayIST });
+  });
+
+  app.post("/api/broker-configs/:id/sync-scrip-master", async (req, res) => {
+    try {
+      const brokerConfig = await storage.getBrokerConfig(req.params.id);
+      if (!brokerConfig) return res.status(404).json({ error: "Broker config not found" });
+      if (brokerConfig.brokerName !== "kotak_neo") {
+        return res.status(400).json({ error: "Scrip master sync is only available for Kotak Neo brokers" });
+      }
+      const { runScripMasterSync } = await import("../smc-kotak-neo-v3");
+      const result = await runScripMasterSync(storage, brokerConfig);
+      if (!result.success) {
+        return res.status(500).json({ error: result.error });
+      }
+      return res.json({ success: true, synced: result.synced });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || String(err) });
+    }
   });
 
   app.get("/api/broker-configs/:id/scrip-master-download", async (req, res) => {

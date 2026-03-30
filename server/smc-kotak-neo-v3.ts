@@ -28,6 +28,16 @@ export const liveContractCache = new Map<string, { brokerSymbol: string, token: 
 export const rawCsvCache = new Map<string, string>(); // exchange → raw CSV text
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// SYNC STATUS TRACKER
+// Updated on every successful runScripMasterSync call so the API and UI can
+// show exactly when the scrip master was last refreshed and flag stale data.
+// ═══════════════════════════════════════════════════════════════════════════════
+export const scripMasterSyncStatus = {
+  lastSyncDateIST: "1970-01-01",
+  lastSyncTimeIST: "00:00:00",
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
 interface ParsedInstrument {
@@ -430,6 +440,13 @@ export async function runScripMasterSync(storage: IStorage, brokerConfig: Broker
     }
 
     tradingCache.invalidateInstrumentConfigs();
+
+    // Update sync status timestamp (IST)
+    const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    scripMasterSyncStatus.lastSyncDateIST = `${nowIST.getUTCFullYear()}-${String(nowIST.getUTCMonth() + 1).padStart(2, "0")}-${String(nowIST.getUTCDate()).padStart(2, "0")}`;
+    scripMasterSyncStatus.lastSyncTimeIST = `${String(nowIST.getUTCHours()).padStart(2, "0")}:${String(nowIST.getUTCMinutes()).padStart(2, "0")}:${String(nowIST.getUTCSeconds()).padStart(2, "0")}`;
+    console.log(`${LOG_PREFIX} Scrip Master Sync Timestamp Updated to: ${scripMasterSyncStatus.lastSyncDateIST} ${scripMasterSyncStatus.lastSyncTimeIST} IST`);
+
     return { success: true, synced };
   } catch (error: any) {
     return { success: false, synced: 0, error: error.message };

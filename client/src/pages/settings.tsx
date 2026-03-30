@@ -372,6 +372,7 @@ function GeneralTradingSettings() {
   const [shortfallRetryCount, setShortfallRetryCount] = useState<string>("");
   const [rollbackRetryCount, setRollbackRetryCount] = useState<string>("");
   const [bufferPoints, setBufferPoints] = useState<string>("");
+  const [syncClockValue, setSyncClockValue] = useState<string>("09:15");
   const { toast } = useToast();
 
   const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
@@ -388,6 +389,10 @@ function GeneralTradingSettings() {
 
   const { data: bufferSetting, isLoading: bufferLoading } = useQuery<{ key: string; value: string | null }>({
     queryKey: ["/api/settings/limit_order_buffer_points"],
+  });
+
+  const { data: syncClockSetting, isLoading: syncClockLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/scrip_master_sync_time"],
   });
 
   useEffect(() => {
@@ -421,6 +426,14 @@ function GeneralTradingSettings() {
       setBufferPoints("1");
     }
   }, [bufferSetting, bufferLoading]);
+
+  useEffect(() => {
+    if (syncClockSetting?.value) {
+      setSyncClockValue(syncClockSetting.value);
+    } else if (!syncClockLoading) {
+      setSyncClockValue("09:15");
+    }
+  }, [syncClockSetting, syncClockLoading]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -486,6 +499,21 @@ function GeneralTradingSettings() {
     },
   });
 
+  const saveSyncClockMutation = useMutation({
+    mutationFn: async () => {
+      if (!syncClockValue) throw new Error("Enter a valid time");
+      const res = await apiRequest("POST", "/api/settings/scrip_master_sync_time", { value: syncClockValue });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/scrip_master_sync_time"] });
+      toast({ title: "Saved", description: "Scrip master sync time updated. Will take effect after next server restart." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   return (
     <Card data-testid="card-general-trading-settings">
       <CardHeader>
@@ -498,7 +526,7 @@ function GeneralTradingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isLoading || shortfallLoading || rollbackLoading || bufferLoading ? (
+        {isLoading || shortfallLoading || rollbackLoading || bufferLoading || syncClockLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
           <>
@@ -623,6 +651,33 @@ function GeneralTradingSettings() {
                 disabled={saveBufferMutation.isPending}
               >
                 {saveBufferMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="input-scrip-sync-clock">
+                Kotak Scrip Master Sync Clock (IST)
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Daily time at which the server automatically re-downloads the Kotak Neo scrip master to pick up post-expiry rolled-over contracts. Takes effect after the next server restart.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Input
+                  id="input-scrip-sync-clock"
+                  data-testid="input-scrip-sync-clock"
+                  type="time"
+                  value={syncClockValue}
+                  onChange={(e) => setSyncClockValue(e.target.value)}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">Default: 09:15. Exchange rolls over contract lists after 09:00 on expiry settlement days.</p>
+              <Button
+                data-testid="button-save-scrip-sync-clock"
+                onClick={() => saveSyncClockMutation.mutate()}
+                disabled={saveSyncClockMutation.isPending}
+              >
+                {saveSyncClockMutation.isPending ? "Saving..." : "Save"}
               </Button>
             </div>
           </>
