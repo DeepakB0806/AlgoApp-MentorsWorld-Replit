@@ -1059,18 +1059,22 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     }
   });
 
-  app.get("/api/process-flow-logs", (_req, res) => {
+  app.get("/api/process-flow-logs", async (_req, res) => {
     const planId = _req.query.planId as string | undefined;
     const limit = parseInt(_req.query.limit as string) || 100;
-    const { entries, totalCount } = getProcessFlowLogs(planId || undefined, limit);
-    const plans = getProcessFlowPlans();
+    const [{ entries, totalCount }, plans] = await Promise.all([
+      getProcessFlowLogs(planId || undefined, limit),
+      getProcessFlowPlans(),
+    ]);
     res.json({ logs: entries, plans, total: totalCount });
   });
 
-  app.get("/api/process-flow-logs/:planId", (req, res) => {
+  app.get("/api/process-flow-logs/:planId", async (req, res) => {
     const limit = parseInt(req.query.limit as string) || 100;
-    const { entries, totalCount } = getProcessFlowLogs(req.params.planId, limit);
-    const plans = getProcessFlowPlans();
+    const [{ entries, totalCount }, plans] = await Promise.all([
+      getProcessFlowLogs(req.params.planId, limit),
+      getProcessFlowPlans(),
+    ]);
     res.json({ logs: entries, plans, total: totalCount });
   });
 

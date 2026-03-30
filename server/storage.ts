@@ -172,6 +172,12 @@ export interface IStorage {
   getInstrumentConfig(ticker: string, exchange: string): Promise<InstrumentConfig | undefined>;
   upsertInstrumentConfig(data: InsertInstrumentConfig): Promise<InstrumentConfig>;
 
+  // Process Flow Logs - persisted to DB
+  addProcessFlowLogToDB(log: InsertProcessFlowLog): Promise<ProcessFlowLog>;
+  getProcessFlowLogsFromDB(planId?: string, limit?: number): Promise<ProcessFlowLog[]>;
+  getProcessFlowPlansFromDB(): Promise<{ planId: string; planName: string; count: number }[]>;
+  deleteProcessFlowLogsOlderThan(days: number): Promise<number>;
+
   // Startup utilities
   backfillUniqueCodes(): Promise<void>;
 
@@ -1476,6 +1482,43 @@ export class DatabaseStorage implements IStorage {
       .values({ ...data, updatedAt: new Date().toISOString() })
       .returning();
     return created;
+  }
+
+  async addProcessFlowLogToDB(log: InsertProcessFlowLog): Promise<ProcessFlowLog> {
+    const [result] = await db.insert(processFlowLogs).values(log).returning();
+    return result;
+  }
+
+  async getProcessFlowLogsFromDB(planId?: string, limit = 100): Promise<ProcessFlowLog[]> {
+    if (planId) {
+      return await db.select().from(processFlowLogs)
+        .where(eq(processFlowLogs.planId, planId))
+        .orderBy(desc(processFlowLogs.timestamp))
+        .limit(limit);
+    }
+    return await db.select().from(processFlowLogs)
+      .orderBy(desc(processFlowLogs.timestamp))
+      .limit(limit);
+  }
+
+  async getProcessFlowPlansFromDB(): Promise<{ planId: string; planName: string; count: number }[]> {
+    const rows = await db.select({
+      planId: processFlowLogs.planId,
+      planName: processFlowLogs.planName,
+      count: sql<number>`cast(count(*) as int)`,
+    }).from(processFlowLogs)
+      .groupBy(processFlowLogs.planId, processFlowLogs.planName)
+      .orderBy(desc(sql`count(*)`));
+    return rows;
+  }
+
+  async deleteProcessFlowLogsOlderThan(days: number): Promise<number> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const result = await db.delete(processFlowLogs)
+      .where(lt(processFlowLogs.timestamp, cutoff.toISOString()))
+      .returning();
+    return result.length;
   }
 
   async backfillUniqueCodes(): Promise<void> {

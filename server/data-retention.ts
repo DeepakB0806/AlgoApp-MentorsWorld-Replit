@@ -9,6 +9,7 @@ const DEFAULTS: Record<string, number> = {
   retention_broker_session_logs_days: 30,
   retention_broker_test_logs_days:     7,
   retention_webhook_status_logs_days: 30,
+  retention_process_flow_logs_days:   30,
 };
 
 async function readSettings(storage: IStorage): Promise<Record<string, number>> {
@@ -48,6 +49,7 @@ async function runRetentionCleanup(storage: IStorage) {
       { name: "broker_session_logs",   fn: () => storage.deleteBrokerSessionLogsOlderThan(s.retention_broker_session_logs_days) },
       { name: "broker_test_logs",      fn: () => storage.deleteBrokerTestLogsOlderThan(s.retention_broker_test_logs_days) },
       { name: "webhook_status_logs",   fn: () => storage.deleteOldLogsGlobally(s.retention_webhook_status_logs_days) },
+      { name: "process_flow_logs",     fn: () => storage.deleteProcessFlowLogsOlderThan(s.retention_process_flow_logs_days) },
     ];
 
     const results = await Promise.allSettled(jobs.map((j) => j.fn()));
