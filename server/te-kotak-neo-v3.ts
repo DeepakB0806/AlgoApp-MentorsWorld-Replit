@@ -23,7 +23,7 @@ import {
   getOTMStrike,
   getTargetExpiry,
 } from "./option-symbol-builder";
-import { liveContractCache } from "./smc-kotak-neo-v3";
+import { liveContractCache, brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // FILL PRICE LOOKUP
@@ -604,9 +604,24 @@ async function executeLegBasket(
           throw new Error(abortMsg);
         }
         const bufferPoints = parseFloat(bufferSetting?.value || "0");
-        const entryPrice = ctx.price || 0;
+        let basePriceForLimit = ctx.price || 0;
+        if (isOptionExchange(ctx.exchange) && resolved.priceMode === "LMT") {
+          const token = brokerSymbolToTokenMap.get(resolved.tradingSymbol);
+          if (!token) {
+            const abortMsg = `ABORT: Token not found for ${resolved.tradingSymbol} in scrip master — run scrip sync first.`;
+            logPFL(plan, broker, ctx.data, "error", abortMsg);
+            throw new Error(abortMsg);
+          }
+          const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(ctx.exchange), token);
+          if (!quoteRes.success || !quoteRes.ltp) {
+            const abortMsg = `ABORT: Live quote fetch failed for ${resolved.tradingSymbol}: ${quoteRes.error}`;
+            logPFL(plan, broker, ctx.data, "error", abortMsg);
+            throw new Error(abortMsg);
+          }
+          basePriceForLimit = quoteRes.ltp;
+        }
         const finalPrice = resolved.priceMode === "LMT"
-          ? getBufferedLimitPrice(entryPrice, leg.action, bufferPoints)
+          ? getBufferedLimitPrice(basePriceForLimit, leg.action, bufferPoints)
           : "0";
         const orderResult = await EL.placeOrder(brokerConfig, {
           tradingSymbol: resolved.tradingSymbol, exchange: EL.mapExchange(ctx.exchange),
@@ -691,8 +706,26 @@ async function executeLegBasket(
               startPersistentRollback(storage, plan.id, brokerConfig);
               continue;
             }
+            let rbBasePriceForLimit = landed.ltp || landed.price || 0;
+            if (isOptionExchange(ctx.exchange) && rbPriceMode === "LMT") {
+              const rbToken = brokerSymbolToTokenMap.get(landed.tradingSymbol);
+              if (!rbToken) {
+                logPFL(plan, broker, ctx.data, "error", `ABORT: Token not found for ${landed.tradingSymbol} for rollback. Marking rollback_failed.`);
+                await storage.updateStrategyTrade(landed.id, { status: "rollback_failed", updatedAt: ctx.now });
+                startPersistentRollback(storage, plan.id, brokerConfig);
+                continue;
+              }
+              const rbQuoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(ctx.exchange), rbToken);
+              if (!rbQuoteRes.success || !rbQuoteRes.ltp) {
+                logPFL(plan, broker, ctx.data, "error", `ABORT: Live quote fetch failed for ${landed.tradingSymbol} during rollback: ${rbQuoteRes.error}. Marking rollback_failed.`);
+                await storage.updateStrategyTrade(landed.id, { status: "rollback_failed", updatedAt: ctx.now });
+                startPersistentRollback(storage, plan.id, brokerConfig);
+                continue;
+              }
+              rbBasePriceForLimit = rbQuoteRes.ltp;
+            }
             const rbPrice = rbPriceMode === "LMT"
-              ? getBufferedLimitPrice(landed.ltp || landed.price || 0, reverseAction, rbBufferPoints)
+              ? getBufferedLimitPrice(rbBasePriceForLimit, reverseAction, rbBufferPoints)
               : "0";
             const rbResult = await EL.placeOrder(brokerConfig, {
               tradingSymbol: landed.tradingSymbol, exchange: EL.mapExchange(ctx.exchange),
@@ -978,8 +1011,26 @@ async function closeTrade(
       return failedUpd || trade;
     }
     const ctBufferPoints = parseFloat(ctBufferSetting.value);
+    let ctBasePriceForLimit = exitPrice;
+    if (isOptionExchange(trade.exchange) && ctPriceMode === "LMT") {
+      const ctToken = brokerSymbolToTokenMap.get(trade.tradingSymbol);
+      if (!ctToken) {
+        console.error(`[TE] ABORT: Token not found for ${trade.tradingSymbol} in scrip master for closeTrade. Marking close_failed.`);
+        const failedUpd = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
+        tradingCache.invalidateOpenTrades(trade.planId);
+        return failedUpd || trade;
+      }
+      const ctQuoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(trade.exchange), ctToken);
+      if (!ctQuoteRes.success || !ctQuoteRes.ltp) {
+        console.error(`[TE] ABORT: Live quote fetch failed for ${trade.tradingSymbol} in closeTrade: ${ctQuoteRes.error}. Marking close_failed.`);
+        const failedUpd = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
+        tradingCache.invalidateOpenTrades(trade.planId);
+        return failedUpd || trade;
+      }
+      ctBasePriceForLimit = ctQuoteRes.ltp;
+    }
     const ctFinalPrice = ctPriceMode === "LMT"
-      ? getBufferedLimitPrice(exitPrice, exitAction, ctBufferPoints)
+      ? getBufferedLimitPrice(ctBasePriceForLimit, exitAction, ctBufferPoints)
       : "0";
 
     const universalPayload: Record<string, any> = {
@@ -1296,8 +1347,28 @@ export function startPersistentRollback(
           continue;
         }
         const prBufferPoints = parseFloat(prBufferSetting.value);
+        let prBasePriceForLimit = trade.ltp || trade.price || 0;
+        if (isOptionExchange(trade.exchange || "NFO") && prPriceMode === "LMT") {
+          const prToken = brokerSymbolToTokenMap.get(trade.tradingSymbol);
+          if (!prToken) {
+            const abortMsg = `ABORT: Token not found for ${trade.tradingSymbol} in scrip master for persistent rollback.`;
+            if (plan) logPFL(plan, brokerConfig.brokerName, mockWebhookData, "error", abortMsg);
+            else console.error(`[TE] ${abortMsg}`);
+            await storage.updateStrategyTrade(trade.id, { status: "rollback_failed", updatedAt: now2 });
+            continue;
+          }
+          const prQuoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(trade.exchange || "NFO"), prToken);
+          if (!prQuoteRes.success || !prQuoteRes.ltp) {
+            const abortMsg = `ABORT: Live quote fetch failed for ${trade.tradingSymbol} in persistent rollback: ${prQuoteRes.error}.`;
+            if (plan) logPFL(plan, brokerConfig.brokerName, mockWebhookData, "error", abortMsg);
+            else console.error(`[TE] ${abortMsg}`);
+            await storage.updateStrategyTrade(trade.id, { status: "rollback_failed", updatedAt: now2 });
+            continue;
+          }
+          prBasePriceForLimit = prQuoteRes.ltp;
+        }
         const prFinalPrice = prPriceMode === "LMT"
-          ? getBufferedLimitPrice(trade.ltp || trade.price || 0, reverseAction, prBufferPoints)
+          ? getBufferedLimitPrice(prBasePriceForLimit, reverseAction, prBufferPoints)
           : "0";
 
         const rbResult = await EL.placeOrder(brokerConfig, {

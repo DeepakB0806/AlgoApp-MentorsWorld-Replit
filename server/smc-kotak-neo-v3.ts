@@ -18,6 +18,7 @@ const LOG_PREFIX = "[SCRIP-MASTER]";
 // Populated on every scrip master sync from NFO + BFO CSVs.
 // ═══════════════════════════════════════════════════════════════════════════════
 export const liveContractCache = new Map<string, { brokerSymbol: string, token: string }>();
+export const brokerSymbolToTokenMap = new Map<string, string>();
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // RAW CSV CACHE
@@ -247,6 +248,7 @@ function parseScripMasterCSV(csvText: string, exchange: string, allowed: string[
 // ═══════════════════════════════════════════════════════════════════════════════
 function populateContractCache(allRawContracts: RawContract[]): void {
   liveContractCache.clear();
+  brokerSymbolToTokenMap.clear();
   const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
   const nowTime = startOfDay.getTime();
   for (const c of allRawContracts) {
@@ -256,6 +258,7 @@ function populateContractCache(allRawContracts: RawContract[]): void {
       const d = String(c.date.getDate()).padStart(2, "0");
       const key = `${c.ticker}_${y}-${m}-${d}_${c.strike}_${c.optType}`;
       liveContractCache.set(key, { brokerSymbol: c.symbol, token: c.token });
+      if (c.symbol && c.token) brokerSymbolToTokenMap.set(c.symbol, c.token);
     }
   }
   console.log(`${LOG_PREFIX} Loaded ${liveContractCache.size} contracts (NFO + BFO, all upcoming expiries) into multi-expiry cache.`);

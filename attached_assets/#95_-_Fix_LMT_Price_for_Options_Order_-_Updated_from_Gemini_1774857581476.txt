@@ -1,0 +1,84 @@
+Task #95: STRICT FIX - Options LMT Price Resolution & Tick Rounding
+
+What & Why
+When placing LIMIT orders for options, the Trade Engine incorrectly uses the index spot price (e.g., NIFTY at 22,500) from the webhook instead of the option's actual premium (e.g., ₹300). This causes immediate RMS rejections. Furthermore, Indian exchanges require options limit prices to be strictly rounded to a 0.05 tick size.
+
+Done looks like
+
+Reverse Token Map: SMC exports a brokerSymbolToTokenMap to quickly find a token by its trading symbol.
+
+Quote API Module: The Execution Layer (el-kotak-neo-v3.ts) has a new getQuote function to fetch the live LTP of a specific token.
+
+Dynamic Base Price: At all 4 LMT call sites in te-kotak-neo-v3.ts, if the order is an Option and the type is LMT, the engine pauses to fetch the real-time LTP via getQuote and uses that as the base price.
+
+Strict Tick Rounding: The final computed limit price (after adding/subtracting the buffer) is strictly rounded to the nearest 0.05 before being sent to the broker.
+
+CRITICAL IMPLEMENTATION SNIPPETS:
+
+Task 1: The SMC Reverse Map (server/smc-kotak-neo-v3.ts)
+Add the map export at the top, and populate it inside your CSV parsing loop:
+
+TypeScript
+// Export this alongside liveContractCache
+export const brokerSymbolToTokenMap = new Map<string, string>();
+
+// Inside populateContractCache(), right after setting liveContractCache:
+brokerSymbolToTokenMap.set(brokerSymbol, token);
+Task 2: The Execution Layer Quote Fetcher (server/el-kotak-neo-v3.ts)
+Export this new function to call Kotak's quotes endpoint:
+
+TypeScript
+export async function getQuote(config: BrokerConfig, exchange: string, token: string): Promise<{ success: boolean; ltp?: number; error?: string }> {
+  try {
+    const endpoint = `/script-details/1.0/quotes/neosymbol/${exchange}|${token}/all`;
+    const res = await callKotakApi("GET", endpoint, config); // Use your existing internal API caller
+    
+    // Extract LTP based on Kotak's standard quote response structure
+    const ltp = res?.data?.data?.[0]?.ltp || res?.data?.ltp; 
+    
+    if (ltp !== undefined && ltp !== null) {
+      return { success: true, ltp: Number(ltp) };
+    }
+    return { success: false, error: "LTP missing in Kotak quote response" };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+Task 3: Trade Engine LMT Fix & Tick Rounding (server/te-kotak-neo-v3.ts)
+At each of the 4 call sites where getBufferedLimitPrice is calculated, implement this guard pattern. Note: You must replace the generic ctx.price or trade.ltp with this dynamically fetched price for Options.
+
+TypeScript
+let basePriceForLimit = ctx.price; // Default to webhook spot price for Futures/Equity
+
+// 1. Fetch Option Premium if LMT order
+if (isOptionExchange(ctx.exchange) && plan.orderType === "LMT") {
+  const token = SMC.brokerSymbolToTokenMap.get(resolved.tradingSymbol);
+  if (!token) {
+    throw new Error(`ABORT: Could not find token for ${resolved.tradingSymbol} to fetch live quote.`);
+  }
+  
+  const quoteRes = await EL.getQuote(brokerConfig, ctx.exchange, token);
+  if (!quoteRes.success || !quoteRes.ltp) {
+    throw new Error(`ABORT: Failed to fetch live quote for ${resolved.tradingSymbol}. API Error: ${quoteRes.error}`);
+  }
+  basePriceForLimit = quoteRes.ltp;
+}
+
+// 2. Calculate raw buffer
+// (Replace logic below with your existing add/subtract buffer logic based on BUY/SELL)
+const rawLimitPrice = basePriceForLimit + limitBuffer; 
+
+// 3. STRICT TICK SIZE ROUNDING (0.05) - MANDATORY
+const finalLimitPrice = (Math.round(rawLimitPrice * 20) / 20).toFixed(2);
+
+// Now pass finalLimitPrice as a string to your order payload
+Why this order of operations is critical:
+Failsafe Aborts: If the getQuote API call fails (e.g., Kotak's servers glitch), the throw new Error ensures the trade aborts immediately. It will never default back to the dangerous 22,500 spot price.
+
+The Math.round(x * 20) / 20 Formula: This is the universal standard for financial tick size rounding.
+
+308.12 * 20 = 6162.4
+
+Math.round(6162.4) = 6162
+
+6162 / 20 = 308.10 (Perfectly valid tick size).

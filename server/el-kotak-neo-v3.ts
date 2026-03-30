@@ -620,6 +620,33 @@ class ExecutionLayer {
     }
   }
 
+  async getQuote(
+    config: BrokerConfig,
+    exchange: string,
+    token: string,
+  ): Promise<{ success: boolean; ltp?: number; error?: string }> {
+    if (!this.ready && !(await this.ensureReady())) {
+      return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
+    }
+    try {
+      const endpoint = this.getEndpoint("quotes");
+      if (!endpoint) return { success: false, error: "quotes endpoint not configured" };
+      const headers = this.buildHeadersForEndpoint(endpoint, {
+        accessToken: config.accessToken,
+        sessionId: config.sessionId,
+        consumerKey: config.consumerKey,
+      });
+      const url = `${config.baseUrl}/script-details/1.0/quotes/neosymbol/${exchange}|${token}/all`;
+      const res = await fetch(url, { method: "GET", headers });
+      const data = await res.json();
+      const ltp = data?.data?.[0]?.ltp ?? data?.ltp;
+      if (ltp !== undefined && ltp !== null) return { success: true, ltp: Number(ltp) };
+      return { success: false, error: `LTP missing in response: ${JSON.stringify(data).slice(0, 200)}` };
+    } catch (err: any) {
+      return { success: false, error: err.message || String(err) };
+    }
+  }
+
   async getOrderHistory(
     config: BrokerConfig,
     orderNo: string,
