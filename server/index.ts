@@ -268,6 +268,24 @@ app.use((req, res, next) => {
         await storage.createErrorRoute(route).catch(() => {});
       }
       log("[STARTUP] Error routing rules seeded with default Kotak terminal + system_halt patterns.");
+    } else {
+      // Existing deployments: ensure the 4 auth system_halt patterns are present
+      // (they were added in Task #98 and won't exist in pre-#98 databases).
+      const SYSTEM_HALT_PATTERNS = [
+        { errorPattern: "401",             actionType: "system_halt", description: "Kotak Auth: Unauthorized — session expired or invalid token" },
+        { errorPattern: "expired session", actionType: "system_halt", description: "Kotak Auth: Session has expired — re-login required" },
+        { errorPattern: "invalid totp",    actionType: "system_halt", description: "Kotak Auth: TOTP rejected — re-authentication required" },
+        { errorPattern: "invalid mpin",    actionType: "system_halt", description: "Kotak Auth: MPIN rejected — re-authentication required" },
+      ];
+      const existingPatterns = new Set(existingRoutes.map(r => r.errorPattern.toLowerCase()));
+      let added = 0;
+      for (const route of SYSTEM_HALT_PATTERNS) {
+        if (!existingPatterns.has(route.errorPattern.toLowerCase())) {
+          await storage.createErrorRoute(route).catch(() => {});
+          added++;
+        }
+      }
+      if (added > 0) log(`[STARTUP] Back-filled ${added} system_halt auth pattern(s) into error_routing.`);
     }
   } catch (err) {
     log(`[STARTUP] Error routing seed warning: ${err}`);
