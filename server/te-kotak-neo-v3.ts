@@ -563,7 +563,12 @@ async function executeLegBasket(
   let finalError: string | undefined;
 
   const retrySetting = await storage.getSetting("margin_shortfall_retry_count");
-  const maxRetries = retrySetting?.value ? parseInt(retrySetting.value, 10) : 0;
+  if (!retrySetting?.value && retrySetting?.value !== "0") {
+    const abortMsg = "ABORT: margin_shortfall_retry_count is missing from app_settings.";
+    logPFL(plan, broker, ctx.data, "error", abortMsg);
+    throw new Error(abortMsg);
+  }
+  const maxRetries = parseInt(retrySetting.value, 10);
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const landedLegs: StrategyTrade[] = [];
@@ -639,8 +644,13 @@ async function executeLegBasket(
 
         if (items.length > 1) {
           const settingRow = await storage.getSetting("order_execution_delay_ms");
-          const _parsed = parseInt(settingRow?.value ?? "", 10);
-          const delayMs = Number.isFinite(_parsed) ? Math.max(0, _parsed) : 200;
+          if (!settingRow?.value && settingRow?.value !== "0") {
+            const abortMsg = "ABORT: order_execution_delay_ms is missing from app_settings.";
+            logPFL(plan, broker, ctx.data, "error", abortMsg);
+            throw new Error(abortMsg);
+          }
+          const _parsed = parseInt(settingRow.value, 10);
+          const delayMs = Math.max(0, _parsed);
           await new Promise(r => setTimeout(r, delayMs));
         }
       } else {
@@ -661,7 +671,12 @@ async function executeLegBasket(
             logPFL(plan, broker, ctx.data, "warn", `[ROLLBACK] Reversing ${landed.tradingSymbol} qty=${landed.quantity}`);
 
             const rbBufferSetting = await storage.getSetting("limit_order_buffer_points");
-            const rbBufferPoints = parseFloat(rbBufferSetting?.value || "0");
+            if (!rbBufferSetting?.value && rbBufferSetting?.value !== "0") {
+              const abortMsg = "ABORT: limit_order_buffer_points is missing from app_settings.";
+              logPFL(plan, broker, ctx.data, "error", abortMsg);
+              throw new Error(abortMsg);
+            }
+            const rbBufferPoints = parseFloat(rbBufferSetting.value);
             const rbPriceMode = (ctx.blockConfig.priceMode as string | undefined)
               || (TL.isReady() ? TL.getDefaultByUniversalName("priceType", "order_place") : null);
             if (!rbPriceMode) {
@@ -742,7 +757,12 @@ async function executeLegBasket(
       return { trades: finalTrades, orderIds: finalOrderIds };
     } else if (attempt < maxRetries && finalError?.includes("Margin shortfall")) {
       const retryRow = await storage.getSetting("squareoff_retry_interval_ms");
-      const retryDelay = retryRow?.value ? Math.max(0, parseInt(retryRow.value, 10)) : 1000;
+      if (!retryRow?.value && retryRow?.value !== "0") {
+        const abortMsg = "ABORT: squareoff_retry_interval_ms is missing from app_settings.";
+        logPFL(plan, broker, ctx.data, "error", abortMsg);
+        throw new Error(abortMsg);
+      }
+      const retryDelay = Math.max(0, parseInt(retryRow.value, 10));
       console.log(`[TE] Retrying basket at lotMultiplier=${Math.max(1, ctx.lotMultiplier - attempt - 1)} in ${retryDelay}ms...`);
       await new Promise(r => setTimeout(r, retryDelay));
     } else {
@@ -797,8 +817,13 @@ async function executeBuySignal(
     });
     let closePnl = 0;
     const delaySetting = await storage.getSetting("order_execution_delay_ms");
-    const _parsedDelay = parseInt(delaySetting?.value ?? "", 10);
-    const delayMs = Number.isFinite(_parsedDelay) ? Math.max(0, _parsedDelay) : 200;
+    if (!delaySetting?.value && delaySetting?.value !== "0") {
+      const abortMsg = "ABORT: order_execution_delay_ms is missing from app_settings.";
+      logPFL(plan, broker, ctx.data, "error", abortMsg);
+      throw new Error(abortMsg);
+    }
+    const _parsedDelay = parseInt(delaySetting.value, 10);
+    const delayMs = Math.max(0, _parsedDelay);
 
     for (let ci = 0; ci < openOpposites.length; ci++) {
       const closed = await closeTrade(storage, openOpposites[ci], ctx.price, ctx.now, brokerConfig);
@@ -856,8 +881,13 @@ async function executeSellSignal(
     });
     let anyFailed = false;
     const delaySetting = await storage.getSetting("order_execution_delay_ms");
-    const _parsedDelay = parseInt(delaySetting?.value ?? "", 10);
-    const delayMs = Number.isFinite(_parsedDelay) ? Math.max(0, _parsedDelay) : 200;
+    if (!delaySetting?.value && delaySetting?.value !== "0") {
+      const abortMsg = "ABORT: order_execution_delay_ms is missing from app_settings.";
+      logPFL(plan, broker, ctx.data, "error", abortMsg);
+      throw new Error(abortMsg);
+    }
+    const _parsedDelay = parseInt(delaySetting.value, 10);
+    const delayMs = Math.max(0, _parsedDelay);
 
     for (let ci = 0; ci < allToClose.length; ci++) {
       const closed = await closeTrade(storage, allToClose[ci], ctx.price, ctx.now, brokerConfig);
@@ -941,7 +971,13 @@ async function closeTrade(
       return failedUpdate || trade;
     }
     const ctBufferSetting = await storage.getSetting("limit_order_buffer_points");
-    const ctBufferPoints = parseFloat(ctBufferSetting?.value || "0");
+    if (!ctBufferSetting?.value && ctBufferSetting?.value !== "0") {
+      console.error(`[TE] ABORT: limit_order_buffer_points is missing from app_settings. Marking close_failed for ${trade.tradingSymbol}.`);
+      const failedUpd = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
+      tradingCache.invalidateOpenTrades(trade.planId);
+      return failedUpd || trade;
+    }
+    const ctBufferPoints = parseFloat(ctBufferSetting.value);
     const ctFinalPrice = ctPriceMode === "LMT"
       ? getBufferedLimitPrice(exitPrice, exitAction, ctBufferPoints)
       : "0";
@@ -1025,8 +1061,13 @@ export async function squareOffPlan(
   console.log(`[TE] squareOffPlan: planId=${planId}, unclosedTrades=${openTrades.length}`);
 
   const delaySetting = await storage.getSetting("order_execution_delay_ms");
-  const _parsedDelay = parseInt(delaySetting?.value ?? "", 10);
-  const delayMs = Number.isFinite(_parsedDelay) ? Math.max(0, _parsedDelay) : 200;
+  if (!delaySetting?.value && delaySetting?.value !== "0") {
+    const abortMsg = "ABORT: order_execution_delay_ms is missing from app_settings.";
+    console.error(`[TE] ${abortMsg}`);
+    throw new Error(abortMsg);
+  }
+  const _parsedDelay = parseInt(delaySetting.value, 10);
+  const delayMs = Math.max(0, _parsedDelay);
 
   for (const trade of openTrades) {
     try {
@@ -1125,7 +1166,12 @@ export function startPersistentSquareOff(
     console.log(`[TE] PersistentSquareOff — ${unclosed.length} unclosed leg(s) for plan ${planId}, retrying...`);
     await squareOffPlan(storage, planId, brokerConfig);
     const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
-    const intervalMs = settingRow?.value ? parseInt(settingRow.value, 10) : 2000;
+    if (!settingRow?.value && settingRow?.value !== "0") {
+      const abortMsg = "ABORT: squareoff_retry_interval_ms is missing from app_settings.";
+      console.error(`[TE] ${abortMsg}`);
+      throw new Error(abortMsg);
+    }
+    const intervalMs = Math.max(0, parseInt(settingRow.value, 10));
     setTimeout(attempt, intervalMs);
   }
 
@@ -1167,7 +1213,12 @@ export function startPersistentExit(
     }
     tradingCache.invalidateOpenTrades(planId);
     const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
-    const intervalMs = settingRow?.value ? parseInt(settingRow.value, 10) : 2000;
+    if (!settingRow?.value && settingRow?.value !== "0") {
+      const abortMsg = "ABORT: squareoff_retry_interval_ms is missing from app_settings.";
+      console.error(`[TE] ${abortMsg}`);
+      throw new Error(abortMsg);
+    }
+    const intervalMs = Math.max(0, parseInt(settingRow.value, 10));
     setTimeout(attempt, intervalMs);
   }
 
@@ -1238,7 +1289,13 @@ export function startPersistentRollback(
           continue;
         }
         const prBufferSetting = await storage.getSetting("limit_order_buffer_points");
-        const prBufferPoints = parseFloat(prBufferSetting?.value || "0");
+        if (!prBufferSetting?.value && prBufferSetting?.value !== "0") {
+          const abortMsg = "ABORT: limit_order_buffer_points is missing from app_settings.";
+          if (plan) logPFL(plan, brokerConfig.brokerName, mockWebhookData, "error", abortMsg);
+          else console.error(`[TE] ${abortMsg}`);
+          continue;
+        }
+        const prBufferPoints = parseFloat(prBufferSetting.value);
         const prFinalPrice = prPriceMode === "LMT"
           ? getBufferedLimitPrice(trade.ltp || trade.price || 0, reverseAction, prBufferPoints)
           : "0";
@@ -1271,7 +1328,13 @@ export function startPersistentRollback(
 
       if (remaining.length > 0) {
         const settingRow = await storage.getSetting("squareoff_retry_interval_ms");
-        const intervalMs = settingRow?.value ? parseInt(settingRow.value, 10) : 2000;
+        if (!settingRow?.value && settingRow?.value !== "0") {
+          const abortMsg = "ABORT: squareoff_retry_interval_ms is missing from app_settings.";
+          console.error(`[TE] ${abortMsg}`);
+          persistentRollbackActive.delete(planId);
+          return;
+        }
+        const intervalMs = Math.max(0, parseInt(settingRow.value, 10));
         setTimeout(attempt, intervalMs);
       } else {
         persistentRollbackActive.delete(planId);

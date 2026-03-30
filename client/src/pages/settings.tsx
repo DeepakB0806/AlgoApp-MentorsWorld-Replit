@@ -372,6 +372,7 @@ function GeneralTradingSettings() {
   const [shortfallRetryCount, setShortfallRetryCount] = useState<string>("");
   const [rollbackRetryCount, setRollbackRetryCount] = useState<string>("");
   const [bufferPoints, setBufferPoints] = useState<string>("");
+  const [orderDelayMs, setOrderDelayMs] = useState<string>("");
   const [syncClockValue, setSyncClockValue] = useState<string>("09:10");
   const { toast } = useToast();
 
@@ -389,6 +390,10 @@ function GeneralTradingSettings() {
 
   const { data: bufferSetting, isLoading: bufferLoading } = useQuery<{ key: string; value: string | null }>({
     queryKey: ["/api/settings/limit_order_buffer_points"],
+  });
+
+  const { data: orderDelaySetting, isLoading: orderDelayLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/order_execution_delay_ms"],
   });
 
   const { data: syncClockSetting, isLoading: syncClockLoading } = useQuery<{ key: string; value: string | null }>({
@@ -426,6 +431,12 @@ function GeneralTradingSettings() {
       setBufferPoints("1");
     }
   }, [bufferSetting, bufferLoading]);
+
+  useEffect(() => {
+    if (orderDelaySetting?.value !== undefined && orderDelaySetting?.value !== null) {
+      setOrderDelayMs(orderDelaySetting.value);
+    }
+  }, [orderDelaySetting, orderDelayLoading]);
 
   useEffect(() => {
     if (syncClockSetting?.value) {
@@ -499,6 +510,22 @@ function GeneralTradingSettings() {
     },
   });
 
+  const saveOrderDelayMutation = useMutation({
+    mutationFn: async () => {
+      const ms = parseInt(orderDelayMs, 10);
+      if (isNaN(ms) || ms < 0) throw new Error("Enter a valid non-negative number");
+      const res = await apiRequest("POST", "/api/settings/order_execution_delay_ms", { value: String(ms) });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/order_execution_delay_ms"] });
+      toast({ title: "Saved", description: "Inter-leg execution delay updated." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   const saveSyncClockMutation = useMutation({
     mutationFn: async () => {
       if (!syncClockValue) throw new Error("Enter a valid time");
@@ -526,7 +553,7 @@ function GeneralTradingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isLoading || shortfallLoading || rollbackLoading || bufferLoading || syncClockLoading ? (
+        {isLoading || shortfallLoading || rollbackLoading || bufferLoading || orderDelayLoading || syncClockLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
           <>
@@ -651,6 +678,37 @@ function GeneralTradingSettings() {
                 disabled={saveBufferMutation.isPending}
               >
                 {saveBufferMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="input-order-delay-ms">Inter-Leg Execution Delay (ms)</Label>
+                <Badge variant="outline" className="text-xs">Required</Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Delay in milliseconds between sequenced leg executions (entry and exit). Required — no default. Set to 0 for immediate sequential fire.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Input
+                  id="input-order-delay-ms"
+                  data-testid="input-order-delay-ms"
+                  type="number"
+                  min="0"
+                  step="50"
+                  value={orderDelayMs}
+                  onChange={(e) => setOrderDelayMs(e.target.value)}
+                  placeholder="e.g. 200"
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">ms</span>
+              </div>
+              <Button
+                data-testid="button-save-order-delay-ms"
+                onClick={() => saveOrderDelayMutation.mutate()}
+                disabled={saveOrderDelayMutation.isPending}
+              >
+                {saveOrderDelayMutation.isPending ? "Saving..." : "Save"}
               </Button>
             </div>
 
