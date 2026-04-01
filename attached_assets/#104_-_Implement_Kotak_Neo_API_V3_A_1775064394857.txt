@@ -1,0 +1,88 @@
+Task #104: Kotak Neo API V3 Full Upgrade & Bangalore Relay
+
+What & Why
+Kotak Securities has rigidly enforced their API V3 upgrade alongside a new SEBI Static IP mandate. Replit's dynamic IPs cause immediate 401 Unauthorized rejections. We have deployed a Node.js Relay on a DigitalOcean server in Bangalore to lock our Outbound IP. We must upgrade ExecutionLayer in server/el-kotak-neo-v3.ts to route all traffic through this relay, handle Kotak V3's URL-encoded jData order payloads, and strip the legacy "Bearer " prefix from auth headers.
+
+Done looks like
+
+All Kotak API calls route through the Bangalore Relay (http://168.144.0.191:8080).
+
+Order placements (POST requests) successfully wrap their JSON payload inside a URL-encoded jData string.
+
+The Authorization header passes the raw token (no "Bearer " prefix).
+
+Tasks:
+
+Task 1 — Add V3 Body Formatter and Relay Wrapper
+File: server/el-kotak-neo-v3.ts
+Locate the ExecutionLayer class. Add these two private helpers to handle V3 formatting and the Bangalore relay routing:
+
+TypeScript
+  /**
+   * Formats the body for Kotak V3 API. V3 requires POST payloads to be URL-encoded 
+   * under the key "jData".
+   */
+  private formatV3Body(body: any): { body: string; contentType?: string } {
+    if (!body) return { body: "" };
+    
+    // Convert the JSON object to a string, then URL-encode it, prefixing with jData=
+    const jDataString = JSON.stringify(body);
+    const encodedBody = `jData=${encodeURIComponent(jDataString)}`;
+    
+    return {
+      body: encodedBody,
+      contentType: "application/x-www-form-urlencoded"
+    };
+  }
+
+  /**
+   * Routes Kotak API requests through the Bangalore Static IP Relay.
+   * Required for SEBI API IP Whitelisting and Session Binding.
+   */
+  private async executeRelayFetch(targetUrl: string, options: any): Promise<Response> {
+    const RELAY_URL = "http://168.144.0.191:8080";
+    const RELAY_SECRET = "mentorsworld_algo_secure_2026";
+
+    // Strip "Bearer " from Authorization header if present (Kotak V3 rejects it)
+    if (options?.headers?.["Authorization"]) {
+      options.headers["Authorization"] = options.headers["Authorization"].replace(/bearer /i, "").trim();
+    }
+
+    const relayOptions = {
+      ...options,
+      headers: {
+        ...options?.headers,
+        'x-target-url': targetUrl,
+        'x-relay-secret': RELAY_SECRET
+      }
+    };
+
+    return fetch(RELAY_URL, relayOptions);
+  }
+Task 2 — Replace Direct Fetches & Apply V3 Formatting
+File: server/el-kotak-neo-v3.ts
+Scan the entire ExecutionLayer class for native fetch(url, ...) calls.
+Update all GET requests to simply use this.executeRelayFetch(url, ...).
+
+For POST/PUT requests (like placeOrder, modifyOrder, cancelOrder), you must first format the body using formatV3Body.
+
+Example Update for placeOrder:
+
+TypeScript
+      const endpoint = this.getEndpoint("placeOrder");
+      // ... setup headers ...
+      const payload = { /* ... order data ... */ };
+      
+      const v3Formatted = this.formatV3Body(payload);
+      if (v3Formatted.contentType) {
+        headers["Content-Type"] = v3Formatted.contentType;
+      }
+
+      const res = await this.executeRelayFetch(`${config.baseUrl}${endpoint.path}`, { 
+        method: "POST", 
+        headers, 
+        body: v3Formatted.body 
+      });
+Apply this V3 payload logic to all mutating endpoints, and apply the Relay fetch wrapper to getPositions, getQuote, generateToken, etc.
+
+Once Replit completes this, your engine will be 100% compliant with Kotak's V3 architecture and SEBI's IP mandates. Let me know when this builds!

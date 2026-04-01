@@ -49,6 +49,9 @@ integrations = ["javascript_database:1.0.0", "javascript_log_in_with_replit:2.0.
 
 [userenv.production]
 
+[userenv.shared]
+RELAY_TARGET_URL = "http://168.144.0.191:8080"
+
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
