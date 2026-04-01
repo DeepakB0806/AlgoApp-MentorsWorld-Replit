@@ -184,6 +184,7 @@ export interface IStorage {
   getAllErrorRoutes(): Promise<ErrorRouting[]>;
   getActiveErrorRoutes(): Promise<ErrorRouting[]>;
   createErrorRoute(route: InsertErrorRouting): Promise<ErrorRouting>;
+  upsertErrorRoute(route: InsertErrorRouting): Promise<boolean>;
   updateErrorRoute(id: number, patch: Partial<InsertErrorRouting>): Promise<ErrorRouting | undefined>;
   deleteErrorRoute(id: number): Promise<boolean>;
 
@@ -1546,6 +1547,15 @@ export class DatabaseStorage implements IStorage {
   async createErrorRoute(route: InsertErrorRouting): Promise<ErrorRouting> {
     const [result] = await db.insert(errorRouting).values(route).returning();
     return result;
+  }
+
+  async upsertErrorRoute(route: InsertErrorRouting): Promise<boolean> {
+    const result = await db.execute(
+      sql`INSERT INTO error_routing (error_pattern, action_type, description)
+          VALUES (${route.errorPattern}, ${route.actionType}, ${route.description})
+          ON CONFLICT (error_pattern) DO NOTHING`
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 
   async updateErrorRoute(id: number, patch: Partial<InsertErrorRouting>): Promise<ErrorRouting | undefined> {

@@ -241,58 +241,41 @@ app.use((req, res, next) => {
     log(`[STARTUP] Default settings seed warning: ${err}`);
   }
 
-  // Seed default error routing rules if table is empty
+  // Seed default error routing rules — idempotent upsert on every startup
   try {
-    const existingRoutes = await storage.getAllErrorRoutes();
-    if (existingRoutes.length === 0) {
-      const SEED_ROUTES = [
-        { errorPattern: "instrument has been expired",  actionType: "terminal_close", description: "Kotak RMS: expired contract — exact string" },
-        { errorPattern: "order type is invalid",        actionType: "terminal_close", description: "Kotak RMS: invalid contract type" },
-        { errorPattern: "1007",                         actionType: "terminal_close", description: "Kotak API V3 code: Invalid Symbol" },
-        { errorPattern: "invalid symbol",               actionType: "terminal_close", description: "Kotak: symbol not found in scrip master" },
-        { errorPattern: "scrip not found",              actionType: "terminal_close", description: "Kotak: scrip lookup failure" },
-        { errorPattern: "1009",                         actionType: "terminal_close", description: "Kotak API V3 code: Invalid Quantity" },
-        { errorPattern: "invalid quantity",             actionType: "terminal_close", description: "Kotak: lot/quantity mismatch" },
-        { errorPattern: "1006",                         actionType: "terminal_close", description: "Kotak API V3 code: Invalid Exchange" },
-        { errorPattern: "insufficient holding",         actionType: "terminal_close", description: "Kotak RMS: position already gone from account" },
-        { errorPattern: "insufficient balance",         actionType: "terminal_close", description: "Kotak RMS: funds exhausted — cannot close" },
-        { errorPattern: "no open position",             actionType: "terminal_close", description: "Broker has no record of this open position" },
-        { errorPattern: "delisted",                     actionType: "terminal_close", description: "Instrument has been delisted" },
-        { errorPattern: "suspended",                    actionType: "terminal_close", description: "Instrument is suspended from trading" },
-        { errorPattern: "401",                          actionType: "system_halt",    description: "Kotak Auth: Unauthorized — session expired or invalid token" },
-        { errorPattern: "expired session",              actionType: "system_halt",    description: "Kotak Auth: Session has expired — re-login required" },
-        { errorPattern: "invalid totp",                 actionType: "system_halt",    description: "Kotak Auth: TOTP rejected — re-authentication required" },
-        { errorPattern: "invalid mpin",                 actionType: "system_halt",    description: "Kotak Auth: MPIN rejected — re-authentication required" },
-        { errorPattern: "unauthorized",                  actionType: "system_halt",    description: "Kotak: IP not whitelisted or session expired — SEBI IP whitelist mandate" },
-        { errorPattern: "token not found",               actionType: "terminal_close", description: "Internal guard: token missing from Scrip Master (expired contract)" },
-        { errorPattern: "quote fetch failed",            actionType: "terminal_close", description: "Internal guard: options live quote API failure" },
-      ];
-      for (const route of SEED_ROUTES) {
-        await storage.createErrorRoute(route).catch(() => {});
+    const CANONICAL_ERROR_ROUTES = [
+      { errorPattern: "instrument has been expired",  actionType: "terminal_close", description: "Kotak RMS: expired contract — exact string" },
+      { errorPattern: "order type is invalid",        actionType: "terminal_close", description: "Kotak RMS: invalid contract type" },
+      { errorPattern: "1007",                         actionType: "terminal_close", description: "Kotak API V3 code: Invalid Symbol" },
+      { errorPattern: "invalid symbol",               actionType: "terminal_close", description: "Kotak: symbol not found in scrip master" },
+      { errorPattern: "scrip not found",              actionType: "terminal_close", description: "Kotak: scrip lookup failure" },
+      { errorPattern: "1009",                         actionType: "terminal_close", description: "Kotak API V3 code: Invalid Quantity" },
+      { errorPattern: "invalid quantity",             actionType: "terminal_close", description: "Kotak: lot/quantity mismatch" },
+      { errorPattern: "1006",                         actionType: "terminal_close", description: "Kotak API V3 code: Invalid Exchange" },
+      { errorPattern: "insufficient holding",         actionType: "terminal_close", description: "Kotak RMS: position already gone from account" },
+      { errorPattern: "insufficient balance",         actionType: "terminal_close", description: "Kotak RMS: funds exhausted — cannot close" },
+      { errorPattern: "no open position",             actionType: "terminal_close", description: "Broker has no record of this open position" },
+      { errorPattern: "delisted",                     actionType: "terminal_close", description: "Instrument has been delisted" },
+      { errorPattern: "suspended",                    actionType: "terminal_close", description: "Instrument is suspended from trading" },
+      { errorPattern: "401",                          actionType: "system_halt",    description: "Kotak Auth: Unauthorized — session expired or invalid token" },
+      { errorPattern: "expired session",              actionType: "system_halt",    description: "Kotak Auth: Session has expired — re-login required" },
+      { errorPattern: "invalid totp",                 actionType: "system_halt",    description: "Kotak Auth: TOTP rejected — re-authentication required" },
+      { errorPattern: "invalid mpin",                 actionType: "system_halt",    description: "Kotak Auth: MPIN rejected — re-authentication required" },
+      { errorPattern: "unauthorized",                 actionType: "system_halt",    description: "Kotak: IP not whitelisted or session expired — SEBI IP whitelist mandate" },
+      { errorPattern: "token not found",              actionType: "terminal_close", description: "Internal guard: token missing from Scrip Master (expired contract)" },
+      { errorPattern: "quote fetch failed",           actionType: "terminal_close", description: "Internal guard: options live quote API failure" },
+    ];
+    let seeded = 0;
+    for (const route of CANONICAL_ERROR_ROUTES) {
+      try {
+        const inserted = await storage.upsertErrorRoute(route);
+        if (inserted) seeded++;
+      } catch (err) {
+        log(`[STARTUP] Error routing seed failed for "${route.errorPattern}": ${err}`);
       }
-      log("[STARTUP] Error routing rules seeded with default Kotak terminal + system_halt patterns.");
-    } else {
-      // Existing deployments: ensure all auth/guard system_halt patterns are present
-      // (base set added in Task #98; "unauthorized" added in Task #102 for SEBI IP whitelist).
-      const SYSTEM_HALT_PATTERNS = [
-        { errorPattern: "401",             actionType: "system_halt",    description: "Kotak Auth: Unauthorized — session expired or invalid token" },
-        { errorPattern: "expired session", actionType: "system_halt",    description: "Kotak Auth: Session has expired — re-login required" },
-        { errorPattern: "invalid totp",    actionType: "system_halt",    description: "Kotak Auth: TOTP rejected — re-authentication required" },
-        { errorPattern: "invalid mpin",    actionType: "system_halt",    description: "Kotak Auth: MPIN rejected — re-authentication required" },
-        { errorPattern: "unauthorized",    actionType: "system_halt",    description: "Kotak: IP not whitelisted or session expired — SEBI IP whitelist mandate" },
-        { errorPattern: "token not found", actionType: "terminal_close", description: "Internal guard: token missing from Scrip Master (expired contract)" },
-        { errorPattern: "quote fetch failed", actionType: "terminal_close", description: "Internal guard: options live quote API failure" },
-      ];
-      const existingPatterns = new Set(existingRoutes.map(r => r.errorPattern.toLowerCase()));
-      let added = 0;
-      for (const route of SYSTEM_HALT_PATTERNS) {
-        if (!existingPatterns.has(route.errorPattern.toLowerCase())) {
-          await storage.createErrorRoute(route).catch(() => {});
-          added++;
-        }
-      }
-      if (added > 0) log(`[STARTUP] Back-filled ${added} system_halt auth pattern(s) into error_routing.`);
     }
+    if (seeded > 0) log(`[STARTUP] Error routing: ${seeded} new pattern(s) seeded.`);
+    else log(`[STARTUP] Error routing: all ${CANONICAL_ERROR_ROUTES.length} patterns already present.`);
   } catch (err) {
     log(`[STARTUP] Error routing seed warning: ${err}`);
   }

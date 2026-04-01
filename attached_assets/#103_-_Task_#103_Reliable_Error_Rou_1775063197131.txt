@@ -1,0 +1,60 @@
+Task #103: Reliable Error Routing Seed (Idempotent Upsert)
+
+What & Why
+The current error routing seed logic in server/index.ts (around lines 244–298) suffers from a silent failure bug and requires maintaining two separate lists (SEED_ROUTES and SYSTEM_HALT_PATTERNS). As a result, critical new error patterns like the SEBI "unauthorized" IP rejection are failing to back-fill into the database. We need to replace this brittle logic with a single, canonical array and an idempotent SQL upsert (ON CONFLICT DO NOTHING).
+
+Done looks like
+
+The old if/else seeding logic for error_routing in server/index.ts is completely removed.
+
+It is replaced with a single CANONICAL_ERROR_ROUTES array and a raw db.execute loop using sql.
+
+On server startup, all essential error patterns (including "unauthorized") are guaranteed to exist in the database.
+
+Tasks:
+
+Task 1 — Replace the Error Routing Seed Logic
+File: server/index.ts
+
+Ensure that sql is imported from drizzle-orm at the top of the file:
+import { sql } from "drizzle-orm";
+
+Locate the existing error routing seed block (usually an if (existingRoutes.length === 0) block followed by an else back-fill block). Delete that entire section.
+
+Replace it exactly with this new Idempotent Upsert Loop:
+
+TypeScript
+const CANONICAL_ERROR_ROUTES = [
+  { errorPattern: "Insufficient fund",            actionType: "terminal_close", description: "Kotak: Account lacks margin for this specific trade" },
+  { errorPattern: "rms:margin",                   actionType: "terminal_close", description: "Kotak RMS: Margin shortfall rejection" },
+  { errorPattern: "Invalid Token",                actionType: "system_halt",    description: "Kotak Auth: Session completely expired or forcefully terminated" },
+  { errorPattern: "Invalid MPIN",                 actionType: "system_halt",    description: "Kotak Auth: MPIN rejected — re-authentication required" },
+  { errorPattern: "unauthorized",                 actionType: "system_halt",    description: "Kotak: IP not whitelisted or session expired — SEBI IP whitelist mandate" },
+  { errorPattern: "token not found",              actionType: "terminal_close", description: "Internal guard: token missing from Scrip Master (expired contract)" },
+  { errorPattern: "quote fetch failed",           actionType: "terminal_close", description: "Internal guard: options live quote API failure" },
+];
+
+let seeded = 0;
+for (const route of CANONICAL_ERROR_ROUTES) {
+  try {
+    const result = await db.execute(
+      sql`INSERT INTO error_routing (error_pattern, action_type, description)
+          VALUES (${route.errorPattern}, ${route.actionType}, ${route.description})
+          ON CONFLICT (error_pattern) DO NOTHING`
+    );
+    if ((result.rowCount ?? 0) > 0) seeded++;
+  } catch (err) {
+    log(`[STARTUP] Error routing seed failed for "${route.errorPattern}": ${err}`);
+  }
+}
+
+if (seeded > 0) log(`[STARTUP] Error routing: ${seeded} new pattern(s) seeded.`);
+else log(`[STARTUP] Error routing: all patterns already present — no action needed.`);
+Constraint Check: Ensure db is properly in scope where this code is injected. Do not modify any other seeding logic (like the user or broker configurations).
+
+Next Steps:
+Once Replit applies this:
+
+Check your terminal logs upon restart. You should see [STARTUP] Error routing: X new pattern(s) seeded.
+
+Let me know the status of your live test for Task #104 (the Bangalore Relay). If the relay is successfully firing trades without the 401 error, and this error handler is in place, your execution layer is officially stabilized!
