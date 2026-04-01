@@ -1,0 +1,84 @@
+Task #102: Universal Limit Order Math (Entries & Exits)**
+
+**What & Why**
+Currently, `executeLegBasket` (Entries) mistakenly uses the webhook's spot index price as the base for Option Limit orders, causing immediate "Outside Circuit Limit" rejections. Furthermore, while `closeTrade` (Exits) correctly fetches the live option premium **(thanks to the Pre-Flight Guard built in Task #99)**, it lacks the strict directional buffer and NSE 0.05 tick-size rounding needed to guarantee a fill. We must create a universal `calculateLimitPrice` helper function that applies the user's `limitOrderBufferPoints`, enforces the 0.05 tick rule, and bounds the price above 0.05. This function will be injected into the Entry flow, and hooked into the existing Task #99 quote-fetch in the Exit flow.
+
+**Done looks like**
+1. **Helper Function:** A new `calculateLimitPrice(ltp, action, buffer)` function is added to `option-symbol-builder.ts` (or a math utility file).
+2. **Entries Patched:** `executeLegBasket` pauses LMT option orders to fetch the live premium via `EL.getQuote`, then applies the helper function.
+3. **Exits Patched:** `closeTrade` uses the already-fetched `ctQuoteRes.ltp` (from the Task #99 implementation) and applies the helper function before placing the exit order.
+
+**Tasks:**
+
+**Task 1 — The Universal Math Helper**
+**File:** `server/option-symbol-builder.ts` (Add at the bottom and export)
+```typescript
+export function calculateLimitPrice(ltp: number, action: "BUY" | "SELL", bufferPoints: number = 0): string {
+  // BUY orders bid higher (+buffer) to ensure fill, SELL orders ask lower (-buffer)
+  const rawPrice = action === "BUY" ? ltp + bufferPoints : ltp - bufferPoints;
+  
+  // Enforce NSE 0.05 Tick Size Rule
+  const roundedPrice = Math.round(rawPrice / 0.05) * 0.05;
+  
+  // Enforce Zero-Floor Rule (Options cannot be priced at or below 0)
+  const finalPrice = Math.max(0.05, roundedPrice);
+  
+  return finalPrice.toFixed(2);
+}
+```
+
+**Task 2 — Patch Entries (`executeLegBasket`)**
+**File:** `server/te-kotak-neo-v3.ts`
+Import `calculateLimitPrice`. Inside `executeLegBasket`, find the `orderParams` construction block. Replace the LMT pricing logic:
+```typescript
+// INJECT: Live Premium Fetch & Universal Limit Math
+if (plan.priceMode === "LMT") {
+  let basePrice = ctx.price; 
+
+  if (isOptionExchange(item.leg.exchange || plan.exchange || "NFO")) {
+    const token = brokerSymbolToTokenMap.get(item.brokerSymbol);
+    if (!token) {
+      finalError = `Pre-flight Abort: Missing token in Scrip Master for ${item.brokerSymbol}`;
+      break; 
+    }
+    const quoteRes = await EL.getQuote(brokerConfig, "nfo", token); 
+    if (!quoteRes.success || !quoteRes.ltp) {
+      finalError = `Quote fetch failed for LMT entry on ${item.brokerSymbol}: ${quoteRes.error || "No LTP"}`;
+      break; 
+    }
+    basePrice = Number(quoteRes.ltp);
+  }
+
+  const buffer = Number(plan.limitOrderBufferPoints || 0);
+  orderParams.prc = calculateLimitPrice(basePrice, item.leg.action as "BUY" | "SELL", buffer);
+  orderParams.prcTp = "L";
+} else {
+  orderParams.prc = "0.00";
+  orderParams.prcTp = "MKT";
+}
+```
+*(Replit Note: Ensure the loop constructing `orderParams` handles the `await EL.getQuote` properly).*
+
+**Task 3 — Patch Exits (`closeTrade`) integrating with Task #99 logic**
+**File:** `server/te-kotak-neo-v3.ts`
+Inside `closeTrade`, locate the block where the Kotak `orderParams` are built (this is immediately after the `ctQuoteRes` fetch implemented during Task #99). 
+Update the `prc` assignment to use the helper:
+```typescript
+let exitPrc = "0.00";
+if (ctPriceMode === "LMT") {
+  // Leverage the ltp already fetched by the Task #99 Pre-Flight guard
+  const ltp = Number(ctQuoteRes.ltp);
+  const buffer = Number(plan.limitOrderBufferPoints || 0);
+  
+  // Apply inverse directional math using the computed exitAction
+  exitPrc = calculateLimitPrice(ltp, exitAction as "BUY" | "SELL", buffer);
+}
+
+const orderParams: Partial<OrderParams> = {
+  // ... existing params ...
+  prc: exitPrc,
+  prcTp: ctPriceMode === "LMT" ? "L" : "MKT",
+};
+```
+
+***

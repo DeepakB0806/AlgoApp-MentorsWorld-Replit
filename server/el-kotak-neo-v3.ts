@@ -631,17 +631,29 @@ class ExecutionLayer {
     try {
       const endpoint = this.getEndpoint("quotes");
       if (!endpoint) return { success: false, error: "quotes endpoint not configured" };
+
       const headers = this.buildHeadersForEndpoint(endpoint, {
         accessToken: config.accessToken,
         sessionId: config.sessionId,
         consumerKey: config.consumerKey,
       });
+
       const url = `${config.baseUrl}/script-details/1.0/quotes/neosymbol/${exchange}|${token}/all`;
       const res = await fetch(url, { method: "GET", headers });
       const data = await res.json();
-      const ltp = data?.data?.[0]?.ltp ?? data?.ltp;
-      if (ltp !== undefined && ltp !== null) return { success: true, ltp: Number(ltp) };
-      return { success: false, error: `LTP missing in response: ${JSON.stringify(data).slice(0, 200)}` };
+
+      // RECURSIVE DEEP SEARCH FOR LTP (Resilient against API shape-shifts)
+      const keywords = ["ltp", "lastPrice", "last_price", "last_traded_price", "LTP"];
+      const ltpValue = this.findKeyDeep(data, keywords);
+
+      if (ltpValue !== undefined && ltpValue !== null) {
+        return { success: true, ltp: Number(ltpValue) };
+      }
+
+      return {
+        success: false,
+        error: `LTP keyword not found in response tree: ${JSON.stringify(data).substring(0, 200)}...`,
+      };
     } catch (err: any) {
       return { success: false, error: err.message || String(err) };
     }
@@ -880,6 +892,29 @@ class ExecutionLayer {
     } catch (error: any) {
       return { success: false, error: error.message || `${endpointName} error` };
     }
+  }
+
+  /**
+   * Recursively searches a JSON tree for an array of possible keywords.
+   * Provides resilience against structural shifts and keyword renaming.
+   */
+  private findKeyDeep(obj: any, targetKeys: string[]): any {
+    if (obj === null || typeof obj !== "object") return undefined;
+
+    // 1. Check if any of our target keywords exist at this level
+    for (const key of targetKeys) {
+      if (key in obj && obj[key] !== null && obj[key] !== undefined) {
+        return obj[key];
+      }
+    }
+
+    // 2. Recursively search all nested values (objects and arrays)
+    for (const val of Object.values(obj)) {
+      const found = this.findKeyDeep(val, targetKeys);
+      if (found !== undefined) return found;
+    }
+
+    return undefined;
   }
 
   private extractArray(data: any): any[] {
