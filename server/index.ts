@@ -272,8 +272,8 @@ app.use((req, res, next) => {
       }
       log("[STARTUP] Error routing rules seeded with default Kotak terminal + system_halt patterns.");
     } else {
-      // Existing deployments: ensure the 4 auth system_halt patterns are present
-      // (they were added in Task #98 and won't exist in pre-#98 databases).
+      // Existing deployments: ensure all auth/guard system_halt patterns are present
+      // (base set added in Task #98; "unauthorized" added in Task #102 for SEBI IP whitelist).
       const SYSTEM_HALT_PATTERNS = [
         { errorPattern: "401",             actionType: "system_halt",    description: "Kotak Auth: Unauthorized — session expired or invalid token" },
         { errorPattern: "expired session", actionType: "system_halt",    description: "Kotak Auth: Session has expired — re-login required" },
