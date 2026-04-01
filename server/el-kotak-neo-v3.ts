@@ -322,6 +322,27 @@ class ExecutionLayer {
     return { body: JSON.stringify(data) };
   }
 
+  // ─── Bangalore Relay ─────────────────────────────────────────────────────
+  private async executeRelayFetch(targetUrl: string, options: RequestInit): Promise<Response> {
+    const RELAY_URL = process.env.RELAY_TARGET_URL;
+    const RELAY_SECRET = process.env.RELAY_SECRET_KEY;
+
+    if (!RELAY_URL || !RELAY_SECRET) {
+      throw new Error("CRITICAL: RELAY_TARGET_URL or RELAY_SECRET_KEY missing from environment.");
+    }
+
+    const relayOptions: RequestInit = {
+      ...options,
+      headers: {
+        ...(options.headers as Record<string, string>),
+        "x-target-url": targetUrl,
+        "x-relay-secret": RELAY_SECRET,
+      },
+    };
+
+    return fetch(RELAY_URL, relayOptions);
+  }
+
   // ─── Request Execution ──────────────────────────────────────────────────
   private async executeRequest(
     endpoint: EndpointEntry,
@@ -343,7 +364,7 @@ class ExecutionLayer {
       }
     }
 
-    const response = await fetch(url, fetchOptions);
+    const response = await this.executeRelayFetch(url, fetchOptions);
     return response.json();
   }
 
@@ -639,7 +660,7 @@ class ExecutionLayer {
       });
 
       const url = `${config.baseUrl}/script-details/1.0/quotes/neosymbol/${exchange}|${token}/all`;
-      const res = await fetch(url, { method: "GET", headers });
+      const res = await this.executeRelayFetch(url, { method: "GET", headers });
       const data = await res.json();
 
       // RECURSIVE DEEP SEARCH FOR LTP (Resilient against API shape-shifts)
@@ -788,7 +809,7 @@ class ExecutionLayer {
         ? `${config.baseUrl}${resolvedPath}`
         : resolvedPath;
 
-      const response = await fetch(url, { method: "GET", headers });
+      const response = await this.executeRelayFetch(url, { method: "GET", headers });
       const data = await response.json();
 
       return { success: true, data };
@@ -817,7 +838,7 @@ class ExecutionLayer {
         ? `${config.baseUrl}${endpoint.endpointPath}`
         : endpoint.endpointPath;
 
-      const response = await fetch(url, { method: "GET", headers });
+      const response = await this.executeRelayFetch(url, { method: "GET", headers });
       const data = await response.json();
 
       return { success: true, data };
@@ -840,7 +861,7 @@ class ExecutionLayer {
         consumerKey: consumerKey || null,
       });
 
-      const response = await fetch(url, {
+      const response = await this.executeRelayFetch(url, {
         method: totpEndpoint.httpMethod,
         headers,
         body: JSON.stringify({ mobileNumber: "", ucc: "", totp: "" }),
