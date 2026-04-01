@@ -263,6 +263,7 @@ app.use((req, res, next) => {
         { errorPattern: "expired session",              actionType: "system_halt",    description: "Kotak Auth: Session has expired — re-login required" },
         { errorPattern: "invalid totp",                 actionType: "system_halt",    description: "Kotak Auth: TOTP rejected — re-authentication required" },
         { errorPattern: "invalid mpin",                 actionType: "system_halt",    description: "Kotak Auth: MPIN rejected — re-authentication required" },
+        { errorPattern: "unauthorized",                  actionType: "system_halt",    description: "Kotak: IP not whitelisted or session expired — SEBI IP whitelist mandate" },
         { errorPattern: "token not found",               actionType: "terminal_close", description: "Internal guard: token missing from Scrip Master (expired contract)" },
         { errorPattern: "quote fetch failed",            actionType: "terminal_close", description: "Internal guard: options live quote API failure" },
       ];
@@ -278,6 +279,7 @@ app.use((req, res, next) => {
         { errorPattern: "expired session", actionType: "system_halt",    description: "Kotak Auth: Session has expired — re-login required" },
         { errorPattern: "invalid totp",    actionType: "system_halt",    description: "Kotak Auth: TOTP rejected — re-authentication required" },
         { errorPattern: "invalid mpin",    actionType: "system_halt",    description: "Kotak Auth: MPIN rejected — re-authentication required" },
+        { errorPattern: "unauthorized",    actionType: "system_halt",    description: "Kotak: IP not whitelisted or session expired — SEBI IP whitelist mandate" },
         { errorPattern: "token not found", actionType: "terminal_close", description: "Internal guard: token missing from Scrip Master (expired contract)" },
         { errorPattern: "quote fetch failed", actionType: "terminal_close", description: "Internal guard: options live quote API failure" },
       ];
