@@ -947,11 +947,22 @@ async function executeSellSignal(
       startPersistentExit(storage, plan.id, ctx.resolvedBlockType, brokerConfig);
     }
     if (ctx.signalContext?.resolvedAction === "EXIT") {
+      const exitMsg = anyFailed ? "Leg close failed — persistent retry started." : "Successfully closed all positions (Pure EXIT).";
+      logPFL(plan, broker, ctx.data, anyFailed ? "close_failed" : "closed", exitMsg, {
+        resolvedAction: "EXIT", blockType: ctx.resolvedBlockType,
+        ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price,
+        executionTimeMs: Date.now() - ctx.startTime,
+      });
       return { success: true, action: "close", broker, planId: plan.id, pnl: closePnl,
-        message: anyFailed ? "Leg close failed — persistent retry started." : "Successfully closed all positions (Pure EXIT).",
+        message: exitMsg,
         executionTimeMs: Date.now() - ctx.startTime };
     }
   } else if (ctx.signalContext?.resolvedAction === "EXIT") {
+    logPFL(plan, broker, ctx.data, "hold", "Nothing to close (Pure EXIT on empty positions).", {
+      resolvedAction: "EXIT", blockType: ctx.resolvedBlockType,
+      ticker: ctx.ticker, exchange: ctx.exchange, price: ctx.price,
+      executionTimeMs: Date.now() - ctx.startTime,
+    });
     return { success: true, action: "hold", broker, planId: plan.id, pnl: 0,
       message: "Nothing to close (Pure EXIT on empty positions).",
       executionTimeMs: Date.now() - ctx.startTime };
