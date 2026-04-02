@@ -872,7 +872,7 @@ async function executeBuySignal(
     const delayMs = Math.max(0, _parsedDelay);
 
     for (let ci = 0; ci < openOpposites.length; ci++) {
-      const closed = await closeTrade(storage, openOpposites[ci], ctx.price, ctx.now, brokerConfig);
+      const closed = await closeTrade(storage, openOpposites[ci], ctx.price, ctx.now, brokerConfig, ctx.blockConfig?.priceMode as string | undefined);
       closePnl += closed.pnl || 0;
       if (ci < openOpposites.length - 1) await new Promise(r => setTimeout(r, delayMs));
     }
@@ -936,7 +936,7 @@ async function executeSellSignal(
     const delayMs = Math.max(0, _parsedDelay);
 
     for (let ci = 0; ci < allToClose.length; ci++) {
-      const closed = await closeTrade(storage, allToClose[ci], ctx.price, ctx.now, brokerConfig);
+      const closed = await closeTrade(storage, allToClose[ci], ctx.price, ctx.now, brokerConfig, ctx.blockConfig?.priceMode as string | undefined);
       closePnl += closed.pnl || 0;
       if (closed.status === "close_failed") anyFailed = true;
       if (ci < allToClose.length - 1) await new Promise(r => setTimeout(r, delayMs));
@@ -944,7 +944,7 @@ async function executeSellSignal(
     deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
     if (anyFailed) {
       console.warn(`[TE] Plan "${plan.name}" — leg close_failed on ${ctx.resolvedBlockType}, starting persistent exit retry`);
-      startPersistentExit(storage, plan.id, ctx.resolvedBlockType, brokerConfig);
+      startPersistentExit(storage, plan.id, ctx.resolvedBlockType, brokerConfig, ctx.blockConfig?.priceMode as string | undefined);
     }
     if (ctx.signalContext?.resolvedAction === "EXIT") {
       const exitMsg = anyFailed ? "Leg close failed — persistent retry started." : "Successfully closed all positions (Pure EXIT).";
@@ -1112,7 +1112,7 @@ async function handleBrokerError(
 
 // ═══════════════════════════════════════════════════════════════════════════════
 async function closeTrade(
-  storage: IStorage, trade: StrategyTrade, currentPrice: number, now: string, brokerConfig: BrokerConfig,
+  storage: IStorage, trade: StrategyTrade, currentPrice: number, now: string, brokerConfig: BrokerConfig, priceMode?: string,
 ): Promise<StrategyTrade> {
   const broker = brokerConfig.brokerName;
   let exitPrice = currentPrice;
@@ -1157,11 +1157,9 @@ async function closeTrade(
       }
     }
 
-    const ctPriceMode = TL.isReady()
-      ? TL.getDefaultByUniversalName("priceType", "order_place")
-      : null;
+    const ctPriceMode = priceMode || (TL.isReady() ? TL.getDefaultByUniversalName("priceType", "order_place") : null);
     if (!ctPriceMode) {
-      console.error(`[TE] ABORT: Price Type (LMT/MKT) missing from TL defaults for closeTrade on ${trade.tradingSymbol}. Marking close_failed.`);
+      console.error(`[TE] ABORT: Price Type (LMT/MKT) missing for closeTrade on ${trade.tradingSymbol}. Marking close_failed.`);
       const failedUpdate = await storage.updateStrategyTrade(trade.id, { status: "close_failed", ltp: exitPrice, updatedAt: now });
       tradingCache.invalidateOpenTrades(trade.planId);
       return failedUpdate || trade;
@@ -1307,7 +1305,7 @@ export async function squareOffPlan(
   for (const trade of openTrades) {
     try {
       const currentPrice = trade.ltp || trade.price || 0;
-      const result = await closeTrade(storage, trade, currentPrice, now, brokerConfig);
+      const result = await closeTrade(storage, trade, currentPrice, now, brokerConfig, "MKT");
       if (result.status === "closed") {
         closed++;
         const pnl = result.pnl || 0;
@@ -1436,6 +1434,7 @@ export function startPersistentExit(
   planId: string,
   blockType: string,
   brokerConfig: BrokerConfig,
+  priceMode?: string,
 ): void {
   const key = `${planId}:${blockType}`;
   if (persistentExitActive.has(key)) {
@@ -1456,7 +1455,7 @@ export function startPersistentExit(
     const now = new Date().toISOString();
     for (const trade of toRetry) {
       const currentPrice = trade.ltp || trade.price || 0;
-      await closeTrade(storage, trade, currentPrice, now, brokerConfig)
+      await closeTrade(storage, trade, currentPrice, now, brokerConfig, priceMode)
         .catch(err => console.error(`[TE] PersistentExit closeTrade error:`, err?.message || err));
     }
     tradingCache.invalidateOpenTrades(planId);
