@@ -1,0 +1,79 @@
+Task #106: Enforce Absolute Point Limit Orders on Exits (closeTrade Patch)
+
+What & Why
+The user identified two critical logic gaps in server/te-kotak-neo-v3.ts:
+
+closeTrade() currently exits all legs using MKT orders, bypassing the strategy's plan.priceMode configuration.
+
+The limit buffer calculations in our system are based on Absolute Points, not percentages (e.g., a buffer of 1 means LTP + 1, not 1%).
+We must implement symmetrical execution: if a strategy requires Limit Orders, the exit must dynamically calculate a buffered Limit Order using exact point addition/subtraction.
+
+Done looks like
+
+closeTrade() dynamically detects if the exit requires LMT.
+
+It fetches the live quote via getQuote.
+
+It performs absolute point math: rawPrice = LTP + buyEntryBuffer (for BUY exits) and rawPrice = LTP - sellEntryBuffer (for SELL exits).
+
+It rounds the final price to the nearest 0.05 tick size.
+
+Tasks:
+
+Task 1 — Inject Absolute Point Limit Math into Exits
+File: server/te-kotak-neo-v3.ts
+Locate the closeTrade() method. Inside the execution loop, directly before the payload is sent to this.tl.buildOrderPayload(), inject the following buffer logic:
+
+TypeScript
+        // Universal Limit Order Math for Exits (Absolute Points)
+        let exitPriceType = "MKT";
+        let exitPrice = 0;
+        
+        // Match entry logic: Use LMT if plan dictates, or if action is SELL (Option Selling guard)
+        const isLimitExit = (plan.priceMode === "LMT") || (opposingAction === "SELL");
+
+        if (isLimitExit) {
+          try {
+             // 1. Fetch live quote for the leg
+             const quoteRes = await this.el.getQuote(leg.instrumentToken); 
+             
+             // Extract LTP from Kotak V3 response
+             const latestLtp = parseFloat(quoteRes?.ltp || quoteRes?.data?.ltp || quoteRes?.lastPrice || "0");
+
+             if (latestLtp > 0) {
+               exitPriceType = "LMT";
+               let rawPrice = 0;
+               
+               // Option Selling Exit (Buying back a short leg -> Action is BUY)
+               if (opposingAction === "BUY") {
+                 const buffer = plan.buyEntryBufferOverride !== undefined ? plan.buyEntryBufferOverride : config.buyEntryBuffer;
+                 rawPrice = latestLtp + buffer; // Add absolute points ABOVE LTP to ensure fill
+               } 
+               // Option Buying Exit (Selling a long leg -> Action is SELL)
+               else {
+                 rawPrice = latestLtp - config.sellEntryBuffer; // Subtract absolute points BELOW LTP to ensure fill
+               }
+               
+               // Round strictly to nearest 0.05 tick size for Indian Markets
+               exitPrice = Math.round(rawPrice * 20) / 20;
+               
+               // Floor guard: Price cannot go below minimum tick size
+               if (exitPrice <= 0.05) {
+                 exitPrice = 0.05;
+               }
+               
+               log(`[TRADE] Exit LMT configured: ${leg.symbol} at ${exitPrice} (LTP: ${latestLtp})`);
+             } else {
+               log(`[TRADE] Invalid LTP fetched during closeTrade for ${leg.symbol}. Falling back to MKT.`);
+             }
+          } catch (error) {
+             log(`[TRADE] Error fetching quote for limit exit: ${error}. Falling back to MKT.`);
+          }
+        }
+Task 2 — Wire the Payload
+File: server/te-kotak-neo-v3.ts
+Immediately below this calculation block, ensure the buildOrderPayload or placement command uses these dynamic values:
+priceType: exitPriceType
+price: exitPrice.toString() (or however the specific payload builder expects the number).
+
+*** Give this revised patch to Replit. It perfectly honors your schema architecture: BUY at LTP + Buffer, SELL at LTP - Buffer. Once deployed, a manual test of the "Force Close" button will definitively prove your exits are finally protected from slippage!
