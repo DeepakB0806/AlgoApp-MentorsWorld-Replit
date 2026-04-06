@@ -560,6 +560,7 @@ export interface Position {
   expiry?: string;
   realised_pnl?: number;
   unrealised_pnl?: number;
+  timestamp?: string;
 }
 
 // Order
@@ -574,6 +575,7 @@ export interface Order {
   exchange: string;
   timestamp: string;
   rejection_reason?: string;
+  product?: string;
 }
 
 // Holding - matches Kotak Neo INVESTMENTS layout

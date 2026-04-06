@@ -454,6 +454,7 @@ export default function Dashboard() {
                           <TableHead className="text-right">P&L</TableHead>
                           <TableHead className="text-right">P&L Realz</TableHead>
                           <TableHead className="text-right">P&L URealz</TableHead>
+                          <TableHead>Time</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -506,6 +507,7 @@ export default function Dashboard() {
                               <TableCell className={`text-right text-xs ${unrealisedPnl >= 0 ? "text-primary" : "text-destructive"}`}>
                                 {unrealisedPnl >= 0 ? "+" : ""}{unrealisedPnl.toFixed(2)}
                               </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">{(position as any).timestamp || "—"}</TableCell>
                             </TableRow>
                           );
                         })}
@@ -544,7 +546,11 @@ export default function Dashboard() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {orders.map((order) => (
+                      {[...orders].sort((a, b) => {
+                        if (!a.timestamp) return 1;
+                        if (!b.timestamp) return -1;
+                        return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+                      }).map((order) => (
                         <TableRow key={order.order_id} data-testid={`row-order-${order.order_id}`}>
                           <TableCell>
                             <code className="text-xs text-muted-foreground font-mono" data-testid={`text-order-id-${order.order_id}`}>{order.order_id}</code>
@@ -560,7 +566,7 @@ export default function Dashboard() {
                               {order.transaction_type === "B" ? "BUY" : "SELL"}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-sm">{order.order_type}</TableCell>
+                          <TableCell className="text-sm">{order.product || order.order_type}</TableCell>
                           <TableCell className="text-right">{order.quantity}</TableCell>
                           <TableCell className="text-right">{Number(order.price || 0).toFixed(2)}</TableCell>
                           <TableCell>

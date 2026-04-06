@@ -689,6 +689,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
               unrealised_pnl: unrealisedPnl,
               instrument_type: p.type || p.instType || "",
               token: p.tok || p.tknNo || "",
+              timestamp: p.hsUpTm || p.updatedAt || p.lastUpdatedTime || "",
             };
           });
           return res.json(normalized);
@@ -717,9 +718,10 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
             order_type: o.priceType || o.order_type || o.pt || o.orderType || "",
             quantity: Number(o.quantity || o.qt || 0),
             price: Number(o.avgPrc || o.prc || o.price || o.pr || 0),
-            status: o.status || o.stat || o.ordSt || "",
-            timestamp: o.ordDtTm || o.ordEntTm || o.timestamp || o.plDate || o.time || o.ordTm || "",
+            status: (o.status || o.stat || o.ordSt || "").toUpperCase(),
+            timestamp: o.ordDtTm || o.ordEntTm || o.hsUpTm || o.exCfmTm || o.timestamp || o.plDate || o.time || o.ordTm || "",
             rejection_reason: o.rejRsn || o.rejReason || o.rej_reason || o.rjBy || o.reason || "",
+            product: o.prd || o.prod || o.productType || o.product || "",
           }));
           return res.json(normalized);
         }
