@@ -1,0 +1,17 @@
+1. Broker Rate-Limit Immunity (The "HTTP Shield")
+Every broker (including Kotak) has strict API Rate Limits. If they allow 50 HTTP requests per second, and you have 10 active trades polling for prices every second, you consume 20% of your total bandwidth just looking at prices.
+
+The Benefit: A WebSocket consumes exactly zero HTTP requests. It is a single, persistent tunnel. By moving pricing to the WebSocket, you save 100% of your Kotak HTTP rate limits exclusively for what actually matters: Executing Orders instantly. ### 2. CPU & Event Loop Liberation
+HTTP polling is incredibly heavy for a server. For every getQuote request, Replit’s Node.js engine has to open a network port, perform an SSL handshake, send headers, wait for the route to Bangalore, parse the Kotak JSON response, and close the port. Doing this multiple times a second chokes the server's CPU.
+
+The Benefit: A WebSocket handshakes exactly once. After that, it simply receives a raw stream of bytes. This frees up massive amounts of CPU and unblocks the Node.js event loop, allowing your server to focus entirely on strategy logic and fast execution.
+
+3. OOM-Proof Stability (Specific to our Design)
+Retail algorithms often crash because they try to save every tick from a WebSocket into an array or database, causing RAM to explode (Out of Memory/OOM errors).
+
+The Benefit: Because we are implementing the strict Overwrite Cache (Map()), your memory footprint remains practically at zero bytes. Whether the market is dead quiet or experiencing massive volatility with 10,000 ticks per second, your Replit server will never crash.
+
+4. Advanced Microstructure Capabilities (Future-Proofing)
+Once the WebSocket is streaming, it doesn't just send the Last Traded Price (LTP). Brokers often send volume data, open interest (OI), and the Bid-Ask spread.
+
+The Benefit: In the future, you can upgrade your Limit Orders to place bids exactly at the best_bid or best_ask rather than calculating a flat point buffer from the LTP. You can also build triggers based on sudden volume spikes, all with zero latency.

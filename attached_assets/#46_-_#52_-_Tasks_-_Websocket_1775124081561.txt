@@ -1,0 +1,397 @@
+#46 - Task #46: Schema — Add TSL + Settlement Engine fields to strategyTrades
+What & Why
+Add five new columns to strategyTrades to support the Settlement Engine (pnl sweep) and TSL Engine (trail tracking). Additive-only migration — no existing columns touched.
+
+Fields to add (shared/schema.ts, strategyTrades table)
+pnlCalculated:  boolean("pnl_calculated").notNull().default(false),
+initialSlPrice: real("initial_sl_price"),
+trailingStep:   real("trailing_step"),
+currentSlPrice: real("current_sl_price"),
+highWaterMark:  real("high_water_mark"),
+pnlCalculated: Settlement Engine idempotency flag — false until SE processes the closed trade
+initialSlPrice: SL price at NRML entry time (seeded from tradeParams.initialSl)
+trailingStep: Points to trail (seeded from tradeParams.trailingStep)
+currentSlPrice: Current active SL level — updated in RAM, flushed to DB every 15s by TSL Engine
+highWaterMark: Most favourable LTP seen — BUY=highest price, SELL=lowest price (low water mark)
+After schema change
+Run npm run db:push to push columns to DB. Existing rows unaffected (null/false defaults).
+
+Relevant files
+shared/schema.ts (strategyTrades table, lines 186–220)
+Acceptance
+Five new columns exist in DB
+Existing rows untouched (pnlCalculated defaults false, others null)
+TypeScript compiles with zero new errors
+
+
+#47 - Task #47: Create Settlement Engine (server/se-kotak.ts)
+What & Why
+deferDailyPnlUpdate in the TE is a setTimeout(1s) that races on concurrent multi-leg closes — each leg reads the same stale base P&L and overwrites each other. The Settlement Engine replaces it with a reliable background sweep using pnlCalculated as an idempotency guard.
+
+Implementation (new file: server/se-kotak.ts)
+export function startSettlementEngine(storage: IStorage): void {
+  setInterval(async () => {
+    // 1. Fetch all closed trades where pnlCalculated = false
+    // 2. Group by planId + IST date (from executedAt/exitedAt)
+    // 3. For each group: sum pnl, upsert strategyDailyPnl
+    // 4. Batch-mark all processed trades pnlCalculated = true
+  }, 10_000);
+}
+Key design points
+pnlCalculated flag (from #46) ensures each trade's P&L is counted exactly once
+Groups by planId + IST date to correctly bucket multi-leg closes into one daily P&L entry
+Upsert: if daily record exists → add delta; if not → create new record
+Marks pnlCalculated = true on all processed trades after successful upsert
+Storage additions needed (server/storage.ts)
+New method: getUnsettledClosedTrades() → strategy_trades WHERE status='closed' AND pnl_calculated=false
+New method: markTradesPnlCalculated(ids: string[]) → batch update
+Relevant files
+server/se-kotak.ts (new)
+server/storage.ts (2 new methods)
+shared/schema.ts — pnlCalculated field (from #46)
+Blocked by
+#46 (needs pnlCalculated column in schema)
+
+Acceptance
+Settlement Engine starts on boot, logs confirmation
+Closed multi-leg trades get P&L bucketed into strategyDailyPnl exactly once
+Race condition from concurrent leg closes eliminated
+Dependencies
+Schema: Add TSL + Settlement Engine fields to strategyTrades
+
+
+#48 - Task #48: TE Cleanup — Remove deferDailyPnlUpdate + Seed TSL fields on NRML entry
+What & Why
+Two changes to te-kotak-neo-v3.ts:
+
+Remove deferDailyPnlUpdate — Settlement Engine (#47) handles P&L aggregation now
+When placing an NRML entry, read initialSl + trailingStep from tradeParams and seed them into createStrategyTrade so the TSL Engine has its initial state
+Change 1: Remove deferDailyPnlUpdate
+Delete the deferDailyPnlUpdate function (lines 909–921)
+Remove its 3 call sites:
+executeSellSignal line ~582 (after exit basket close)
+executeSellSignal line ~636 (after reversal close)
+squareOffPlan line ~769 (after EOD square-off)
+Change 2: Seed TSL fields in executeLegBasket
+After storage.createStrategyTrade(...), when productType === "NRML":
+
+const initialSl = (leg as any).initialSl ?? ctx.blockConfig.initialSl ?? null;
+const trailStep = (leg as any).trailingStep ?? ctx.blockConfig.trailingStep ?? null;
+const isNrml = productType === "NRML";
+// Add to createStrategyTrade call:
+initialSlPrice: isNrml && initialSl != null ? initialSl : null,
+trailingStep:   isNrml && trailStep != null ? trailStep : null,
+currentSlPrice: isNrml && initialSl != null ? initialSl : null,
+highWaterMark:  isNrml ? fillPrice : null,  // seed HWM at fill price
+Relevant files
+server/te-kotak-neo-v3.ts
+executeLegBasket (~line 515) — add TSL field seeding
+deferDailyPnlUpdate (~line 909) — delete function + 3 call sites
+Blocked by
+#46 (TSL schema fields), #47 (SE must exist before deferDailyPnlUpdate is removed)
+
+Acceptance
+Zero references to deferDailyPnlUpdate remain in the file
+NRML trades with initialSl/trailingStep configured have all 4 TSL fields populated on entry
+MIS/PAPER trades have null for all TSL fields
+TypeScript compiles clean
+Dependencies
+Create Settlement Engine (se-kotak.ts) — replace deferDailyPnlUpdate
+Schema: Add TSL + Settlement Engine fields to strategyTrades
+
+
+#49 - Task #49: Create Event-Driven TSL Engine (server/tsl-engine.ts)
+What & Why
+Kotak only supports TSL for MIS orders. For NRML option-selling positions we need a software TSL that tracks live LTP against each position's trail and fires a market close when the SL is breached.
+
+Architecture
+RAM-first: active TSL states in Map<tradingSymbol, TslState[]>
+Event-driven: does NOT poll prices internally — receives ticks via processTick()
+Dirty flush: setInterval(15s) writes only changed currentSlPrice + highWaterMark to DB
+Boot rehydration: loads all open NRML trades with initialSlPrice IS NOT NULL into RAM on start
+Key types
+interface TslState {
+  tradeId: string;
+  planId: string;
+  tradingSymbol: string;
+  action: "BUY" | "SELL";
+  quantity: number;
+  productType: string;
+  exchange: string;
+  brokerConfig: BrokerConfig;
+  currentSlPrice: number;
+  highWaterMark: number;
+  trailingStep: number;
+  dirty: boolean;
+}
+Exported functions
+// Called by price feed (polling or future WebSocket) on every tick
+export function processTick(tradingSymbol: string, liveLTP: number): void
+// Called by TE immediately after NRML entry with TSL configured
+export function registerNewTrail(trade: StrategyTrade, brokerConfig: BrokerConfig): void
+// Called once at server boot — starts dirty flush interval + rehydrates RAM from DB
+export function startTslEngine(storage: IStorage, closeFn: CloseFn): void
+type CloseFn = (tradeId: string, brokerConfig: BrokerConfig) => Promise<void>
+processTick logic
+BUY (long) position:
+
+liveLTP > highWaterMark → update HWM, recalculate currentSlPrice = HWM - trailingStep, mark dirty
+liveLTP <= currentSlPrice → SL breached → call closeFn → remove from Map
+SELL (short) position:
+
+liveLTP < highWaterMark → update HWM (low water mark), recalculate currentSlPrice = HWM + trailingStep, mark dirty
+liveLTP >= currentSlPrice → SL breached → call closeFn → remove from Map
+closeTradeById — new export from te-kotak-neo-v3.ts
+The existing closeTrade() is a private function. Add a thin exported wrapper:
+
+export async function closeTradeById(
+  storage: IStorage, tradeId: string, brokerConfig: BrokerConfig
+): Promise<void> {
+  const trade = await storage.getStrategyTrade(tradeId);
+  if (trade) await closeTrade(storage, trade, trade.ltp || 0, new Date().toISOString(), brokerConfig);
+}
+Storage additions needed (server/storage.ts)
+getOpenNrmlTradesWithTsl() → open trades where initialSlPrice IS NOT NULL
+Relevant files
+server/tsl-engine.ts (new)
+server/te-kotak-neo-v3.ts — export closeTradeById
+server/storage.ts — getOpenNrmlTradesWithTsl()
+Blocked by
+#46 (schema fields), #48 (TE seeds TSL fields on entry)
+
+Acceptance
+processTick correctly trails BUY and SELL positions
+SL breach fires closeTrade and removes state from Map
+Dirty flush writes to DB every 15s for active trails only
+Boot rehydration restores active trails after server restart with log count
+Dependencies
+Schema: Add TSL + Settlement Engine fields to strategyTrades
+TE Cleanup: remove deferDailyPnlUpdate + seed TSL fields on NRML entry
+
+
+#50 - Task #50: Server Boot — Register Settlement Engine + TSL Engine
+What & Why
+Wire the two new background engines into server/index.ts so they start on boot alongside the existing plan monitor and data retention job.
+
+Change (server/index.ts)
+import { startSettlementEngine } from "./se-kotak";
+import { startTslEngine } from "./tsl-engine";
+import { closeTradeById } from "./te-kotak-neo-v3";
+// After existing TL/EL/planMonitor init:
+startSettlementEngine(storage);
+startTslEngine(storage, (tradeId, bc) => closeTradeById(storage, tradeId, bc));
+Boot order (final)
+TL + EL init (existing)
+Plan monitor — 60s check (existing)
+Data retention job (existing)
+Settlement Engine — 10s sweep (new)
+TSL Engine — rehydrate RAM + 15s dirty flush (new)
+Relevant files
+server/index.ts (lines 1–60)
+server/se-kotak.ts (from #47)
+server/tsl-engine.ts (from #49)
+server/te-kotak-neo-v3.ts — closeTradeById export (from #49)
+Blocked by
+#47, #49
+
+Acceptance
+Server logs show Settlement Engine started and TSL Engine started on every boot
+TSL Engine log shows count of active trails rehydrated from DB
+Dependencies
+Create Settlement Engine (se-kotak.ts) — replace deferDailyPnlUpdate
+Create Event-Driven TSL Engine (tsl-engine.ts)
+
+
+#51 - Task #51 — Production: /api/price-update Endpoint + WebSocket Failover Timer
+Objective
+Add a lightweight price-update ingest endpoint to the Production app so the WebSocket Scout (Deployment 2) can push live LTP ticks into the TSL Engine. Include a staleness tracker so the system automatically falls back to existing API polling if the Scout goes silent.
+
+Depends On
+Task #49 (TSL Engine with processTick() exported)
+Task #50 (Server boot wiring)
+Scope — Production App Only
+1. New route: POST /api/price-update
+File: server/routes.ts
+
+Body: { symbol: string; ltp: number }
+Action:
+  - Validate body (zod: symbol non-empty string, ltp positive number)
+  - Call processTick(symbol, ltp)
+  - Update lastWsTickAt = Date.now()   ← module-level timestamp
+  - Return 200 { ok: true }
+No auth required (internal call from Scout on same platform). Rate-limit awareness: Scout sends one POST per tick per symbol — not a DoS vector.
+
+2. Failover timer — TSL Engine polling guard
+File: server/tsl-engine.ts
+
+Add a module-level lastWsTickAt: number = 0.
+
+In the existing 15s dirty-flush interval (or a separate 2s heartbeat check):
+
+if (Date.now() - lastWsTickAt > WS_STALE_MS) {
+  // WebSocket Scout is silent — TSL Engine relies on API poll ticks only
+  // No action needed; plan-monitor's existing poll already calls processTick()
+  // Log once per stale window to avoid log spam
+}
+WS_STALE_MS = 2000 ms (configurable via env WS_STALE_MS).
+
+Export updateLastWsTick() so the route handler can update the timestamp without circular imports.
+
+3. Plan-monitor integration
+File: server/plan-monitor.ts
+
+In the existing polling loop, after fetching live LTP from API:
+
+processTick(symbol, apiLtp);   // always called — WebSocket ticks override in real time, poll is baseline
+This ensures fallback is automatic — no explicit mode switch needed. The TSL Engine just receives ticks from whichever source is active.
+
+What is NOT in scope
+The WebSocket Scout Repl (Deployment 2) — that is a separate new Replit project
+Any changes to database schema (TSL fields are covered by #46)
+Authentication/token on the endpoint (internal service call, Scout URL is known)
+Acceptance Criteria
+POST /api/price-update returns 200 and calls processTick()
+If no POST received for >2s, plan-monitor poll ticks continue feeding TSL Engine without interruption
+No new dependencies required
+Existing API polling path is untouched
+Dependencies
+Create Event-Driven TSL Engine (tsl-engine.ts)
+Server Boot: register Settlement Engine + TSL Engine
+
+#52 - Task #52: Market Data Manager (server/market-data.ts)
+What & Why
+A singleton that abstracts all price fetching for the entire app. TSL Engine, TE, and any other consumer ask for a price via getPrice(symbol) — they never know or care whether the answer came from the WebSocket cache or a REST API call. This is the core of the Hybrid-Monolith architecture.
+
+Architecture
+Singleton module-level Map<symbol, { ltp: number; updatedAt: number }>
+getPrice(symbol) — checks RAM staleness, falls back to REST if needed
+updatePrice(symbol, ltp) — called by WebSocket Gateway on every tick
+injectPrice(symbol, ltp) — called by /api/price-update endpoint (force override, bypasses staleness check)
+subscribe(symbol) — registers a symbol for WS subscription (delegates to ws-kotak)
+Core logic: getPrice()
+const WS_STALE_MS = Number(process.env.WS_STALE_MS ?? 2000);
+export async function getPrice(symbol: string): Promise<number> {
+  const cached = priceCache.get(symbol);
+  if (cached && Date.now() - cached.updatedAt < WS_STALE_MS) {
+    return cached.ltp; // WebSocket data is fresh — use it
+  }
+  // Stale or missing — fall back to REST API
+  const ltp = await fetchQuoteFromApi(symbol); // calls Kotak getQuote
+  priceCache.set(symbol, { ltp, updatedAt: Date.now() });
+  return ltp;
+}
+Exported functions
+export async function getPrice(symbol: string): Promise<number>
+export function updatePrice(symbol: string, ltp: number): void      // called by WS Gateway
+export function injectPrice(symbol: string, ltp: number): void      // called by /api/price-update
+export function subscribe(symbol: string): void                      // delegates to ws-kotak
+export function startMarketDataManager(): void                       // called at boot, no-op currently but allows future init logic
+fetchQuoteFromApi() — internal
+Reuses the existing Kotak Neo getQuote logic already in the codebase. Does NOT duplicate broker auth — reuses the same broker config resolution pattern used elsewhere in the TE.
+
+Key design decisions
+No WebSocket code in this file — it only holds the RAM cache and fallback logic. WS Gateway calls updatePrice() to push ticks in.
+WS_STALE_MS = 2000ms — configurable via env. If last WS tick was < 2s ago, cache is trusted. Otherwise REST is called.
+Thread safety: Node.js is single-threaded; Map operations are safe without locks.
+Relevant files
+server/market-data.ts (new)
+server/ws-kotak.ts — calls updatePrice() on each tick
+server/tsl-engine.ts — calls getPrice() every 1s
+server/te-kotak-neo-v3.ts — calls getPrice() + subscribe()
+server/routes.ts — /api/price-update calls injectPrice()
+Blocked by
+#46 (schema context), no hard code dependency — can be built in parallel with #47
+
+Acceptance
+getPrice() returns cached value when WS tick is < 2000ms old
+getPrice() calls REST API and updates cache when data is stale or missing
+updatePrice() called by WS Gateway correctly updates cache timestamp
+injectPrice() force-updates cache regardless of staleness
+TypeScript compiles clean with no circular imports
+Dependencies
+Schema: Add TSL + Settlement Engine fields to strategyTrades
+
+
+#53 - Task #53: Kotak HSM WebSocket Gateway (server/ws-kotak.ts)
+What & Why
+Connects to Kotak Neo's HSM (HyperSync Market) WebSocket feed. Pushes every incoming price tick into the Market Data Manager RAM cache so getPrice() returns sub-second data. If the WebSocket drops, the Market Data Manager automatically falls back to REST — no intervention needed.
+
+Architecture
+Singleton WebSocket client, module-level
+Connects to Kotak HSM using sid, token, dataCenter from broker config
+On each tick: calls marketData.updatePrice(symbol, ltp)
+Auto-reconnect: silent exponential backoff on disconnect (1s → 2s → 4s → max 30s)
+subscribe(symbol) — sends HSM subscription message for a given scrip token
+startWsGateway(storage) — called at boot, connects WS + auto-rehydrates subscriptions
+Kotak HSM connection
+// Protocol: HSM WebSocket (Kotak Neo V3 spec)
+// Endpoint: wss://mlhsm.kotaksecurities.com  (or equivalent from broker config)
+// Auth: sid + access_token from active broker session
+// Message format: { type: "subscribe", tokens: ["26000", "35001", ...] }
+Auto-reconnect logic
+function connect() {
+  ws = new WebSocket(HSM_URL);
+  ws.on("open", () => {
+    log("WS Gateway: connected to Kotak HSM");
+    resubscribeAll(); // re-send all active subscriptions after reconnect
+  });
+  ws.on("message", (data) => {
+    const tick = parseTick(data);
+    if (tick) marketData.updatePrice(tick.symbol, tick.ltp);
+  });
+  ws.on("close", () => {
+    log("WS Gateway: disconnected — reconnecting in ${backoffMs}ms");
+    setTimeout(connect, backoffMs);
+    backoffMs = Math.min(backoffMs * 2, 30000);
+  });
+  ws.on("error", (err) => {
+    log("WS Gateway error:", err.message); // silent — close event will trigger reconnect
+  });
+}
+subscribe(symbol) — maps symbol to scrip token
+export function subscribe(symbol: string): void {
+  const token = scriptTokenMap.get(symbol); // resolved from SMC (Scrip Master Cache)
+  if (!token) { log(`WS: no token for ${symbol}`); return; }
+  activeSubscriptions.add(symbol);
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "subscribe", tokens: [token] }));
+  }
+  // If WS not yet open, resubscribeAll() on connect will catch it
+}
+startWsGateway(storage) — boot entry point
+export async function startWsGateway(storage: IStorage): Promise<void> {
+  // 1. Load open NRML trades and subscribe their symbols
+  const openTrades = await storage.getOpenNrmlTradesWithTsl();
+  const symbols = [...new Set(openTrades.map(t => t.tradingSymbol).filter(Boolean))];
+  for (const symbol of symbols) subscribe(symbol);
+  log(`WS Gateway: auto-subscribed ${symbols.length} symbols from open trades`);
+  // 2. Connect WebSocket
+  connect();
+}
+parseTick() — internal
+Parses the raw Kotak HSM message format (JSON or binary depending on HSM version) into { symbol: string, ltp: number }. Uses the existing SMC token-to-symbol reverse map.
+
+Non-fatal on failure
+If startWsGateway cannot connect (bad credentials, network), it logs the error and returns without throwing. The rest of the app continues using REST API polling via Market Data Manager.
+
+Relevant files
+server/ws-kotak.ts (new)
+server/market-data.ts — updatePrice() called on every tick; subscribe() delegates here
+server/smc-kotak-neo-v3.ts — token lookup for scrip symbols
+server/storage.ts — getOpenNrmlTradesWithTsl() for auto-rehydrate
+Blocked by
+#52 (Market Data Manager must exist — ws-kotak calls updatePrice())
+
+Acceptance
+On connect, WS Gateway logs "connected to Kotak HSM"
+On each tick, marketData.updatePrice() is called with correct symbol and LTP
+On disconnect, reconnect is attempted with exponential backoff (max 30s)
+After reconnect, all active subscriptions are re-sent automatically
+If WS fails entirely, getPrice() in Market Data Manager falls back to REST without error
+subscribe() works both when WS is open (immediate) and when WS is connecting (queued via resubscribeAll)
+Non-fatal on boot failure — server continues normally
+Dependencies
+Market Data Manager — RAM cache + WS/REST hybrid getPrice()
+
+
+

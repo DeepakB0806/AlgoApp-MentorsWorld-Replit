@@ -1,0 +1,168 @@
+Task: Implement Batch 2 and Batch 3 (OOM-Proof Data Engine)
+
+Instructions:
+Do not analyze or rewrite the existing architecture. Create the following three files exactly as provided. They are fully typed for our specific Kotak V3 architecture and strictly follow the Zero-History Overwrite constraint. Once created, delete deferDailyPnlUpdate from server/te-kotak-neo-v3.ts.
+
+File 1: Create server/md-kotak-neo-v3.ts
+
+TypeScript
+import { ExecutionLayer } from './el-kotak-neo-v3';
+import { BrokerConfig } from '@shared/schema';
+import { log } from './process-flow-log';
+
+export class MarketDataManager {
+  // Strict OOM-Proof Cache: Only one scalar entry per token
+  private cache = new Map<string, { ltp: number; ts: number }>();
+  private el = new ExecutionLayer();
+
+  public updatePrice(token: string, ltp: number) {
+    if (isNaN(ltp) || ltp <= 0) return;
+    this.cache.set(token.toString(), { ltp, ts: Date.now() });
+  }
+
+  public async getPrice(token: string, brokerConfig: BrokerConfig, exchange: string = 'NFO'): Promise<number> {
+    const cached = this.cache.get(token.toString());
+    // Cache hit: Return if less than 2000ms old
+    if (cached && Date.now() - cached.ts < 2000) {
+      return cached.ltp;
+    }
+    
+    // Cache miss: Fallback to HTTP Relay
+    try {
+      const quote = await this.el.getQuote(brokerConfig.name, token, exchange);
+      const ltp = parseFloat(quote?.lastPrice || quote?.ltp || quote?.data?.ltp || "0");
+      if (ltp > 0) {
+        this.updatePrice(token, ltp);
+        return ltp;
+      }
+      return 0;
+    } catch (error) {
+      log(`[MD] Error fetching fallback price for ${token}: ${error}`);
+      return cached?.ltp || 0; // Return stale cache if HTTP fails
+    }
+  }
+}
+
+export const marketData = new MarketDataManager();
+File 2: Create server/hsm-kotak-neo-v3.ts
+
+TypeScript
+import WebSocket from 'ws';
+import { log } from './process-flow-log';
+import { marketData } from './md-kotak-neo-v3';
+
+export function startHsmSocket(accessToken: string, sessionId: string, hsmUrl: string = "wss://ntpapi.kotaksecurities.com/hsm/v1/marketdata") {
+  let ws: WebSocket | null = null;
+  let isReconnecting = false;
+  let retryCount = 0;
+
+  function connect() {
+    if (ws) { ws.removeAllListeners(); ws.close(); }
+    
+    ws = new WebSocket(hsmUrl, { 
+      headers: { 
+        Authorization: `Bearer ${accessToken}`,
+        Sid: sessionId
+      } 
+    });
+
+    ws.on('open', () => {
+      log('[HSM] Connected to Kotak Live Price Stream');
+      isReconnecting = false;
+      retryCount = 0;
+    });
+
+    ws.on('message', (data: WebSocket.RawData) => {
+      try {
+        const parsed = JSON.parse(data.toString());
+        // Extract token and price, send to RAM cache, and immediately discard object
+        if (parsed && parsed.tk && parsed.ltp) {
+          marketData.updatePrice(parsed.tk.toString(), parseFloat(parsed.ltp));
+        }
+      } catch (e) { /* Ignore parse errors to protect event loop */ }
+    });
+
+    ws.on('close', triggerReconnect);
+    ws.on('error', triggerReconnect);
+  }
+
+  function triggerReconnect() {
+    if (isReconnecting) return;
+    isReconnecting = true;
+    const delay = Math.min(3000 * Math.pow(2, retryCount), 30000); // Max 30s backoff
+    retryCount++;
+    log(`[HSM] Disconnected. Reconnecting in ${delay/1000}s...`);
+    setTimeout(connect, delay);
+  }
+
+  connect();
+}
+File 3: Create server/hsi-kotak-neo-v3.ts
+
+TypeScript
+import WebSocket from 'ws';
+import { log } from './process-flow-log';
+import { db } from './db';
+import { strategyTrades } from '@shared/schema';
+import { eq, inArray } from 'drizzle-orm';
+import { storage } from './storage';
+
+export function startHsiSocket(accessToken: string, sessionId: string, hsiUrl: string = "wss://ntpapi.kotaksecurities.com/hsi/v1/interactive") {
+  let ws: WebSocket | null = null;
+  let isReconnecting = false;
+  let retryCount = 0;
+
+  function connect() {
+    if (ws) { ws.removeAllListeners(); ws.close(); }
+    
+    ws = new WebSocket(hsiUrl);
+
+    ws.on('open', () => {
+      log('[HSI] Connected to Kotak Interactive Stream');
+      isReconnecting = false;
+      retryCount = 0;
+      // Send HSI Auth Message
+      ws?.send(JSON.stringify({ type: "cn", Authorization: accessToken, Sid: sessionId, source: "WEB" }));
+    });
+
+    ws.on('message', async (data: WebSocket.RawData) => {
+      try {
+        const parsed = JSON.parse(data.toString());
+        if (!parsed || parsed.type !== "order") return;
+        
+        // Handle Complete Orders (Fill Prices)
+        if (parsed.ordSt === "complete" && parsed.nOrdNo && parsed.avgPrc) {
+          await db.update(strategyTrades)
+            .set({ exitPrice: parseFloat(parsed.avgPrc) })
+            .where(eq(strategyTrades.exitOrderId, parsed.nOrdNo));
+        }
+        
+        // Handle Rejected Orders (Error Routing)
+        if (parsed.ordSt === "rejected" && parsed.rejRsn) {
+            const activeRoutes = await storage.getActiveErrorRoutes();
+            const matchedRoute = activeRoutes.find(r => parsed.rejRsn.includes(r.errorPattern));
+            if (matchedRoute) {
+                log(`[HSI] Order rejected: Match found for error route: ${matchedRoute.errorPattern}`);
+                // Future expansion: Route webhook to handler based on matchedRoute logic
+            }
+        }
+      } catch (e) { /* Ignore parse errors */ }
+    });
+
+    ws.on('close', triggerReconnect);
+    ws.on('error', triggerReconnect);
+  }
+
+  function triggerReconnect() {
+    if (isReconnecting) return;
+    isReconnecting = true;
+    const delay = Math.min(3000 * Math.pow(2, retryCount), 30000); // Max 30s backoff
+    retryCount++;
+    log(`[HSI] Disconnected. Reconnecting in ${delay/1000}s...`);
+    setTimeout(connect, delay);
+  }
+
+  connect();
+}
+Final Cleanup Task:
+Open server/te-kotak-neo-v3.ts. Delete the function deferDailyPnlUpdate (around line 1660) and remove all three places where it is called (deferDailyPnlUpdate(trade.id);).

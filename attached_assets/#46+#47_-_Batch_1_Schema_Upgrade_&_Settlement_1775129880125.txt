@@ -1,0 +1,84 @@
+Batch 1: Schema Upgrade & Settlement Engine (Tasks #46 & #47)
+
+What & Why
+We are preparing the architecture for a high-frequency Trailing Stop Loss (TSL) and WebSocket engine. Before implementing live data streams, we must update the database schema to store TSL state, and we must decouple our P&L calculations from the main Trade Engine loop by creating an asynchronous Settlement Engine.
+
+Done looks like
+
+shared/schema.ts: strategyTrades table includes 5 new columns (pnlCalculated, initialSlPrice, trailingStep, currentSlPrice, highWaterMark). Drizzle migrations are generated and pushed.
+
+server/se-kotak.ts: A new Settlement Engine is created to find closed trades where pnlCalculated === false, calculate the final P&L, update the strategies daily/total P&L, and mark the flag true.
+
+Existing strategyTrades rows are unharmed.
+
+Tasks:
+
+Task 1 — Schema Update (#46)
+File: shared/schema.ts
+Locate the strategyTrades table. Add these columns (ensure insertStrategyTradeSchema updates automatically or manually if needed):
+
+TypeScript
+  pnlCalculated: boolean("pnl_calculated").notNull().default(false), // SE idempotency flag
+  initialSlPrice: real("initial_sl_price"), // SL price at NRML entry time
+  trailingStep: real("trailing_step"), // Points to trail
+  currentSlPrice: real("current_sl_price"), // Active SL level in RAM, flushed by TSL
+  highWaterMark: real("high_water_mark"), // Most favourable LTP seen
+Run npm run db:push to apply changes without dropping the table.
+
+Task 2 — Create Settlement Engine (#47)
+File: server/se-kotak.ts (Create new)
+Build a module that safely processes the math for closed trades.
+
+TypeScript
+import { db } from "./db";
+import { strategyTrades, strategies } from "@shared/schema";
+import { eq, and, inArray } from "drizzle-orm";
+import { log } from "./process-flow-log";
+
+export class SettlementEngine {
+  public async processUnsettledTrades() {
+    try {
+      // 1. Find all closed trades where P&L hasn't been added to strategy totals
+      const unsettled = await db.select().from(strategyTrades)
+        .where(and(eq(strategyTrades.status, "CLOSED"), eq(strategyTrades.pnlCalculated, false)));
+
+      if (!unsettled.length) return;
+
+      for (const trade of unsettled) {
+        // 2. Fetch the parent strategy
+        const strategyList = await db.select().from(strategies).where(eq(strategies.id, trade.strategyId));
+        if (!strategyList.length) continue;
+        const strategy = strategyList[0];
+
+        // 3. Math: Add trade PnL to Strategy Daily and Total
+        const tradePnl = trade.realizedPnl || 0;
+        const newDaily = (strategy.dailyPnl || 0) + tradePnl;
+        const newTotal = (strategy.totalPnl || 0) + tradePnl;
+
+        // 4. Transactional update: Update strategy totals and mark trade as settled
+        await db.transaction(async (tx) => {
+          await tx.update(strategies)
+            .set({ dailyPnl: newDaily, totalPnl: newTotal })
+            .where(eq(strategies.id, strategy.id));
+
+          await tx.update(strategyTrades)
+            .set({ pnlCalculated: true })
+            .where(eq(strategyTrades.id, trade.id));
+        });
+
+        log(`[SE] Settled Trade ID ${trade.id}. PnL: ${tradePnl}. Strategy ${strategy.id} updated.`);
+      }
+    } catch (error) {
+      log(`[SE] Error processing unsettled trades: ${error}`);
+    }
+  }
+}
+
+export const settlementEngine = new SettlementEngine();
+Task 3 — Remove old timeout logic
+File: server/te-kotak-neo-v3.ts
+Inside closeTrade (or executeSellSignal), look for deferDailyPnlUpdate or setTimeout blocks that attempt to manually update strategy P&L after an exit. Remove them. P&L math is now exclusively the job of the Settlement Engine.
+
+Constraint Check: Ensure no type errors exist after adding nullable real numbers to the Drizzle schema. Ensure the DB migration succeeds.
+
+Let me know when Replit successfully builds Batch 1! Once your schema is updated, we will inject the OOM-Proof WebSocket (Batch 2) directly into your execution pipeline.

@@ -1,0 +1,133 @@
+Batch 2: Zero-Latency Pricing Engine (Tasks #48 & #52 Combined / Task #70)
+
+What & Why
+To execute high-precision Limit Orders without HTTP polling latency, we need a live Last Traded Price (LTP) feed. Previous WebSocket implementations caused Out of Memory (OOM) crashes because they accumulated historical tick objects. We must implement a strict "Overwrite Cache" using a JavaScript Map(). Furthermore, the Execution Layer must be updated to check this cache first before falling back to the HTTP relay.
+
+Done looks like
+
+server/ws-kotak.ts is created and exports a KotakWebSocketManager singleton.
+
+Incoming ticks strictly overwrite values in an ltpCache = new Map<string, number>(). No historical arrays or objects are kept.
+
+Auto-reconnection logic exists with exponential backoff (max 30s) if the stream disconnects.
+
+server/el-kotak-neo-v3.ts (getQuote method) is updated to read from this 0ms cache first, falling back to the HTTP fetch only if the price is missing or the WS is disconnected.
+
+Tasks:
+
+Task 1 — Build the OOM-Proof WebSocket Manager
+File: server/ws-kotak.ts (Create/Update)
+Build the manager with aggressive reconnection and a strict overwrite cache.
+
+TypeScript
+import WebSocket from 'ws';
+import { log } from './process-flow-log';
+
+export class KotakWebSocketManager {
+  private static instance: KotakWebSocketManager;
+  private ws: WebSocket | null = null;
+  private ltpCache = new Map<string, number>();
+  private activeToken: string | null = null;
+  private activeUrl: string | null = null;
+  private isReconnecting = false;
+  private retryCount = 0;
+
+  private constructor() {}
+
+  public static getInstance(): KotakWebSocketManager {
+    if (!KotakWebSocketManager.instance) {
+      KotakWebSocketManager.instance = new KotakWebSocketManager();
+    }
+    return KotakWebSocketManager.instance;
+  }
+
+  public connect(sessionToken: string, apiUrl: string) {
+    this.activeToken = sessionToken;
+    this.activeUrl = apiUrl.replace('https://', 'wss://') + '/realtime'; // Adjust based on Kotak V3 WSS spec
+    
+    if (this.ws) {
+        this.ws.removeAllListeners();
+        this.ws.close();
+    }
+    
+    try {
+      this.ws = new WebSocket(this.activeUrl, {
+        headers: { Authorization: `Bearer ${sessionToken}` } // Note: Check if Kotak V3 requires token in query or header
+      });
+
+      this.ws.on('open', () => {
+        log('[WS] Connected to Kotak V3 Realtime Stream');
+        this.isReconnecting = false;
+        this.retryCount = 0;
+        // Subscriptions to open positions can be fired here
+      });
+
+      this.ws.on('message', (data: WebSocket.RawData) => {
+        try {
+          const message = data.toString();
+          const parsed = JSON.parse(message);
+          
+          // Strict Overwrite: No arrays, no history. Just pure LTP update.
+          // Adjust 'tk' and 'ltp' mapping based on exact Kotak Neo V3 socket JSON response.
+          if (parsed && parsed.tk && parsed.ltp) {
+             this.ltpCache.set(parsed.tk.toString(), parseFloat(parsed.ltp));
+          }
+        } catch (e) {
+          // Ignore parse errors to keep event loop lightning fast
+        }
+      });
+
+      this.ws.on('close', () => this.triggerReconnect());
+      this.ws.on('error', (err) => {
+          log(`[WS] Error: ${err.message}`);
+          this.triggerReconnect();
+      });
+      
+    } catch (error) {
+      log(`[WS] Connection initialization failed: ${error}`);
+      this.triggerReconnect();
+    }
+  }
+
+  private triggerReconnect() {
+    if (this.isReconnecting || !this.activeToken || !this.activeUrl) return;
+    this.isReconnecting = true;
+    
+    // Exponential backoff: 3s, 6s, 12s, max 30s
+    const delay = Math.min(3000 * Math.pow(2, this.retryCount), 30000);
+    this.retryCount++;
+    
+    log(`[WS] Disconnected. Reconnecting in ${delay/1000}s...`);
+    setTimeout(() => this.connect(this.activeToken!, this.activeUrl!), delay);
+  }
+
+  // 0ms Latency Lookup used by Trade Engine
+  public getCachedLtp(instrumentToken: string): number | undefined {
+    return this.ltpCache.get(instrumentToken.toString());
+  }
+}
+
+export const wsManager = KotakWebSocketManager.getInstance();
+(Note to Replit Agent: Double-check Kotak V3's specific WS connection parameters. Some brokers require standard JSON { type: "sub" } payloads to subscribe to tokens. Add a .subscribe(tokens: string[]) method if necessary based on your broker definitions).
+
+Task 2 — Wire the Cache-First Fallback
+File: server/el-kotak-neo-v3.ts
+Locate the public async getQuote(instrumentToken: string) method inside ExecutionLayer.
+Inject the cache lookup at the absolute top of the method:
+
+TypeScript
+import { wsManager } from './ws-kotak';
+
+  public async getQuote(instrumentToken: string): Promise<any> {
+    // 1. CACHE-FIRST LOOKUP (0ms Latency)
+    const cachedPrice = wsManager.getCachedLtp(instrumentToken);
+    if (cachedPrice !== undefined && cachedPrice > 0) {
+       return { ltp: cachedPrice.toString(), isFromCache: true }; 
+    }
+
+    // 2. HTTP FALLBACK (Relay Fetch - ~300ms latency)
+    // ... keep all existing this.executeRelayFetch(...) logic below ...
+Task 3 — Trigger Connection on Login
+File: server/el-kotak-neo-v3.ts
+Locate the generateToken or login method where the sessionToken and baseUrl are generated/refreshed. Add a single line to boot the socket:
+wsManager.connect(this.sessionToken, config.baseUrl);
