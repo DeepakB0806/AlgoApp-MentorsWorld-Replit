@@ -507,7 +507,7 @@ export default function Dashboard() {
                               <TableCell className={`text-right text-xs ${unrealisedPnl >= 0 ? "text-primary" : "text-destructive"}`}>
                                 {unrealisedPnl >= 0 ? "+" : ""}{unrealisedPnl.toFixed(2)}
                               </TableCell>
-                              <TableCell className="text-xs text-muted-foreground">{(position as any).timestamp || "—"}</TableCell>
+                              <TableCell className="text-xs text-muted-foreground">{position.timestamp || "—"}</TableCell>
                             </TableRow>
                           );
                         })}
