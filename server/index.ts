@@ -14,6 +14,9 @@ import { rescheduleScripMasterSync } from "./scrip-sync-scheduler";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
 import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback } from "./te-kotak-neo-v3";
+import { startMarketDataManager, setSubscribeHandler } from "./md-kotak-neo-v3";
+import { subscribe as hsmSubscribe, startWsGateway } from "./hsm-kotak-neo-v3";
+import { startSettlementEngine } from "./se-kotak-neo-v3";
 
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err.stack || err.message || err);
@@ -292,6 +295,31 @@ app.use((req, res, next) => {
     startDataRetentionJob(storage);
   } catch (err) {
     log(`Data retention job startup warning: ${err}`);
+  }
+
+  // Start Market Data Manager + wire HSM subscribe handler
+  try {
+    startMarketDataManager();
+    setSubscribeHandler(hsmSubscribe);
+    log(`Market Data Manager started`);
+  } catch (err) {
+    log(`Market Data Manager startup warning: ${err}`);
+  }
+
+  // Start Settlement Engine — 10s sweep to aggregate P&L into strategyDailyPnl
+  try {
+    startSettlementEngine(storage);
+    log(`Settlement Engine started`);
+  } catch (err) {
+    log(`Settlement Engine startup warning: ${err}`);
+  }
+
+  // Start WebSocket Gateway — subscribes open NRML trades, non-fatal on failure
+  try {
+    await startWsGateway(storage);
+    log(`WS Gateway started`);
+  } catch (err) {
+    log(`WS Gateway startup warning (non-fatal): ${err}`);
   }
 
   // FIX 4b: Reboot Amnesia Catcher — re-ignite persistent retry loops for any
