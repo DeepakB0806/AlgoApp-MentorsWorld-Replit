@@ -28,15 +28,15 @@ function buildSubscribeMessage(exchange: string, token: string): object {
 
 function resubscribeAll(): void {
   if (!ws || ws.readyState !== WebSocket.OPEN || !activeConfig) return;
-  for (const symbol of Array.from(subscriptions.keys())) {
+  subscriptions.forEach((_, symbol) => {
     const token = brokerSymbolToTokenMap.get(symbol);
-    if (!token) continue;
+    if (!token) return;
     try {
-      ws.send(JSON.stringify(buildSubscribeMessage("nfo", token)));
+      ws!.send(JSON.stringify(buildSubscribeMessage("nfo", token)));
     } catch (err) {
       console.error(`${LOG_PREFIX} resubscribeAll send error for ${symbol}:`, err);
     }
-  }
+  });
 }
 
 function connect(config: BrokerConfig): void {

@@ -47,14 +47,22 @@ export async function getPrice(
   return cached ? cached.ltp : null;
 }
 
-let _subscribeHandler: (symbol: string) => void = () => {};
+let _cachedHsmSubscribe: ((symbol: string) => void) | null = null;
 
-export function setSubscribeHandler(fn: (symbol: string) => void): void {
-  _subscribeHandler = fn;
+function resolveHsmSubscribe(): (symbol: string) => void {
+  if (_cachedHsmSubscribe) return _cachedHsmSubscribe;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const hsm = require("./hsm-kotak-neo-v3") as { subscribe: (s: string) => void };
+    _cachedHsmSubscribe = hsm.subscribe;
+    return _cachedHsmSubscribe;
+  } catch {
+    return () => {};
+  }
 }
 
 export function subscribe(symbol: string): void {
-  _subscribeHandler(symbol);
+  resolveHsmSubscribe()(symbol);
 }
 
 export function startMarketDataManager(): void {

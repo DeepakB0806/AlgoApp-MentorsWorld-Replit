@@ -14,8 +14,8 @@ import { rescheduleScripMasterSync } from "./scrip-sync-scheduler";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
 import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback } from "./te-kotak-neo-v3";
-import { startMarketDataManager, setSubscribeHandler } from "./md-kotak-neo-v3";
-import { subscribe as hsmSubscribe, startWsGateway } from "./hsm-kotak-neo-v3";
+import { startMarketDataManager } from "./md-kotak-neo-v3";
+import { startWsGateway } from "./hsm-kotak-neo-v3";
 import { startSettlementEngine } from "./se-kotak-neo-v3";
 
 process.on('uncaughtException', (err) => {
@@ -297,10 +297,9 @@ app.use((req, res, next) => {
     log(`Data retention job startup warning: ${err}`);
   }
 
-  // Start Market Data Manager + wire HSM subscribe handler
+  // Start Market Data Manager (subscribe() delegates to HSM via lazy require — no wiring needed)
   try {
     startMarketDataManager();
-    setSubscribeHandler(hsmSubscribe);
     log(`Market Data Manager started`);
   } catch (err) {
     log(`Market Data Manager startup warning: ${err}`);
