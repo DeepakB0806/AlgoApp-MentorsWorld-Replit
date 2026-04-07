@@ -217,6 +217,11 @@ export const strategyTrades = pgTable("strategy_trades", {
   modeDesc: text("mode_desc"),
   webhookDataId: varchar("webhook_data_id", { length: 36 }),
   rejectedReason: text("rejected_reason"),
+  pnlCalculated: boolean("pnl_calculated").default(false),
+  initialSlPrice: real("initial_sl_price"),
+  trailingStep: real("trailing_step"),
+  currentSlPrice: real("current_sl_price"),
+  highWaterMark: real("high_water_mark"),
 }, (table) => [
   index("idx_strategy_trades_plan_id").on(table.planId),
   index("idx_strategy_trades_status").on(table.status),
