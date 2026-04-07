@@ -13,10 +13,11 @@ import { runScripMasterSync } from "./smc-kotak-neo-v3";
 import { rescheduleScripMasterSync } from "./scrip-sync-scheduler";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
-import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback } from "./te-kotak-neo-v3";
+import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback, closeTradeById } from "./te-kotak-neo-v3";
 import { startMarketDataManager } from "./md-kotak-neo-v3";
 import { startWsGateway } from "./hsm-kotak-neo-v3";
 import { startSettlementEngine } from "./se-kotak-neo-v3";
+import { startTslEngine } from "./tsl-kotak-neo-v3";
 
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err.stack || err.message || err);
@@ -319,6 +320,14 @@ app.use((req, res, next) => {
     log(`WS Gateway started`);
   } catch (err) {
     log(`WS Gateway startup warning (non-fatal): ${err}`);
+  }
+
+  // Start TSL Engine — rehydrates active trails, starts 15s dirty flush loop
+  try {
+    await startTslEngine(storage, closeTradeById);
+    log(`TSL Engine started`);
+  } catch (err) {
+    log(`TSL Engine startup warning (non-fatal): ${err}`);
   }
 
   // FIX 4b: Reboot Amnesia Catcher — re-ignite persistent retry loops for any
