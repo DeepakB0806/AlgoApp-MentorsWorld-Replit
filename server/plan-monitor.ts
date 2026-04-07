@@ -57,8 +57,7 @@ async function checkPlans(storage: IStorage): Promise<void> {
     (p) => (p.deploymentStatus === "active" || p.deploymentStatus === "deployed") && p.brokerConfigId
   );
 
-  if (deployedPlans.length === 0) return;
-
+  // Loop is a no-op when empty; TSL poll still runs regardless of deployed plan count
   for (const plan of deployedPlans) {
     try {
       if (persistentSquareOffActive.has(plan.id)) continue;
