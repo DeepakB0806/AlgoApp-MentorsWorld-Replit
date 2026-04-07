@@ -1,0 +1,131 @@
+import WebSocket from "ws";
+import * as marketData from "./md-kotak-neo-v3";
+import { brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
+import type { IStorage } from "./storage";
+import type { BrokerConfig } from "@shared/schema";
+
+const LOG_PREFIX = "[HSM]";
+const MAX_RECONNECT_DELAY_MS = 30_000;
+const HSM_URL = "wss://hstream.kotaksecurities.com/realtime";
+
+const subscriptions = new Map<string, true>();
+let ws: WebSocket | null = null;
+let reconnectDelay = 1_000;
+let activeConfig: BrokerConfig | null = null;
+
+function buildAuthMessage(config: BrokerConfig): object {
+  return {
+    type: "cn",
+    Authorization: config.accessToken,
+    Sid: config.sessionId,
+    source: "WEB",
+  };
+}
+
+function buildSubscribeMessage(exchange: string, token: string): object {
+  return { type: "sub", scrips: `${exchange}|${token}` };
+}
+
+function resubscribeAll(): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !activeConfig) return;
+  for (const symbol of Array.from(subscriptions.keys())) {
+    const token = brokerSymbolToTokenMap.get(symbol);
+    if (!token) continue;
+    try {
+      ws.send(JSON.stringify(buildSubscribeMessage("nfo", token)));
+    } catch (err) {
+      console.error(`${LOG_PREFIX} resubscribeAll send error for ${symbol}:`, err);
+    }
+  }
+}
+
+function connect(config: BrokerConfig): void {
+  if (!config.accessToken || !config.sessionId) {
+    console.error(`${LOG_PREFIX} No accessToken/sessionId — skipping WS connection`);
+    return;
+  }
+
+  try {
+    ws = new WebSocket(HSM_URL);
+  } catch (err) {
+    console.error(`${LOG_PREFIX} WebSocket construction error:`, err);
+    scheduleReconnect(config);
+    return;
+  }
+
+  ws.on("open", () => {
+    console.log(`${LOG_PREFIX} Connected to Kotak HSM`);
+    reconnectDelay = 1_000;
+    try {
+      ws!.send(JSON.stringify(buildAuthMessage(config)));
+    } catch (err) {
+      console.error(`${LOG_PREFIX} Auth send error:`, err);
+    }
+    resubscribeAll();
+  });
+
+  ws.on("message", (raw: WebSocket.RawData) => {
+    try {
+      const parsed = JSON.parse(raw.toString());
+      const data = parsed.data || parsed;
+      const symbol: string | undefined = data.trdSym || data.ts || data.sym;
+      const ltp: number | undefined = data.ltp || data.lp;
+      if (symbol && ltp !== undefined) {
+        marketData.updatePrice(symbol, Number(ltp));
+      }
+    } catch {
+    }
+  });
+
+  ws.on("close", () => {
+    console.log(`${LOG_PREFIX} Disconnected — reconnecting in ${reconnectDelay}ms`);
+    ws = null;
+    scheduleReconnect(config);
+  });
+
+  ws.on("error", (err) => {
+    console.error(`${LOG_PREFIX} WS error:`, err.message);
+  });
+}
+
+function scheduleReconnect(config: BrokerConfig): void {
+  setTimeout(() => connect(config), reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+}
+
+export function subscribe(symbol: string): void {
+  subscriptions.set(symbol, true);
+  const token = brokerSymbolToTokenMap.get(symbol);
+  if (token && ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify(buildSubscribeMessage("nfo", token)));
+    } catch (err) {
+      console.error(`${LOG_PREFIX} subscribe send error for ${symbol}:`, err);
+    }
+  }
+}
+
+export async function startWsGateway(storage: IStorage): Promise<void> {
+  try {
+    const configs = await storage.getBrokerConfigs();
+    const config = configs.find(c => c.brokerName === "kotak_neo" && c.isConnected);
+    if (!config) {
+      console.log(`${LOG_PREFIX} No connected Kotak Neo config — WS Gateway not started`);
+      return;
+    }
+    activeConfig = config;
+
+    const openTrades = await storage.getTradesByStatuses(["open"]);
+    const nrmlTrades = openTrades.filter(t => t.productType === "NRML");
+    for (const trade of nrmlTrades) {
+      subscriptions.set(trade.tradingSymbol, true);
+    }
+    if (nrmlTrades.length > 0) {
+      console.log(`${LOG_PREFIX} Pre-subscribed ${nrmlTrades.length} NRML symbols`);
+    }
+
+    connect(config);
+  } catch (err) {
+    console.error(`${LOG_PREFIX} startWsGateway error (non-fatal):`, err);
+  }
+}

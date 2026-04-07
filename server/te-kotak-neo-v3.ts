@@ -775,6 +775,8 @@ async function executeLegBasket(
       }
 
       // FIX 3a: Immediate DB write as "pending_basket" — leg gets a real ID before any rollback can occur
+      const initialSl = (leg as any).initialSl ?? (ctx.blockConfig as any)?.initialSl ?? null;
+      const trailingStepVal = (leg as any).trailingStep ?? (ctx.blockConfig as any)?.trailingStep ?? null;
       const stagedTrade = {
         planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${legIndex}`,
         tradingSymbol: resolved.tradingSymbol, exchange: ctx.exchange, quantity: actualFilledQty,
@@ -786,6 +788,12 @@ async function executeLegBasket(
         localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
         webhookDataId: ctx.data.id || undefined,
         rejectedReason: orderReason || null,
+        ...(productType === "NRML" && initialSl !== null ? {
+          initialSlPrice: Number(initialSl),
+          trailingStep: trailingStepVal !== null ? Number(trailingStepVal) : null,
+          currentSlPrice: Number(initialSl),
+          highWaterMark: fillPrice,
+        } : {}),
       };
 
       const savedTrade = await storage.createStrategyTrade(stagedTrade as any);
@@ -876,7 +884,6 @@ async function executeBuySignal(
       closePnl += closed.pnl || 0;
       if (ci < openOpposites.length - 1) await new Promise(r => setTimeout(r, delayMs));
     }
-    deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
     if (ctx.signalContext?.resolvedAction === "EXIT") {
       return { success: true, action: "close", broker, planId: plan.id,
         message: "Successfully closed all positions (Pure EXIT).", executionTimeMs: Date.now() - ctx.startTime };
@@ -941,7 +948,6 @@ async function executeSellSignal(
       if (closed.status === "close_failed") anyFailed = true;
       if (ci < allToClose.length - 1) await new Promise(r => setTimeout(r, delayMs));
     }
-    deferDailyPnlUpdate(storage, plan.id, ctx.today, closePnl);
     if (anyFailed) {
       console.warn(`[TE] Plan "${plan.name}" — leg close_failed on ${ctx.resolvedBlockType}, starting persistent exit retry`);
       startPersistentExit(storage, plan.id, ctx.resolvedBlockType, brokerConfig, ctx.blockConfig?.priceMode as string | undefined);
@@ -1309,7 +1315,6 @@ export async function squareOffPlan(
       if (result.status === "closed") {
         closed++;
         const pnl = result.pnl || 0;
-        deferDailyPnlUpdate(storage, planId, today, pnl);
         if (plan) {
           addProcessFlowLog({
             planId: plan.id,
@@ -1550,7 +1555,7 @@ export function startPersistentRollback(
             const abortMsg = `ABORT: Token not found for ${trade.tradingSymbol} in scrip master for persistent rollback.`;
             if (plan) logPFL(plan, brokerConfig.brokerName, mockWebhookData, "error", abortMsg);
             else console.error(`[TE] ${abortMsg}`);
-            await storage.updateStrategyTrade(trade.id, { status: "rollback_failed", updatedAt: now2 });
+            await storage.updateStrategyTrade(trade.id, { status: "rollback_failed", updatedAt: now });
             continue;
           }
           const prQuoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(trade.exchange || "NFO"), prToken);
@@ -1558,7 +1563,7 @@ export function startPersistentRollback(
             const abortMsg = `ABORT: Live quote fetch failed for ${trade.tradingSymbol} in persistent rollback: ${prQuoteRes.error}.`;
             if (plan) logPFL(plan, brokerConfig.brokerName, mockWebhookData, "error", abortMsg);
             else console.error(`[TE] ${abortMsg}`);
-            await storage.updateStrategyTrade(trade.id, { status: "rollback_failed", updatedAt: now2 });
+            await storage.updateStrategyTrade(trade.id, { status: "rollback_failed", updatedAt: now });
             continue;
           }
           prBasePriceForLimit = prQuoteRes.ltp;
@@ -1657,16 +1662,36 @@ export function startPersistentEntry(
   });
 }
 
-function deferDailyPnlUpdate(storage: IStorage, planId: string, today: string, closePnl: number) {
-  setTimeout(() => {
-    storage.getStrategyDailyPnl(planId).then((records) => {
-      const dailyPnl = records.find(r => r.date === today);
-      const currentPnl = dailyPnl ? Number(dailyPnl.dailyPnl) : 0;
-      if (dailyPnl) {
-        storage.updateStrategyDailyPnl(dailyPnl.id, { dailyPnl: currentPnl + closePnl }).catch(console.error);
-      } else {
-        storage.createStrategyDailyPnl({ planId, date: today, dailyPnl: closePnl }).catch(console.error);
-      }
-    }).catch(console.error);
-  }, 1000);
+export async function closeTradeById(storage: IStorage, tradeId: string): Promise<void> {
+  try {
+    const trade = await storage.getStrategyTrade(tradeId);
+    if (!trade) {
+      console.error(`[TE] closeTradeById: trade ${tradeId} not found`);
+      return;
+    }
+    if (trade.status !== "open") return;
+
+    const plan = await storage.getStrategyPlan(trade.planId);
+    if (!plan?.brokerConfigId) {
+      console.error(`[TE] closeTradeById: no brokerConfigId for plan ${trade.planId}`);
+      return;
+    }
+
+    let brokerConfig = tradingCache.getBrokerConfig(plan.brokerConfigId);
+    if (!brokerConfig) {
+      brokerConfig = (await storage.getBrokerConfig(plan.brokerConfigId)) || undefined;
+      if (brokerConfig) tradingCache.setBrokerConfig(plan.brokerConfigId, brokerConfig);
+    }
+    if (!brokerConfig) {
+      console.error(`[TE] closeTradeById: brokerConfig not found for id=${plan.brokerConfigId}`);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const currentPrice = trade.ltp || trade.price || 0;
+    await closeTrade(storage, trade, currentPrice, now, brokerConfig, "MKT");
+  } catch (err) {
+    console.error(`[TE] closeTradeById error for trade ${tradeId}:`, err);
+  }
 }
+

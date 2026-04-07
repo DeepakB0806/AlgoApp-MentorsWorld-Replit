@@ -1,5 +1,5 @@
 import { randomUUID, randomBytes } from "crypto";
-import { eq, desc, and, inArray, lt, sql } from "drizzle-orm";
+import { eq, desc, and, inArray, lt, sql, isNotNull } from "drizzle-orm";
 import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
@@ -145,6 +145,9 @@ export interface IStorage {
   deleteStrategyTradesByPlan(planId: string, olderThanDays?: number): Promise<number>;
   deleteAllStrategyTradesByPlan(planId: string): Promise<number>;
   deleteStrategyTradesOlderThan(days: number): Promise<number>;
+  getUnsettledClosedTrades(): Promise<StrategyTrade[]>;
+  markTradesPnlCalculated(ids: string[]): Promise<void>;
+  getOpenNrmlTradesWithTsl(): Promise<StrategyTrade[]>;
 
   // Strategy Daily P&L - daily P&L log entries
   getStrategyDailyPnl(planId: string): Promise<StrategyDailyPnl[]>;
@@ -940,6 +943,29 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(strategyTrades)
       .where(inArray(strategyTrades.status, statuses))
       .orderBy(desc(strategyTrades.createdAt));
+  }
+
+  async getUnsettledClosedTrades(): Promise<StrategyTrade[]> {
+    return await db.select().from(strategyTrades)
+      .where(and(
+        eq(strategyTrades.status, "closed"),
+        eq(strategyTrades.pnlCalculated, false)
+      ));
+  }
+
+  async markTradesPnlCalculated(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    await db.update(strategyTrades)
+      .set({ pnlCalculated: true })
+      .where(inArray(strategyTrades.id, ids));
+  }
+
+  async getOpenNrmlTradesWithTsl(): Promise<StrategyTrade[]> {
+    return await db.select().from(strategyTrades)
+      .where(and(
+        eq(strategyTrades.status, "open"),
+        isNotNull(strategyTrades.initialSlPrice)
+      ));
   }
 
   async createStrategyTrade(trade: InsertStrategyTrade): Promise<StrategyTrade> {
