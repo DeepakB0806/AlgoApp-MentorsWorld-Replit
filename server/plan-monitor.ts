@@ -2,6 +2,10 @@ import type { IStorage } from "./storage";
 import type { TimeLogicConfig, TradeParams } from "@shared/schema";
 import { startPersistentSquareOff, persistentSquareOffActive } from "./te-kotak-neo-v3";
 import { addProcessFlowLog } from "./process-flow-log";
+import { processTick } from "./tsl-kotak-neo-v3";
+import { getPrice } from "./md-kotak-neo-v3";
+import { brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
+import EL from "./el-kotak-neo-v3";
 
 const LOG_PREFIX = "[PLAN-MONITOR]";
 const CHECK_INTERVAL_MS = 60 * 1000;
@@ -142,5 +146,32 @@ async function checkPlans(storage: IStorage): Promise<void> {
         err?.message || err
       );
     }
+  }
+
+  // TSL Poll — REST fallback: fetch live LTP for all active NRML trails and
+  // push into processTick() so the engine has a price baseline even when the
+  // WebSocket Scout is silent. getPrice() uses MD cache first, falls back to
+  // REST quote only when cache is stale.
+  try {
+    const tslTrades = await storage.getOpenNrmlTradesWithTsl();
+    if (tslTrades.length > 0) {
+      const planConfigCache = new Map<string, Awaited<ReturnType<IStorage["getBrokerConfig"]>>>();
+      for (const trade of tslTrades) {
+        if (!planConfigCache.has(trade.planId)) {
+          const plan = await storage.getStrategyPlan(trade.planId);
+          const bc = plan?.brokerConfigId ? await storage.getBrokerConfig(plan.brokerConfigId) : undefined;
+          planConfigCache.set(trade.planId, bc);
+        }
+        const bc = planConfigCache.get(trade.planId);
+        if (!bc) continue;
+        const token = brokerSymbolToTokenMap.get(trade.tradingSymbol);
+        const ltp = await getPrice(trade.tradingSymbol, bc, EL.mapExchange(trade.exchange), token);
+        if (ltp !== null) {
+          processTick(trade.tradingSymbol, ltp);
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error(`${LOG_PREFIX} TSL poll error:`, err?.message || err);
   }
 }

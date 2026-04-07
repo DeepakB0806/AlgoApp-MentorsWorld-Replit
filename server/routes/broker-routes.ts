@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import zlib from "zlib";
+import { z } from "zod";
 import type { Express } from "express";
 import type { IStorage } from "../storage";
 import { insertBrokerConfigSchema, webhookStatusLogs, brokerTestLogs, brokerSessionLogs } from "@shared/schema";
@@ -11,6 +12,7 @@ import EL from "../el-kotak-neo-v3";
 import { startPersistentSquareOff } from "../te-kotak-neo-v3";
 import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
 import { addProcessFlowLog, getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
+import { processTick, updateLastWsTick } from "../tsl-kotak-neo-v3";
 import {
   testBinanceConnectivity,
   authenticateBinance,
@@ -1182,6 +1184,25 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       console.error(`[BROKER] Scrip master download error:`, error.message);
       res.status(500).json({ error: error.message || "Scrip master download failed" });
     }
+  });
+
+  // ── TSL Price-Update Endpoint ─────────────────────────────────────────────
+  // External WebSocket Scout pushes live LTP ticks here; calls processTick()
+  // and stamps the last-WS-tick timestamp so the 15s flush suppresses stale warnings.
+  const priceUpdateSchema = z.object({
+    symbol: z.string().min(1),
+    ltp: z.number(),
+  });
+
+  app.post("/api/price-update", (req, res) => {
+    const parsed = priceUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body — expected { symbol: string, ltp: number }" });
+    }
+    const { symbol, ltp } = parsed.data;
+    processTick(symbol, ltp);
+    updateLastWsTick();
+    res.json({ ok: true });
   });
 }
 
