@@ -314,20 +314,21 @@ app.use((req, res, next) => {
     log(`Settlement Engine startup warning: ${err}`);
   }
 
+  // Start TSL Engine — rehydrates active trails, starts 15s dirty flush loop
+  // Must start before WS Gateway so processTick() is ready before first tick arrives
+  try {
+    await startTslEngine(storage, closeTradeById);
+    log(`TSL Engine started`);
+  } catch (err) {
+    log(`TSL Engine startup warning (non-fatal): ${err}`);
+  }
+
   // Start WebSocket Gateway — subscribes open NRML trades, non-fatal on failure
   try {
     await startWsGateway(storage);
     log(`WS Gateway started`);
   } catch (err) {
     log(`WS Gateway startup warning (non-fatal): ${err}`);
-  }
-
-  // Start TSL Engine — rehydrates active trails, starts 15s dirty flush loop
-  try {
-    await startTslEngine(storage, closeTradeById);
-    log(`TSL Engine started`);
-  } catch (err) {
-    log(`TSL Engine startup warning (non-fatal): ${err}`);
   }
 
   // FIX 4b: Reboot Amnesia Catcher — re-ignite persistent retry loops for any
