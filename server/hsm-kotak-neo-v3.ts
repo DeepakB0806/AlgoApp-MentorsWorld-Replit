@@ -68,8 +68,15 @@ function connect(config: BrokerConfig): void {
     try {
       const parsed = JSON.parse(raw.toString());
       const data = parsed.data || parsed;
-      const symbol: string | undefined = data.trdSym || data.ts || data.sym;
-      const ltp: number | undefined = data.ltp || data.lp;
+      let symbol: string | undefined = data.trdSym || data.ts || data.sym;
+      // Fallback: if payload carries only a token (tk), reverse-map it to a symbol
+      if (!symbol && data.tk) {
+        const tokenStr = String(data.tk);
+        brokerSymbolToTokenMap.forEach((tok, sym) => {
+          if (!symbol && tok === tokenStr) symbol = sym;
+        });
+      }
+      const ltp: number | undefined = data.ltp ?? data.lp;
       if (symbol && ltp !== undefined) {
         marketData.updatePrice(symbol, Number(ltp));
       }

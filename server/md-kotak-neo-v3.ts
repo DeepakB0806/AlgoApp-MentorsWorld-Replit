@@ -49,20 +49,30 @@ export async function getPrice(
 
 let _cachedHsmSubscribe: ((symbol: string) => void) | null = null;
 
-function resolveHsmSubscribe(): (symbol: string) => void {
+function resolveHsmSubscribe(): ((symbol: string) => void) | null {
   if (_cachedHsmSubscribe) return _cachedHsmSubscribe;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const hsm = require("./hsm-kotak-neo-v3") as { subscribe: (s: string) => void };
+    if (typeof hsm.subscribe !== "function") {
+      console.error(`${LOG_PREFIX} subscribe: hsm-kotak-neo-v3.subscribe is not a function — wiring failure`);
+      return null;
+    }
     _cachedHsmSubscribe = hsm.subscribe;
     return _cachedHsmSubscribe;
-  } catch {
-    return () => {};
+  } catch (err: any) {
+    console.error(`${LOG_PREFIX} subscribe: failed to load hsm-kotak-neo-v3 — ${err?.message || err}`);
+    return null;
   }
 }
 
 export function subscribe(symbol: string): void {
-  resolveHsmSubscribe()(symbol);
+  const fn = resolveHsmSubscribe();
+  if (!fn) {
+    console.error(`${LOG_PREFIX} subscribe(${symbol}) dropped — HSM module unavailable`);
+    return;
+  }
+  fn(symbol);
 }
 
 export function startMarketDataManager(): void {
