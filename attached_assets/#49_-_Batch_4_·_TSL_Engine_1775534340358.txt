@@ -1,0 +1,35 @@
+#49 - Batch 4 · TSL Engine
+
+What & Why
+The Trailing Stop Loss engine monitors all open NRML trades that have trailingStep > 0. On each 2-second tick, it fetches current LTP via md-kotak-neo-v3.ts, updates highWaterMark and currentSlPrice in the database, and fires startPersistentExit() when live price breaches the active SL level.
+
+OOM Constraint — Zero-History Overwrite (strictly enforced)
+This engine reads from the cache and writes to the database. The following rules are absolute:
+
+Fetch the open trades list fresh on every interval tick — do not cache the trade list in a module-level variable between ticks
+No price history arrays — do not accumulate LTP readings per instrument. Each tick is processed and discarded.
+highWaterMark is computed as Math.max(existingHWM, currentLtp) — a single scalar update, not a running array
+Do not write LTP values to any database table — only highWaterMark and currentSlPrice are persisted (they live in strategyTrades columns added in #46)
+The only module-level state permitted is the setInterval handle for cleanup purposes
+Done looks like
+server/tsl-kotak-neo-v3.ts exports startTslEngine(storage: IStorage, brokerConfig: BrokerConfig)
+setInterval at 2 000ms
+Fetches open NRML strategyTrades where trailingStep > 0 fresh each tick
+For each trade: calls marketData.getPrice(token, brokerConfig, exchange), computes new highWaterMark (Math.max of existing and current LTP), recalculates currentSlPrice = highWaterMark - trailingStep, persists both fields to DB
+Triggers startPersistentExit(storage, trade, brokerConfig, priceMode) if LTP crossed currentSlPrice (SELL leg: LTP >= currentSlPrice; BUY leg: LTP <= currentSlPrice)
+Does not touch trades where trailingStep = 0 or null
+Does not touch bracket order logic
+No module-level price arrays or trade history
+Out of scope
+Starting the engine at boot (Batch 4 / #50)
+UI changes
+Tasks
+Create server/tsl-kotak-neo-v3.ts with startTslEngine(storage, brokerConfig). 2-second polling loop: fetch open NRML trades with trailingStep > 0 (fresh each tick, no caching), compute HWM + currentSlPrice via scalar Math.max, persist, trigger startPersistentExit on breach. Enforce OOM constraint: no price arrays, no module-level trade cache.
+Relevant files
+server/md-kotak-neo-v3.ts
+server/te-kotak-neo-v3.ts:1430-1470
+server/storage.ts:44-202
+shared/schema.ts:187-228
+Dependencies
+Batch 2 · TE Cleanup: remove deferDailyPnlUpdate
+Batch 3 · WebSocket Gateways (hsm + hsi -kotak-neo-v3.ts)

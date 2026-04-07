@@ -1,0 +1,30 @@
+#52 - Batch 2 · Market Data Manager
+
+What & Why
+Creates the price-fetch abstraction singleton that all consumers (plan-monitor, TSL engine, EL fallback) use to get the current LTP. Prioritises a live WebSocket-sourced price if it is under 2 000ms old; otherwise falls back to HTTP via EL.getQuote(). This is the RAM cache that the HSM WebSocket (Batch 3) will write to.
+
+OOM Constraint — Zero-History Overwrite (strictly enforced)
+This file is the primary cache. The following rules are absolute and must not be relaxed:
+
+Internal state MUST be Map<string, { ltp: number; ts: number }> — exactly one entry per instrument token
+updatePrice() MUST use Map.set() — this overwrites the previous value. Never push, never spread into a new object accumulating history
+No arrays anywhere in this file — not for prices, not for timestamps, not for logs
+Map size is bounded by the number of subscribed instruments. It must never grow proportionally to time or tick count
+Do not log raw price data to any database table or external buffer
+The { ltp, ts } value shape is the maximum allowed per key — no additional fields
+Done looks like
+server/md-kotak-neo-v3.ts exports singleton: export const marketData = new MarketDataManager()
+Internal state: Map<string, { ltp: number; ts: number }> — single entry per token, overwrite-only
+updatePrice(token: string, ltp: number) — calls Map.set() with current Date.now() timestamp
+getPrice(token, brokerConfig, exchange) — returns cached ltp if age < 2 000ms, else calls EL.getQuote(brokerConfig, exchange, token), updates cache via updatePrice, returns ltp
+EL.getQuote() signature unchanged
+No circular imports
+Out of scope
+WebSocket connection (Batch 3 feeds updatePrice)
+Replacing plan-monitor price fetch calls (Batch 5)
+Tasks
+Create server/md-kotak-neo-v3.ts with MarketDataManager class and singleton export. Implement updatePrice (Map.set overwrite only) and getPrice (cache-first, HTTP fallback). Enforce OOM constraint: no arrays, no history accumulation.
+Relevant files
+server/el-kotak-neo-v3.ts:644-681
+Dependencies
+Batch 1 · Schema: TSL + pnlCalculated columns

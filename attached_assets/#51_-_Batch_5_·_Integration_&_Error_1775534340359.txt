@@ -1,0 +1,29 @@
+#51 - Batch 5 · Integration & Error Command Centre UI
+
+What & Why
+Final integration layer. POST /api/price-update lets an external tick source push prices into md-kotak-neo-v3.ts cache via HTTP (fallback for WS downtime). plan-monitor is updated to read from marketData.getPrice() instead of EL.getQuote() directly. Missing UI for the Error Command Centre (backend already merged in #97): max_close_retry_count field and Error Routing table in Settings, plus a Force-Close button on close_failed trade rows.
+
+Done looks like
+POST /api/price-update { token, ltp } in admin-routes — calls marketData.updatePrice, returns { ok: true }
+server/plan-monitor.ts price fetch calls replaced with marketData.getPrice(token, brokerConfig, exchange)
+Settings page has an editable max_close_retry_count numeric input (reads/saves via /api/settings)
+Settings page has an Error Routing section: lists patterns with active toggle, add-row form, delete button
+Broker-linking trades table shows a Force Close button on rows where status === close_failed — calls POST /api/admin/force-close/:tradeId, refreshes list on success
+Out of scope
+WebSocket subscription management UI
+New backend error routing logic (already merged in #97)
+Tasks
+Add POST /api/price-update to server/routes/admin-routes.ts. Validate body, call marketData.updatePrice, return ok.
+Replace EL.getQuote() price fetch calls in server/plan-monitor.ts with marketData.getPrice().
+Add max_close_retry_count numeric input to Settings page.
+Add Error Routing table to Settings page (list, toggle active, add, delete via existing /api/admin/error-routes endpoints).
+Add Force Close button to close_failed trade rows in broker-linking component.
+Relevant files
+server/routes/admin-routes.ts
+server/plan-monitor.ts
+client/src/pages/settings.tsx
+client/src/components/broker-linking.tsx
+server/md-kotak-neo-v3.ts
+Dependencies
+Batch 4 · TSL Engine (tsl-kotak-neo-v3.ts)
+Batch 4 · Server Boot: register all engines + sockets

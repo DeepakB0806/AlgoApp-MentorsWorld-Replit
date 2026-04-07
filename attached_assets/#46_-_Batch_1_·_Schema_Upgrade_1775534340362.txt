@@ -1,0 +1,16 @@
+#46 - Batch 1 · Schema Upgrade
+What & Why
+Adds 5 columns to the strategyTrades table required by the Settlement Engine and TSL engine. pnlCalculated is the idempotency flag that prevents double-counting P&L. The four real columns store TSL state (initial SL, trailing step, active SL, high water mark) and are seeded when a NRML trade opens.
+
+Done looks like
+strategyTrades table has 5 new columns: pnl_calculated (bool, not null, default false), initial_sl_price, trailing_step, current_sl_price, high_water_mark (all real, nullable)
+npm run db:push completes without dropping rows or altering existing columns
+insertStrategyTradeSchema reflects the new optional fields automatically
+Out of scope
+Settlement Engine code (next step #47)
+Any TSL logic
+Tasks
+Add 5 columns to strategyTrades in shared/schema.ts after rejectedReason, before the index block.
+Run npm run db:push to apply the migration.
+Relevant files
+shared/schema.ts:187-228

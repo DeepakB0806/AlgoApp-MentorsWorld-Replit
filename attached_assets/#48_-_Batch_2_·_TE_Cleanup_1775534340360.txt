@@ -1,0 +1,19 @@
+#48 - Batch 2 · TE Cleanup
+
+What & Why
+Removes the deferDailyPnlUpdate setTimeout pattern from the Trade Engine now that the Settlement Engine (Batch 1) owns P&L math. Three call sites and the function definition are deleted. This eliminates a race condition where a trade could be double-counted if the SE ran before the deferred setTimeout fired.
+
+Done looks like
+deferDailyPnlUpdate function definition (lines 1660-1672) deleted from te-kotak-neo-v3.ts
+All 3 call sites (lines 879, 944, 1312) removed with no dangling references
+No TypeScript errors in te-kotak-neo-v3.ts after removal
+Bracket order logic is untouched
+Out of scope
+Any other TE changes
+Market Data Manager (parallel task #52)
+Tasks
+Delete the deferDailyPnlUpdate function definition and its 3 call sites from server/te-kotak-neo-v3.ts. Confirm no TypeScript errors remain.
+Relevant files
+server/te-kotak-neo-v3.ts:879,944,1312,1660-1672
+Dependencies
+Batch 1 · Settlement Engine (se-kotak.ts)

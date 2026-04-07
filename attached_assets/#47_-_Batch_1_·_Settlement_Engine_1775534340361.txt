@@ -1,0 +1,25 @@
+#47 - Batch 1 · Settlement Engine
+
+What & Why
+Creates the background Settlement Engine that replaces the fragile deferDailyPnlUpdate setTimeout pattern. Runs a 10-second sweep to find closed trades where P&L has not yet been added to the strategy's daily record, processes them, and marks them settled. Uses the storage interface throughout — no direct db imports.
+
+Done looks like
+server/se-kotak.ts exists and exports startSettlementEngine(storage: IStorage) as a functional export (not a class)
+Two new storage methods exist in IStorage and DatabaseStorage: getUnsettledClosedTrades() and markTradesPnlCalculated(ids: string[])
+SE groups by planId + IST calendar date (from exitedAt field, using toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }))
+For each group: upserts strategyDailyPnl using existing storage.getStrategyDailyPnl / updateStrategyDailyPnl / createStrategyDailyPnl methods
+Batch-marks all processed trade IDs as pnlCalculated=true via markTradesPnlCalculated
+Uses console.log / console.error only — no addProcessFlowLog
+deferDailyPnlUpdate is NOT removed yet (Batch 2)
+Out of scope
+Removing deferDailyPnlUpdate (Batch 2 / #48)
+Starting SE at boot (Batch 4 / #50)
+Tasks
+Add getUnsettledClosedTrades() and markTradesPnlCalculated(ids) to IStorage interface and DatabaseStorage class in server/storage.ts.
+Create server/se-kotak.ts with startSettlementEngine(storage: IStorage). setInterval at 10 000ms. Fetch unsettled trades, group by planId + IST date, upsert strategyDailyPnl per group, then call markTradesPnlCalculated with all processed IDs.
+Relevant files
+server/storage.ts:44-202
+server/storage.ts:980-999
+shared/schema.ts:230-249
+Dependencies
+Batch 1 · Schema: TSL + pnlCalculated columns
