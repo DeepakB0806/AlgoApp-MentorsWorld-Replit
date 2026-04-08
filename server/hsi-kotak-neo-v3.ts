@@ -10,6 +10,7 @@ let ws: WebSocket | null = null;
 let reconnectDelay = 1_000;
 let activeStorage: IStorage | null = null;
 let activeConfig: BrokerConfig | null = null;
+let relayFailed = false;
 
 function buildAuthMessage(config: BrokerConfig): object {
   return { type: "cn", Authorization: config.accessToken, Sid: config.sessionId, source: "WEB" };
@@ -24,14 +25,19 @@ function connect(config: BrokerConfig): void {
   const RELAY_URL = process.env.RELAY_TARGET_URL;
   const RELAY_SECRET = process.env.RELAY_SECRET_KEY;
 
+  let opened = false;
+
   try {
-    if (RELAY_URL && RELAY_SECRET) {
+    if (RELAY_URL && RELAY_SECRET && !relayFailed) {
       const wsRelayUrl = RELAY_URL.replace("http://", "ws://").replace("https://", "wss://");
       console.log(`${LOG_PREFIX} Routing via Bangalore relay ${wsRelayUrl} → ${HSI_URL}`);
       ws = new WebSocket(wsRelayUrl, {
         headers: { "x-target-url": HSI_URL, "x-relay-secret": RELAY_SECRET },
       });
     } else {
+      if (relayFailed) {
+        console.log(`${LOG_PREFIX} Connecting directly to Kotak (relay previously failed)`);
+      }
       ws = new WebSocket(HSI_URL);
     }
   } catch (err) {
@@ -41,6 +47,7 @@ function connect(config: BrokerConfig): void {
   }
 
   ws.on("open", () => {
+    opened = true;
     console.log(`${LOG_PREFIX} Relay tunnel established. Sending Kotak auth...`);
     reconnectDelay = 1_000;
     try {
@@ -91,6 +98,10 @@ function connect(config: BrokerConfig): void {
 
   ws.on("error", (err) => {
     console.error(`${LOG_PREFIX} WS error:`, err.message);
+    if (!opened && !relayFailed && process.env.RELAY_TARGET_URL) {
+      relayFailed = true;
+      console.log(`${LOG_PREFIX} Relay unreachable — falling back to direct connection`);
+    }
   });
 }
 
