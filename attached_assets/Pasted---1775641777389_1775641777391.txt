@@ -1,0 +1,49 @@
+└────┴────────────────┴─────────────┴─────────┴─────────┴──────────┴──���─────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# pm2 logs
+[TAILING] Tailing last 15 lines for [all] processes (change the value with --lines option)
+/root/.pm2/pm2.log last 15 lines:
+PM2        | 2026-04-01T19:01:12: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-01T19:01:12: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-01T19:01:12: PM2 log: Script /root/relay.js had too many unstable restarts (16). Stopped. "errored"
+PM2        | 2026-04-01T21:31:04: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-01T21:31:04: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-08T13:31:37: PM2 log: Stopping app:kotak-relay id:0
+PM2        | 2026-04-08T13:31:37: PM2 log: App [kotak-relay:0] exited with code [0] via signal [SIGINT]
+PM2        | 2026-04-08T13:31:38: PM2 log: pid=11299 msg=process killed
+PM2        | 2026-04-08T13:31:38: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-08T13:31:38: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-08T15:17:08: PM2 log: Stopping app:kotak-relay id:0
+PM2        | 2026-04-08T15:17:08: PM2 log: App [kotak-relay:0] exited with code [0] via signal [SIGINT]
+PM2        | 2026-04-08T15:17:08: PM2 log: pid=272498 msg=process killed
+PM2        | 2026-04-08T15:17:08: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-08T15:17:08: PM2 log: App [kotak-relay:0] online
+
+/root/.pm2/logs/kotak-relay-out.log last 15 lines:
+0|kotak-re | Kotak Relay Engine running on Port 8080
+0|kotak-re | Kotak Relay Engine running on Port 8080
+0|kotak-re | Relay server running on port 8080 (REST + WebSockets)
+0|kotak-re | Hardened Relay running on port 8080 (REST + WS)
+0|kotak-re | [RELAY] Proxying WS to: wss://histream.kotaksecurities.com/interactive
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/realtime
+0|kotak-re | [RELAY] Proxying WS to: wss://histream.kotaksecurities.com/interactive
+0|kotak-re | [RELAY] Proxying WS to: wss://histream.kotaksecurities.com/interactive
+
+/root/.pm2/logs/kotak-relay-error.log last 15 lines:
+0|kotak-re |     at name (/root/node_modules/path-to-regexp/dist/index.js:85:19)
+0|kotak-re |     at parse (/root/node_modules/path-to-regexp/dist/index.js:101:59)
+0|kotak-re |     at pathToRegexp (/root/node_modules/path-to-regexp/dist/index.js:264:56)
+0|kotak-re |     at Object.match (/root/node_modules/path-to-regexp/dist/index.js:225:30)
+0|kotak-re |     at matcher (/root/node_modules/router/lib/layer.js:86:23)
+0|kotak-re |     at new Layer (/root/node_modules/router/lib/layer.js:93:62)
+0|kotak-re |     at Function.route (/root/node_modules/router/index.js:428:17)
+0|kotak-re |     at Function.route (/root/node_modules/express/lib/application.js:257:22)
+0|kotak-re |     at Function.all (/root/node_modules/express/lib/application.js:495:20)
+0|kotak-re |     at Object.<anonymous> (/root/relay.js:11:5) {
+0|kotak-re |   originalPath: '*'
+0|kotak-re | }
+0|kotak-re | [RELAY] WS Proxy Error: getaddrinfo ENOTFOUND histream.kotaksecurities.com
+0|kotak-re | [RELAY] WS Proxy Error: getaddrinfo ENOTFOUND histream.kotaksecurities.com
+0|kotak-re | [RELAY] WS Proxy Error: getaddrinfo ENOTFOUND histream.kotaksecurities.com
+
+0|kotak-relay  | [RELAY] Proxying WS to: wss://histream.kotaksecurities.com/interactive
+0|kotak-relay  | [RELAY] WS Proxy Error: getaddrinfo ENOTFOUND histream.kotaksecurities.com
