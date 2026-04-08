@@ -3,7 +3,7 @@ import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
 
 const LOG_PREFIX = "[HSI]";
-const HSI_URL = "wss://histream.kotaksecurities.com/interactive";
+const HSI_URL = "wss://hstream.kotaksecurities.com/interactive";
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
 let ws: WebSocket | null = null;
@@ -54,19 +54,20 @@ function connect(config: BrokerConfig): void {
     try {
       const msg = JSON.parse(raw.toString());
       const type: string = msg.type || "";
+      const d = msg.data || msg;
       if (type === "trade" || type === "position") {
-        console.log(`${LOG_PREFIX} ${type} event: ${msg.nOrdNo || ""}`);
+        console.log(`${LOG_PREFIX} ${type} event: ${d.nOrdNo || d.trdSym || ""}`);
         return;
       }
       if (type === "order") {
-        const ordSt: string = (msg.ordSt || "").toLowerCase();
-        const nOrdNo: string = msg.nOrdNo || "";
+        const ordSt: string = (d.ordSt || "").toLowerCase();
+        const nOrdNo: string = d.nOrdNo || "";
         if (ordSt === "complete") {
-          console.log(`${LOG_PREFIX} Order COMPLETE: ${nOrdNo} avgPrc=${msg.avgPrc || ""} qty=${msg.qty || ""}`);
+          console.log(`${LOG_PREFIX} Order COMPLETE: ${nOrdNo} avgPrc=${d.avgPrc || ""} qty=${d.fldQty || ""}`);
         } else if (ordSt === "rejected" || ordSt === "cancelled") {
-          const rejRsn: string = (msg.rejRsn || "").toLowerCase();
+          const rejRsn: string = (d.rejRsn || "").toLowerCase();
           console.warn(`${LOG_PREFIX} Order ${ordSt.toUpperCase()}: ${nOrdNo} reason="${rejRsn}"`);
-          if (rejRsn && activeStorage) {
+          if (rejRsn && rejRsn !== "--" && activeStorage) {
             activeStorage.getActiveErrorRoutes().then((routes) => {
               for (const route of routes) {
                 if (rejRsn.includes(route.errorPattern.toLowerCase())) {
