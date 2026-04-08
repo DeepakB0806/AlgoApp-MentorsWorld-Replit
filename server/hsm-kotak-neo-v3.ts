@@ -50,9 +50,11 @@ function connect(config: BrokerConfig): void {
   const RELAY_SECRET = process.env.RELAY_SECRET_KEY;
 
   let opened = false;
+  let usingRelay = false;
 
   try {
     if (RELAY_URL && RELAY_SECRET && !relayFailed) {
+      usingRelay = true;
       const wsRelayUrl = RELAY_URL.replace("http://", "ws://").replace("https://", "wss://");
       console.log(`${LOG_PREFIX} Routing via Bangalore relay ${wsRelayUrl} → ${HSM_URL}`);
       ws = new WebSocket(wsRelayUrl, {
@@ -110,7 +112,7 @@ function connect(config: BrokerConfig): void {
 
   ws.on("error", (err) => {
     console.error(`${LOG_PREFIX} WS error:`, err.message);
-    if (!opened && !relayFailed && process.env.RELAY_TARGET_URL) {
+    if (!opened && usingRelay && !relayFailed) {
       relayFailed = true;
       console.log(`${LOG_PREFIX} Relay unreachable — falling back to direct connection`);
     }
