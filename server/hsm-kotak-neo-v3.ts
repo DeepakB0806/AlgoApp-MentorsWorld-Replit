@@ -45,8 +45,19 @@ function connect(config: BrokerConfig): void {
     return;
   }
 
+  const RELAY_URL = process.env.RELAY_TARGET_URL;
+  const RELAY_SECRET = process.env.RELAY_SECRET_KEY;
+
   try {
-    ws = new WebSocket(HSM_URL);
+    if (RELAY_URL && RELAY_SECRET) {
+      const wsRelayUrl = RELAY_URL.replace("http://", "ws://").replace("https://", "wss://");
+      console.log(`${LOG_PREFIX} Routing via Bangalore relay ${wsRelayUrl} → ${HSM_URL}`);
+      ws = new WebSocket(wsRelayUrl, {
+        headers: { "x-target-url": HSM_URL, "x-relay-secret": RELAY_SECRET },
+      });
+    } else {
+      ws = new WebSocket(HSM_URL);
+    }
   } catch (err) {
     console.error(`${LOG_PREFIX} WebSocket construction error:`, err);
     scheduleReconnect(config);

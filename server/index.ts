@@ -16,6 +16,7 @@ import { startDataRetentionJob } from "./data-retention";
 import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback, closeTradeById } from "./te-kotak-neo-v3";
 import { startMarketDataManager } from "./md-kotak-neo-v3";
 import { startWsGateway } from "./hsm-kotak-neo-v3";
+import { startHsiGateway } from "./hsi-kotak-neo-v3";
 import { startSettlementEngine } from "./se-kotak-neo-v3";
 import { startTslEngine } from "./tsl-kotak-neo-v3";
 
@@ -329,6 +330,14 @@ app.use((req, res, next) => {
     log(`WS Gateway started`);
   } catch (err) {
     log(`WS Gateway startup warning (non-fatal): ${err}`);
+  }
+
+  // Start HSI Gateway — real-time order status stream via Bangalore relay
+  try {
+    await startHsiGateway(storage);
+    log(`HSI Gateway started`);
+  } catch (err) {
+    log(`HSI Gateway startup warning (non-fatal): ${err}`);
   }
 
   // FIX 4b: Reboot Amnesia Catcher — re-ignite persistent retry loops for any

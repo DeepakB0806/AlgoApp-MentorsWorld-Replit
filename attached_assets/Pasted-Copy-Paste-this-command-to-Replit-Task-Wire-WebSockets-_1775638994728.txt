@@ -1,0 +1,84 @@
+Copy & Paste this command to Replit:
+Task: Wire WebSockets to the DigitalOcean Proxy
+
+Context:
+The DigitalOcean static IP relay has been upgraded to support WebSocket proxying via http-proxy. Kotak is blocking direct WebSocket connections from Replit due to IP whitelisting. We must route all outbound WSS traffic through our Bangalore relay.
+
+Instructions for Replit:
+Task 1: Install Dependency
+Run this in the shell: npm install https-proxy-agent
+
+Task 2: Update HSM Socket
+File: server/hsm-kotak-neo-v3.ts
+Modify the connection logic to use the proxy agent if the relay environment variables exist.
+
+TypeScript
+import WebSocket from 'ws';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import { log } from './process-flow-log';
+import { marketData } from './md-kotak-neo-v3';
+
+export function startHsmSocket(accessToken: string, sessionId: string, hsmUrl: string = "wss://ntpapi.kotaksecurities.com/hsm/v1/marketdata") {
+  let ws: WebSocket | null = null;
+  let isReconnecting = false;
+  let retryCount = 0;
+
+  // READ RELAY CONFIG FROM ENV
+  const relayUrl = process.env.RELAY_TARGET_URL;
+  const relaySecret = process.env.RELAY_SECRET_KEY;
+
+  function connect() {
+    if (ws) { ws.removeAllListeners(); ws.close(); }
+    
+    const headers: Record<string, string> = { 
+        Authorization: `Bearer ${accessToken}`,
+        Sid: sessionId
+    };
+
+    let options: WebSocket.ClientOptions = { headers };
+
+    // PROXY WIRING: Route through DigitalOcean if relay is active
+    if (relayUrl && relaySecret) {
+        log(`[HSM] Routing WebSocket through DO Relay: ${relayUrl}`);
+        // Point the underlying TCP connection to the Relay
+        const agent = new HttpsProxyAgent(relayUrl.replace('http://', 'https://')); 
+        options.agent = agent;
+        // Tell the Relay where to forward the payload
+        headers['x-target-url'] = hsmUrl;
+        headers['x-relay-secret'] = relaySecret;
+    }
+
+    // Connect (either directly or via the proxy agent)
+    ws = new WebSocket(relayUrl ? relayUrl.replace('http://', 'ws://').replace('https://', 'wss://') : hsmUrl, options);
+
+    ws.on('open', () => {
+      log('[HSM] Connected to Kotak Live Price Stream (via Relay)');
+      isReconnecting = false;
+      retryCount = 0;
+    });
+
+    ws.on('message', (data: WebSocket.RawData) => {
+      try {
+        const parsed = JSON.parse(data.toString());
+        if (parsed && parsed.tk && parsed.ltp) {
+          marketData.updatePrice(parsed.tk.toString(), parseFloat(parsed.ltp));
+        }
+      } catch (e) { /* Ignore parse errors */ }
+    });
+
+    ws.on('close', triggerReconnect);
+    ws.on('error', triggerReconnect);
+  }
+
+  function triggerReconnect() {
+    if (isReconnecting) return;
+    isReconnecting = true;
+    const delay = Math.min(3000 * Math.pow(2, retryCount), 30000); 
+    retryCount++;
+    log(`[HSM] Disconnected. Reconnecting in ${delay/1000}s...`);
+    setTimeout(connect, delay);
+  }
+
+  connect();
+}
+Once Replit updates this file, restart the server. The ws library will open a tunnel to your 168.144.0.191 Bangalore droplet, and Kotak will finally accept the handshake!

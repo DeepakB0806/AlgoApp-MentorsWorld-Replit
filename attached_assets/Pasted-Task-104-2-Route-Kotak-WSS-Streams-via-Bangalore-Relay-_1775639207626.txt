@@ -1,0 +1,98 @@
+Task #104.2 - Route Kotak WSS Streams via Bangalore Relay
+What & Why
+While REST API calls are now compliant, the WebSocket streams (HSM for market ticks and HSI for order updates) are still connecting directly from Replit, causing Kotak to reject the connection. We must refactor the WebSocket logic to connect to the Bangalore Relay (ws://168.144.0.191:8080) and provide the destination Kotak URL and security secret in the handshake headers.
+
+Done looks like
+
+server/hsm-kotak-neo-v3.ts connects to the relay instead of Kotak directly.
+
+server/hsi-kotak-neo-v3.ts connects to the relay instead of Kotak directly.
+
+Handshake headers include x-target-url and x-relay-secret.
+
+Live ticks successfully populate the marketData cache without timeout errors.
+
+Implementation Steps & Code Snippets
+1. Refactor Market Data Socket (server/hsm-kotak-neo-v3.ts)
+Replace the direct connection URL with the relay endpoint and inject the routing headers.
+
+TypeScript
+import WebSocket from 'ws'; // Ensure we use the Node.js 'ws' library for header support
+
+const KOTAK_HSM_URL = "wss://hstream.kotaksecurities.com/realtime";
+
+export function startHsmSocket(accessToken: string, sessionId: string) {
+  // Derive WebSocket Relay URL from the REST Relay URL environment variable
+  const RELAY_WS_URL = process.env.RELAY_TARGET_URL?.replace('http', 'ws') || "ws://168.144.0.191:8080";
+  const RELAY_SECRET = process.env.RELAY_SECRET_KEY || "mentorsworld_algo_secure_2026";
+
+  console.log(`[HSM] Initiating connection via Bangalore Relay: ${RELAY_WS_URL}`);
+
+  // Connect to the Relay, NOT Kotak
+  const ws = new WebSocket(RELAY_WS_URL, {
+    headers: {
+      'x-target-url': KOTAK_HSM_URL,
+      'x-relay-secret': RELAY_SECRET
+    }
+  });
+
+  ws.on('open', () => {
+    console.log("[HSM] Relay handshake successful. Authenticating with Kotak...");
+    const authPayload = {
+      type: "cn",
+      Authorization: accessToken,
+      Sid: sessionId,
+      source: "WEB"
+    };
+    ws.send(JSON.stringify(authPayload));
+  });
+
+  // ... (Keep existing message parsing and exponential backoff logic)
+}
+2. Refactor Interactive Socket (server/hsi-kotak-neo-v3.ts)
+Apply the same pattern to the order status stream.
+
+TypeScript
+import WebSocket from 'ws';
+
+const KOTAK_HSI_URL = "wss://histream.kotaksecurities.com/interactive";
+
+export function startHsiSocket(accessToken: string, sessionId: string, storage: any) {
+  const RELAY_WS_URL = process.env.RELAY_TARGET_URL?.replace('http', 'ws') || "ws://168.144.0.191:8080";
+  const RELAY_SECRET = process.env.RELAY_SECRET_KEY || "mentorsworld_algo_secure_2026";
+
+  console.log(`[HSI] Initiating connection via Bangalore Relay: ${RELAY_WS_URL}`);
+
+  const ws = new WebSocket(RELAY_WS_URL, {
+    headers: {
+      'x-target-url': KOTAK_HSI_URL,
+      'x-relay-secret': RELAY_SECRET
+    }
+  });
+
+  ws.on('open', () => {
+    console.log("[HSI] Relay handshake successful. Sending interactive auth...");
+    const authPayload = {
+      type: "cn",
+      Authorization: accessToken,
+      Sid: sessionId,
+      source: "WEB"
+    };
+    ws.send(JSON.stringify(authPayload));
+  });
+
+  // ... (Keep existing message parsing and rejected order routing logic)
+}
+3. Verify Environment Variables
+Ensure your Replit Secrets (Environment Variables) are strictly configured as follows:
+
+RELAY_TARGET_URL: http://168.144.0.191:8080
+
+RELAY_SECRET_KEY: mentorsworld_algo_secure_2026
+
+Pre-Deployment Checklist
+Dependency Check: Ensure ws is in your package.json. If not, run npm install ws in the Replit Shell.
+
+Hard Fail Guard: Since we are using process.env, if these variables are missing, the replacement code will fallback to the hardcoded IPs provided, but it is safer to ensure the Secrets are set to avoid leaking IPs.
+
+Restart Service: After applying these changes, restart the Replit application. You should see the log [HSM] Relay handshake successful instead of the previous ETIMEDOUT errors.
