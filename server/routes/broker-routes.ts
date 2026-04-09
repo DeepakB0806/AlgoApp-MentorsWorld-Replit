@@ -484,6 +484,26 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.patch("/api/strategy-plans/:id/multiplier", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const lm = Number(req.body.lotMultiplier);
+      if (isNaN(lm) || lm < 1 || lm > 10) {
+        return res.status(400).json({ error: "lotMultiplier must be 1–10" });
+      }
+      const plan = await storage.getStrategyPlan(id);
+      if (!plan) return res.status(404).json({ error: "Plan not found" });
+      const updated = await storage.updateStrategyPlan(id, {
+        lotMultiplier: Math.round(lm),
+        updatedAt: new Date().toISOString(),
+      });
+      if (updated?.configId) tradingCache.invalidatePlans(updated.configId);
+      res.json(updated);
+    } catch {
+      res.status(500).json({ error: "Failed to update lot multiplier" });
+    }
+  });
+
   app.get("/api/strategy-trades/:planId", async (req, res) => {
     try {
       const { planId } = req.params;

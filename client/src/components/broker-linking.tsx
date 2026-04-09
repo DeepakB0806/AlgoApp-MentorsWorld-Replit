@@ -512,6 +512,7 @@ export function BrokerLinking() {
   const [pnlSheetPlanId, setPnlSheetPlanId] = useState<string | null>(null);
   const [expandedCorrelationMaps, setExpandedCorrelationMaps] = useState<Set<string>>(new Set());
   const [expandedStrategyConfigs, setExpandedStrategyConfigs] = useState<Set<string>>(new Set());
+  const [expandedMultipliers, setExpandedMultipliers] = useState<Set<string>>(new Set());
 
   const plansKey = activePlans.map((p) => `${p.id}:${p.brokerConfigId}:${p.isProxyMode}`).join(",");
   useEffect(() => {
@@ -555,6 +556,16 @@ export function BrokerLinking() {
     onError: () => {
       toast({ title: "Failed to update deployment status", variant: "destructive" });
     },
+  });
+
+  const multiplierMutation = useMutation({
+    mutationFn: async ({ id, lotMultiplier }: { id: string; lotMultiplier: number }) =>
+      apiRequest("PATCH", `/api/strategy-plans/${id}/multiplier`, { lotMultiplier }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/strategy-plans"] });
+      toast({ title: "Lot multiplier updated" });
+    },
+    onError: () => toast({ title: "Failed to update multiplier", variant: "destructive" }),
   });
 
   const handleLink = (planId: string) => {
@@ -951,6 +962,52 @@ export function BrokerLinking() {
                         </div>
                       </div>
                     </>
+                  )}
+
+                  {(depStatus === "active" || depStatus === "paused") && (
+                    <div className="border border-border/30 rounded-lg overflow-hidden">
+                      <button
+                        className="flex items-center justify-between w-full px-3 py-2 text-xs hover:bg-muted/30 transition-colors"
+                        onClick={() =>
+                          setExpandedMultipliers((prev) => {
+                            const next = new Set(prev);
+                            next.has(plan.id) ? next.delete(plan.id) : next.add(plan.id);
+                            return next;
+                          })
+                        }
+                        data-testid={`button-toggle-multiplier-${plan.id}`}
+                      >
+                        <span className="font-semibold uppercase tracking-widest text-[10px] text-muted-foreground">
+                          Lot Multiplier
+                        </span>
+                        <span className="flex items-center gap-2">
+                          {!expandedMultipliers.has(plan.id) && (
+                            <span className="text-[10px] text-muted-foreground/70 font-mono">{effectiveMultiplier}x</span>
+                          )}
+                          {expandedMultipliers.has(plan.id)
+                            ? <ChevronUp className="w-3 h-3 text-muted-foreground" />
+                            : <ChevronRight className="w-3 h-3 text-muted-foreground" />}
+                        </span>
+                      </button>
+                      {expandedMultipliers.has(plan.id) && (
+                        <div className="px-3 pb-3 pt-2 bg-muted/20">
+                          <div className="flex gap-1.5 flex-wrap">
+                            {[1, 2, 3, 4, 5].map((m) => (
+                              <Button
+                                key={m}
+                                size="sm"
+                                variant={effectiveMultiplier === m ? "default" : "outline"}
+                                disabled={multiplierMutation.isPending}
+                                onClick={() => multiplierMutation.mutate({ id: plan.id, lotMultiplier: m })}
+                                data-testid={`button-live-multiplier-${m}x-${plan.id}`}
+                              >
+                                {m}x
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {blockGroups.length > 0 && (
