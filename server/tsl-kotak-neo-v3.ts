@@ -1,6 +1,14 @@
 import type { IStorage } from "./storage";
 import type { StrategyTrade } from "@shared/schema";
 
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
+//
+// 📋 TSL PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [TSL-1] processTick has separate BUY/SELL direction branches — never unify. BUY trails high, SELL trails low.
+//   [TSL-2] registerNewTrail initializes highWaterMark from trade.highWaterMark ?? (trade.ltp || trade.price || 0) — not just trade.price.
+//   [TSL-3] flushDirtyTrails persists only dirty states. WS stale detection log must remain.
+
 const LOG_PREFIX = "[TSL]";
 const FLUSH_INTERVAL_MS = 15_000;
 const WS_STALE_MS = 2_000;
@@ -25,6 +33,7 @@ export function updateLastWsTick(): void {
   lastWsTickAt = Date.now();
 }
 
+// 🔒 LOCKED BLOCK START — TSL processTick: BUY/SELL direction branches must remain separate; BUY trails high, SELL trails low [TSL-1]
 export function processTick(symbol: string, ltp: number): void {
   for (const [tradeId, state] of trails) {
     if (state.symbol !== symbol) continue;
@@ -64,7 +73,9 @@ export function processTick(symbol: string, ltp: number): void {
     }
   }
 }
+// 🔒 LOCKED BLOCK END
 
+// 🔒 LOCKED BLOCK START — TSL registerNewTrail: highWaterMark must init from trade.highWaterMark ?? (ltp || price || 0), not just price [TSL-2]
 export function registerNewTrail(trade: StrategyTrade): void {
   if (!trade.initialSlPrice || !trade.trailingStep) return;
   const isBuy = trade.action === "BUY";
@@ -80,7 +91,9 @@ export function registerNewTrail(trade: StrategyTrade): void {
   });
   console.log(`${LOG_PREFIX} Registered trail for ${trade.tradingSymbol} [${isBuy ? "BUY" : "SELL"}] sl=${trade.currentSlPrice}`);
 }
+// 🔒 LOCKED BLOCK END
 
+// 🔒 LOCKED BLOCK START — TSL flushDirtyTrails: persists dirty states only; WS stale detection log must remain [TSL-3]
 async function flushDirtyTrails(): Promise<void> {
   if (!_storage) return;
 
@@ -102,6 +115,7 @@ async function flushDirtyTrails(): Promise<void> {
     }
   }
 }
+// 🔒 LOCKED BLOCK END
 
 export async function startTslEngine(
   storage: IStorage,

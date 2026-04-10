@@ -1,6 +1,13 @@
 import EL from "./el-kotak-neo-v3";
 import type { BrokerConfig } from "@shared/schema";
 
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
+//
+// 📋 MD PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [MD-1] getPrice three-tier fallback: WS cache (2s staleness) → REST quote via EL.getQuote → stale cache. Never collapse tiers or remove REST fallback.
+//   [MD-2] resolveHsmSubscribe uses lazy require() — not a static import. Avoids circular dependency. Never convert to module-level import.
+
 const LOG_PREFIX = "[MD]";
 const STALE_MS = 2_000;
 
@@ -19,6 +26,7 @@ export function injectPrice(symbol: string, ltp: number): void {
   priceCache.set(symbol, { ltp, updatedAt: Date.now() });
 }
 
+// 🔒 LOCKED BLOCK START — MD getPrice: three-tier fallback (WS cache → REST quote → stale cache); never collapse tiers or remove REST fallback [MD-1]
 export async function getPrice(
   symbol: string,
   config?: BrokerConfig,
@@ -46,9 +54,11 @@ export async function getPrice(
 
   return cached ? cached.ltp : null;
 }
+// 🔒 LOCKED BLOCK END
 
 let _cachedHsmSubscribe: ((symbol: string) => void) | null = null;
 
+// 🔒 LOCKED BLOCK START — MD resolveHsmSubscribe: lazy require() prevents circular import; never convert to static module-level import [MD-2]
 function resolveHsmSubscribe(): ((symbol: string) => void) | null {
   if (_cachedHsmSubscribe) return _cachedHsmSubscribe;
   try {
@@ -65,6 +75,7 @@ function resolveHsmSubscribe(): ((symbol: string) => void) | null {
     return null;
   }
 }
+// 🔒 LOCKED BLOCK END
 
 export function subscribe(symbol: string): void {
   const fn = resolveHsmSubscribe();

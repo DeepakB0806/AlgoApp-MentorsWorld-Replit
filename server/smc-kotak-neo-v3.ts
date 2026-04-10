@@ -9,6 +9,15 @@ import EL from "./el-kotak-neo-v3";
 import { tradingCache } from "./cache";
 import { isOptionExchange } from "./option-symbol-builder";
 
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
+//
+// 📋 SMC PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [SMC-1] parseExpiryDate Kotak 1980 epoch offset: (epochSec + 315_532_800) * 1000. MUST NOT be removed — Kotak timestamps are seconds since 1980, not 1970.
+//   [SMC-2] inferExpiryDay uses raw getDay() (no UTC correction) — intentional, proven correct for 2025/2026 NSE expiry resolution.
+//   [SMC-3] inferStrikeInterval 15% frequency threshold — must receive nearest-expiry strikes only. Do not lower threshold or change frequency logic.
+//   [SMC-4] populateContractCache key format: {ticker}_{YYYY-MM-DD}_{strike}_{optType} — TE holiday fallback scanner depends on this exact format.
+
 const LOG_PREFIX = "[SCRIP-MASTER]";
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -63,6 +72,7 @@ interface ParseResult {
 // ═══════════════════════════════════════════════════════════════════════════════
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+// 🔒 LOCKED BLOCK START — SMC parseExpiryDate: Kotak 1980 epoch offset (epochSec + 315_532_800) * 1000 is mandatory; removing gives wrong expiry years [SMC-1]
 function parseExpiryDate(raw: string): Date | null {
   if (!raw || raw === "-" || raw === "0") return null;
   const trimmed = raw.trim().replace(/"/g, '');
@@ -85,7 +95,9 @@ function parseExpiryDate(raw: string): Date | null {
 
   return null;
 }
+// 🔒 LOCKED BLOCK END
 
+// 🔒 LOCKED BLOCK START — SMC inferExpiryDay: raw getDay() intentional, no UTC correction — proven correct for 2025/2026 NSE expiry days [SMC-2]
 function inferExpiryDay(expiryDates: Date[]): string {
   if (expiryDates.length === 0) return "Thursday";
   const now = new Date();
@@ -111,6 +123,7 @@ function inferExpiryDay(expiryDates: Date[]): string {
   // the exact 2025/2026 NSE Tuesday baseline and month-end prepone shifts.
   return DAY_NAMES[sorted[0].getDay()];
 }
+// 🔒 LOCKED BLOCK END
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // STRIKE INTERVAL INFERENCE (feeds instrument_configs.strike_interval)
@@ -119,6 +132,7 @@ function inferExpiryDay(expiryDates: Date[]): string {
 // Must receive ONLY nearest-expiry strikes to avoid far-expiry 100-point gaps
 // inflating NIFTY's interval from the correct 50 to 100.
 // ═══════════════════════════════════════════════════════════════════════════════
+// 🔒 LOCKED BLOCK START — SMC inferStrikeInterval: 15% frequency threshold with nearest-expiry-only input; do not lower threshold or change frequency logic [SMC-3]
 function inferStrikeInterval(strikes: number[]): number {
   if (strikes.length < 2) return 50;
   const sorted = Array.from(new Set(strikes)).sort((a, b) => a - b);
@@ -145,6 +159,7 @@ function inferStrikeInterval(strikes: number[]): number {
   }
   return best;
 }
+// 🔒 LOCKED BLOCK END
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CSV PARSING
@@ -246,6 +261,7 @@ function parseScripMasterCSV(csvText: string, exchange: string, allowed: string[
 // Clears and rebuilds liveContractCache from the merged set of raw contracts
 // (NFO + BFO combined). Called once after all CSVs are parsed.
 // ═══════════════════════════════════════════════════════════════════════════════
+// 🔒 LOCKED BLOCK START — SMC populateContractCache: cache key format {ticker}_{YYYY-MM-DD}_{strike}_{optType} — TE holiday fallback scanner depends on exact format [SMC-4]
 function populateContractCache(allRawContracts: RawContract[]): void {
   liveContractCache.clear();
   brokerSymbolToTokenMap.clear();
@@ -263,6 +279,7 @@ function populateContractCache(allRawContracts: RawContract[]): void {
   }
   console.log(`${LOG_PREFIX} Loaded ${liveContractCache.size} contracts (NFO + BFO, all upcoming expiries) into multi-expiry cache.`);
 }
+// 🔒 LOCKED BLOCK END
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCRIP MASTER DOWNLOAD

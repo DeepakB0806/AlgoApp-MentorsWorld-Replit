@@ -7,6 +7,15 @@ import type { BrokerConfig } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import TL from "./tl-kotak-neo-v3";
 
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
+//
+// 📋 EL PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [EL-1] executeRelayFetch always injects x-target-url and x-relay-secret headers — never bypass.
+//   [EL-2] executeRequest is the single dispatch path — never add a second path that skips it.
+//   [EL-3] authenticate is a strict two-step sequence: TOTP first, then MPIN. Kotak API enforces this — never swap or merge steps.
+//   [EL-4] placeOrder / modifyOrder / cancelOrder must call TL.buildRequestPayload() before constructing the broker payload.
+
 const BROKER_NAME = "kotak_neo_v3";
 const LOG_PREFIX = "[EL]";
 const LOGIN_BASE_URL = "https://mis.kotaksecurities.com";
@@ -322,6 +331,7 @@ class ExecutionLayer {
     return { body: JSON.stringify(data) };
   }
 
+  // 🔒 LOCKED BLOCK START — EL relay dispatch: executeRelayFetch + executeRequest are the sole network dispatch chain; never bypass or add a parallel path [EL-1, EL-2]
   // ─── Bangalore Relay ─────────────────────────────────────────────────────
   private async executeRelayFetch(targetUrl: string, options: RequestInit): Promise<Response> {
     const RELAY_URL = process.env.RELAY_TARGET_URL;
@@ -367,7 +377,9 @@ class ExecutionLayer {
     const response = await this.executeRelayFetch(url, fetchOptions);
     return response.json();
   }
+  // 🔒 LOCKED BLOCK END
 
+  // 🔒 LOCKED BLOCK START — EL authenticate: TOTP→MPIN two-step is enforced by Kotak API; never swap, merge, or skip either step [EL-3]
   // ─── Authentication (TOTP + MPIN two-step) ──────────────────────────────
   async authenticate(
     config: BrokerConfig,
@@ -452,7 +464,9 @@ class ExecutionLayer {
       };
     }
   }
+  // 🔒 LOCKED BLOCK END
 
+  // 🔒 LOCKED BLOCK START — EL order management: placeOrder/modifyOrder/cancelOrder must each call TL.buildRequestPayload() before constructing broker payload [EL-4]
   // ─── Order Management (place, modify, cancel) ───────────────────────────
   async placeOrder(
     config: BrokerConfig,
@@ -588,6 +602,7 @@ class ExecutionLayer {
       return { success: false, error: error.message || "Order cancellation error" };
     }
   }
+  // 🔒 LOCKED BLOCK END
 
   // ─── Data Retrieval (orderBook, tradeBook, positions, holdings, history) ─
   async getOrderBook(config: BrokerConfig): Promise<ApiResponse<unknown[]>> {

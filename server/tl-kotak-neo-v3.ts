@@ -5,6 +5,14 @@ import { db } from "./db";
 import { broker_field_mappings, universal_fields } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
+//
+// 📋 TL PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [TL-1] buildMaps collision policy is last-entry-wins. Count is logged but never throws.
+//   [TL-2] translateRequest resolves via requestMap keyed by {category}::{universalName}. Never fall through on partial matches.
+//   [TL-3] buildRequestPayload injects DB default values when includeDefaults=true — defaults from DB, never hard-coded.
+
 const BROKER_NAME = "kotak_neo_v3";
 const LOG_PREFIX = "[TL]";
 
@@ -152,6 +160,7 @@ class TranslationLayer {
     }
   }
 
+  // 🔒 LOCKED BLOCK START — TL buildMaps: last-entry-wins collision policy; collisions logged, never thrown [TL-1]
   // ─── Map Building ───────────────────────────────────────────────────────
   private buildMaps(): void {
     this.requestMap.clear();
@@ -210,6 +219,7 @@ class TranslationLayer {
       console.warn(`${LOG_PREFIX} ${collisions} map collisions detected — last entry wins`);
     }
   }
+  // 🔒 LOCKED BLOCK END
 
   // ─── Reload ─────────────────────────────────────────────────────────────
   async reload(): Promise<void> {
@@ -248,6 +258,7 @@ class TranslationLayer {
     };
   }
 
+  // 🔒 LOCKED BLOCK START — TL translateRequest: resolves via requestMap keyed by {category}::{universalName}; never fall through on partial matches [TL-2]
   // ─── Request Translation (Universal → Broker) ───────────────────────────
   translateRequest(
     category: string,
@@ -282,6 +293,7 @@ class TranslationLayer {
 
     return { payload, mapped, unmapped };
   }
+  // 🔒 LOCKED BLOCK END
 
   // ─── Response Translation (Broker → Universal) ──────────────────────────
   translateResponse(
@@ -418,6 +430,7 @@ class TranslationLayer {
     return this.getFieldsByCategoryAndDirection(category, "response");
   }
 
+  // 🔒 LOCKED BLOCK START — TL buildRequestPayload: DB default values injected when includeDefaults=true; defaults from DB only, never hard-coded [TL-3]
   // ─── Payload Builders (with defaults) ────────────────────────────────────
   buildRequestPayload(
     category: string,
@@ -442,6 +455,7 @@ class TranslationLayer {
 
     return result;
   }
+  // 🔒 LOCKED BLOCK END
 
   parseResponsePayload(
     category: string,

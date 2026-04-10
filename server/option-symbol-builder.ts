@@ -32,6 +32,14 @@ const WEEKLY_MONTH_CODES = [
   "D",
 ];
 
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
+//
+// 📋 OSB PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [OSB-1] getOTMStrike direction: OTM CE = atmStrike + steps, OTM PE = atmStrike - steps; ITM reversed. Never swap CE/PE directions.
+//   [OSB-2] getTargetExpiry post-15:30 IST roll: adds 7 days when daysUntil === 0 and time >= 15:30. weekOffset multiplies by 7 calendar days.
+//   [OSB-3] getNextExpiry same post-15:30 roll logic as getTargetExpiry — must stay in sync.
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // STRIKE CALCULATION
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -65,6 +73,7 @@ export function getATMStrike(
   return Math.round(spotPrice / strikeInterval) * strikeInterval;
 }
 
+// 🔒 LOCKED BLOCK START — OSB getOTMStrike: OTM CE = atmStrike+steps, OTM PE = atmStrike-steps; ITM reversed; never swap CE/PE directions [OSB-1]
 export function getOTMStrike(
   atmStrike: number,
   spec: StrikeSpec,
@@ -85,10 +94,12 @@ export function getOTMStrike(
 
   return atmStrike;
 }
+// 🔒 LOCKED BLOCK END
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXPIRY CALCULATION
 // ═══════════════════════════════════════════════════════════════════════════════
+// 🔒 LOCKED BLOCK START — OSB getNextExpiry: post-15:30 IST roll (daysUntil += 7) and monthly resolution logic must stay in sync with getTargetExpiry [OSB-3]
 export function getNextExpiry(
   expiryDay: string = "Thursday",
   expiryType: string = "weekly",
@@ -131,6 +142,7 @@ export function getNextExpiry(
 
   return expiry;
 }
+// 🔒 LOCKED BLOCK END
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXPIRY DATE RESOLUTION
@@ -140,6 +152,7 @@ export function getNextExpiry(
 //   weekOffset — 0 = current week, 1 = next week, 2 = week after
 // Returns a Date representing the target expiry for cache key lookup.
 // ═══════════════════════════════════════════════════════════════════════════════
+// 🔒 LOCKED BLOCK START — OSB getTargetExpiry: post-15:30 IST roll (daysUntil += 7) and weekOffset * 7 calendar days must not be altered [OSB-2]
 export function getTargetExpiry(
   expiryDay: string = "Thursday",
   expiryType: string = "weekly",
@@ -179,6 +192,7 @@ export function getTargetExpiry(
 
   return expiry;
 }
+// 🔒 LOCKED BLOCK END
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SYMBOL BUILDING

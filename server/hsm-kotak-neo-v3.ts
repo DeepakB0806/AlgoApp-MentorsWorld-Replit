@@ -4,6 +4,14 @@ import { brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
 
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
+//
+// 📋 HSM PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [HSM-1] connect relay→direct auto-fallback: relayFailed=true on first connection failure. Never remove this fallback path.
+//   [HSM-2] subscriptions.forEach() — NOT Array.from(subscriptions). OOM constraint.
+//   [HSM-3] scheduleReconnect uses exponential backoff capped at MAX_RECONNECT_DELAY_MS.
+
 const LOG_PREFIX = "[HSM]";
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const HSM_URL = "wss://hstream.kotaksecurities.com/realtime";
@@ -40,6 +48,7 @@ function resubscribeAll(): void {
   });
 }
 
+// 🔒 LOCKED BLOCK START — HSM connect: relay→direct auto-fallback (relayFailed=true on failure) must not be removed; subscriptions.forEach() only, not Array.from() [HSM-1, HSM-2]
 function connect(config: BrokerConfig): void {
   if (!config.accessToken || !config.sessionId) {
     console.error(`${LOG_PREFIX} No accessToken/sessionId — skipping WS connection`);
@@ -118,11 +127,14 @@ function connect(config: BrokerConfig): void {
     }
   });
 }
+// 🔒 LOCKED BLOCK END
 
+// 🔒 LOCKED BLOCK START — HSM scheduleReconnect: exponential backoff capped at MAX_RECONNECT_DELAY_MS [HSM-3]
 function scheduleReconnect(config: BrokerConfig): void {
   setTimeout(() => connect(config), reconnectDelay);
   reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
 }
+// 🔒 LOCKED BLOCK END
 
 export function subscribe(symbol: string): void {
   subscriptions.set(symbol, true);

@@ -2,6 +2,13 @@ import WebSocket from "ws";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
 
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
+//
+// 📋 HSI PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [HSI-1] connect mirrors HSM relay→direct auto-fallback with identical relayFailed logic.
+//   [HSI-2] scheduleReconnect uses same exponential backoff as HSM.
+
 const LOG_PREFIX = "[HSI]";
 const HSI_URL = "wss://hstream.kotaksecurities.com/interactive";
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -16,6 +23,7 @@ function buildAuthMessage(config: BrokerConfig): object {
   return { type: "cn", Authorization: config.accessToken, Sid: config.sessionId, source: "WEB" };
 }
 
+// 🔒 LOCKED BLOCK START — HSI connect: mirrors HSM relay→direct auto-fallback with identical relayFailed logic; never weaken [HSI-1]
 function connect(config: BrokerConfig): void {
   if (!config.accessToken || !config.sessionId) {
     console.error(`${LOG_PREFIX} No accessToken/sessionId — skipping WS connection`);
@@ -106,11 +114,14 @@ function connect(config: BrokerConfig): void {
     }
   });
 }
+// 🔒 LOCKED BLOCK END
 
+// 🔒 LOCKED BLOCK START — HSI scheduleReconnect: same exponential backoff as HSM [HSI-2]
 function scheduleReconnect(config: BrokerConfig): void {
   setTimeout(() => connect(config), reconnectDelay);
   reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
 }
+// 🔒 LOCKED BLOCK END
 
 export async function startHsiGateway(storage: IStorage): Promise<void> {
   try {

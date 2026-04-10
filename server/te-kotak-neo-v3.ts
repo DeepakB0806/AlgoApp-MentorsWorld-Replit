@@ -27,6 +27,7 @@ import {
 import { liveContractCache, brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
 //
 // 📋 TE PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
 //   [1] SIGNAL DISPATCH ORDER: EXIT signals fire before ENTRY. For ENTRY, neutral=ENTRY dispatches before uptrend/downtrend.
