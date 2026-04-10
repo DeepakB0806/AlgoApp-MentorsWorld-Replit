@@ -26,6 +26,17 @@ import {
 } from "./option-symbol-builder";
 import { liveContractCache, brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+//
+// 📋 TE PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [1] SIGNAL DISPATCH ORDER: EXIT signals fire before ENTRY. For ENTRY, neutral=ENTRY dispatches before uptrend/downtrend.
+//   [2] REVERSAL CLOSE FILTER: openOpposites targets the opposite directional block ONLY. || t.blockType === "neutralLegs" must NEVER be added.
+//   [3] NEUTRAL PRESERVATION ON EXIT: executeSellSignal closes ctx.resolvedBlockType only — neutral legs never touched by EXIT signals.
+//   [4] FRESH-SESSION NEUTRAL SEED: buildEntryBasket seeds neutralLegs when hasOpenNeutral=false — restores hedge before directional SELL.
+//   [5] BUY-BEFORE-SELL SORT: All entry baskets sort BUY legs before SELL legs for margin safety — universally applied.
+//   [6] STRIKE & CONTRACT RESOLUTION: resolveOrderParams holiday fallback scanner (±3 days) must not be removed or weakened.
+//   [7] NIFTY WEEKLY EXPIRY = TUESDAY. Never Thursday. Embedded in instrument_config.expiryDay — do not hard-code.
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // FILL PRICE LOOKUP
 // After a Kotak order is placed, fetch actual execution price from order history
@@ -114,6 +125,7 @@ export function resolveSignalFromActionMapper(
   return results[0];
 }
 
+// 🔒 LOCKED BLOCK START — Invariant [1]: Dispatch order is EXIT→ENTRY; within ENTRY, neutral fires before uptrend/downtrend. Altering this sequence causes unhedged SELL orders.
 export function resolveAllSignalsFromActionMapper(
   signalData: Record<string, any>,
   actionMapperJson: string | null | undefined,
@@ -160,6 +172,7 @@ export function resolveAllSignalsFromActionMapper(
     },
   ];
 }
+// 🔒 LOCKED BLOCK END
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN ENTRY POINT
@@ -440,6 +453,7 @@ function getBufferedLimitPrice(currentPrice: number, action: string, bufferPoint
   return roundedPrice.toFixed(2);
 }
 
+// 🔒 LOCKED BLOCK START — Invariant [6]: Strike resolution, IST stale-expiry guard, and holiday fallback scanner (±3 days). Do not weaken or remove any of these checks.
 function resolveOrderParams(
   leg: PlanTradeLeg,
   ctx: TradeContext,
@@ -545,6 +559,7 @@ function resolveOrderParams(
   console.log(`[TRADE] Leg[${legIndex}] order params: symbol=${tradingSymbol} qty=${quantity} product=${productCode} price=${priceMode}`);
   return { tradingSymbol, quantity, productCode, priceMode, transactionType };
 }
+// 🔒 LOCKED BLOCK END
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SHARED BASKET EXECUTOR (ENTERPRISE STATE MACHINE ROLLBACK)
@@ -552,6 +567,7 @@ function resolveOrderParams(
 // "pending_basket" BEFORE placement so rollback has a real DB ID to update.
 // Rollback transitions: pending_basket → rolling_back → rolled_back/rollback_failed
 // ═══════════════════════════════════════════════════════════════════════════════
+// 🔒 LOCKED BLOCK START — Invariant [5]: Order placement sequence, margin shortfall retry, and rollback state machine. Do not alter retry logic, delay handling, or rollback transitions.
 type BasketItem = { leg: PlanTradeLeg; blockType: string; legIndex: number };
 
 async function executeLegBasket(
@@ -826,6 +842,7 @@ async function executeLegBasket(
 
   return { trades: [], orderIds: [], error: finalError };
 }
+// 🔒 LOCKED BLOCK END
 
 // 🔒 LOCKED BLOCK START — Invariants [4][5]: hasOpenNeutral auto-seed (fresh-session margin protection) + BUY-before-SELL sort must remain. Removing either breaks margin safety.
 // Assembles the entry basket for the resolved block. Sorted BUY-before-SELL universally.
