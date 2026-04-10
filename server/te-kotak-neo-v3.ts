@@ -827,6 +827,7 @@ async function executeLegBasket(
   return { trades: [], orderIds: [], error: finalError };
 }
 
+// 🔒 LOCKED BLOCK START — Invariants [4][5]: hasOpenNeutral auto-seed (fresh-session margin protection) + BUY-before-SELL sort must remain. Removing either breaks margin safety.
 // Assembles the entry basket for the resolved block. Sorted BUY-before-SELL universally.
 // TASK #112: Auto-seeds neutral legs on fresh sessions (no open neutral) before the
 // directional block — prevents margin rejection on SELL without hedge.
@@ -848,6 +849,7 @@ function buildEntryBasket(ctx: TradeContext, currentOpen: StrategyTrade[]): Bask
   });
   return items;
 }
+// 🔒 LOCKED BLOCK END
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // BUY EXECUTION (HANDLES "ENTRY" SIGNALS)
@@ -863,6 +865,7 @@ async function executeBuySignal(
     return { success: true, action: "hold", broker, planId: plan.id, message: `${ctx.resolvedBlockType} position already open`, executionTimeMs: Date.now() - ctx.startTime };
   }
 
+  // 🔒 LOCKED BLOCK START — Invariant [2]: openOpposites = targetOppositeBlock ONLY. NEVER add || t.blockType === "neutralLegs" — doing so caused the March 2026 production incident.
   // 2. REVERSALS: Close opposite directional block ONLY (Preserve neutralLegs)
   let targetOppositeBlock: string | null = null;
   if (ctx.resolvedBlockType === "uptrendLegs") targetOppositeBlock = "downtrendLegs";
@@ -901,6 +904,7 @@ async function executeBuySignal(
       message: "Nothing to close (Pure EXIT on empty positions).",
       executionTimeMs: Date.now() - ctx.startTime };
   }
+  // 🔒 LOCKED BLOCK END
 
   if (broker === "kotak_neo" && (!brokerConfig.isConnected || !brokerConfig.accessToken || !brokerConfig.sessionId || !brokerConfig.baseUrl)) {
     return { success: false, action: "error", broker, planId: plan.id, message: "Kotak Neo session expired", executionTimeMs: Date.now() - ctx.startTime };
@@ -932,8 +936,10 @@ async function executeSellSignal(
   const broker = brokerConfig.brokerName;
   let closePnl = 0;
 
+  // 🔒 LOCKED BLOCK START — Invariant [3]: allToClose = ctx.resolvedBlockType ONLY. Never extend filter to neutralLegs — neutral is preserved on EXIT signals.
   // EXIT: Close directional block ONLY (Preserve neutralLegs)
   const allToClose = ctx.openTrades.filter(t => t.blockType === ctx.resolvedBlockType);
+  // 🔒 LOCKED BLOCK END
   if (allToClose.length > 0) {
     // Sort: BUY-to-cover SELL positions first (margin safety)
     allToClose.sort((a, b) => {
