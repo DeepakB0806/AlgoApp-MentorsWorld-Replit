@@ -1,0 +1,105 @@
+#99 - Task #99 — Pre-Flight Guard: Expired Contract Terminal Close
+What & Why
+The Error Command Centre (Task #98) routes Kotak API errors through handleBrokerError(), but closeTrade() has two early-exit paths that bypass it entirely. When an options contract has expired, its token disappears from brokerSymbolToTokenMap. The function detects this locally and writes close_failed — never reaching the broker or the switchboard. The persistent retry loops (startPersistentExit, startPersistentSquareOff) then pick up those close_failed trades and replay the same dead path forever — a zombie loop that continues until the server restarts. The same problem occurs when the live quote fetch fails for an option leg.
+
+Done looks like
+When closeTrade() detects an option symbol is missing from the Scrip Master, it immediately marks the trade as closed (pnl=0), writes a PFL entry, and returns — no retry, no zombie loop.
+When the live quote fetch fails for an option, the same terminal-close treatment applies instead of close_failed.
+Two new seed patterns added to error_routing as defence-in-depth.
+The "Stuck Exits" Force-Close section never appears for expired contracts — the system self-heals in one pass.
+Out of scope
+Changes to startPersistentExit or startPersistentSquareOff loop logic.
+Changes to handleBrokerError() or the error routing switchboard.
+Any UI changes.
+Tasks
+Task 1 — Pre-flight token guard in closeTrade()
+Inside the Kotak branch of closeTrade(), immediately after the basic symbol/exchange/productType validation block (line 1117) and before the ctPriceMode check (line 1119), inject this exact block:
+
+// PRE-FLIGHT DEAD CONTRACT GUARD
+if (isOptionExchange(trade.exchange)) {
+  const preflightToken = brokerSymbolToTokenMap.get(trade.tradingSymbol);
+  if (!preflightToken) {
+    const msg = `[TE] Pre-flight Abort: Contract ${trade.tradingSymbol} missing from Scrip Master (expired).`;
+    console.warn(msg);
+    addProcessFlowLog({
+      planId: trade.planId,
+      planName: "Auto-Close Guard",
+      signalType: "SYSTEM",
+      alert: "EXPIRED_CONTRACT",
+      resolvedAction: exitAction,
+      blockType: "SQUARE_OFF",
+      actionTaken: "force_closed",
+      message: msg,
+      broker,
+    });
+    const closedUpdate = await storage.updateStrategyTrade(trade.id, {
+      status: "closed",
+      pnl: 0,
+      exitedAt: now,
+      updatedAt: now,
+      exitPrice: trade.ltp || trade.price || 0,
+      exitAction,
+    });
+    tradingCache.invalidateOpenTrades(trade.planId);
+    return closedUpdate || trade;
+  }
+}
+Task 2 — Quote-fetch failure terminal close
+In the existing quote-fetch failure block (lines 1146–1150), replace the body of the if (!ctQuoteRes.success || !ctQuoteRes.ltp) block with this exact replacement (keep the if condition unchanged, only replace the body):
+
+const qfMsg = ctQuoteRes.error || "live quote fetch failed";
+console.warn(`[TE] Quote fetch failed for ${trade.tradingSymbol}: ${qfMsg}. Marking as closed.`);
+addProcessFlowLog({
+  planId: trade.planId,
+  planName: "Auto-Close Guard",
+  signalType: "SYSTEM",
+  alert: "QUOTE_FETCH_FAILED",
+  resolvedAction: exitAction,
+  blockType: "SQUARE_OFF",
+  actionTaken: "force_closed",
+  message: qfMsg,
+  broker,
+});
+const closedUpdate = await storage.updateStrategyTrade(trade.id, {
+  status: "closed",
+  pnl: 0,
+  exitedAt: now,
+  updatedAt: now,
+  exitPrice: trade.ltp || trade.price || 0,
+  exitAction,
+});
+tradingCache.invalidateOpenTrades(trade.planId);
+return closedUpdate || trade;
+Task 3 — Add two defence-in-depth seeds to error_routing
+In the startup seed block in server/index.ts, immediately after the existing error route seeds (around line 288), add these two entries using the same duplicate-safe pattern already present in the file:
+
+try {
+  await storage.createErrorRoute({
+    errorPattern: "token not found",
+    actionType: "terminal_close",
+    description: "Internal guard: token missing from Scrip Master (expired contract)",
+    isActive: true,
+  });
+} catch { /* duplicate safe */ }
+try {
+  await storage.createErrorRoute({
+    errorPattern: "quote fetch failed",
+    actionType: "terminal_close",
+    description: "Internal guard: options live quote API failure",
+    isActive: true,
+  });
+} catch { /* duplicate safe */ }
+Critical constraints
+addProcessFlowLog takes a single object — never positional args.
+planId must be trade.planId — plan is NOT in scope inside closeTrade().
+broker must be the variable (const broker = brokerConfig.brokerName at line 1106) — NOT the hardcoded string "kotak_neo_v3".
+exitAction is already computed at line 1108 (const exitAction = trade.action === "BUY" ? "SELL" : "BUY") — use that variable directly.
+exitedAt and updatedAt must be now (the string parameter) — never new Date().
+trade.entryLegId does NOT exist in the schema — do not reference it.
+addProcessFlowLog returns void — no await needed, but await is harmless.
+Do NOT modify the error_routing table schema or any existing seed rows.
+Do NOT touch any other part of closeTrade() — especially the Margin Shortfall step-down logic or Atomic Rollback loops.
+Relevant files
+server/te-kotak-neo-v3.ts:1103-1155
+server/index.ts:244-290
+server/process-flow-log.ts

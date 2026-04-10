@@ -1,0 +1,86 @@
+Task #97: Relational Error Command Centre (Multi-Tenant Scaling)
+
+What & Why
+As the platform scales to 50+ users, the variety of Kotak API and RMS errors will multiply. A hardcoded array or a flat comma-separated string for error handling is unscalable. We are building a true Relational Error Routing Engine. This involves a dedicated SQL table where administrators can log exact Kotak error patterns, assign them specific system actions (like terminal_close), and toggle them globally for all users.
+
+Done looks like
+
+Accurate UI Data: The Rejection Reason and Time columns in the Order Panel show Kotak's actual rejRsn and ordDtTm fields.
+
+Schema & DB: A new error_routing table exists in the PostgreSQL database.
+
+Settings UI: The Admin Settings page features a data table to Create, Read, Update, and Delete (CRUD) error routing rules.
+
+Dynamic Trade Engine: closeTrade() queries the active error routes from the DB. If a broker error matches a pattern, it executes the assigned action (e.g., terminating the zombie loop).
+
+Manual Override: A "Force Close" button remains available on close_failed trades for unmapped errors.
+
+Tasks:
+
+Task 1 — Expose Kotak Rejection Reasons & Timestamps
+File: server/routes/broker-routes.ts (inside /api/orders GET handler)
+Update normalization to prioritize actual Kotak fields:
+
+TypeScript
+rejection_reason: o.rejRsn || o.rejReason || o.rej_reason || o.rjBy || o.reason || "",
+timestamp: o.ordDtTm || o.ordEntTm || o.timestamp || o.plDate || o.time || o.ordTm || "",
+Task 2 — Database Schema & Storage Methods
+Files: shared/schema.ts and server/storage.ts
+
+Schema: Add the new table to schema.ts:
+
+TypeScript
+export const errorRouting = pgTable("error_routing", {
+  id: serial("id").primaryKey(),
+  errorPattern: text("error_pattern").notNull().unique(), 
+  actionType: text("action_type").notNull().default("terminal_close"), // Future proofing: "terminal_close", "ignore", etc.
+  isActive: boolean("is_active").notNull().default(true),
+  description: text("description"), // Context for the admin
+});
+// Add appropriate insert/select types
+Storage: Add methods in storage.ts for: getAllErrorRoutes(), getActiveErrorRoutes(), createErrorRoute(), updateErrorRoute(), and deleteErrorRoute().
+
+Seed: In server/index.ts, seed the table with the known Kotak terminal errors if it is empty (e.g., "1006", "1007", "1009", "instrument has been expired", "order type is invalid").
+
+Task 3 — API Routes & Admin UI
+
+Backend: Create CRUD endpoints in server/routes/admin-routes.ts (e.g., GET /api/error-routes, POST /api/error-routes, etc.).
+
+Frontend: In client/src/pages/settings.tsx (or a dedicated Admin page), build a data table UI for "Error Routing Rules". Include a form to add a new rule (Pattern, Action Type dropdown, Description), a toggle for Active/Inactive, and a delete button.
+
+Task 4 — Trade Engine Integration
+File: server/te-kotak-neo-v3.ts (inside closeTrade failure handler)
+Replace the hardcoded checks with a database query:
+
+TypeScript
+const activeRoutes = await storage.getActiveErrorRoutes();
+const errStr = String(orderResult.error || "").toLowerCase();
+
+const matchedRoute = activeRoutes.find(route => 
+  errStr.includes(route.errorPattern.toLowerCase())
+);
+
+if (matchedRoute) {
+  if (matchedRoute.actionType === "terminal_close") {
+    const terminalMsg = `[TE] Terminal rejection mapped by rule #${matchedRoute.id}: "${orderResult.error}". Marking as closed.`;
+    console.warn(terminalMsg);
+    await logPFL(plan.id, trade.entryLegId || "N/A", "force_closed", terminalMsg);
+    
+    const closedUpdate = await storage.updateStrategyTrade(trade.id, {
+      status: "closed", pnl: 0, exitedAt: new Date(), updatedAt: new Date(), 
+      exitPrice: trade.ltp || trade.price || 0, exitAction: plan.exitAction || "SELL"
+    });
+    
+    tradingCache.invalidateOpenTrades(trade.planId);
+    return closedUpdate || trade;
+  }
+  // Future action types can be handled here
+}
+Task 5 — Manual Force-Close Endpoint & UI Button
+
+Backend: Add POST /api/trades/:tradeId/force-close to forcefully close a trade (set status=closed, pnl=0) and log to PFL.
+
+Frontend: In the Trades Panel, show a red "Force Close" button next to the status badge ONLY when status === "close_failed".
+
+Why this is a Game Changer
+With this implementation, you are no longer just fixing a bug. You are building an internal administrative tool. When a new user joins and encounters a weird margin error specific to their Kotak account tier, you will see it in the logs, go to your Settings UI, add the exact error string, map it to "terminal_close", and instantly resolve it for them and everyone else on the platform forever.

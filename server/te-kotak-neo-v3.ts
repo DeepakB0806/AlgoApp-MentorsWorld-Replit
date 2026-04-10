@@ -827,11 +827,19 @@ async function executeLegBasket(
   return { trades: [], orderIds: [], error: finalError };
 }
 
-// Assembles the entry basket for the resolved block only. Sorted BUY-before-SELL universally.
-// Neutral legs are NOT auto-entered here — they enter only when the configurator
-// explicitly dispatches ENTRY@neutralLegs as its own processTradeSignal call.
+// Assembles the entry basket for the resolved block. Sorted BUY-before-SELL universally.
+// TASK #112: Auto-seeds neutral legs on fresh sessions (no open neutral) before the
+// directional block — prevents margin rejection on SELL without hedge.
+// Safe during reversals: neutral remains in currentOpen (remainingOpen) → hasOpenNeutral=true → skipped.
 function buildEntryBasket(ctx: TradeContext, currentOpen: StrategyTrade[]): BasketItem[] {
   const items: BasketItem[] = [];
+
+  const hasOpenNeutral = currentOpen.some(t => t.blockType === "neutralLegs");
+  if (!hasOpenNeutral && ctx.neutralLegs.length > 0) {
+    console.log(`[TE] Fresh session: auto-seeding ${ctx.neutralLegs.length} neutral leg(s) before directional entry.`);
+    ctx.neutralLegs.forEach((leg, i) => items.push({ leg, blockType: "neutralLegs", legIndex: i }));
+  }
+
   ctx.legs.forEach((leg, i) => items.push({ leg, blockType: ctx.resolvedBlockType, legIndex: i }));
   items.sort((a, b) => {
     const aB = (a.leg.action || "BUY").toUpperCase() === "BUY";
