@@ -49,20 +49,24 @@ export interface StrikeSpec {
 }
 
 export function parseStrikeSpec(strike: string): StrikeSpec {
-  if (!strike || strike === "ATM") return { direction: "ATM", offset: 0 };
+  if (!strike) return { direction: "ATM", offset: 0 };
 
-  const match = strike.match(/^(OTM|ITM|ATM)\s*(\d+)?$/i);
+  const clean = strike.trim();
+  if (clean === "ATM") return { direction: "ATM", offset: 0 };
+
+  const match = clean.match(/^(OTM|ITM|ATM)\s*(\d+)?$/i);
   if (match) {
     const dir = match[1].toUpperCase() as "OTM" | "ITM" | "ATM";
     const offset = match[2] ? parseInt(match[2], 10) : 0;
     return { direction: dir, offset };
   }
 
-  const numMatch = strike.match(/^(\d+)$/);
+  const numMatch = clean.match(/^(\d+)$/);
   if (numMatch) {
     return { direction: "ATM", offset: 0 };
   }
 
+  console.warn(`[SYMBOL-BUILDER] Unrecognized strike spec "${strike}" — defaulting to ATM. Check leg configuration.`);
   return { direction: "ATM", offset: 0 };
 }
 
@@ -249,5 +253,5 @@ export function isOptionExchange(exchange: string): boolean {
 
 export function isStrikeSpec(strike: string): boolean {
   if (!strike) return false;
-  return /^(OTM|ITM|ATM)\s*\d*$/i.test(strike);
+  return /^(OTM|ITM|ATM)\s*\d*$/i.test(strike.trim());
 }
