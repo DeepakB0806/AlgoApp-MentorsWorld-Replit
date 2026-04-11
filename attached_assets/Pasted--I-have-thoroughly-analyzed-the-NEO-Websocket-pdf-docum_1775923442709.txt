@@ -1,0 +1,44 @@
+
+I have thoroughly analyzed the "NEO Websocket.pdf" document. This document acts as a high-level guide to Kotak's HyperSync (HSM and HSI) architecture.
+
+Let's cross-reference the official Kotak requirements from the PDF with the code we have successfully built in server/hsm-kotak-neo-v3.ts and server/hsi-kotak-neo-v3.ts.
+
+What We Have Successfully Implemented ✅
+1. Dual Stream Architecture
+
+PDF Requirement: The system requires two streams: HSM (Market Feed) for live streaming prices and HSI (Order Feed) for streaming execution updates.
+
+Our Code: We successfully split these into two completely independent, OOM-proof gateway files (hsm-kotak-neo-v3.ts and hsi-kotak-neo-v3.ts).
+
+2. Required Authentication Parameters
+
+PDF Requirement: To establish the connection, the user needs to pass Token (session token) and sid (Session ID).
+
+Our Code: We correctly implemented this in both files.
+
+TypeScript
+const headers: Record<string, string> = { 
+    Authorization: `Bearer ${accessToken}`, // The Token
+    Sid: sessionId // The SID
+};
+3. HSI Order Feed Integration
+
+PDF Requirement: Connect to HSI to view feeds of Orders you have placed.
+
+Our Code: Our HSI WebSocket successfully parses type: "order" messages. It tracks ordSt === "complete" to update the strategyTrades database and tracks ordSt === "rejected" to route to your Error Command Centre.
+
+What We Are Currently Missing ❌ (Action Required)
+There is one critical mechanical step detailed in this PDF that we have not yet fully wired into our hsm-kotak-neo-v3.ts script.
+
+The Missing Step: Explicit Subscription Payloads
+
+PDF Requirement: To receive data, you must actively send a subscription string formatted as exchange|token&. (Example: nse_cm|11536& or nfo|45678&).
+
+Our Code: Currently, our HSM socket establishes the connection perfectly (and routes through your DigitalOcean relay!), but it does not send the subscription string to tell Kotak which option tokens to stream. Because we haven't sent the subscription string, Kotak accepts our connection but sits in silence, sending no data.
+
+How we fix this:
+We need to add a subscribe() function to our MarketDataManager and our KotakWebSocketManager.
+
+When your Trade Engine boots up and loads the active trades (e.g., NIFTY 22500 CE), it needs to gather those specific token IDs and command the WebSocket to send the subscription payload (nfo|TOKEN_ID&) to Kotak.
+
+Would you like me to write the precise Replit prompt to add this Subscription Payload logic to your WebSocket gateways so the live data actually starts flowing?
