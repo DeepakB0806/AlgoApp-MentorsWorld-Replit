@@ -1680,8 +1680,9 @@ function ProcessFlowLogSheet({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen
     const csvContent = [
       headers.join(","),
       ...logs.map((log) => {
+        const esc = (v: string) => v.replace(/"/g, '""');
         const time = formatTimestampIST(log.timestamp);
-        return `"${time}","${log.planName}","${log.alert || "-"}","${log.signalType || "-"}","${log.resolvedAction || "-"}","${log.blockType || "-"}","${log.actionTaken}","${(log.message || "").replace(/"/g, '""')}","${log.orderId || "-"}","${log.executionTimeMs ?? "-"}"`;
+        return `"${esc(time)}","${esc(log.planName || "-")}","${esc(log.alert || "-")}","${esc(log.signalType || "-")}","${esc(log.resolvedAction || "-")}","${esc(log.blockType || "-")}","${esc(log.actionTaken || "-")}","${esc(log.message || "-")}","${esc(log.orderId || "-")}","${log.executionTimeMs ?? "-"}"`;
       }),
     ].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -1709,7 +1710,7 @@ function ProcessFlowLogSheet({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen
                 <Activity className="w-5 h-5 text-blue-500" />
                 Process Flow Log
                 {total > 0 && (
-                  <Badge variant="secondary" className="text-xs font-mono" data-testid="badge-pfl-count">{total}</Badge>
+                  <Badge variant="secondary" className="text-xs font-mono" data-testid="badge-pfl-sheet-count">{total}</Badge>
                 )}
               </SheetTitle>
               <SheetDescription>
