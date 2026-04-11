@@ -3161,9 +3161,9 @@ export default function BrokerApi() {
     queryKey: ["/api/process-flow-logs", "all"],
     queryFn: async () => {
       const res = await fetch("/api/process-flow-logs?limit=100");
-      const data = await res.json();
-      return (data.total as number) || 0;
+      return res.json() as Promise<{ logs: PFLEntry[]; plans: PFLPlan[]; total: number }>;
     },
+    select: (data: { logs: PFLEntry[]; plans: PFLPlan[]; total: number }) => data.total,
     refetchInterval: 30000,
   });
 
