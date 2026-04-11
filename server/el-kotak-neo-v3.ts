@@ -384,7 +384,7 @@ class ExecutionLayer {
   async authenticate(
     config: BrokerConfig,
     totp: string,
-  ): Promise<ApiResponse<{ viewToken: string; sidView: string; sessionToken: string; sidSession: string; baseUrl: string }>> {
+  ): Promise<ApiResponse<{ viewToken: string; sidView: string; sessionToken: string; sidSession: string; baseUrl: string; dataCenter?: string | null }>> {
     if (!this.ready) {
       const recovered = await this.ensureReady();
       if (!recovered) {
@@ -454,6 +454,7 @@ class ExecutionLayer {
           sessionToken: mpinData.data.token,
           sidSession: mpinData.data.sid,
           baseUrl: mpinData.data.baseUrl,
+          dataCenter: mpinData.data.dataCenter || null,
         },
         message: "Authentication successful - Trading session established",
       };

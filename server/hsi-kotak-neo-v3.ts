@@ -20,7 +20,13 @@ let activeConfig: BrokerConfig | null = null;
 let relayFailed = false;
 
 function buildAuthMessage(config: BrokerConfig): object {
-  return { type: "cn", Authorization: config.accessToken, Sid: config.sessionId, source: "WEB" };
+  return {
+    type: "cn",
+    Authorization: config.accessToken,
+    Sid: config.sessionId,
+    source: "WEB",
+    ...(config.dataCenter ? { dataCenter: config.dataCenter } : {}),
+  };
 }
 
 // 🔒 LOCKED BLOCK START — HSI connect: mirrors HSM relay→direct auto-fallback with identical relayFailed logic; never weaken [HSI-1]

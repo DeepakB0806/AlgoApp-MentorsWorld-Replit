@@ -28,6 +28,7 @@ function buildAuthMessage(config: BrokerConfig): object {
     Authorization: config.accessToken,
     Sid: config.sessionId,
     source: "WEB",
+    ...(config.dataCenter ? { dataCenter: config.dataCenter } : {}),
   };
 }
 

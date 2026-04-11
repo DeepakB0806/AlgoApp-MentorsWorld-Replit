@@ -459,6 +459,7 @@ export const brokerConfigs = pgTable("broker_configs", {
   accessToken: text("access_token"),
   sessionId: text("session_id"),
   baseUrl: text("base_url"), // Dynamic trading API base URL from Kotak Neo
+  dataCenter: text("data_center"), // Data center identifier from Kotak login (e.g. E43, E41)
   viewToken: text("view_token"), // Token from TOTP login step
   sidView: text("sid_view"), // Session ID from TOTP login step
   

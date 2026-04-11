@@ -306,6 +306,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         accessToken: result.data?.sessionToken || null,
         sessionId: result.data?.sidSession || null,
         baseUrl: result.data?.baseUrl || null,
+        dataCenter: result.data?.dataCenter || null,
         viewToken: result.data?.viewToken || null,
         sidView: result.data?.sidView || null,
         lastTotpUsed: totp,
