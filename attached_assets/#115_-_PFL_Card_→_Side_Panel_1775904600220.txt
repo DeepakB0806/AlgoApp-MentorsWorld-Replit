@@ -1,0 +1,279 @@
+#115 - PFL Card → Side Panel with CSV Download
+
+What & Why
+The Process Flow Log card is currently an embedded collapsible card on the Broker API page. When expanded it produces a long vertical scroll that is difficult to navigate. This task converts it to the same right-side Sheet panel pattern already used by Session Data and Test Connection panels in the same page — making it expandable to fullscreen and adding a CSV download.
+
+Done looks like
+The embedded ProcessFlowLogCard Card is removed from the Broker API page
+In its place, a compact trigger row is rendered: Activity icon + "Process Flow Log" label + entry count badge + "Open" button
+Clicking the trigger (or the Open button) opens a Sheet side panel from the right
+Panel default width: w-full max-w-[800px] — same as Session Data panel
+Panel header contains:
+Title: "Process Flow Log"
+Description: "Trade signal processing decisions (in-memory, resets on restart)"
+Expand-to-fullscreen toggle button (ExternalLink icon, same pattern as Session Data panel)
+Download CSV button (Download icon) — exports visible rows
+Close button (built-in Sheet X)
+Panel body contains exactly what the card showed when expanded:
+Plan filter tabs: All + one button per plan (with count badge)
+Refresh button
+10-column table: Time (IST), Plan, Alert, Signal, Action, Block, Result, Message, Order ID, ms
+Loading spinner state, empty state
+Auto-refresh every 30 seconds while the Sheet is open (same as current refetchInterval: isExpanded ? 30000 : false logic)
+CSV export (client-side, no backend change):
+Columns: Time (IST), Plan, Alert, Signal, Action, Block, Result, Message, Order ID, Execution ms
+Filename: PFL_{planName or "All"}_{YYYY-MM-DD}.csv
+Exports the currently filtered set (respects selected plan tab)
+Out of scope
+No data model changes (no new fields on ProcessFlowEntry)
+No backend/API changes
+No enrichment (strike data, broker response, etc.) — that is Task #2
+No per-plan icon in broker-linking — this is only the Broker API page card conversion
+Implementation notes
+Keep ProcessFlowLogCard function name or rename to ProcessFlowLogSheet — either is fine
+Reuse existing query logic, formatTimestampIST, getResultBadge, plan filter state exactly as-is
+Follow the exact same Sheet structure as the Session Data panel (lines 2961–3090 of broker-api.tsx):
+<Sheet open={isPflSheetOpen} onOpenChange={setIsPflSheetOpen}>
+<SheetContent className={...expandedView ? "w-full sm:max-w-full" : "w-full max-w-[800px]"...}>
+<SheetHeader> with title row + expand button
+The trigger row on the Broker API page should sit at the same position where <ProcessFlowLogCard /> was (line ~3273)
+CSV download: build comma-separated string from logs array, encodeURIComponent, create object URL, trigger anchor download, revoke URL — client-side only (same pattern used by Scrip Master card)
+Relevant files
+client/src/pages/broker-api.tsx
+ProcessFlowLogCard function: lines 1625–1785 (the component to convert)
+Session Data Sheet (reference pattern): lines 2961–3090
+Render site: line ~3273 (<ProcessFlowLogCard />)
+PFLEntry interface: lines 1529–1546
+PFLPlan interface: lines 1619–1623
+
+
+Code Snippets
+
+Agent Instruction: Please execute Task #115 by applying the exact code snippets below to client/src/pages/broker-api.tsx. Do not write new UI logic from scratch; strictly use the provided React components.
+
+Step 1: Imports & Component Replacement
+In client/src/pages/broker-api.tsx, ensure Download and ExternalLink are imported from lucide-react. Then, locate the entire ProcessFlowLogCard function and completely replace it with this new ProcessFlowLogSheet component:
+
+TypeScript
+export function ProcessFlowLogSheet({
+  isOpen,
+  setIsOpen,
+}: {
+  isOpen: boolean;
+  setIsOpen: (v: boolean) => void;
+}) {
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [expandedView, setExpandedView] = useState(false);
+  const { toast } = useToast();
+
+  // Fetch plans to create tabs
+  const { data: plans } = useQuery<any[]>({
+    queryKey: ["/api/strategies/plans"],
+  });
+
+  // Fetch PFL data - only auto-refresh when the sheet is open
+  const { data: logs = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["/api/process-flow"],
+    refetchInterval: isOpen ? 30000 : false, 
+  });
+
+  const filteredLogs = selectedPlan
+    ? logs.filter((log) => log.planId === selectedPlan)
+    : logs;
+
+  const handleExportCSV = () => {
+    if (filteredLogs.length === 0) {
+      toast({ title: "No data to export", variant: "destructive" });
+      return;
+    }
+
+    const headers = [
+      "Time", "Plan", "Alert", "Signal", "Action", "Block", "Result", "Message", "Order ID", "Processing Time (ms)"
+    ];
+
+    const planName = selectedPlan
+      ? plans?.find((p) => p.id === selectedPlan)?.name || selectedPlan
+      : "All";
+
+    const csvContent = [
+      headers.join(","),
+      ...filteredLogs.map((log) => {
+        const pName = plans?.find((p) => p.id === log.planId)?.name || log.planId;
+        const time = new Date(log.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+        return `"${time}","${pName}","${log.webhookId || "-"}","${log.signalType || "-"}","${log.tradeAction || "-"}","${log.blockType || "-"}","${log.result}","${(log.message || "").replace(/"/g, '""')}","${log.orderId || "-"}","${log.durationMs !== undefined ? log.durationMs : "-"}"`;
+      }),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    const dateStr = new Date().toISOString().split("T")[0];
+    link.setAttribute("download", `PFL_${planName}_${dateStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const getResultBadge = (result: string) => {
+    switch (result) {
+      case "success": return <Badge className="bg-green-500/10 text-green-500 hover:bg-green-500/20 border-green-500/20">Success</Badge>;
+      case "skipped": return <Badge variant="secondary" className="text-muted-foreground border-border">Skipped</Badge>;
+      case "error": return <Badge variant="destructive" className="bg-destructive/10 text-destructive hover:bg-destructive/20 border-destructive/20">Error</Badge>;
+      case "force_closed": return <Badge className="bg-red-600/10 text-red-600 border-red-600/20">Force Closed</Badge>;
+      default: return <Badge variant="outline">{result}</Badge>;
+    }
+  };
+
+  return (
+    <Sheet open={isOpen} onOpenChange={setIsOpen}>
+      <SheetContent
+        className={`flex flex-col h-full border-l border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60 p-0 transition-all duration-300 ease-in-out ${
+          expandedView ? "w-full sm:max-w-full" : "w-full sm:max-w-[800px]"
+        }`}
+      >
+        <SheetHeader className="px-6 py-4 border-b border-border/50 flex flex-row items-center justify-between space-y-0">
+          <div className="space-y-1 text-left">
+            <SheetTitle className="flex items-center gap-2 text-xl font-semibold tracking-tight">
+              <Activity className="h-5 w-5 text-primary" />
+              Process Flow Log
+            </SheetTitle>
+            <SheetDescription>
+              Trade signal processing decisions (in-memory, resets on restart)
+            </SheetDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleExportCSV} className="h-8 hidden sm:flex" disabled={filteredLogs.length === 0}>
+              <Download className="h-4 w-4 mr-2" />
+              Export CSV
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => setExpandedView(!expandedView)} className="h-8 w-8 text-muted-foreground hover:text-foreground hidden sm:flex" title={expandedView ? "Restore Width" : "Expand to Fullscreen"}>
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+          </div>
+        </SheetHeader>
+
+        <div className="flex-1 overflow-auto p-6 space-y-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant={selectedPlan === null ? "default" : "outline"} size="sm" onClick={() => setSelectedPlan(null)} className="h-8 text-xs rounded-full">
+                All Events
+                <Badge variant="secondary" className="ml-2 bg-background/20 hover:bg-background/20 font-mono text-[10px] px-1.5 py-0 h-4">
+                  {logs.length}
+                </Badge>
+              </Button>
+              {plans?.map((plan) => {
+                const planLogsCount = logs.filter((l) => l.planId === plan.id).length;
+                if (planLogsCount === 0) return null;
+                return (
+                  <Button key={plan.id} variant={selectedPlan === plan.id ? "default" : "outline"} size="sm" onClick={() => setSelectedPlan(plan.id)} className="h-8 text-xs rounded-full">
+                    {plan.name}
+                    <Badge variant="secondary" className="ml-2 bg-background/20 hover:bg-background/20 font-mono text-[10px] px-1.5 py-0 h-4">
+                      {planLogsCount}
+                    </Badge>
+                  </Button>
+                );
+              })}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading} className="h-8 text-xs shrink-0">
+              <RefreshCw className={`h-3 w-3 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+
+          <div className="rounded-md border border-border/50 bg-background/50 overflow-hidden">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-border/50">
+                    <TableHead className="w-[140px] font-medium text-xs whitespace-nowrap">Time (IST)</TableHead>
+                    <TableHead className="font-medium text-xs whitespace-nowrap">Plan</TableHead>
+                    <TableHead className="font-medium text-xs whitespace-nowrap">Alert</TableHead>
+                    <TableHead className="font-medium text-xs whitespace-nowrap">Signal</TableHead>
+                    <TableHead className="font-medium text-xs whitespace-nowrap">Action</TableHead>
+                    <TableHead className="font-medium text-xs whitespace-nowrap">Block</TableHead>
+                    <TableHead className="w-[100px] font-medium text-xs whitespace-nowrap">Result</TableHead>
+                    <TableHead className="min-w-[200px] font-medium text-xs whitespace-nowrap">Message</TableHead>
+                    <TableHead className="font-medium text-xs whitespace-nowrap">Order ID</TableHead>
+                    <TableHead className="w-[80px] text-right font-medium text-xs whitespace-nowrap">ms</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading && filteredLogs.length === 0 ? (
+                    <TableRow><TableCell colSpan={10} className="h-32 text-center text-muted-foreground"><RefreshCw className="h-4 w-4 animate-spin inline mr-2" />Loading logs...</TableCell></TableRow>
+                  ) : filteredLogs.length === 0 ? (
+                    <TableRow><TableCell colSpan={10} className="h-32 text-center text-muted-foreground">No processing logs found</TableCell></TableRow>
+                  ) : (
+                    filteredLogs.map((log, idx) => {
+                      const pName = plans?.find((p) => p.id === log.planId)?.name || log.planId.substring(0,8);
+                      return (
+                        <TableRow key={idx} className="hover:bg-muted/30 border-b-border/50 transition-colors">
+                          <TableCell className="text-xs whitespace-nowrap font-mono text-muted-foreground py-2">
+                            {new Date(log.timestamp).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
+                          </TableCell>
+                          <TableCell className="text-xs font-medium whitespace-nowrap py-2">{pName}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap py-2">
+                            {log.webhookId ? <Badge variant="outline" className="font-mono text-[10px] px-1.5 py-0 rounded-sm bg-primary/5">{log.webhookId.substring(0,8)}</Badge> : <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                          <TableCell className="text-xs whitespace-nowrap font-medium py-2">
+                            {log.signalType ? <span className="text-primary">{log.signalType}</span> : <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                          <TableCell className="text-xs whitespace-nowrap py-2">{log.tradeAction || "-"}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap font-mono text-muted-foreground py-2">{log.blockType || "-"}</TableCell>
+                          <TableCell className="py-2">{getResultBadge(log.result)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground py-2 max-w-[300px] truncate" title={log.message || ""}>{log.message || "-"}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap py-2">
+                            {log.orderId ? <code className="px-1.5 py-0.5 bg-muted rounded font-mono text-[10px]">{log.orderId}</code> : "-"}
+                          </TableCell>
+                          <TableCell className="text-xs text-right font-mono text-muted-foreground py-2">
+                            {log.durationMs !== undefined ? `${log.durationMs}ms` : "-"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+Step 2: Add State & Render the Trigger Row
+At the top of the main export default function BrokerAPI() component, add the state for the new sheet and fetch the log length for the badge:
+
+TypeScript
+  const [isPflSheetOpen, setIsPflSheetOpen] = useState(false);
+  const { data: pflLogsCount = 0 } = useQuery({
+    queryKey: ["/api/process-flow"],
+    select: (data: any[]) => data.length,
+    refetchInterval: 30000, 
+  });
+Finally, find where <ProcessFlowLogCard /> is currently rendered inside the BrokerAPI return statement (likely near the bottom next to the Danger Zone), and replace it with this compact Trigger Row:
+
+TypeScript
+          {/* Process Flow Log Trigger Row */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-lg border border-border/50 bg-card hover:bg-muted/20 transition-colors shadow-sm gap-4">
+            <div className="flex items-center gap-4">
+              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <Activity className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-semibold tracking-tight text-sm flex items-center gap-2">
+                  Process Flow Log
+                  <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0 h-4 bg-primary/10 text-primary border-primary/20">
+                    {pflLogsCount}
+                  </Badge>
+                </h3>
+                <p className="text-xs text-muted-foreground">Trade signal processing decisions and flow routing.</p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setIsPflSheetOpen(true)} className="w-full sm:w-auto shrink-0">
+              Open Log Viewer
+            </Button>
+          </div>
+
+          <ProcessFlowLogSheet isOpen={isPflSheetOpen} setIsOpen={setIsPflSheetOpen} />
