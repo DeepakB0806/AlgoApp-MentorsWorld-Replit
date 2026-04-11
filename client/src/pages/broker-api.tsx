@@ -3335,7 +3335,7 @@ export default function BrokerApi() {
                 <Activity className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <h3 className="font-semibold leading-none tracking-tight flex items-center gap-2">
+                <h3 className="text-2xl font-semibold leading-none tracking-tight flex items-center gap-2">
                   Process Flow Log
                   {pflTotal > 0 && (
                     <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0 h-4" data-testid="badge-pfl-count">
