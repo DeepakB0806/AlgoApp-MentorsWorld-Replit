@@ -1622,9 +1622,10 @@ interface PFLPlan {
   count: number;
 }
 
-function ProcessFlowLogCard() {
-  const [isExpanded, setIsExpanded] = useState(false);
+function ProcessFlowLogSheet({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (v: boolean) => void }) {
   const [selectedPlan, setSelectedPlan] = useState<string>("all");
+  const [expandedView, setExpandedView] = useState(false);
+  const { toast } = useToast();
 
   const pflQuery = useQuery<{ logs: PFLEntry[]; plans: PFLPlan[]; total: number }>({
     queryKey: ["/api/process-flow-logs", selectedPlan],
@@ -1635,7 +1636,7 @@ function ProcessFlowLogCard() {
       const res = await fetch(url);
       return res.json();
     },
-    refetchInterval: isExpanded ? 30000 : false,
+    refetchInterval: isOpen ? 30000 : false,
   });
 
   const logs = pflQuery.data?.logs || [];
@@ -1667,32 +1668,80 @@ function ProcessFlowLogCard() {
     }
   };
 
+  const handleExportCSV = () => {
+    if (logs.length === 0) {
+      toast({ title: "No data to export", variant: "destructive" });
+      return;
+    }
+    const headers = ["Time (IST)", "Plan", "Alert", "Signal", "Action", "Block", "Result", "Message", "Order ID", "ms"];
+    const planName = selectedPlan === "all"
+      ? "All"
+      : plans.find((p) => p.planId === selectedPlan)?.planName || selectedPlan;
+    const csvContent = [
+      headers.join(","),
+      ...logs.map((log) => {
+        const time = formatTimestampIST(log.timestamp);
+        return `"${time}","${log.planName}","${log.alert || "-"}","${log.signalType || "-"}","${log.resolvedAction || "-"}","${log.blockType || "-"}","${log.actionTaken}","${(log.message || "").replace(/"/g, '""')}","${log.orderId || "-"}","${log.executionTimeMs ?? "-"}"`;
+      }),
+    ].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    const dateStr = new Date().toISOString().split("T")[0];
+    link.setAttribute("download", `PFL_${planName}_${dateStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <Card data-testid="card-process-flow-log">
-      <CardHeader
-        className="cursor-pointer select-none"
-        onClick={() => setIsExpanded(!isExpanded)}
-        data-testid="button-toggle-process-flow-log"
+    <Sheet open={isOpen} onOpenChange={setIsOpen}>
+      <SheetContent
+        className={`${expandedView ? "w-full sm:max-w-full" : "w-full max-w-[800px]"} h-full max-h-screen overflow-hidden flex flex-col`}
+        side="right"
       >
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="w-5 h-5 text-blue-500" />
-              Process Flow Log
-            </CardTitle>
-            {total > 0 && (
-              <Badge variant="secondary" className="text-xs" data-testid="badge-pfl-count">
-                {total}
-              </Badge>
-            )}
+        <SheetHeader>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <SheetTitle className="flex items-center gap-2">
+                <Activity className="w-5 h-5 text-blue-500" />
+                Process Flow Log
+                {total > 0 && (
+                  <Badge variant="secondary" className="text-xs font-mono" data-testid="badge-pfl-count">{total}</Badge>
+                )}
+              </SheetTitle>
+              <SheetDescription>
+                Trade signal processing decisions (in-memory, resets on restart)
+              </SheetDescription>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportCSV}
+                disabled={logs.length === 0}
+                data-testid="button-export-pfl-csv"
+              >
+                <Download className="w-4 h-4 mr-1" />
+                Export CSV
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setExpandedView(!expandedView)}
+                title={expandedView ? "Restore width" : "Expand to fullscreen"}
+                data-testid="button-expand-pfl-sheet"
+              >
+                <ExternalLink className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
-          {isExpanded ? <ChevronDown className="w-5 h-5 text-muted-foreground" /> : <ChevronRight className="w-5 h-5 text-muted-foreground" />}
-        </div>
-        <CardDescription>Trade signal processing decisions per strategy (in-memory, resets on restart)</CardDescription>
-      </CardHeader>
-      {isExpanded && (
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
+        </SheetHeader>
+
+        <div className="mt-4 flex-1 min-h-0 flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-2 flex-wrap flex-shrink-0">
             <div className="flex items-center gap-2 flex-wrap">
               <Button
                 variant={selectedPlan === "all" ? "default" : "outline"}
@@ -1701,6 +1750,7 @@ function ProcessFlowLogCard() {
                 data-testid="button-pfl-all"
               >
                 All
+                <Badge variant="secondary" className="ml-1 text-[10px]">{total}</Badge>
               </Button>
               {plans.map((p) => (
                 <Button
@@ -1718,10 +1768,7 @@ function ProcessFlowLogCard() {
             <Button
               variant="outline"
               size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                queryClient.invalidateQueries({ queryKey: ["/api/process-flow-logs", selectedPlan] });
-              }}
+              onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/process-flow-logs", selectedPlan] })}
               disabled={pflQuery.isLoading}
               data-testid="button-refresh-pfl"
             >
@@ -1730,22 +1777,22 @@ function ProcessFlowLogCard() {
             </Button>
           </div>
 
-          {pflQuery.isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-              <span className="ml-2 text-sm text-muted-foreground">Loading process flow logs...</span>
-            </div>
-          ) : logs.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground" data-testid="text-no-pfl">
-              <Activity className="w-8 h-8 mx-auto mb-2 text-muted-foreground/50" />
-              <p className="text-sm">No process flow logs yet</p>
-              <p className="text-xs mt-1">Logs will appear here when trade signals are received</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto border border-border rounded-md">
+          <div className="flex-1 min-h-0 overflow-auto border border-border rounded-md">
+            {pflQuery.isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-sm text-muted-foreground">Loading process flow logs...</span>
+              </div>
+            ) : logs.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground" data-testid="text-no-pfl">
+                <Activity className="w-8 h-8 mx-auto mb-2 text-muted-foreground/50" />
+                <p className="text-sm">No process flow logs yet</p>
+                <p className="text-xs mt-1">Logs will appear here when trade signals are received</p>
+              </div>
+            ) : (
               <table className="w-full text-xs" data-testid="table-pfl">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
+                <thead className="sticky top-0 bg-muted/90 backdrop-blur z-10">
+                  <tr className="border-b border-border">
                     <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Time (IST)</th>
                     <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Plan</th>
                     <th className="text-left py-2 px-3 text-muted-foreground font-medium whitespace-nowrap">Alert</th>
@@ -1760,7 +1807,7 @@ function ProcessFlowLogCard() {
                 </thead>
                 <tbody>
                   {logs.map((log) => (
-                    <tr key={log.id} className="border-b border-border/50 last:border-0" data-testid={`row-pfl-${log.id}`}>
+                    <tr key={log.id} className="border-b border-border/50 last:border-0 hover:bg-muted/20" data-testid={`row-pfl-${log.id}`}>
                       <td className="py-2 px-3 font-mono whitespace-nowrap text-muted-foreground">{formatTimestampIST(log.timestamp)}</td>
                       <td className="py-2 px-3 whitespace-nowrap font-medium">{log.planName}</td>
                       <td className="py-2 px-3 whitespace-nowrap font-mono text-blue-400">{log.alert || "—"}</td>
@@ -1777,11 +1824,11 @@ function ProcessFlowLogCard() {
                   ))}
                 </tbody>
               </table>
-            </div>
-          )}
-        </CardContent>
-      )}
-    </Card>
+            )}
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -3104,9 +3151,20 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
 
 export default function BrokerApi() {
   const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [isPflSheetOpen, setIsPflSheetOpen] = useState(false);
 
   const { data: brokerConfigs = [], isLoading } = useQuery<BrokerConfig[]>({
     queryKey: ["/api/broker-configs"],
+  });
+
+  const { data: pflTotal = 0 } = useQuery({
+    queryKey: ["/api/process-flow-logs", "all"],
+    queryFn: async () => {
+      const res = await fetch("/api/process-flow-logs?limit=100");
+      const data = await res.json();
+      return (data.total as number) || 0;
+    },
+    refetchInterval: 30000,
   });
 
   const { toast } = useToast();
@@ -3270,7 +3328,34 @@ export default function BrokerApi() {
         )}
 
         <div className="mt-6">
-          <ProcessFlowLogCard />
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-lg border border-border/50 bg-card hover:bg-muted/20 transition-colors shadow-sm gap-4">
+            <div className="flex items-center gap-4">
+              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <Activity className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-semibold tracking-tight text-sm flex items-center gap-2">
+                  Process Flow Log
+                  {pflTotal > 0 && (
+                    <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0 h-4" data-testid="badge-pfl-count">
+                      {pflTotal}
+                    </Badge>
+                  )}
+                </h3>
+                <p className="text-xs text-muted-foreground">Trade signal processing decisions (in-memory, resets on restart)</p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsPflSheetOpen(true)}
+              className="w-full sm:w-auto shrink-0"
+              data-testid="button-open-pfl-sheet"
+            >
+              Open Log Viewer
+            </Button>
+          </div>
+          <ProcessFlowLogSheet isOpen={isPflSheetOpen} setIsOpen={setIsPflSheetOpen} />
         </div>
 
         <div className="mt-6">
