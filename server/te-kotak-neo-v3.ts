@@ -596,6 +596,12 @@ async function executeLegBasket(
     const effectiveMultiplier = Math.max(1, ctx.lotMultiplier - attempt);
 
     for (const { leg, blockType, legIndex } of items) {
+      // --- TASK #116: MID-LOOP ABORT GUARD ---
+      if (persistentSquareOffActive.has(plan.id)) {
+        console.log(`[TE] executeLegBasket aborted mid-loop for plan ${plan.id} (Square Off detected)`);
+        return { trades: [], orderIds: [], error: "Aborted due to manual square-off" };
+      }
+      // ----------------------------------------
       const tempCtx = { ...ctx, lotMultiplier: effectiveMultiplier };
       const resolved = resolveOrderParams(leg, tempCtx, legIndex);
       if ("error" in resolved) {
@@ -1429,6 +1435,13 @@ export function startPersistentSquareOff(
   let retryAttempt = 0;
 
   async function attempt() {
+    // --- TASK #116: KILL ALL CONFLICTING LOOPS ON SQUARE-OFF ---
+    persistentEntryActive.delete(planId);
+    persistentRollbackActive.delete(planId);
+    for (const k of persistentExitActive.keys()) {
+      if (k.startsWith(`${planId}:`)) persistentExitActive.delete(k);
+    }
+    // -----------------------------------------------------------
     const unclosed = await storage.getUnclosedTradesByPlan(planId);
     if (unclosed.length === 0) {
       console.log(`[TE] PersistentSquareOff complete — all legs exited for plan ${planId}`);
@@ -1481,6 +1494,9 @@ export function startPersistentExit(
   persistentExitActive.add(key);
 
   async function attempt() {
+    // --- TASK #116: WAKE-UP GUARD ---
+    if (!persistentExitActive.has(key)) return;
+    // ---------------------------------
     const unclosed = await storage.getUnclosedTradesByPlan(planId);
     const toRetry = unclosed.filter(t => t.blockType === blockType);
     if (toRetry.length === 0) {
@@ -1529,6 +1545,9 @@ export function startPersistentRollback(
   persistentRollbackActive.add(planId);
 
   async function attempt() {
+    // --- TASK #116: WAKE-UP GUARD ---
+    if (!persistentRollbackActive.has(planId)) return;
+    // ---------------------------------
     try {
       // Fresh query at the START of each cycle (not stale array)
       const allTrades = await storage.getStrategyTradesByPlan(planId);
@@ -1668,6 +1687,9 @@ export function startPersistentEntry(
   persistentEntryActive.add(planId);
 
   async function attempt() {
+    // --- TASK #116: WAKE-UP GUARD ---
+    if (!persistentEntryActive.has(planId)) return;
+    // ---------------------------------
     const allTrades = await storage.getStrategyTradesByPlan(planId);
     const failedForSignal = allTrades.filter(
       t => t.webhookDataId === webhookDataRow.id && t.status === "failed"

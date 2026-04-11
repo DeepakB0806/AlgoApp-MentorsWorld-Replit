@@ -1,0 +1,55 @@
+Today I noticed a Ghost order. It happened like this that SELL_UT+BUY_DT got fired from the webhook. There was no existing trade, hence the SELL of the UT leg did not happen, and the BUY of DT got stuck because of margin issue, caused because of hedging. This got solved by the Task # 112. But I saw a leg entered. So I squared off. When I squared off, 2 more hedged legs entered. This should not happen as per the Ghost trade fix by the Task # 97 & 99.
+
+
+
+I have given the log below. I have also uploaded all the task and codes. Check and clarify
+
+
+
+10/4/2026, 15:16:57NIFTY 50 OTM1 SELL + OTM12 BUY OPTION SELLINGSquare off all positionssquare_offCLOSEsquare_offsquared_offSquared off trade: NIFTY2641324000PE qty=65 exitPrice=24060.7 pnl=0——10/4/2026, 15:09:06NIFTY 50 OTM1 SELL + OTM12 BUY OPTION SELLINGSELL_DT+BUY_UTsellN/A—info[ORDER] 260410000451474 → UNKNOWN | symbol: NIFTY2641324000PE | qty: 65——10/4/2026, 15:09:05NIFTY 50 OTM1 SELL + OTM12 BUY OPTION SELLINGSELL_DT+BUY_UTsellEXITdowntrendLegsclosedSuccessfully closed all positions (Pure EXIT).—176710/4/2026, 14:33:05NIFTY 50 ATM SELL + OTM12 BUY OPTION SELLINGSELL_UT+BUY_DTsellN/A—info[ORDER] 260410000401816 → UNKNOWN | symbol: NIFTY2641323950CE | qty: 65——
+
+This is a phenomenal catch. You have just uncovered a classic concurrency race condition between your margin limits and your Node.js execution loops.
+
+First, to address your immediate concern: This is not a failure of Task #97 or #99.
+
+Tasks #97 and #99 specifically patched the Exit Engine (closeTradeById and startPersistentSquareOff). They stop the system from endlessly retrying to close dead contracts or hard-rejected trades.
+
+The ghost legs you saw today originated from the Entry Engine (startPersistentEntry). The Entry engine had a hidden vulnerability that was only exposed because of the margin shortfall.
+
+Here is the exact forensic breakdown of what happened in your system today, followed by the code snippet to fix it permanently.
+
+🕵️ The Post-Mortem: What Happened at 15:16:57?
+Based on your logs and the te-kotak-neo-v3.ts code, here is the exact 7-minute timeline that created these ghost legs:
+
+1. The Webhook (15:09:06)
+
+The SELL_DT+BUY_UT webhook fired.
+
+Task #112 correctly auto-seeded the Entry Basket with 3 legs: 2 Neutral Hedges + 1 Directional PE.
+
+The engine executed the Directional PE successfully (NIFTY2641324000PE), but as you noted, the Neutral legs failed due to a Kotak margin shortfall.
+
+2. The Invisible Loop (15:09:06 to 15:16:57)
+
+Because the Neutral legs failed, the startPersistentEntry function went into its automatic background retry loop.
+
+For 7 solid minutes, the engine was waking up every 2 seconds, silently trying to place those 2 Neutral legs, and failing every time because your Kotak margin was locked up by the open PE leg.
+
+3. The Race Condition (15:16:57)
+
+You manually clicked "Square Off".
+
+The squareOffPlan function immediately executed. It grabbed the open PE leg and closed it.
+
+Crucial Moment: The millisecond that PE leg closed, your blocked margin in Kotak was freed up.
+
+Simultaneously, the background startPersistentEntry loop woke up for its scheduled 2-second retry. Because the margin was suddenly free, the loop successfully placed the 2 Neutral legs!
+
+A split-second after it placed them, the Square Off command's internal "Stop" signal reached the entry loop and shut it down.
+
+The Result: The Square Off command inadvertently provided the exact margin needed for the persistent entry loop to succeed, leaving those 2 newly entered legs orphaned as "Ghost Trades" right after the Square Off finished.
+
+🛠️ The Fix: The Mid-Loop Abort Guard
+The vulnerability exists because startPersistentEntry currently only checks if it should stop at the beginning of the basket attempt. It does not check if you clicked "Square Off" in the middle of iterating through the legs.
+
+We need to add a "Mid-Loop Abort Guard" to all three of your persistent engines so they instantly die the millisecond a user clicks Square Off, even if they are in the middle of a for loop.

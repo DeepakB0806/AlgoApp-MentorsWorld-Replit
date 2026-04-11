@@ -1,0 +1,80 @@
+However, you are absolutely right to ask for a review. I have forensically analyzed Replit’s Draft #116 against your te-kotak-neo-v3.ts architecture, and there are three critical loopholes in their logic that will cause the fix to silently fail and allow ghost trades to continue.
+
+Here is the exact breakdown of the flaws, followed by the bulletproof task document you should hand back to Replit.
+
+🚨 The Three Loopholes in Replit's Draft
+Loophole 1: The "Wake-Up" Guard is Missing
+Replit’s Task 1 correctly deletes the persistentEntryActive flag when Square Off is clicked. However, it forgot to tell the engine to check that flag when it wakes up!
+Currently, when startPersistentEntry goes to sleep for 2 seconds, the setTimeout is already locked in. When it wakes up, it blindly executes attempt() without checking if its flag was deleted. Deleting the flag does nothing if the function doesn't look at it!
+
+Loophole 2: The Exit Key Mismatch
+In Replit's Task 1, they wrote persistentExitActive.delete(planId).
+If you look at the top of startPersistentExit in your code, the set uses composite keys formatted as ${planId}:${blockType} (e.g., 1234-abcd:uptrendLegs). Trying to delete just planId will silently fail, leaving the exit loop running.
+
+Loophole 3: The Rollback Engine is Unprotected
+If a margin shortfall occurs, the system initiates startPersistentRollback. If you click Square Off while a rollback is pending, the rollback loop will stay alive and fire a reverse "Buy" leg after your Square Off finishes, creating another ghost trade. Square Off must kill the Rollback loop too.
+
+📋 The Corrected Task Document for Replit
+Copy and paste this exact text back to Replit. It fixes all the loopholes and applies the guards perfectly to your architecture.
+
+#116 - Persistent Engine Mid-Loop Concurrency Guard (V2)
+What & Why
+A race condition exists between startPersistentEntry and startPersistentSquareOff. When a user clicks Square Off, it frees margin. Background loops (Entry, Exit, Rollback) that are currently sleeping in their setTimeout cycles wake up, see the freed margin, and blindly execute their next leg — creating ghost trades.
+
+We must explicitly kill all background loops the millisecond startPersistentSquareOff is triggered, and ensure all attempt() functions verify their active status immediately upon waking up.
+
+Tasks
+
+Task 1 — Kill all conflicting loops from startPersistentSquareOff
+File: server/te-kotak-neo-v3.ts
+Location: Inside startPersistentSquareOff, at the very top of the attempt() function (~line 1432).
+Add these exact lines to safely purge all background flags:
+
+TypeScript
+    // --- TASK #116: KILL ALL CONFLICTING LOOPS ON SQUARE-OFF ---
+    persistentEntryActive.delete(planId);
+    persistentRollbackActive.delete(planId);
+    for (const k of persistentExitActive.keys()) {
+      if (k.startsWith(`${planId}:`)) persistentExitActive.delete(k);
+    }
+    // -----------------------------------------------------------
+Task 2 — Add Wake-Up Guard to startPersistentEntry
+File: server/te-kotak-neo-v3.ts
+Location: Inside startPersistentEntry, at the very top of async function attempt().
+Add the guard so the sleeping timeout safely dies if its flag was deleted:
+
+TypeScript
+  async function attempt() {
+    // --- TASK #116: WAKE-UP GUARD ---
+    if (!persistentEntryActive.has(planId)) return;
+Task 3 — Add Wake-Up Guard to startPersistentExit
+File: server/te-kotak-neo-v3.ts
+Location: Inside startPersistentExit, at the very top of async function attempt().
+Add the guard:
+
+TypeScript
+  async function attempt() {
+    // --- TASK #116: WAKE-UP GUARD ---
+    if (!persistentExitActive.has(key)) return;
+Task 4 — Add Wake-Up Guard to startPersistentRollback
+File: server/te-kotak-neo-v3.ts
+Location: Inside startPersistentRollback, at the very top of async function attempt().
+Add the guard:
+
+TypeScript
+  async function attempt() {
+    // --- TASK #116: WAKE-UP GUARD ---
+    if (!persistentRollbackActive.has(planId)) return;
+Task 5 — Mid-Loop Abort Guard in executeLegBasket
+File: server/te-kotak-neo-v3.ts
+Location: Inside executeLegBasket, immediately inside the for (const { leg, blockType, legIndex } of items) loop body (~line 650).
+Add this guard to stop the basket if Square Off is triggered during the 500ms delay between legs:
+
+TypeScript
+    for (const { leg, blockType, legIndex } of items) {
+      // --- TASK #116: MID-LOOP ABORT GUARD ---
+      if (persistentSquareOffActive.has(plan.id)) {
+        console.log(`[TE] executeLegBasket aborted mid-loop for plan ${plan.id} (Square Off detected)`);
+        return { trades: [], orderIds: [], error: "Aborted due to manual square-off" };
+      }
+      // ---------------------------------------

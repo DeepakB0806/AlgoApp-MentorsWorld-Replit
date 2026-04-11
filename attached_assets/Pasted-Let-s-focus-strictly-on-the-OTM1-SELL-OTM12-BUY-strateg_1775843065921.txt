@@ -1,0 +1,85 @@
+Let's focus strictly on the OTM1 SELL + OTM12 BUY strategy and why the math went haywire today.
+
+I have forensically analyzed the CSV and the option-symbol-builder.ts code, and I have found the exact bug. The code is silently failing to read your dropdown settings.
+
+🕵️ The Root Cause: The Fragile Regex Bug
+In server/option-symbol-builder.ts, the Trade Engine uses a Regular Expression (Regex) to read the strike string saved from your UI dropdowns:
+
+TypeScript
+// Current Code
+const match = strike.match(/^(OTM|ITM|ATM)\s*(\d+)?$/i);
+This strict rule says: "The string must start with OTM/ITM/ATM, have optional spaces, a number, and then immediately end."
+
+If the UI saves the dropdown value with even a single hidden trailing space (e.g., "OTM 12 ") or uses a hyphen ("OTM-12"), this regex completely fails to match.
+
+What happens when it fails? The code executes this fallback:
+
+TypeScript
+return { direction: "ATM", offset: 0 };
+It silently gives up and defaults to the ATM strike (0 offset) for every single leg.
+
+📊 The Proof in Your CSV
+At 15:09, the Spot price of NIFTY was hovering right on the boundary of 23975.
+Because the strike parser failed and defaulted every leg to ATM 0, look at what it calculated in real-time as the spot price slightly fluctuated:
+
+15:09:04: Spot dipped slightly below 23975 -> Nearest ATM is 23950. (It bought 23950 CE).
+
+15:09:05: Spot ticked slightly above 23975 -> Nearest ATM is 24000. (It tried to sell 24000 PE).
+
+The system didn't calculate OTM 1 or OTM 12; it literally just fired ATM strikes because the text parser tripped on a hidden character or space from your UI database!
+
+🛠️ The Fix: Bulletproof Strike Parsing
+We need to update parseStrikeSpec to aggressively sanitize the text (trimming spaces) and accept more variations before attempting to match.
+
+Here is the exact task to feed your Replit Agent to fix this permanently.
+
+Task #117 - Robust Options Strike Parser
+What & Why
+The parseStrikeSpec function in option-symbol-builder.ts uses a strict regex anchored to the end of the string ($). If the database contains strike strings with trailing whitespace (e.g., "OTM 12 ") or alternative formatting from UI dropdowns, the regex fails. When it fails, it silently defaults to returning { direction: "ATM", offset: 0 }. This causes deep OTM hedge legs to incorrectly execute as ATM strikes. We need to sanitize the input strings and make the regex more forgiving.
+
+Done looks like
+
+Strike strings with leading/trailing spaces (e.g., " OTM 12 ") are successfully parsed as OTM 12.
+
+Strike strings with hyphens or underscores (e.g., "OTM-12", "OTM_12") are successfully parsed.
+
+Deep OTM/ITM legs calculate their correct offsets without silently defaulting to ATM.
+
+Out of scope
+
+UI changes to the Mother Configurator.
+
+Changes to Kotak API execution logic.
+
+Any database migrations.
+
+Task: Update parseStrikeSpec
+File: server/option-symbol-builder.ts
+Replace the entire parseStrikeSpec function with this robust version:
+
+TypeScript
+export function parseStrikeSpec(strike: string): StrikeSpec {
+  if (!strike) return { direction: "ATM", offset: 0 };
+
+  // 1. Aggressively sanitize the input (remove outer spaces, make uppercase)
+  const cleanStrike = strike.trim().toUpperCase();
+  if (cleanStrike === "ATM") return { direction: "ATM", offset: 0 };
+
+  // 2. Forgiving Regex: Allows spaces, hyphens, or underscores between direction and number
+  const match = cleanStrike.match(/^(OTM|ITM|ATM)[\s\-_]*(\d+)?$/);
+  if (match) {
+    const dir = match[1] as "OTM" | "ITM" | "ATM";
+    const offset = match[2] ? parseInt(match[2], 10) : 0;
+    return { direction: dir, offset };
+  }
+
+  // 3. Fallback for pure numbers
+  const numMatch = cleanStrike.match(/^(\d+)$/);
+  if (numMatch) {
+    return { direction: "ATM", offset: 0 };
+  }
+
+  // 4. Default failsafe
+  console.warn(`[SYMBOL-BUILDER] Warning: Unrecognized strike format "${strike}". Defaulting to ATM.`);
+  return { direction: "ATM", offset: 0 };
+}
