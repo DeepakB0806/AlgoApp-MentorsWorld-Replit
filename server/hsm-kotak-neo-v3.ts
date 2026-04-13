@@ -14,7 +14,7 @@ import type { BrokerConfig } from "@shared/schema";
 
 const LOG_PREFIX = "[HSM]";
 const MAX_RECONNECT_DELAY_MS = 30_000;
-const HSM_URL = "wss://hstream.kotaksecurities.com/realtime";
+const HSM_URL = "wss://mlhsm.kotaksecurities.com";
 
 const subscriptions = new Map<string, true>();
 let ws: WebSocket | null = null;
