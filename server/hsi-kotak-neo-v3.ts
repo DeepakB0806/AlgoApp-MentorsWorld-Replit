@@ -34,13 +34,7 @@ function buildAuthMessage(config: BrokerConfig): object {
 }
 
 // 🔒 LOCKED BLOCK START — resolveHsiUrl: maps config.dataCenter to specific Kotak datacenter endpoints [HSI-4]
-function resolveHsiUrl(config: BrokerConfig): string {
-  const dc = (config.dataCenter || "").toLowerCase();
-  if (dc === "adc") return "wss://cis.kotaksecurities.com/realtime";
-  if (dc === "e21") return "wss://e21.kotaksecurities.com/realtime";
-  if (dc === "e22") return "wss://e22.kotaksecurities.com/realtime";
-  if (dc === "e41") return "wss://e41.kotaksecurities.com/realtime";
-  if (dc === "e43") return "wss://e43.kotaksecurities.com/realtime";
+function resolveHsiUrl(_config: BrokerConfig): string {
   return "wss://mis.kotaksecurities.com/realtime";
 }
 // 🔒 LOCKED BLOCK END
