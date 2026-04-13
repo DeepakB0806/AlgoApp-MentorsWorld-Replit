@@ -7,17 +7,21 @@ import type { BrokerConfig } from "@shared/schema";
 //
 // 📋 HSI PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
 //   [HSI-1] connect mirrors HSM relay→direct auto-fallback with identical relayFailed logic.
-//   [HSI-2] scheduleReconnect uses same exponential backoff as HSM.
+//   [HSI-2] scheduleReconnect: exponential backoff; reconnectTimer tracked for cancellation.
+//   [HSI-3] startHsiHeartbeat: 30 s hb heartbeat, interval tracked in heartbeatInterval.
+//   [HSI-4] resolveHsiUrl: maps config.dataCenter to specific Kotak datacenter endpoints.
 
 const LOG_PREFIX = "[HSI]";
-const HSI_URL = "wss://mlhsm.kotaksecurities.com";
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
+let HSI_URL = "wss://mis.kotaksecurities.com/realtime";
 let ws: WebSocket | null = null;
 let reconnectDelay = 1_000;
 let activeStorage: IStorage | null = null;
 let activeConfig: BrokerConfig | null = null;
 let relayFailed = false;
+let reconnectTimer: NodeJS.Timeout | null = null;
+let heartbeatInterval: NodeJS.Timeout | null = null;
 
 function buildAuthMessage(config: BrokerConfig): object {
   return {
@@ -28,6 +32,18 @@ function buildAuthMessage(config: BrokerConfig): object {
     ...(config.dataCenter ? { dataCenter: config.dataCenter } : {}),
   };
 }
+
+// 🔒 LOCKED BLOCK START — resolveHsiUrl: maps config.dataCenter to specific Kotak datacenter endpoints [HSI-4]
+function resolveHsiUrl(config: BrokerConfig): string {
+  const dc = (config.dataCenter || "").toLowerCase();
+  if (dc === "adc") return "wss://cis.kotaksecurities.com/realtime";
+  if (dc === "e21") return "wss://e21.kotaksecurities.com/realtime";
+  if (dc === "e22") return "wss://e22.kotaksecurities.com/realtime";
+  if (dc === "e41") return "wss://e41.kotaksecurities.com/realtime";
+  if (dc === "e43") return "wss://e43.kotaksecurities.com/realtime";
+  return "wss://mis.kotaksecurities.com/realtime";
+}
+// 🔒 LOCKED BLOCK END
 
 // 🔒 LOCKED BLOCK START — HSI connect: mirrors HSM relay→direct auto-fallback with identical relayFailed logic; never weaken [HSI-1]
 function connect(config: BrokerConfig): void {
@@ -124,8 +140,19 @@ function connect(config: BrokerConfig): void {
 
 // 🔒 LOCKED BLOCK START — HSI scheduleReconnect: same exponential backoff as HSM [HSI-2]
 function scheduleReconnect(config: BrokerConfig): void {
-  setTimeout(() => connect(config), reconnectDelay);
+  reconnectTimer = setTimeout(() => connect(config), reconnectDelay);
   reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+}
+// 🔒 LOCKED BLOCK END
+
+// 🔒 LOCKED BLOCK START — HSI heartbeat: sends {"type":"hb"} every 30 s while WS is OPEN [HSI-3]
+function startHsiHeartbeat(): void {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  heartbeatInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "hb" })); } catch {}
+    }
+  }, 30_000);
 }
 // 🔒 LOCKED BLOCK END
 
@@ -135,10 +162,13 @@ export function refreshConfig(config: BrokerConfig): void {
     try { ws.terminate(); } catch {}
     ws = null;
   }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   relayFailed = false;
   reconnectDelay = 1_000;
   activeConfig = config;
+  HSI_URL = resolveHsiUrl(config);
   connect(config);
+  startHsiHeartbeat();
 }
 
 export async function startHsiGateway(storage: IStorage): Promise<void> {
@@ -151,7 +181,10 @@ export async function startHsiGateway(storage: IStorage): Promise<void> {
     }
     activeConfig = config;
     activeStorage = storage;
+    HSI_URL = resolveHsiUrl(config);
+    console.log(`${LOG_PREFIX} HSI URL resolved to ${HSI_URL} (dataCenter=${config.dataCenter ?? "default"})`);
     connect(config);
+    startHsiHeartbeat();
   } catch (err) {
     console.error(`${LOG_PREFIX} startHsiGateway error (non-fatal):`, err);
   }

@@ -10,7 +10,8 @@ import type { BrokerConfig } from "@shared/schema";
 // 📋 HSM PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
 //   [HSM-1] connect relay→direct auto-fallback: relayFailed=true on first connection failure. Never remove this fallback path.
 //   [HSM-2] subscriptions.forEach() — NOT Array.from(subscriptions). OOM constraint.
-//   [HSM-3] scheduleReconnect uses exponential backoff capped at MAX_RECONNECT_DELAY_MS.
+//   [HSM-3] scheduleReconnect uses exponential backoff capped at MAX_RECONNECT_DELAY_MS; reconnectTimer tracked.
+//   [HSM-4] startHsmHeartbeat: 30 s ti heartbeat, interval tracked in heartbeatInterval.
 
 const LOG_PREFIX = "[HSM]";
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -21,6 +22,8 @@ let ws: WebSocket | null = null;
 let reconnectDelay = 1_000;
 let activeConfig: BrokerConfig | null = null;
 let relayFailed = false;
+let reconnectTimer: NodeJS.Timeout | null = null;
+let heartbeatInterval: NodeJS.Timeout | null = null;
 
 function buildAuthMessage(config: BrokerConfig): object {
   return {
@@ -132,8 +135,19 @@ function connect(config: BrokerConfig): void {
 
 // 🔒 LOCKED BLOCK START — HSM scheduleReconnect: exponential backoff capped at MAX_RECONNECT_DELAY_MS [HSM-3]
 function scheduleReconnect(config: BrokerConfig): void {
-  setTimeout(() => connect(config), reconnectDelay);
+  reconnectTimer = setTimeout(() => connect(config), reconnectDelay);
   reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+}
+// 🔒 LOCKED BLOCK END
+
+// 🔒 LOCKED BLOCK START — HSM heartbeat: sends {"type":"ti","scrips":""} every 30 s while WS is OPEN [HSM-4]
+function startHsmHeartbeat(): void {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  heartbeatInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "ti", scrips: "" })); } catch {}
+    }
+  }, 30_000);
 }
 // 🔒 LOCKED BLOCK END
 
@@ -143,10 +157,12 @@ export function refreshConfig(config: BrokerConfig): void {
     try { ws.terminate(); } catch {}
     ws = null;
   }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   relayFailed = false;
   reconnectDelay = 1_000;
   activeConfig = config;
   connect(config);
+  startHsmHeartbeat();
 }
 
 export function subscribe(symbol: string): void {
@@ -181,6 +197,7 @@ export async function startWsGateway(storage: IStorage): Promise<void> {
     }
 
     connect(config);
+    startHsmHeartbeat();
   } catch (err) {
     console.error(`${LOG_PREFIX} startWsGateway error (non-fatal):`, err);
   }

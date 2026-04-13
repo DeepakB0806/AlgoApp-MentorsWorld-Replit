@@ -1,0 +1,127 @@
+Task: HSM/HSI WebSocket Migration & Reliability Patch
+Objective: Migrate Kotak Neo WebSocket endpoints to the new production environment, implement mandatory 30s heartbeats, and fix a race condition where pending reconnect timers could overwrite new session configurations.
+
+1. Update for server/hsm-kotak-neo-v3.ts
+1a. Module Variables & URL Update
+Update URL: Change HSM_URL to wss://mlhsm.kotaksecurities.com.
+
+Add Handles: Add reconnectTimer and heartbeatInterval after the relayFailed variable.
+
+TypeScript
+const HSM_URL = "wss://mlhsm.kotaksecurities.com"; //
+
+// ... after let relayFailed = false;
+let reconnectTimer: NodeJS.Timeout | null = null; //
+let heartbeatInterval: NodeJS.Timeout | null = null; //
+1b. Modify [HSM-3] scheduleReconnect
+Update the 🔒 LOCKED BLOCK to capture the timer handle.
+
+TypeScript
+// 🔒 LOCKED BLOCK START — HSM scheduleReconnect: exponential backoff capped at MAX_RECONNECT_DELAY_MS [HSM-3]
+function scheduleReconnect(config: BrokerConfig): void {
+  reconnectTimer = setTimeout(() => connect(config), reconnectDelay); // Updated to track handle
+  reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+}
+// 🔒 LOCKED BLOCK END
+1c. Add [HSM-4] Heartbeat
+Insert this new 🔒 LOCKED BLOCK before the refreshConfig function.
+
+TypeScript
+// 🔒 LOCKED BLOCK START — HSM heartbeat: sends {"type":"ti","scrips":""} every 30 s while WS is OPEN [HSM-4]
+function startHsmHeartbeat(): void {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  heartbeatInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "ti", scrips: "" })); //
+      } catch {}
+    }
+  }, 30_000);
+}
+// 🔒 LOCKED BLOCK END
+1d. Update refreshConfig & startWsGateway
+Call startHsmHeartbeat() at the end of both functions.
+
+In refreshConfig, ensure existing timers are cleared to prevent session overwrites.
+
+TypeScript
+export function refreshConfig(config: BrokerConfig): void {
+  if (ws) {
+    ws.removeAllListeners();
+    try { ws.terminate(); } catch {}
+    ws = null;
+  }
+  if (reconnectTimer) { // Clear pending reconnect
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  relayFailed = false;
+  reconnectDelay = 1_000;
+  activeConfig = config;
+  connect(config);
+  startHsmHeartbeat(); //
+}
+2. Update for server/hsi-kotak-neo-v3.ts
+2a. Module Variables & URL Update
+Update URL: Change HSI_URL to wss://mis.kotaksecurities.com/realtime.
+
+TypeScript
+const HSI_URL = "wss://mis.kotaksecurities.com/realtime"; //
+
+// ... after let relayFailed = false;
+let reconnectTimer: NodeJS.Timeout | null = null; //
+let heartbeatInterval: NodeJS.Timeout | null = null; //
+2b. Modify [HSI-2] scheduleReconnect
+Capture the timer handle in the 🔒 LOCKED BLOCK.
+
+TypeScript
+// 🔒 LOCKED BLOCK START — HSI scheduleReconnect: same exponential backoff as HSM [HSI-2]
+function scheduleReconnect(config: BrokerConfig): void {
+  reconnectTimer = setTimeout(() => connect(config), reconnectDelay); // Updated to track handle
+  reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+}
+// 🔒 LOCKED BLOCK END
+2c. Add [HSI-3] Heartbeat
+Insert this new 🔒 LOCKED BLOCK before refreshConfig.
+
+TypeScript
+// 🔒 LOCKED BLOCK START — HSI heartbeat: sends {"type":"hb"} every 30 s while WS is OPEN [HSI-3]
+function startHsiHeartbeat(): void {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  heartbeatInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "hb" })); //
+      } catch {}
+    }
+  }, 30_000);
+}
+// 🔒 LOCKED BLOCK END
+2d. Update refreshConfig & startHsiGateway
+Call startHsiHeartbeat() and ensure timer cleanup.
+
+TypeScript
+export function refreshConfig(config: BrokerConfig): void {
+  if (ws) {
+    ws.removeAllListeners();
+    try { ws.terminate(); } catch {}
+    ws = null;
+  }
+  if (reconnectTimer) { // Clear pending reconnect
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  relayFailed = false;
+  reconnectDelay = 1_000;
+  activeConfig = config;
+  connect(config);
+  startHsiHeartbeat(); //
+}
+3. Invariant Comment Updates
+Update the top-level documentation in both files to include the new invariants:
+
+HSM: // [HSM-4] startHsmHeartbeat: 30 s ti heartbeat to prevent Kotak server drop.
+
+HSI: // [HSI-2] scheduleReconnect: reconnectTimer tracked.
+
+HSI: // [HSI-3] startHsiHeartbeat: 30 s hb heartbeat to prevent Kotak server drop.
