@@ -138,7 +138,11 @@ function scheduleReconnect(config: BrokerConfig): void {
 // 🔒 LOCKED BLOCK END
 
 export function refreshConfig(config: BrokerConfig): void {
-  if (ws) { try { ws.terminate(); } catch {} ws = null; }
+  if (ws) {
+    ws.removeAllListeners();
+    try { ws.terminate(); } catch {}
+    ws = null;
+  }
   relayFailed = false;
   reconnectDelay = 1_000;
   activeConfig = config;
