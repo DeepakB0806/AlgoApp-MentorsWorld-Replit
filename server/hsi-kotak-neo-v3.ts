@@ -10,7 +10,7 @@ import type { BrokerConfig } from "@shared/schema";
 //   [HSI-2] scheduleReconnect uses same exponential backoff as HSM.
 
 const LOG_PREFIX = "[HSI]";
-const HSI_URL = "wss://e41.kotaksecurities.com/realtime";
+const HSI_URL = "wss://mlhsm.kotaksecurities.com";
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
 let ws: WebSocket | null = null;
