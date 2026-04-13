@@ -1110,7 +1110,7 @@ export function TradePlanning() {
                     if (tp2.timeLogic?.exitTime) {
                       exitBadges.push({ label: `Exit @ ${tp2.timeLogic.exitTime}`, color: "text-yellow-400" });
                     }
-                    if (tp2.timeLogic?.exitOnExpiry) {
+                    if (tp2.timeLogic?.exitOnExpiry || !!tp2.timeLogic?.expiryType) {
                       const expType = tp2.timeLogic.expiryType || "weekly";
                       const weekOffset = tp2.timeLogic.expiryWeekOffset || 0;
                       const dayRange = `(${tp2.timeLogic.weeklyStartDay || "Mon"}-${tp2.timeLogic.weeklyEndDay || "Thu"})`;

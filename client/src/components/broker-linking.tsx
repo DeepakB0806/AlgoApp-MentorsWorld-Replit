@@ -806,7 +806,7 @@ export function BrokerLinking() {
               blockGroups.length > 0 ? `${blockGroups.length} block${blockGroups.length > 1 ? "s" : ""}` : null,
               tp.stoploss?.enabled ? `SL: ${tp.stoploss.value}${tp.stoploss.mode === "percentage" ? "%" : ""}` : null,
               tl.exitTime ? `Exit ${tl.exitTime}` : null,
-              tl.exitOnExpiry ? expiryLabel : null,
+              (tl.exitOnExpiry || !!tl.expiryType) ? expiryLabel : null,
               (tl.exitAfterDays ?? 0) > 0 ? `Exit +${tl.exitAfterDays}d` : null,
             ].filter(Boolean).join(" · ");
 
@@ -877,11 +877,13 @@ export function BrokerLinking() {
                               </span>
                             ))}
                           </div>
-                          {(tp.stoploss?.enabled || tl.exitTime || (tl.exitAfterDays ?? 0) > 0 || tl.exitOnExpiry) && (
+                          {(tp.stoploss?.enabled || tp.profitTarget?.enabled || tp.trailingSL?.enabled || tl.exitTime || (tl.exitAfterDays ?? 0) > 0 || tl.exitOnExpiry || !!tl.expiryType) && (
                             <div className="flex flex-wrap gap-1.5">
                               {tp.stoploss?.enabled && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">SL: {tp.stoploss.value}{tp.stoploss.mode === "percentage" ? "%" : ""}</span>}
+                              {tp.profitTarget?.enabled && <span className="text-xs text-emerald-400 bg-emerald-400/10 rounded px-2 py-0.5">Target: {tp.profitTarget.value}{tp.profitTarget.mode === "percentage" ? "%" : " INR"}</span>}
+                              {tp.trailingSL?.enabled && <span className="text-xs text-blue-400 bg-blue-400/10 rounded px-2 py-0.5">TSL Active</span>}
                               {tl.exitTime && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Exit @ {tl.exitTime}</span>}
-                              {tl.exitOnExpiry && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">{expiryLabel}</span>}
+                              {(tl.exitOnExpiry || !!tl.expiryType) && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">{expiryLabel}</span>}
                               {(tl.exitAfterDays ?? 0) > 0 && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Exit +{tl.exitAfterDays}d</span>}
                             </div>
                           )}
