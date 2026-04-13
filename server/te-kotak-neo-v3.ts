@@ -42,29 +42,59 @@ import { liveContractCache, brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 // FILL PRICE LOOKUP
 // After a Kotak order is placed, fetch actual execution price from order history
 // ═══════════════════════════════════════════════════════════════════════════════
-async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallback: number): Promise<{ fillPrice: number; status: string; reason: string; filledQty: number }> {
+async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallback: number, isRetry = false): Promise<{ fillPrice: number; status: string; reason: string; filledQty: number }> {
   try {
     const histResult = await EL.getOrderHistory(brokerConfig, orderId);
+
+    // TASK #119: Retry once after 1s if history is empty (race condition after placement)
+    if ((!histResult.success || !Array.isArray(histResult.data) || histResult.data.length === 0) && !isRetry) {
+      console.log(`[TE] getOrderHistory empty for ${orderId} — retrying in 1s...`);
+      await new Promise(r => setTimeout(r, 1000));
+      return getFillPrice(brokerConfig, orderId, fallback, true);
+    }
+
     if (histResult.success && Array.isArray(histResult.data) && histResult.data.length > 0) {
-      const latest = histResult.data[histResult.data.length - 1] as any;
+      // TASK #119: Raw debug log — reveals actual Kotak field names and array order in production
+      const firstElem = histResult.data[0] as any;
+      const lastElem = histResult.data[histResult.data.length - 1] as any;
+      console.debug(`[TE] RAW HISTORY DEBUG [${orderId}]: length=${histResult.data.length} | index[0] keys=${Object.keys(firstElem || {}).join(',')} | ordSt[0]=${firstElem?.ordSts || firstElem?.ordSt || firstElem?.status || firstElem?.stText} | ordSt[last]=${lastElem?.ordSts || lastElem?.ordSt || lastElem?.status || lastElem?.stText}`);
+
+      // Kotak Neo V3 assumed newest-first (index 0). Verify via RAW HISTORY DEBUG log on first live trade.
+      // If debug log shows real status is at [last], change data[0] → data[data.length - 1] and remove debug line.
+      const latest = histResult.data[0] as any;
+
       const fill = Number(
         latest?.avgPrc || latest?.avgPrice || latest?.avg_prc ||
         latest?.flprc  || latest?.fillPrice || latest?.fill_price ||
         latest?.prc    || latest?.pr || 0
       );
-      const status = latest?.ordSt || latest?.stText || "UNKNOWN";
-      const reason = latest?.rejReason || latest?.rjBy || "";
-      const filledQty = Number(latest?.filledShares || latest?.fldQty || latest?.fil_qty || 0);
-      if (fill > 0) {
-        console.log(`[TE] Fill price from order history (${orderId.slice(0,8)}): ${fill} (fallback was ${fallback})`);
-        return { fillPrice: fill, status, reason, filledQty };
+
+      // TASK #119: Expanded field name mapping for status
+      const rawStatus = latest?.ordSts || latest?.ordSt || latest?.status || latest?.stText || "UNKNOWN";
+      let normalizedStatus = "UNKNOWN";
+      if (typeof rawStatus === "string") {
+        const s = rawStatus.toUpperCase();
+        if (s === "COMPLETED" || s === "TRADED" || s === "COMPLETE" || s === "C" || s.includes("COMP")) normalizedStatus = "COMPLETED";
+        else if (s === "REJECTED" || s.includes("REJ") || s === "R") normalizedStatus = "REJECTED";
+        else if (s === "CANCELLED" || s.includes("CAN") || s === "X") normalizedStatus = "CANCELLED";
+        else if (s === "OPEN" || s === "PENDING" || s === "O") normalizedStatus = "OPEN";
+        else normalizedStatus = rawStatus;
       }
-      return { fillPrice: fallback, status, reason, filledQty };
+
+      const reason = latest?.rejReason || latest?.rejRsn || latest?.rjBy || latest?.reason || "";
+      const filledQty = Number(latest?.filledShares || latest?.fldQty || latest?.fil_qty || 0);
+
+      if (fill > 0) {
+        console.log(`[TE] Fill price from order history (${orderId.slice(0,8)}): ${fill} (fallback was ${fallback}) | status: ${normalizedStatus}`);
+        return { fillPrice: fill, status: normalizedStatus, reason, filledQty };
+      }
+      return { fillPrice: fallback, status: normalizedStatus, reason, filledQty };
     }
-  } catch (err) {
-    console.warn(`[TE] Could not fetch fill price for order ${orderId.slice(0,8)}: ${err}`);
+    return { fillPrice: fallback, status: "UNKNOWN", reason: "History empty after retry", filledQty: 0 };
+  } catch (err: any) {
+    console.error(`[TE] Error in getFillPrice for ${orderId}:`, err);
+    return { fillPrice: fallback, status: "UNKNOWN", reason: err.message, filledQty: 0 };
   }
-  return { fillPrice: fallback, status: "UNKNOWN", reason: "", filledQty: 0 };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -187,11 +217,25 @@ export async function processTradeSignal(
   console.log(`[PFL] ▶ processTradeSignal: signal=${webhookData.signalType} alert=${webhookData.alert} config=${strategyConfigId.slice(0, 8)} resolvedAction=${signalContext?.resolvedAction || "N/A"} blockType=${signalContext?.blockType || "N/A"}`);
   const results: TradeResult[] = [];
 
-  let plans = tradingCache.getActivePlansByConfigId(strategyConfigId);
+  const cachedResult = tradingCache.getActivePlansByConfigId(strategyConfigId);
+  const fromCache = !!cachedResult;
+  let plans = cachedResult;
   if (!plans) {
     const allPlans = await storage.getStrategyPlansByConfig(strategyConfigId);
     plans = allPlans.filter((p) => p.brokerConfigId && (p.deploymentStatus === "active" || p.deploymentStatus === "deployed"));
     tradingCache.setActivePlansByConfigId(strategyConfigId, plans);
+  }
+
+  // TASK #120: Signal-Time Audit Log
+  if (plans.length > 0) {
+    const planAudit = plans.map(p => `${p.name} [${p.id.slice(0, 4)}]=${p.deploymentStatus}`).join(" | ");
+    const auditMsg = `Active Plans Resolved (${fromCache ? "cache hit" : "DB query"}): ${planAudit}`;
+    console.log(`[PFL] ℹ ${auditMsg}`);
+    addProcessFlowLog({
+      planId: plans[0].id, planName: plans[0].name, signalType: webhookData.signalType || "unknown",
+      alert: webhookData.alert || "", resolvedAction: "N/A", blockType: "",
+      actionTaken: "info", message: auditMsg, broker: "none",
+    });
   }
 
   if (plans.length === 0) {
@@ -279,6 +323,21 @@ async function executeTradeForPlan(
   signalContext?: SignalContext,
 ): Promise<TradeResult> {
   const startTime = Date.now();
+
+  // TASK #120: Point-of-Execution Re-validation — close the cache staleness window
+  try {
+    const livePlan = await storage.getStrategyPlan(plan.id);
+    if (!livePlan || (livePlan.deploymentStatus !== "active" && livePlan.deploymentStatus !== "deployed")) {
+      const warnMsg = `Plan "${plan.name}" skipped — deploymentStatus changed to '${livePlan?.deploymentStatus}' between cache and execution`;
+      console.warn(`[PFL] ⚠ ${warnMsg}`);
+      logPFL(plan, brokerConfig.brokerName, data, "skipped", warnMsg, { resolvedAction: signalContext?.resolvedAction });
+      return { success: false, action: "hold", broker: brokerConfig.brokerName, planId: plan.id, message: warnMsg };
+    }
+  } catch (e) {
+    console.error(`[TE] DB read failed during plan re-validation for ${plan.id}`, e);
+  }
+  // -------------------------------------------------------
+
   const broker = brokerConfig.brokerName;
   const signalType = data.signalType;
   const price = Number(data.price) || 0;
