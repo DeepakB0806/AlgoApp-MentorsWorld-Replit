@@ -10,6 +10,8 @@ import { db } from "../db";
 import { desc, eq, sql, or } from "drizzle-orm";
 import EL from "../el-kotak-neo-v3";
 import { startPersistentSquareOff } from "../te-kotak-neo-v3";
+import { refreshConfig as hsmRefreshConfig } from "../hsm-kotak-neo-v3";
+import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo-v3";
 import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
 import { addProcessFlowLog, getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
 import { processTick, updateLastWsTick } from "../tsl-kotak-neo-v3";
@@ -316,6 +318,12 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         failedLogins: result.success ? (config.failedLogins || 0) : (config.failedLogins || 0) + 1,
         updatedAt: now,
       });
+
+      if (result.success && updated) {
+        hsmRefreshConfig(updated);
+        hsiRefreshConfig(updated);
+        console.log(`[WS] Refreshed HSM/HSI config after successful login (${updated.brokerName})`);
+      }
 
       await storage.createBrokerSessionLog({
         brokerConfigId: req.params.id,

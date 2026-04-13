@@ -137,6 +137,14 @@ function scheduleReconnect(config: BrokerConfig): void {
 }
 // 🔒 LOCKED BLOCK END
 
+export function refreshConfig(config: BrokerConfig): void {
+  if (ws) { try { ws.terminate(); } catch {} ws = null; }
+  relayFailed = false;
+  reconnectDelay = 1_000;
+  activeConfig = config;
+  connect(config);
+}
+
 export function subscribe(symbol: string): void {
   subscriptions.set(symbol, true);
   const token = brokerSymbolToTokenMap.get(symbol);
