@@ -1,0 +1,55 @@
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# curl -vI https://mis.kotaksecurities.com
+*   Trying 167.86.39.30:443...
+* Connected to mis.kotaksecurities.com (167.86.39.30) port 443 (#0)
+* ALPN: offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+*  CAfile: /etc/ssl/certs/ca-certificates.crt
+*  CApath: /etc/ssl/certs
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: C=IN; ST=Mah\U0101r\U0101shtra; O=Kotak Securities Ltd.; CN=*.kotaksecurities.com
+*  start date: Jan 23 00:00:00 2026 GMT
+*  expire date: Feb 10 23:59:59 2027 GMT
+*  subjectAltName: host "mis.kotaksecurities.com" matched cert's "*.kotaksecurities.com"
+*  issuer: C=GB; O=Sectigo Limited; CN=Sectigo Public Server Authentication CA OV R36
+*  SSL certificate verify ok.
+* using HTTP/2
+* h2h3 [:method: HEAD]
+* h2h3 [:path: /]
+* h2h3 [:scheme: https]
+* h2h3 [:authority: mis.kotaksecurities.com]
+* h2h3 [user-agent: curl/7.88.1]
+* h2h3 [accept: */*]
+* Using Stream ID: 1 (easy handle 0x55fbb43c52b0)
+> HEAD / HTTP/2
+> Host: mis.kotaksecurities.com
+> user-agent: curl/7.88.1
+> accept: */*
+> 
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* old SSL session ID is stale, removing
+< HTTP/2 503 
+HTTP/2 503 
+< content-type: text/html
+content-type: text/html
+< content-length: 0
+content-length: 0
+< rdwr-code: server said - 503
+rdwr-code: server said - 503
+< rdwr_response: allowed
+rdwr_response: allowed
+< strict-transport-security: max-age=31536000
+strict-transport-security: max-age=31536000
+
+< 
+* Connection #0 to host mis.kotaksecurities.com left intact
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# 
