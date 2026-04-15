@@ -160,7 +160,7 @@ function startHsiHeartbeat(): void {
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   heartbeatInterval = setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(JSON.stringify({ type: "hb" })); } catch {}
+      try { ws.send(JSON.stringify({ type: "hb" }).replace(/"/g, '')); } catch {}
     }
   }, 30_000);
 }
