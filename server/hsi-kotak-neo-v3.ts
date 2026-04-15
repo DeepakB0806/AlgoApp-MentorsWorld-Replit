@@ -26,8 +26,8 @@ let heartbeatInterval: NodeJS.Timeout | null = null;
 function buildAuthMessage(config: BrokerConfig): object {
   return {
     type: "cn",
-    Authorization: config.viewToken,
-    Sid: config.sidView,
+    Authorization: config.accessToken,
+    Sid: config.sessionId,
     source: "WEB",
     ...(config.dataCenter ? { dataCenter: config.dataCenter } : {}),
   };
@@ -47,8 +47,8 @@ function resolveHsiUrl(config: BrokerConfig): string {
 
 // 🔒 LOCKED BLOCK START — HSI connect: mirrors HSM relay→direct auto-fallback with identical relayFailed logic; never weaken [HSI-1]
 function connect(config: BrokerConfig): void {
-  if (!config.viewToken || !config.sidView) {
-    console.error(`${LOG_PREFIX} Missing viewToken/sidView. Cannot connect HSI.`);
+  if (!config.accessToken || !config.sessionId) {
+    console.error(`${LOG_PREFIX} Missing accessToken/sessionId. Cannot connect HSI.`);
     return;
   }
 
@@ -117,13 +117,17 @@ function connect(config: BrokerConfig): void {
             }).catch(() => {});
           }
         }
+        return;
       }
+      console.log(`${LOG_PREFIX} [DEBUG] msg type="${type}" raw=${raw.toString().slice(0, 300)}`);
     } catch {
+      console.log(`${LOG_PREFIX} [DEBUG] non-JSON raw=${raw.toString().slice(0, 300)}`);
     }
   });
 
-  ws.on("close", () => {
-    console.log(`${LOG_PREFIX} Disconnected — reconnecting in ${reconnectDelay}ms`);
+  ws.on("close", (code: number, reason: Buffer) => {
+    const reasonStr = reason ? reason.toString() : "";
+    console.log(`${LOG_PREFIX} Disconnected code=${code} reason="${reasonStr}" — reconnecting in ${reconnectDelay}ms`);
     ws = null;
     scheduleReconnect(config);
   });
