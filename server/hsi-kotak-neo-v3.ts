@@ -83,7 +83,7 @@ function connect(config: BrokerConfig): void {
     console.log(usingRelay ? `${LOG_PREFIX} Connected via relay. Sending Kotak auth...` : `${LOG_PREFIX} Connected directly to Kotak HSI. Sending auth...`);
     reconnectDelay = 1_000;
     try {
-      const authPayload = JSON.stringify(buildAuthMessage(config));
+      const authPayload = JSON.stringify(buildAuthMessage(config)).replace(/"/g, '');
       console.log(`${LOG_PREFIX} Auth payload: ${authPayload}`);
       ws!.send(authPayload);
     } catch (err) {
