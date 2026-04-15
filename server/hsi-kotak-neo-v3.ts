@@ -28,7 +28,7 @@ function buildAuthMessage(config: BrokerConfig): object {
     type: "cn",
     Authorization: config.accessToken,
     Sid: config.sessionId,
-    source: "WEB",
+    src: "WEB",
   };
 }
 
@@ -82,7 +82,9 @@ function connect(config: BrokerConfig): void {
     console.log(usingRelay ? `${LOG_PREFIX} Connected via relay. Sending Kotak auth...` : `${LOG_PREFIX} Connected directly to Kotak HSI. Sending auth...`);
     reconnectDelay = 1_000;
     try {
-      ws!.send(JSON.stringify(buildAuthMessage(config)));
+      const authPayload = JSON.stringify(buildAuthMessage(config));
+      console.log(`${LOG_PREFIX} Auth payload: ${authPayload}`);
+      ws!.send(authPayload);
     } catch (err) {
       console.error(`${LOG_PREFIX} Auth send error:`, err);
     }
@@ -91,6 +93,10 @@ function connect(config: BrokerConfig): void {
   ws.on("message", (raw: WebSocket.RawData) => {
     try {
       const msg = JSON.parse(raw.toString());
+      if (usingRelay && msg.msg === "session message format incorrect") {
+        relayFailed = true;
+        console.log(`${LOG_PREFIX} Relay path error confirmed — relay does not forward /realtime path; switching to direct E41 connection on next reconnect`);
+      }
       const type: string = msg.type || "";
       const d = msg.data || msg;
       if (type === "trade" || type === "position") {
