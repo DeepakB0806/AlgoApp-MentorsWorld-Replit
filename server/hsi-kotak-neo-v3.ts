@@ -61,8 +61,9 @@ function connect(config: BrokerConfig): void {
     if (RELAY_URL && RELAY_SECRET && !relayFailed) {
       usingRelay = true;
       const wsRelayUrl = RELAY_URL.replace("http://", "ws://").replace("https://", "wss://");
-      console.log(`${LOG_PREFIX} Routing via Bangalore relay ${wsRelayUrl} → ${HSI_URL}`);
-      ws = new WebSocket(wsRelayUrl, {
+      const wsRelayUrlWithPath = `${wsRelayUrl}/realtime`;
+      console.log(`${LOG_PREFIX} Routing via Bangalore relay ${wsRelayUrlWithPath} → ${HSI_URL}`);
+      ws = new WebSocket(wsRelayUrlWithPath, {
         headers: { "x-target-url": HSI_URL, "x-relay-secret": RELAY_SECRET },
       });
     } else {
