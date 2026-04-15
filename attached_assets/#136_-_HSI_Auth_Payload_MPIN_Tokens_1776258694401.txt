@@ -1,0 +1,75 @@
+#136 - HSI Auth Payload: MPIN Tokens & Strict JSON Schema
+
+What & Why
+The Kotak Interactive stream (HSI) on the E41 datacenter is actively rejecting the WebSocket authentication payload. Deep analysis of the official Kotak Python SDK (Websocket_KotakNeo.ipynb) reveals two critical payload requirements that our raw implementation currently violates:
+
+The MPIN Token Inference: The Colab notebook proves Kotak's login is a strict two-step process. Step 1 (totp_login) issues a token with "scope":["View"]. Step 2 (totp_validate with MPIN) issues the final session token with "scope":["Trade"] and explicitly assigns the E41 datacenter. Because HSI is the order-execution stream on E41, it strictly requires the "Trade" token (accessToken / sessionId), not the "View" tokens.
+
+The "src" Schema Bug: The Kotak WebSocket parser strictly expects the payload key "src": "WEB". Our current buildAuthMessage sends "source": "WEB". The E41 server cannot parse this, immediately dropping the connection with the error: {"ak":"nk","type":"failed to connect","msg":"session message format incorrect"}.
+
+Done looks like
+
+buildAuthMessage in HSI sends the correct MPIN tokens and uses the exact "src": "WEB" key.
+
+The pre-flight token guard in [HSI-1] checks for the correct MPIN tokens.
+
+Replit console logs show [HSI] Connected via relay. Sending Kotak auth... followed by a stable connection, with no 1006 disconnects or "format incorrect" debug messages.
+
+Out of scope
+
+server/hsm-kotak-neo-v3.ts — The Market Data stream (HSM) is working perfectly and must not be touched.
+
+The [HSI-2], [HSI-3], and [HSI-4] locked blocks in the HSI file.
+
+Any changes to the relayFailed fallback routing logic.
+
+Tasks
+
+Revert Auth Tokens & Fix Schema — In server/hsi-kotak-neo-v3.ts, locate the buildAuthMessage function (not inside any locked block). Change the Authorization value to config.accessToken, the Sid value to config.sessionId, and change the source: "WEB" key to exactly src: "WEB".
+
+Update Pre-Flight Guard — Inside the connect() function (which is inside the [HSI-1] locked block), update the early-return guard at the very top. Change the condition from checking !config.viewToken || !config.sidView to checking !config.accessToken || !config.sessionId. Update the corresponding console.error message to match.
+
+Critical constraints
+
+Task 2 requires modifying the [HSI-1] locked block. The user has explicitly authorized opening [HSI-1] to update the !config.accessToken guard check ONLY.
+
+Do NOT modify any of the relay routing, URL assignment, or error fallback logic inside [HSI-1].
+
+The buildAuthMessage function (Task 1) sits safely outside the locked blocks and can be fully replaced.
+
+Ensure the key is exactly "src" and not "source".
+
+Relevant files
+
+server/hsi-kotak-neo-v3.ts:26-33 (For buildAuthMessage)
+
+server/hsi-kotak-neo-v3.ts (For [HSI-1] connect guard)
+
+Code Snippets:
+
+Snippet 1: Update buildAuthMessage (Lines ~26-33)
+Locate the buildAuthMessage function near the top of the file (it is outside of any locked blocks). Replace the entire function with this code to use the MPIN tokens and the strict "src" key:
+
+TypeScript
+function buildAuthMessage(config: BrokerConfig): object {
+  return { 
+    type: "cn", 
+    Authorization: config.accessToken, // Reverted from viewToken
+    Sid: config.sessionId,             // Reverted from sidView
+    src: "WEB"                         // CRITICAL FIX: Must be exactly 'src'
+  };
+}
+Snippet 2: Update the [HSI-1] Pre-Flight Guard (Lines ~41-48)
+Locate the connect function inside the 🔒 [HSI-1] LOCKED BLOCK. Replace the early-return guard at the very beginning of the function to match the token change:
+
+TypeScript
+// 🔒 LOCKED BLOCK START — HSI connect: mirrors HSM relay→direct auto-fallback [HSI-1]
+async function connect(config: BrokerConfig, retryCount = 0) {
+  // REVERTED GUARD: Check for the MPIN session tokens
+  if (!config.accessToken || !config.sessionId) {
+    console.error(`${LOG_PREFIX} Missing accessToken/sessionId. Cannot connect HSI.`);
+    return;
+  }
+
+  const targetUrl = process.env.RELAY_TARGET_URL && !relayFailed 
+// ... [Keep the rest of the function exactly as it is] ...

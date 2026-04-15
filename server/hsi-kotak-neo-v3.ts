@@ -26,8 +26,8 @@ let heartbeatInterval: NodeJS.Timeout | null = null;
 function buildAuthMessage(config: BrokerConfig): object {
   return {
     type: "cn",
-    Authorization: config.viewToken,
-    Sid: config.sidView,
+    Authorization: config.accessToken,
+    Sid: config.sessionId,
     source: "WEB",
   };
 }
