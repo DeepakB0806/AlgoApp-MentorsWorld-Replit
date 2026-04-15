@@ -26,8 +26,8 @@ let heartbeatInterval: NodeJS.Timeout | null = null;
 function buildAuthMessage(config: BrokerConfig): object {
   return {
     type: "cn",
-    Authorization: config.accessToken,
-    Sid: config.sessionId,
+    Authorization: config.viewToken,
+    Sid: config.sidView,
     source: "WEB",
     ...(config.dataCenter ? { dataCenter: config.dataCenter } : {}),
   };
@@ -47,8 +47,8 @@ function resolveHsiUrl(config: BrokerConfig): string {
 
 // 🔒 LOCKED BLOCK START — HSI connect: mirrors HSM relay→direct auto-fallback with identical relayFailed logic; never weaken [HSI-1]
 function connect(config: BrokerConfig): void {
-  if (!config.accessToken || !config.sessionId) {
-    console.error(`${LOG_PREFIX} No accessToken/sessionId — skipping WS connection`);
+  if (!config.viewToken || !config.sidView) {
+    console.error(`${LOG_PREFIX} Missing viewToken/sidView. Cannot connect HSI.`);
     return;
   }
 
