@@ -29,19 +29,18 @@ function buildAuthMessage(config: BrokerConfig): object {
     Authorization: config.accessToken,
     Sid: config.sessionId,
     source: "WEB",
-    ...(config.dataCenter ? { dataCenter: config.dataCenter } : {}),
   };
 }
 
 // 🔒 LOCKED BLOCK START — resolveHsiUrl: maps config.dataCenter to specific Kotak datacenter endpoints [HSI-4]
 function resolveHsiUrl(config: BrokerConfig): string {
   const dc = (config.dataCenter || "").toLowerCase().trim();
-  if (dc === "adc") return "wss://cis.kotaksecurities.com/interactive";
-  if (dc === "e21") return "wss://e21.kotaksecurities.com/interactive";
-  if (dc === "e22") return "wss://e22.kotaksecurities.com/interactive";
-  if (dc === "e41") return "wss://e41.kotaksecurities.com/interactive";
-  if (dc === "e43") return "wss://e43.kotaksecurities.com/interactive";
-  return "wss://mis.kotaksecurities.com/interactive";
+  if (dc === "adc") return "wss://cis.kotaksecurities.com/realtime";
+  if (dc === "e21") return "wss://e21.kotaksecurities.com/realtime";
+  if (dc === "e22") return "wss://e22.kotaksecurities.com/realtime";
+  if (dc === "e41") return "wss://e41.kotaksecurities.com/realtime";
+  if (dc === "e43") return "wss://e43.kotaksecurities.com/realtime";
+  return "wss://mis.kotaksecurities.com/realtime";
 }
 // 🔒 LOCKED BLOCK END
 
