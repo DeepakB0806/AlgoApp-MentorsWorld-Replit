@@ -86,7 +86,9 @@ class TranslationLayer {
   private lastLoadDurationMs: number | null = null;
   private initError: string | null = null;
   private reloading = false;
-  private recoveryTimer: NodeJS.Timeout | null = null;
+  private reloadPromise: Promise<void> | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private inRetryLoop = false;
 
   // ─── Init & Load ─────────────────────────────────────────────────────────
   async init(): Promise<void> {
@@ -158,8 +160,66 @@ class TranslationLayer {
       this.ready = false;
       this.initError = error.message;
       console.error(`${LOG_PREFIX} Init failed: ${error.message}`);
-      this.scheduleAutoRecovery();
+      if (!this.inRetryLoop) {
+        this.scheduleRetry(1);
+      }
     }
+  }
+
+  // ─── Auto-Recovery ───────────────────────────────────────────────────────
+  private scheduleRetry(attempt: number): void {
+    if (this.retryTimer) return;
+    const delayMs = Math.min(5000 * attempt, 60000);
+    console.warn(`${LOG_PREFIX} Auto-recovery: scheduling retry attempt ${attempt} in ${delayMs}ms`);
+    this.retryTimer = setTimeout(async () => {
+      this.retryTimer = null;
+      if (this.ready) return;
+      console.warn(`${LOG_PREFIX} Auto-recovery: retrying init (attempt ${attempt})...`);
+      this.inRetryLoop = true;
+      try {
+        await this.init();
+      } finally {
+        this.inRetryLoop = false;
+      }
+      if (this.ready) {
+        console.log(`${LOG_PREFIX} TL recovered after ${attempt} retry attempt(s)`);
+      } else {
+        this.scheduleRetry(attempt + 1);
+      }
+    }, delayMs);
+  }
+
+  async ensureReady(): Promise<boolean> {
+    if (this.ready) return true;
+    console.warn(`${LOG_PREFIX} Auto-recovery: re-initializing after DB connection drop`);
+    if (this.reloadPromise) {
+      await this.reloadPromise;
+    } else {
+      await this.reload();
+    }
+    return this.ready;
+  }
+
+  async reload(): Promise<void> {
+    if (this.reloading && this.reloadPromise) {
+      await this.reloadPromise;
+      return;
+    }
+    this.reloading = true;
+    this.reloadPromise = (async () => {
+      try {
+        console.log(`${LOG_PREFIX} Reloading from database...`);
+        if (this.retryTimer) {
+          clearTimeout(this.retryTimer);
+          this.retryTimer = null;
+        }
+        await this.init();
+      } finally {
+        this.reloading = false;
+        this.reloadPromise = null;
+      }
+    })();
+    await this.reloadPromise;
   }
 
   // 🔒 LOCKED BLOCK START — TL buildMaps: last-entry-wins collision policy; collisions logged, never thrown [TL-1]
@@ -222,32 +282,6 @@ class TranslationLayer {
     }
   }
   // 🔒 LOCKED BLOCK END
-
-  // ─── Reload ─────────────────────────────────────────────────────────────
-  async reload(): Promise<void> {
-    if (this.reloading) {
-      console.warn(`${LOG_PREFIX} Reload already in progress, skipping`);
-      return;
-    }
-    if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = null; }
-    this.reloading = true;
-    try {
-      console.log(`${LOG_PREFIX} Reloading mappings from database...`);
-      await this.init();
-    } finally {
-      this.reloading = false;
-    }
-  }
-
-  private scheduleAutoRecovery(): void {
-    if (this.recoveryTimer) return;
-    this.recoveryTimer = setTimeout(async () => {
-      this.recoveryTimer = null;
-      console.log(`${LOG_PREFIX} Auto-recovery: retrying init...`);
-      await this.init();
-      if (this.ready) console.log(`${LOG_PREFIX} Auto-recovery succeeded`);
-    }, 30_000);
-  }
 
   // ─── Status & Diagnostics ────────────────────────────────────────────────
   isReady(): boolean {
