@@ -1569,6 +1569,12 @@ function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfig[] }) {
   const kotakConfigs = brokerConfigs.filter(c => c.brokerName === "kotak_neo");
   const selectedConfig = kotakConfigs.find(c => c.consumerKey) || kotakConfigs[0];
 
+  const readinessQuery = useQuery<{ ready: boolean; lastUpdated: string | null; isRecovering: boolean; recoveryAttempt: number }>({
+    queryKey: ["/api/te/readiness", selectedConfig?.id],
+    enabled: !!selectedConfig?.id,
+    refetchInterval: 10_000,
+  });
+
   const handleDownload = async () => {
     if (!selectedConfig) return;
     setIsDownloading(true);
@@ -1602,12 +1608,30 @@ function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfig[] }) {
     <Card data-testid="card-scrip-master">
       <CardHeader>
         <div className="flex items-center justify-between">
-          <div>
+          <div className="flex flex-col gap-1">
             <CardTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5" />
               Scrip Master
             </CardTitle>
             <CardDescription>Download the day's NFO scrip master CSV from Kotak Neo</CardDescription>
+            {selectedConfig?.id && (
+              readinessQuery.data?.isRecovering ? (
+                <Badge variant="outline" data-testid="badge-scrip-recovering" className="bg-amber-500/10 text-amber-500 border-amber-500/20 flex items-center gap-2 w-fit mt-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Recovering (Attempt {readinessQuery.data.recoveryAttempt})
+                </Badge>
+              ) : readinessQuery.data?.lastUpdated ? (
+                <Badge variant="outline" data-testid="badge-scrip-synced" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 flex items-center gap-2 w-fit mt-1">
+                  <CheckCircle className="h-3 w-3" />
+                  Synced
+                </Badge>
+              ) : (
+                <Badge variant="outline" data-testid="badge-scrip-not-synced" className="bg-muted text-muted-foreground flex items-center gap-2 w-fit mt-1">
+                  <XCircle className="h-3 w-3" />
+                  Not Synced
+                </Badge>
+              )
+            )}
           </div>
           <Button
             onClick={handleDownload}

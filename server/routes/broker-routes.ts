@@ -13,6 +13,7 @@ import { startPersistentSquareOff } from "../te-kotak-neo-v3";
 import { refreshConfig as hsmRefreshConfig } from "../hsm-kotak-neo-v3";
 import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo-v3";
 import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
+import { getScripSyncStatus } from "../scrip-sync-scheduler";
 import { addProcessFlowLog, getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
 import { processTick, updateLastWsTick } from "../tsl-kotak-neo-v3";
 import {
@@ -955,6 +956,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
             }
           });
         }
+        const recoveryStatus0 = getScripSyncStatus(brokerConfigId);
         return res.json({
           ready: false,
           instrumentCount: 0,
@@ -962,6 +964,8 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
           stale: false,
           lastUpdated: null,
           syncing: syncing || scripSyncInProgress.has(brokerConfigId),
+          isRecovering: recoveryStatus0.isRecovering,
+          recoveryAttempt: recoveryStatus0.recoveryAttempt,
         });
       }
 
@@ -996,6 +1000,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         });
       }
 
+      const recoveryStatus = getScripSyncStatus(brokerConfigId);
       return res.json({
         ready: true,
         instrumentCount: nfoConfigs.length,
@@ -1003,9 +1008,11 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         stale,
         lastUpdated: lastUpdated > 0 ? new Date(lastUpdated).toISOString() : null,
         syncing: syncing || scripSyncInProgress.has(brokerConfigId),
+        isRecovering: recoveryStatus.isRecovering,
+        recoveryAttempt: recoveryStatus.recoveryAttempt,
       });
     } catch (error) {
-      res.status(500).json({ ready: false, instrumentCount: 0, error: "Failed to check trade readiness", stale: false, lastUpdated: null, syncing: false });
+      res.status(500).json({ ready: false, instrumentCount: 0, error: "Failed to check trade readiness", stale: false, lastUpdated: null, syncing: false, isRecovering: false, recoveryAttempt: 0 });
     }
   });
 

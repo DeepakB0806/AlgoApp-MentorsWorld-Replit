@@ -19,6 +19,8 @@ import { startWsGateway } from "./hsm-kotak-neo-v3";
 import { startHsiGateway } from "./hsi-kotak-neo-v3";
 import { startSettlementEngine } from "./se-kotak-neo-v3";
 import { startTslEngine } from "./tsl-kotak-neo-v3";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err.stack || err.message || err);
@@ -167,6 +169,23 @@ app.use((req, res, next) => {
   registerAuthRoutes(app);
   
   await registerRoutes(httpServer, app);
+
+  // DB warmup probe — waits for Neon to wake up before any subsystem queries the DB
+  async function waitForDatabase() {
+    console.log(`[BOOT] Probing database connection (waking up serverless DB)...`);
+    for (let i = 1; i <= 30; i++) {
+      try {
+        await db.execute(sql`SELECT 1`);
+        console.log(`[BOOT] Database is awake and ready! (Took ~${i * 2}s)`);
+        return;
+      } catch (error: any) {
+        console.warn(`[BOOT] DB probe failed, retrying in 2s... (Attempt ${i}/30)`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+    console.warn(`[BOOT] DB warmup probe timed out after 60 seconds. Proceeding with boot sequence...`);
+  }
+  await waitForDatabase();
 
   try {
     const ufResult = await storage.ensureUniversalFields();

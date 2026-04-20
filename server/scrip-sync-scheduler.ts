@@ -15,6 +15,13 @@ const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // fails (no broker context is available, so per-broker retries cannot be used)
 let startupRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
+// In-memory recovery state — updated by retry functions, consumed by API route
+export const scripRecoveryState = new Map<string, { isRecovering: boolean; recoveryAttempt: number }>();
+
+export function getScripSyncStatus(brokerConfigId: string) {
+  return scripRecoveryState.get(brokerConfigId) ?? { isRecovering: false, recoveryAttempt: 0 };
+}
+
 /**
  * Schedules a full startup-phase retry: re-fetches broker configs and then
  * attempts `runScripMasterSync` for each live broker. Used when the outer
@@ -82,11 +89,14 @@ export function scheduleScripSyncRetry(
     `[SCRIP-MASTER] Auto-recovery: scheduling retry attempt ${attempt} for broker ${brokerConfig.ucc || brokerId} in ${delayMs / 1000}s`,
   );
 
+  scripRecoveryState.set(brokerId, { isRecovering: true, recoveryAttempt: attempt });
+
   const timer = setTimeout(async () => {
     retryTimers.delete(brokerId);
     try {
       const result = await runScripMasterSync(storage, brokerConfig);
       if (result.success) {
+        scripRecoveryState.set(brokerId, { isRecovering: false, recoveryAttempt: 0 });
         console.log(
           `[SCRIP-MASTER] Auto-recovery: recovered after ${attempt} attempt(s) — ${result.synced} contracts loaded`,
         );
