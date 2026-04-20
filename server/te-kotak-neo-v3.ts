@@ -101,6 +101,8 @@ async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallbac
 // TRANSACTION TYPE MAPPING
 // Maps universal action names (BUY/SELL) to broker-specific codes via TL
 // ═══════════════════════════════════════════════════════════════════════════════
+const KOTAK_TT_FALLBACK: Record<string, string> = { BUY: "B", SELL: "S" };
+
 function mapTransactionType(action: string): string {
   if (TL.isReady()) {
     const mapped = TL.mapValueFromAllowed("transactionType", "order_place", action);
@@ -109,7 +111,7 @@ function mapTransactionType(action: string): string {
   } else {
     console.warn(`[TE] TL not ready — cannot map transaction type for action="${action}"`);
   }
-  return action;
+  return KOTAK_TT_FALLBACK[action.toUpperCase()] ?? action;
 }
 
 function mapPriceType(pt: string | null | undefined): string {
