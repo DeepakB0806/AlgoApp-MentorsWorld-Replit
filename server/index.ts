@@ -10,7 +10,7 @@ import TL from "./tl-kotak-neo-v3";
 import EL from "./el-kotak-neo-v3";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
 import { runScripMasterSync } from "./smc-kotak-neo-v3";
-import { rescheduleScripMasterSync } from "./scrip-sync-scheduler";
+import { rescheduleScripMasterSync, scheduleScripSyncRetry, scheduleStartupScripSyncRetry } from "./scrip-sync-scheduler";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
 import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback, closeTradeById } from "./te-kotak-neo-v3";
@@ -214,14 +214,17 @@ app.use((req, res, next) => {
         if (result.success) {
           log(`[STARTUP] Scrip master auto-sync: ${result.synced} contracts loaded for broker ${brokerConfig.ucc || brokerConfig.id}`);
         } else {
-          log(`[STARTUP] Scrip master auto-sync warning for broker ${brokerConfig.ucc || brokerConfig.id}: ${result.error}`);
+          log(`[STARTUP] Scrip master auto-sync warning for broker ${brokerConfig.ucc || brokerConfig.id}: ${result.error} — scheduling auto-recovery`);
+          scheduleScripSyncRetry(storage, brokerConfig, 1);
         }
       } catch (syncErr) {
-        log(`[STARTUP] Scrip master auto-sync warning for broker ${brokerConfig.ucc || brokerConfig.id}: ${syncErr}`);
+        log(`[STARTUP] Scrip master auto-sync warning for broker ${brokerConfig.ucc || brokerConfig.id}: ${syncErr} — scheduling auto-recovery`);
+        scheduleScripSyncRetry(storage, brokerConfig, 1);
       }
     }
   } catch (err) {
-    log(`[STARTUP] Scrip master auto-sync warning: ${err}`);
+    log(`[STARTUP] Scrip master auto-sync warning: ${err} — scheduling auto-recovery`);
+    scheduleStartupScripSyncRetry(storage, 1);
   }
 
   // Start plan monitor — auto square-off based on exitTime and exitOnExpiry
