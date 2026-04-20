@@ -1,0 +1,88 @@
+Step 1: Increase DB Timeout
+File: server/db.ts
+
+Locate the Pool initialization.
+
+Add or update the connectionTimeoutMillis property to 30000 (30 seconds) to give Neon more time to wake up.
+
+Step 2: Implement the DB Warmup Probe
+File: server/index.ts
+
+At the top of the file, ensure you have imported sql from drizzle-orm and db from ./db.
+
+Immediately before the main initialization block (where TL.init(), EL.init(), and scrip-sync are called), insert this exact warmup function and call:
+
+TypeScript
+// --- TASK #148: DB WARMUP PROBE ---
+async function waitForDatabase() {
+  console.log(`[BOOT] Probing database connection (waking up serverless DB)...`);
+  for (let i = 1; i <= 30; i++) {
+    try {
+      await db.execute(sql`SELECT 1`);
+      console.log(`[BOOT] Database is awake and ready! (Took ~${i * 2}s)`);
+      return;
+    } catch (error: any) {
+      console.warn(`[BOOT] DB probe failed, retrying in 2s... (Attempt ${i}/30)`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+  console.warn(`[BOOT] DB warmup probe timed out after 60 seconds. Proceeding with boot sequence...`);
+}
+
+// Call this BEFORE initializing TL, EL, or Scrip Master
+await waitForDatabase();
+// -----------------------------------
+Step 3: Expose Recovery State in Scheduler
+File: server/scrip-sync-scheduler.ts
+
+At the top of the file, create a state map:
+
+TypeScript
+export const scripRecoveryState = new Map<string, { isRecovering: boolean; recoveryAttempt: number; lastSyncAt: Date | null }>();
+
+export function getScripSyncStatus(brokerConfigId: string) {
+  return scripRecoveryState.get(brokerConfigId) || { isRecovering: false, recoveryAttempt: 0, lastSyncAt: null };
+}
+Inside your scheduleScripSyncRetry or scheduleStartupScripSyncRetry functions, update this map appropriately before the retry setTimeout, incrementing the attempt number. When a sync succeeds, set isRecovering: false and recoveryAttempt: 0.
+
+Step 4: Wire State to API Route
+File: server/routes/broker-routes.ts
+
+Locate the router.get("/api/broker-configs/:id/scrip-status", ...) route.
+
+Import getScripSyncStatus from ../scrip-sync-scheduler.
+
+Merge the memory state with the response. Example:
+
+TypeScript
+const recoveryStatus = getScripSyncStatus(configId);
+res.json({ 
+  ...existingResponseData, 
+  isRecovering: recoveryStatus.isRecovering, 
+  recoveryAttempt: recoveryStatus.recoveryAttempt 
+});
+Step 5: Build the Frontend Recovery Badge
+File: client/src/pages/broker-api.tsx (Inside the Scrip Master card component)
+
+Access the new isRecovering and recoveryAttempt fields from the scrip status query.
+
+Update the status badge logic:
+
+TypeScript
+{statusQuery.data?.isRecovering ? (
+  <Badge variant="outline" className="bg-amber-500/10 text-amber-500 border-amber-500/20 flex items-center gap-2">
+    <Loader2 className="h-3 w-3 animate-spin" />
+    Recovering (Attempt {statusQuery.data.recoveryAttempt})
+  </Badge>
+) : statusQuery.data?.lastSyncTime ? (
+  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 flex items-center gap-2">
+    <CheckCircle2 className="h-3 w-3" />
+    Synced
+  </Badge>
+) : (
+  <Badge variant="outline" className="bg-muted text-muted-foreground flex items-center gap-2">
+    <XCircle className="h-3 w-3" />
+    Not Synced
+  </Badge>
+)}
+(Ensure Loader2, CheckCircle2, and XCircle are imported from lucide-react).
