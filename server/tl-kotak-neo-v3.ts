@@ -86,6 +86,7 @@ class TranslationLayer {
   private lastLoadDurationMs: number | null = null;
   private initError: string | null = null;
   private reloading = false;
+  private recoveryTimer: NodeJS.Timeout | null = null;
 
   // ─── Init & Load ─────────────────────────────────────────────────────────
   async init(): Promise<void> {
@@ -157,6 +158,7 @@ class TranslationLayer {
       this.ready = false;
       this.initError = error.message;
       console.error(`${LOG_PREFIX} Init failed: ${error.message}`);
+      this.scheduleAutoRecovery();
     }
   }
 
@@ -227,6 +229,7 @@ class TranslationLayer {
       console.warn(`${LOG_PREFIX} Reload already in progress, skipping`);
       return;
     }
+    if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = null; }
     this.reloading = true;
     try {
       console.log(`${LOG_PREFIX} Reloading mappings from database...`);
@@ -234,6 +237,16 @@ class TranslationLayer {
     } finally {
       this.reloading = false;
     }
+  }
+
+  private scheduleAutoRecovery(): void {
+    if (this.recoveryTimer) return;
+    this.recoveryTimer = setTimeout(async () => {
+      this.recoveryTimer = null;
+      console.log(`${LOG_PREFIX} Auto-recovery: retrying init...`);
+      await this.init();
+      if (this.ready) console.log(`${LOG_PREFIX} Auto-recovery succeeded`);
+    }, 30_000);
   }
 
   // ─── Status & Diagnostics ────────────────────────────────────────────────
