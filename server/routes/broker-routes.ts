@@ -930,11 +930,11 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       const { brokerConfigId } = req.params;
       const brokerConfig = await storage.getBrokerConfig(brokerConfigId);
       if (!brokerConfig) {
-        return res.status(404).json({ ready: false, instrumentCount: 0, error: "Broker config not found", stale: false, lastUpdated: null, syncing: false });
+        return res.status(404).json({ ready: false, instrumentCount: 0, error: "Broker config not found", stale: false, lastUpdated: null, syncing: false, isRecovering: false, recoveryAttempt: 0 });
       }
 
       if (brokerConfig.brokerName !== "kotak_neo") {
-        return res.json({ ready: true, instrumentCount: 0, error: null, stale: false, lastUpdated: null, syncing: false });
+        return res.json({ ready: true, instrumentCount: 0, error: null, stale: false, lastUpdated: null, syncing: false, isRecovering: false, recoveryAttempt: 0 });
       }
 
       const instrumentConfigs = await storage.getInstrumentConfigs();
