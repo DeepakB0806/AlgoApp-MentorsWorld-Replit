@@ -67,6 +67,9 @@ function ApiFieldsReference() {
     lastLoadDurationMs: number | null;
     matchedCount: number;
     unmatchedCount: number;
+    initError: string | null;
+    isRecovering: boolean;
+    recoveryAttempt: number;
   }
 
   const tlStatusQuery = useQuery<TLStatusData>({
@@ -876,13 +879,27 @@ function ApiFieldsReference() {
                   </div>
                   {tlStatusQuery.data && (
                     <Badge
-                      variant={tlStatusQuery.data.isReady ? "default" : "destructive"}
-                      className={`text-[10px] px-1.5 py-0 h-5 ${tlStatusQuery.data.isReady ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
+                      variant={
+                        tlStatusQuery.data.isReady
+                          ? "default"
+                          : tlStatusQuery.data.isRecovering
+                            ? "outline"
+                            : "destructive"
+                      }
+                      className={`text-[10px] px-1.5 py-0 h-5 ${
+                        tlStatusQuery.data.isReady
+                          ? "bg-emerald-600 hover:bg-emerald-700"
+                          : tlStatusQuery.data.isRecovering
+                            ? "border-amber-500 text-amber-500"
+                            : ""
+                      }`}
                       data-testid="badge-tl-status"
                     >
                       {tlStatusQuery.data.isReady
                         ? `TL Active: ${tlStatusQuery.data.brokerFieldCount} fields, ${tlStatusQuery.data.categories.length} categories`
-                        : "TL Not Ready"}
+                        : tlStatusQuery.data.isRecovering
+                          ? `TL Recovering (attempt ${tlStatusQuery.data.recoveryAttempt})`
+                          : "TL Not Ready"}
                     </Badge>
                   )}
                   {elStatusQuery.data && (

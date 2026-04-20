@@ -62,6 +62,8 @@ interface TLStatus {
   matchedCount: number;
   unmatchedCount: number;
   initError: string | null;
+  isRecovering: boolean;
+  recoveryAttempt: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -89,6 +91,8 @@ class TranslationLayer {
   private reloadPromise: Promise<void> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private inRetryLoop = false;
+  private _isRecovering = false;
+  private _recoveryAttempt = 0;
 
   // ─── Init & Load ─────────────────────────────────────────────────────────
   async init(): Promise<void> {
@@ -170,10 +174,16 @@ class TranslationLayer {
   private scheduleRetry(attempt: number): void {
     if (this.retryTimer) return;
     const delayMs = Math.min(5000 * attempt, 60000);
+    this._isRecovering = true;
+    this._recoveryAttempt = attempt;
     console.warn(`${LOG_PREFIX} Auto-recovery: scheduling retry attempt ${attempt} in ${delayMs}ms`);
     this.retryTimer = setTimeout(async () => {
       this.retryTimer = null;
-      if (this.ready) return;
+      if (this.ready) {
+        this._isRecovering = false;
+        this._recoveryAttempt = 0;
+        return;
+      }
       console.warn(`${LOG_PREFIX} Auto-recovery: retrying init (attempt ${attempt})...`);
       this.inRetryLoop = true;
       try {
@@ -182,6 +192,8 @@ class TranslationLayer {
         this.inRetryLoop = false;
       }
       if (this.ready) {
+        this._isRecovering = false;
+        this._recoveryAttempt = 0;
         console.log(`${LOG_PREFIX} TL recovered after ${attempt} retry attempt(s)`);
       } else {
         this.scheduleRetry(attempt + 1);
@@ -214,6 +226,10 @@ class TranslationLayer {
           this.retryTimer = null;
         }
         await this.init();
+        if (this.ready) {
+          this._isRecovering = false;
+          this._recoveryAttempt = 0;
+        }
       } finally {
         this.reloading = false;
         this.reloadPromise = null;
@@ -302,6 +318,8 @@ class TranslationLayer {
       matchedCount: matched,
       unmatchedCount: this.brokerFields.length - matched,
       initError: this.initError,
+      isRecovering: this._isRecovering,
+      recoveryAttempt: this._recoveryAttempt,
     };
   }
 
