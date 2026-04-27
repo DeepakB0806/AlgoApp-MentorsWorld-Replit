@@ -45,6 +45,7 @@ function resolveHsiUrl(config: BrokerConfig): string {
 // 🔒 LOCKED BLOCK END
 
 // 🔒 LOCKED BLOCK START — HSI connect: mirrors HSM relay→direct auto-fallback with identical relayFailed logic; never weaken [HSI-1]
+// HSI-1 amended by Build #151 (2026-04-27): zombie-state detection added to message handler — additive only, no existing logic changed.
 function connect(config: BrokerConfig): void {
   if (!config.accessToken || !config.sessionId) {
     console.error(`${LOG_PREFIX} Missing accessToken/sessionId. Cannot connect HSI.`);
@@ -99,6 +100,13 @@ function connect(config: BrokerConfig): void {
         console.log(`${LOG_PREFIX} Relay path error confirmed — relay does not forward /realtime path; switching to direct E41 connection on next reconnect`);
       }
       const type: string = msg.type || "";
+      if (type === "failed to process request") {
+        console.warn(`${LOG_PREFIX} Session rejected by Kotak (failed to process request) — zombie state detected, forcing reconnect`);
+        try { ws!.terminate(); } catch {}
+        ws = null;
+        scheduleReconnect(config);
+        return;
+      }
       const d = msg.data || msg;
       if (type === "trade" || type === "position") {
         console.log(`${LOG_PREFIX} ${type} event: ${d.nOrdNo || d.trdSym || ""}`);
