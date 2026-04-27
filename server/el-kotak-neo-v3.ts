@@ -665,35 +665,47 @@ class ExecutionLayer {
     if (!this.ready && !(await this.ensureReady())) {
       return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
     }
-    try {
-      const endpoint = this.getEndpoint("quotes");
-      if (!endpoint) return { success: false, error: "quotes endpoint not configured" };
 
-      const headers = this.buildHeadersForEndpoint(endpoint, {
-        accessToken: config.accessToken,
-        sessionId: config.sessionId,
-        consumerKey: config.consumerKey,
-      });
+    const endpoint = this.getEndpoint("quotes");
+    if (!endpoint) return { success: false, error: "quotes endpoint not configured" };
 
-      const url = `${config.baseUrl}/script-details/1.0/quotes/neosymbol/${exchange}|${token}/all`;
-      const res = await this.executeRelayFetch(url, { method: "GET", headers });
-      const data = await res.json();
+    const headers = this.buildHeadersForEndpoint(endpoint, {
+      accessToken: config.accessToken,
+      sessionId: config.sessionId,
+      consumerKey: config.consumerKey,
+    });
 
-      // RECURSIVE DEEP SEARCH FOR LTP (Resilient against API shape-shifts)
-      const keywords = ["ltp", "lastPrice", "last_price", "last_traded_price", "LTP"];
-      const ltpValue = this.findKeyDeep(data, keywords);
+    const url = `${config.baseUrl}/script-details/1.0/quotes/neosymbol/${exchange}|${token}/all`;
 
-      if (ltpValue !== undefined && ltpValue !== null) {
-        return { success: true, ltp: Number(ltpValue) };
+    // TASK #150: 3-attempt retry loop for transient 502/5xx errors at market open
+    const keywords = ["ltp", "lastPrice", "last_price", "last_traded_price", "LTP"];
+    let lastError = "";
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await this.executeRelayFetch(url, { method: "GET", headers });
+        if (res.status === 401 || res.status === 403) {
+          return { success: false, error: `API auth error: ${res.status} ${res.statusText}` };
+        }
+        if (!res.ok) {
+          throw new Error(`API error: ${res.status} ${res.statusText}`);
+        }
+        const data = await res.json();
+        // RECURSIVE DEEP SEARCH FOR LTP (Resilient against API shape-shifts)
+        const ltpValue = this.findKeyDeep(data, keywords);
+        if (ltpValue !== undefined && ltpValue !== null) {
+          return { success: true, ltp: Number(ltpValue) };
+        }
+        throw new Error(`LTP keyword not found in response tree: ${JSON.stringify(data).substring(0, 200)}...`);
+      } catch (err: any) {
+        lastError = err.message || String(err);
+        if (attempt < 3) {
+          console.log(`${LOG_PREFIX} Quote retry attempt ${attempt + 1}/3 for ${exchange}|${token} (previous error: ${lastError})`);
+          await new Promise((r) => setTimeout(r, 1_000));
+        }
       }
-
-      return {
-        success: false,
-        error: `LTP keyword not found in response tree: ${JSON.stringify(data).substring(0, 200)}...`,
-      };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
     }
+
+    return { success: false, error: `Quote fetch failed after 3 attempts. Last error: ${lastError}` };
   }
 
   async getOrderHistory(
