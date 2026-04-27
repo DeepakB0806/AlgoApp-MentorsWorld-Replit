@@ -48,6 +48,7 @@ function resolveHsiUrl(config: BrokerConfig): string {
 // 🔒 LOCKED BLOCK START — HSI connect: mirrors HSM relay→direct auto-fallback with identical relayFailed logic; never weaken [HSI-1]
 // HSI-1 amended by Build #151 (2026-04-27): zombie-state detection added to message handler — additive only, no existing logic changed.
 // HSI-1 amended by Build #153 (2026-04-27): zombieCount relay-bypass counter added — additive only.
+// HSI-1 amended by Build #155 (2026-04-27): removed duplicate scheduleReconnect() from zombie handler — ws.terminate() already fires ws.on("close") which calls scheduleReconnect; having both created two concurrent timers and two simultaneous WS connections.
 function connect(config: BrokerConfig): void {
   if (!config.accessToken || !config.sessionId) {
     console.error(`${LOG_PREFIX} Missing accessToken/sessionId. Cannot connect HSI.`);
@@ -112,7 +113,6 @@ function connect(config: BrokerConfig): void {
         }
         try { ws!.terminate(); } catch {}
         ws = null;
-        scheduleReconnect(config);
         return;
       }
       if (type === "cn" && msg.ak === "ok") {
