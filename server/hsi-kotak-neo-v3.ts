@@ -22,6 +22,7 @@ let activeConfig: BrokerConfig | null = null;
 let relayFailed = false;
 let reconnectTimer: NodeJS.Timeout | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
+let zombieCount = 0;
 
 function buildAuthMessage(config: BrokerConfig): object {
   return {
@@ -46,6 +47,7 @@ function resolveHsiUrl(config: BrokerConfig): string {
 
 // 🔒 LOCKED BLOCK START — HSI connect: mirrors HSM relay→direct auto-fallback with identical relayFailed logic; never weaken [HSI-1]
 // HSI-1 amended by Build #151 (2026-04-27): zombie-state detection added to message handler — additive only, no existing logic changed.
+// HSI-1 amended by Build #153 (2026-04-27): zombieCount relay-bypass counter added — additive only.
 function connect(config: BrokerConfig): void {
   if (!config.accessToken || !config.sessionId) {
     console.error(`${LOG_PREFIX} Missing accessToken/sessionId. Cannot connect HSI.`);
@@ -101,10 +103,21 @@ function connect(config: BrokerConfig): void {
       }
       const type: string = msg.type || "";
       if (type === "failed to process request") {
-        console.warn(`${LOG_PREFIX} Session rejected by Kotak (failed to process request) — zombie state detected, forcing reconnect`);
+        if (usingRelay) zombieCount++;
+        if (usingRelay && zombieCount >= 3) {
+          relayFailed = true;
+          console.warn(`${LOG_PREFIX} ${zombieCount} consecutive zombie detections via relay — marking relay failed, switching to direct E41`);
+        } else {
+          console.warn(`${LOG_PREFIX} Session rejected by Kotak (failed to process request) — zombie state detected, forcing reconnect`);
+        }
         try { ws!.terminate(); } catch {}
         ws = null;
         scheduleReconnect(config);
+        return;
+      }
+      if (type === "cn" && msg.ak === "ok") {
+        zombieCount = 0;
+        console.log(`${LOG_PREFIX} Auth confirmed (cn ok) — relay healthy, zombie counter reset`);
         return;
       }
       const d = msg.data || msg;
@@ -182,6 +195,7 @@ export function refreshConfig(config: BrokerConfig): void {
   }
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   relayFailed = false;
+  zombieCount = 0;
   reconnectDelay = 1_000;
   activeConfig = config;
   HSI_URL = resolveHsiUrl(config);
