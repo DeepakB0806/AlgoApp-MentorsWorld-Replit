@@ -1,0 +1,58 @@
+#137 - HSI Fix: src key + relay path fallback
+What & Why
+Two confirmed bugs preventing HSI from connecting to E41.
+
+Bug 1 — Wrong auth key: source vs src (PRIMARY)
+hslib.js (Kotak's official SDK, now confirmed from uploaded file) intercepts the connection object and rewrites the key before transmitting to E41:
+
+// Keys.SOURCE = "source" (input), but output key is "src":
+req = {
+  type: "cn",
+  Authorization: reqJson[Keys.AUTORIZATION],
+  Sid: reqJson[Keys.SID],
+  src: reqJson[Keys.SOURCE]   // "source" → "src" over the wire
+}
+
+E41's /realtime endpoint requires src: "WEB". Our buildAuthMessage sends source: "WEB". E41 sees an unrecognized field → "session message format incorrect".
+
+This is the definitive root cause of the format error. Proven by:
+
+hslib.js source code (uploaded, line 1, HSIWebSocket constructor)
+User connected via demo.html with same tokens → "connected" (hslib.js sent src)
+Our code with same tokens → "session message format incorrect" (source rejected)
+Bug 2 — Relay path stripping (SECONDARY)
+The Bangalore relay (ws://168.144.0.191:8080) receives x-target-url: wss://e41.kotaksecurities.com/realtime but may connect to E41 root (/) instead of /realtime. HSM works because its URL has no path to strip.
+
+Even after fixing Bug 1, if the relay drops /realtime, the connection goes to the wrong E41 endpoint. Detecting "session message format incorrect" while usingRelay=true and setting relayFailed=true forces the next reconnect cycle to go direct — exactly as demo.html connects (directly to wss://e41.kotaksecurities.com/realtime).
+
+Done looks like
+Production HSI log shows:
+
+[HSI] Auth payload: {"type":"cn","Authorization":"...","Sid":"...","src":"WEB"}
+[HSI] Connected [via relay OR directly]. Sending Kotak auth...
+{"ak":"ok","type":"cn","task":"cn","msg":"connected"}
+
+Order/trade updates flow through HSI. HSM unchanged.
+
+Out of scope
+Changes to hslib.js or the Bangalore relay server (both external)
+HSM (working correctly)
+Modifying any locked block [HSI-1] through [HSI-4]
+Tasks
+In server/hsi-kotak-neo-v3.ts, change buildAuthMessage (lines 26-33, NOT locked):
+
+Change source: "WEB" → src: "WEB"
+Add console.log(\${LOG_PREFIX} Auth payload: ${JSON.stringify(buildAuthMessage(config))}`)immediately beforews!.send()in thews.on("open")` handler (not locked, line ~85)
+In server/hsi-kotak-neo-v3.ts, inside the ws.on("message") handler (NOT locked, lines 91-125): after parsing the JSON, add relay-path fallback detection:
+
+if (usingRelay && msg.msg === "session message format incorrect") {
+  relayFailed = true;
+  console.log(`${LOG_PREFIX} Relay path error confirmed — switching to direct E41 connection`);
+}
+
+This fires only when using the relay and E41 still rejects — forces direct on next reconnect. relayFailed is module-scope and persists across reconnects in the session.
+
+Deploy to production. Verify logs show src in the auth payload and eventually "msg":"connected" from E41. No locked blocks are modified in any step.
+
+Relevant files
+server/hsi-kotak-neo-v3.ts:26-33,80-125 attached_assets/hslib_1776267386097.js

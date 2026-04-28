@@ -1,0 +1,44 @@
+#157 - Fix HSI Heartbeat: Replace Invalid {type:hb} with WebSocket Ping
+What & Why
+Kotak's official hslib.js sends zero application-level heartbeats — confirmed by static analysis of their library (no setInterval, no hb, no ping message anywhere). The browser demo stays connected indefinitely because browsers automatically send WebSocket protocol-level ping frames that Kotak's server responds to correctly.
+
+Our HSI-3 heartbeat sends {type:hb} as a JSON application message every 30 seconds. This is an invalid/unrecognised message type. Kotak's server responds immediately with "failed to process request" — which our zombie detector (Task #151) correctly treats as a session rejection and forces a reconnect. This is the root cause of the perpetual 27-second reconnect loop.
+
+The fix: replace the application-level {type:hb} message with a WebSocket protocol-level ws.ping() call. This is exactly what browsers do natively. Kotak's server responds with a pong, keeping the session alive without ever seeing an invalid application message.
+
+Done looks like
+Production logs show "Auth confirmed (cn ok)" once per login session, not once every 27 seconds
+No more "Session rejected by Kotak (failed to process request)" log entries
+HSI stays connected continuously without reconnecting
+Out of scope
+Any changes to HSM
+Any changes to zombie detection logic (HSI-1)
+Any changes to scheduleReconnect (HSI-2)
+Steps
+Unlock HSI-3 for this fix only — change ws.send(JSON.stringify({ type: "hb" }).replace(/"/g, '')) to ws.ping(). Reduce interval from 30,000ms to 20,000ms as a safety margin. Update the HSI-3 block comment to record this amendment.
+Relevant files
+server/hsi-kotak-neo-v3.ts:179-188
+
+Code Snippets:
+
+File: server/hsi-kotak-neo-v3.ts
+
+Step 1: Locate the Heartbeat Interval
+Inside the connect function (likely inside the ws.on('open', ...) block or just after), locate the setInterval block responsible for the heartbeat. It currently looks something like this:
+
+TypeScript
+    heartbeatInterval = setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "hb" }).replace(/"/g, ''));
+      }
+    }, 30000);
+Step 2: Replace with Protocol Ping
+Replace that specific setInterval block entirely with this hardened version that uses ws.ping() and a safer 20-second interval:
+
+TypeScript
+    // TASK #157: Protocol-level ping instead of invalid application-level {type:hb}
+    heartbeatInterval = setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.ping(); // Standard WS protocol ping (Kotak replies with native pong)
+      }
+    }, 20000); // Reduced to 20s for a tighter safety margin
