@@ -176,14 +176,18 @@ function scheduleReconnect(config: BrokerConfig): void {
 }
 // 🔒 LOCKED BLOCK END
 
-// 🔒 LOCKED BLOCK START — HSI heartbeat: sends {"type":"hb"} every 30 s while WS is OPEN [HSI-3]
+// 🔒 LOCKED BLOCK START — HSI heartbeat: WS protocol-level ping every 20 s while WS is OPEN [HSI-3]
+// HSI-3 amended by Build #157 (2026-04-28): replaced invalid {type:hb} application message with ws.ping().
+// Kotak's server does not recognise {type:hb} and responds with "failed to process request" — confirmed by
+// static analysis of hslib.js (zero setInterval/hb/ping anywhere). Browsers keep sessions alive via native
+// WS protocol pings; ws.ping() replicates this. Interval reduced 30s→20s for tighter safety margin.
 function startHsiHeartbeat(): void {
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   heartbeatInterval = setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(JSON.stringify({ type: "hb" }).replace(/"/g, '')); } catch {}
+      try { ws.ping(); } catch {}
     }
-  }, 30_000);
+  }, 20_000);
 }
 // 🔒 LOCKED BLOCK END
 
