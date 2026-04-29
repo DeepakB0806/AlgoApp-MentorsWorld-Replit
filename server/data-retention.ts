@@ -49,7 +49,7 @@ function pruneOldScripMasterFiles(): void {
     const files = fs.readdirSync(rootDir);
 
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - SCRIP_MASTER_RETENTION_DAYS);
+    cutoff.setDate(cutoff.getDate() - (SCRIP_MASTER_RETENTION_DAYS - 1));
     cutoff.setHours(0, 0, 0, 0);
 
     let pruned = 0;
