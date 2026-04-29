@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import type { IStorage } from "./storage";
 
 // ─── Default Retention Windows ───────────────────────────────────────────────
@@ -11,6 +13,9 @@ const DEFAULTS: Record<string, number> = {
   retention_webhook_status_logs_days: 30,
   retention_process_flow_logs_days:   30,
 };
+
+const SCRIP_MASTER_RETENTION_DAYS = 2;
+const SCRIP_MASTER_PATTERN = /^scrip_master_[a-z]+_(\d{4}-\d{2}-\d{2})\.csv$/i;
 
 async function readSettings(storage: IStorage): Promise<Record<string, number>> {
   const values: Record<string, number> = {};
@@ -34,6 +39,42 @@ async function seedDefaultSettings(storage: IStorage) {
         await storage.setSetting(key, String(value));
       }
     } catch {}
+  }
+}
+
+function pruneOldScripMasterFiles(): void {
+  const log = (msg: string) => console.log(`[DATA-RETENTION] ${msg}`);
+  try {
+    const rootDir = process.cwd();
+    const files = fs.readdirSync(rootDir);
+
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - SCRIP_MASTER_RETENTION_DAYS);
+    cutoff.setHours(0, 0, 0, 0);
+
+    let pruned = 0;
+    for (const file of files) {
+      const match = file.match(SCRIP_MASTER_PATTERN);
+      if (!match) continue;
+      const fileDate = new Date(match[1]);
+      if (isNaN(fileDate.getTime())) continue;
+      if (fileDate < cutoff) {
+        try {
+          fs.unlinkSync(path.join(rootDir, file));
+          pruned++;
+        } catch (err) {
+          log(`Warning: could not delete ${file}: ${err}`);
+        }
+      }
+    }
+
+    if (pruned > 0) {
+      log(`Pruned ${pruned} old scrip master file(s) (keep last ${SCRIP_MASTER_RETENTION_DAYS}d)`);
+    } else {
+      log("Scrip master files — nothing to prune");
+    }
+  } catch (err) {
+    log(`Scrip master file pruning error: ${err}`);
   }
 }
 
@@ -73,6 +114,8 @@ async function runRetentionCleanup(storage: IStorage) {
   } catch (err) {
     console.error("[DATA-RETENTION] Cleanup error:", err);
   }
+
+  pruneOldScripMasterFiles();
 }
 
 export function startDataRetentionJob(storage: IStorage) {
