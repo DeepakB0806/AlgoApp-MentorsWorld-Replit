@@ -126,6 +126,8 @@ export function startDataRetentionJob(storage: IStorage) {
     console.error("[DATA-RETENTION] Settings seed error:", err)
   );
 
+  pruneOldScripMasterFiles();
+
   setTimeout(() => runRetentionCleanup(storage), STARTUP_DELAY_MS);
   setInterval(() => runRetentionCleanup(storage), DAILY_MS);
 
