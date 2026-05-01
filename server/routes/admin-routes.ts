@@ -4,6 +4,7 @@ import { sendEmail } from "../services/email";
 import { rescheduleScripMasterSync } from "../scrip-sync-scheduler";
 import { insertErrorRoutingSchema } from "@shared/schema";
 import { resetTradingHaltCache } from "./webhook-routes";
+import { getHsiStatus } from "../hsi-kotak-neo-v3";
 
 export function registerAdminRoutes(app: Express, storage: IStorage) {
   app.get("/api/settings/mail", async (req, res) => {
@@ -210,6 +211,14 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
       res.json({ success: true, message: "Trading Resumed" });
     } catch (error) {
       res.status(500).json({ error: "Failed to resume trading" });
+    }
+  });
+
+  app.get("/api/admin/hsi/status", (_req, res) => {
+    try {
+      res.json(getHsiStatus());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 }

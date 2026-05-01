@@ -24,6 +24,49 @@ let reconnectTimer: NodeJS.Timeout | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
 let zombieCount = 0;
 
+// ── HSI Status tracking (outside locked blocks) ──────────────────────────────
+let hsiLastConnectedAt: Date | null = null;
+let hsiLastHeartbeatAt: Date | null = null;
+let hsiStatusInterval: NodeJS.Timeout | null = null;
+let _hsiPrevOpen = false; // tracks ws open state for transition detection
+
+function startHsiStatusTracking(): void {
+  if (hsiStatusInterval) clearInterval(hsiStatusInterval);
+  _hsiPrevOpen = false;
+  hsiStatusInterval = setInterval(() => {
+    const nowOpen = ws !== null && ws.readyState === WebSocket.OPEN;
+    if (nowOpen && !_hsiPrevOpen) {
+      // disconnected → connected transition: record the connection time
+      hsiLastConnectedAt = new Date();
+    }
+    if (nowOpen) {
+      hsiLastHeartbeatAt = new Date();
+    }
+    _hsiPrevOpen = nowOpen;
+  }, 20_000);
+}
+
+export function getHsiStatus() {
+  const isConnected = ws !== null && ws.readyState === WebSocket.OPEN;
+  const isReconnecting = !isConnected && reconnectTimer !== null;
+  const reconnectAttempts = reconnectDelay > 1_000
+    ? Math.round(Math.log2(reconnectDelay / 1_000))
+    : 0;
+  const usingRelay = !relayFailed && !!(process.env.RELAY_TARGET_URL && process.env.RELAY_SECRET_KEY);
+  return {
+    connected: isConnected,
+    reconnecting: isReconnecting,
+    connectionMode: usingRelay ? "relay" : "direct",
+    reconnectAttempts,
+    reconnectDelayMs: reconnectDelay,
+    lastConnectedAt: hsiLastConnectedAt?.toISOString() ?? null,
+    lastHeartbeatAt: hsiLastHeartbeatAt?.toISOString() ?? null,
+    hsiUrl: HSI_URL,
+    zombieCount,
+  };
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function buildAuthMessage(config: BrokerConfig): object {
   return {
     type: "cn",
@@ -205,10 +248,14 @@ export function refreshConfig(config: BrokerConfig): void {
   relayFailed = false;
   zombieCount = 0;
   reconnectDelay = 1_000;
+  hsiLastConnectedAt = null;
+  hsiLastHeartbeatAt = null;
+  _hsiPrevOpen = false;
   activeConfig = config;
   HSI_URL = resolveHsiUrl(config);
   connect(config);
   startHsiHeartbeat();
+  startHsiStatusTracking();
 }
 
 export async function startHsiGateway(storage: IStorage): Promise<void> {
@@ -225,6 +272,7 @@ export async function startHsiGateway(storage: IStorage): Promise<void> {
     console.log(`${LOG_PREFIX} HSI URL resolved to ${HSI_URL} (dataCenter=${config.dataCenter ?? "default"})`);
     connect(config);
     startHsiHeartbeat();
+    startHsiStatusTracking();
   } catch (err) {
     console.error(`${LOG_PREFIX} startHsiGateway error (non-fatal):`, err);
   }
