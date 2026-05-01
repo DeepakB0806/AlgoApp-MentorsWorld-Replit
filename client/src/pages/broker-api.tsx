@@ -2036,6 +2036,7 @@ interface HsiStatusData {
   reconnectDelayMs: number;
   lastConnectedAt: string | null;
   lastHeartbeatAt: string | null;
+  lastDisconnectedAt: string | null;
   hsiUrl: string;
   zombieCount: number;
 }
@@ -2059,6 +2060,17 @@ function HsiStatusCard() {
   });
 
   const [expanded, setExpanded] = useState(false);
+
+  function formatExact(iso: string | null): string {
+    if (!iso) return "—";
+    try {
+      const date = new Date(iso);
+      if (isNaN(date.getTime())) return "—";
+      return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+    } catch {
+      return "—";
+    }
+  }
 
   function formatRelative(iso: string | null): string {
     if (!iso) return "—";
@@ -2134,14 +2146,20 @@ function HsiStatusCard() {
             </div>
             <div className="flex items-center justify-between px-4 py-2.5">
               <span className="text-muted-foreground">Last Heartbeat</span>
-              <span className="font-medium" data-testid="text-hsi-last-heartbeat">
-                {isLoading ? "—" : formatRelative(data?.lastHeartbeatAt ?? null)}
+              <span className="font-mono text-xs" data-testid="text-hsi-last-heartbeat">
+                {isLoading ? "—" : formatExact(data?.lastHeartbeatAt ?? null)}
               </span>
             </div>
             <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-muted-foreground">Last Connected</span>
-              <span className="font-medium" data-testid="text-hsi-last-connected">
-                {isLoading ? "—" : formatRelative(data?.lastConnectedAt ?? null)}
+              <span className="text-muted-foreground">Last Connected At</span>
+              <span className="font-mono text-xs" data-testid="text-hsi-last-connected">
+                {isLoading ? "—" : formatExact(data?.lastConnectedAt ?? null)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">Last Disconnected At</span>
+              <span className="font-mono text-xs" data-testid="text-hsi-last-disconnected">
+                {isLoading ? "—" : formatExact(data?.lastDisconnectedAt ?? null)}
               </span>
             </div>
             <div className="flex items-center justify-between px-4 py-2.5">

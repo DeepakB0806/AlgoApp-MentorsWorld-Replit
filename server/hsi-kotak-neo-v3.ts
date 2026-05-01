@@ -27,22 +27,15 @@ let zombieCount = 0;
 // ── HSI Status tracking (outside locked blocks) ──────────────────────────────
 let hsiLastConnectedAt: Date | null = null;
 let hsiLastHeartbeatAt: Date | null = null;
+let hsiLastDisconnectedAt: Date | null = null;
 let hsiStatusInterval: NodeJS.Timeout | null = null;
-let _hsiPrevOpen = false; // tracks ws open state for transition detection
 
 function startHsiStatusTracking(): void {
   if (hsiStatusInterval) clearInterval(hsiStatusInterval);
-  _hsiPrevOpen = false;
   hsiStatusInterval = setInterval(() => {
-    const nowOpen = ws !== null && ws.readyState === WebSocket.OPEN;
-    if (nowOpen && !_hsiPrevOpen) {
-      // disconnected → connected transition: record the connection time
-      hsiLastConnectedAt = new Date();
-    }
-    if (nowOpen) {
+    if (ws !== null && ws.readyState === WebSocket.OPEN) {
       hsiLastHeartbeatAt = new Date();
     }
-    _hsiPrevOpen = nowOpen;
   }, 20_000);
 }
 
@@ -61,6 +54,7 @@ export function getHsiStatus() {
     reconnectDelayMs: reconnectDelay,
     lastConnectedAt: hsiLastConnectedAt?.toISOString() ?? null,
     lastHeartbeatAt: hsiLastHeartbeatAt?.toISOString() ?? null,
+    lastDisconnectedAt: hsiLastDisconnectedAt?.toISOString() ?? null,
     hsiUrl: HSI_URL,
     zombieCount,
   };
@@ -92,6 +86,7 @@ function resolveHsiUrl(config: BrokerConfig): string {
 // HSI-1 amended by Build #151 (2026-04-27): zombie-state detection added to message handler — additive only, no existing logic changed.
 // HSI-1 amended by Build #153 (2026-04-27): zombieCount relay-bypass counter added — additive only.
 // HSI-1 amended by Build #155 (2026-04-27): removed duplicate scheduleReconnect() from zombie handler — ws.terminate() already fires ws.on("close") which calls scheduleReconnect; having both created two concurrent timers and two simultaneous WS connections.
+// HSI-1 amended by Build #163 (2026-05-01): exact connection/disconnection timestamps recorded in ws.on("open") and ws.on("close") — additive only, no existing logic changed.
 function connect(config: BrokerConfig): void {
   if (!config.accessToken || !config.sessionId) {
     console.error(`${LOG_PREFIX} Missing accessToken/sessionId. Cannot connect HSI.`);
@@ -127,6 +122,7 @@ function connect(config: BrokerConfig): void {
 
   ws.on("open", () => {
     opened = true;
+    hsiLastConnectedAt = new Date(); // HSI-1 Build #163: exact connect timestamp
     console.log(usingRelay ? `${LOG_PREFIX} Connected via relay. Sending Kotak auth...` : `${LOG_PREFIX} Connected directly to Kotak HSI. Sending auth...`);
     reconnectDelay = 1_000;
     try {
@@ -197,6 +193,7 @@ function connect(config: BrokerConfig): void {
 
   ws.on("close", (code: number, reason: Buffer) => {
     const reasonStr = reason ? reason.toString() : "";
+    hsiLastDisconnectedAt = new Date(); // HSI-1 Build #163: exact disconnect timestamp
     console.log(`${LOG_PREFIX} Disconnected code=${code} reason="${reasonStr}" — reconnecting in ${reconnectDelay}ms`);
     ws = null;
     scheduleReconnect(config);
@@ -250,7 +247,7 @@ export function refreshConfig(config: BrokerConfig): void {
   reconnectDelay = 1_000;
   hsiLastConnectedAt = null;
   hsiLastHeartbeatAt = null;
-  _hsiPrevOpen = false;
+  hsiLastDisconnectedAt = null;
   activeConfig = config;
   HSI_URL = resolveHsiUrl(config);
   connect(config);
