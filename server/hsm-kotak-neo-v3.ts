@@ -25,6 +25,48 @@ let relayFailed = false;
 let reconnectTimer: NodeJS.Timeout | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
 
+// ── HSM Status tracking (outside locked blocks) ──────────────────────────────
+let hsmLastConnectedAt: Date | null = null;
+let hsmLastHeartbeatAt: Date | null = null;
+let hsmStatusInterval: NodeJS.Timeout | null = null;
+let _hsmPrevOpen = false;
+
+function startHsmStatusTracking(): void {
+  if (hsmStatusInterval) clearInterval(hsmStatusInterval);
+  _hsmPrevOpen = false;
+  hsmStatusInterval = setInterval(() => {
+    const nowOpen = ws !== null && ws.readyState === WebSocket.OPEN;
+    if (nowOpen && !_hsmPrevOpen) {
+      hsmLastConnectedAt = new Date();
+    }
+    if (nowOpen) {
+      hsmLastHeartbeatAt = new Date();
+    }
+    _hsmPrevOpen = nowOpen;
+  }, 20_000);
+}
+
+export function getHsmStatus() {
+  const isConnected = ws !== null && ws.readyState === WebSocket.OPEN;
+  const isReconnecting = !isConnected && reconnectTimer !== null;
+  const reconnectAttempts = reconnectDelay > 1_000
+    ? Math.round(Math.log2(reconnectDelay / 1_000))
+    : 0;
+  const usingRelay = !relayFailed && !!(process.env.RELAY_TARGET_URL && process.env.RELAY_SECRET_KEY);
+  return {
+    connected: isConnected,
+    reconnecting: isReconnecting,
+    connectionMode: usingRelay ? "relay" : "direct",
+    reconnectAttempts,
+    reconnectDelayMs: reconnectDelay,
+    lastConnectedAt: hsmLastConnectedAt?.toISOString() ?? null,
+    lastHeartbeatAt: hsmLastHeartbeatAt?.toISOString() ?? null,
+    hsmUrl: HSM_URL,
+    subscriptionCount: subscriptions.size,
+  };
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function buildAuthMessage(config: BrokerConfig): object {
   return {
     type: "cn",
@@ -160,9 +202,13 @@ export function refreshConfig(config: BrokerConfig): void {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   relayFailed = false;
   reconnectDelay = 1_000;
+  hsmLastConnectedAt = null;
+  hsmLastHeartbeatAt = null;
+  _hsmPrevOpen = false;
   activeConfig = config;
   connect(config);
   startHsmHeartbeat();
+  startHsmStatusTracking();
 }
 
 export function subscribe(symbol: string): void {
@@ -198,6 +244,7 @@ export async function startWsGateway(storage: IStorage): Promise<void> {
 
     connect(config);
     startHsmHeartbeat();
+    startHsmStatusTracking();
   } catch (err) {
     console.error(`${LOG_PREFIX} startWsGateway error (non-fatal):`, err);
   }

@@ -5,6 +5,7 @@ import { rescheduleScripMasterSync } from "../scrip-sync-scheduler";
 import { insertErrorRoutingSchema } from "@shared/schema";
 import { resetTradingHaltCache } from "./webhook-routes";
 import { getHsiStatus } from "../hsi-kotak-neo-v3";
+import { getHsmStatus } from "../hsm-kotak-neo-v3";
 
 export function registerAdminRoutes(app: Express, storage: IStorage) {
   app.get("/api/settings/mail", async (req, res) => {
@@ -217,6 +218,14 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
   app.get("/api/admin/hsi/status", (_req, res) => {
     try {
       res.json(getHsiStatus());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/hsm/status", (_req, res) => {
+    try {
+      res.json(getHsmStatus());
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

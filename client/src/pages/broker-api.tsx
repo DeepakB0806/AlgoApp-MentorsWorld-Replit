@@ -2040,6 +2040,18 @@ interface HsiStatusData {
   zombieCount: number;
 }
 
+interface HsmStatusData {
+  connected: boolean;
+  reconnecting: boolean;
+  connectionMode: "relay" | "direct";
+  reconnectAttempts: number;
+  reconnectDelayMs: number;
+  lastConnectedAt: string | null;
+  lastHeartbeatAt: string | null;
+  hsmUrl: string;
+  subscriptionCount: number;
+}
+
 function HsiStatusCard() {
   const { data, isLoading, dataUpdatedAt } = useQuery<HsiStatusData>({
     queryKey: ["/api/admin/hsi/status"],
@@ -2154,6 +2166,131 @@ function HsiStatusCard() {
               <span className="text-muted-foreground">WebSocket URL</span>
               <span className="font-mono text-xs truncate max-w-[220px]" data-testid="text-hsi-url">
                 {isLoading ? "—" : data?.hsiUrl ?? "—"}
+              </span>
+            </div>
+          </div>
+          {dataUpdatedAt > 0 && (
+            <p className="text-[11px] text-muted-foreground mt-2 text-right">
+              Updated {formatRelative(new Date(dataUpdatedAt).toISOString())} · auto-refreshes every 10s
+            </p>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+function HsmStatusCard() {
+  const { data, isLoading, dataUpdatedAt } = useQuery<HsmStatusData>({
+    queryKey: ["/api/admin/hsm/status"],
+    refetchInterval: 10_000,
+  });
+
+  const [expanded, setExpanded] = useState(false);
+
+  function formatRelative(iso: string | null): string {
+    if (!iso) return "—";
+    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (diff < 5) return "just now";
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    return `${Math.floor(diff / 3600)}h ago`;
+  }
+
+  const statusLabel = isLoading
+    ? "Checking..."
+    : data?.connected
+    ? "Connected"
+    : data?.reconnecting
+    ? "Reconnecting"
+    : "Failed";
+
+  const statusColor = isLoading
+    ? "bg-muted text-muted-foreground"
+    : data?.connected
+    ? "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30"
+    : data?.reconnecting
+    ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30"
+    : "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30";
+
+  const StatusIcon = isLoading
+    ? Loader2
+    : data?.connected
+    ? Wifi
+    : data?.reconnecting
+    ? RefreshCw
+    : WifiOff;
+
+  return (
+    <Card>
+      <CardHeader
+        className="cursor-pointer select-none"
+        onClick={() => setExpanded(v => !v)}
+        data-testid="button-toggle-hsm-status"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <Activity className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-base">HSM Connection Health</CardTitle>
+              <CardDescription className="text-xs">Kotak Neo market data feed status</CardDescription>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusColor}`}
+              data-testid="badge-hsm-status"
+            >
+              <StatusIcon className={`h-3 w-3 ${isLoading || data?.reconnecting ? "animate-spin" : ""}`} />
+              {statusLabel}
+            </span>
+            {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+          </div>
+        </div>
+      </CardHeader>
+
+      {expanded && (
+        <CardContent className="pt-0">
+          <div className="rounded-lg border border-border/50 bg-muted/20 divide-y divide-border/40 text-sm">
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">Connection Mode</span>
+              <span className="font-medium capitalize" data-testid="text-hsm-mode">
+                {isLoading ? "—" : data?.connectionMode ?? "—"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">Last Heartbeat</span>
+              <span className="font-medium" data-testid="text-hsm-last-heartbeat">
+                {isLoading ? "—" : formatRelative(data?.lastHeartbeatAt ?? null)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">Last Connected</span>
+              <span className="font-medium" data-testid="text-hsm-last-connected">
+                {isLoading ? "—" : formatRelative(data?.lastConnectedAt ?? null)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">Reconnect Attempts</span>
+              <span
+                className={`font-medium ${(data?.reconnectAttempts ?? 0) >= 3 ? "text-amber-600 dark:text-amber-400" : ""}`}
+                data-testid="text-hsm-reconnect-attempts"
+              >
+                {isLoading ? "—" : data?.reconnectAttempts ?? 0}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">Active Subscriptions</span>
+              <span className="font-medium" data-testid="text-hsm-subscription-count">
+                {isLoading ? "—" : data?.subscriptionCount ?? 0}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">WebSocket URL</span>
+              <span className="font-mono text-xs truncate max-w-[220px]" data-testid="text-hsm-url">
+                {isLoading ? "—" : data?.hsmUrl ?? "—"}
               </span>
             </div>
           </div>
@@ -3500,6 +3637,12 @@ export default function BrokerApi() {
         {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
           <div className="mt-6">
             <HsiStatusCard />
+          </div>
+        )}
+
+        {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
+          <div className="mt-6">
+            <HsmStatusCard />
           </div>
         )}
 
