@@ -16,7 +16,7 @@ import { Plus, Trash2, Settings, Link2, Loader2, X, Clock, Shield, Target, Trend
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl, Position } from "@shared/schema";
-import type { TradeParams, TimeLogicConfig } from "@shared/schema";
+import type { TradeParams, TimeLogicConfig, TrailingStoplossConfig } from "@shared/schema";
 import { buildBrokerOrderParams } from "@shared/schema";
 import type { BrokerConfig, Webhook } from "@shared/schema";
 
@@ -27,6 +27,20 @@ function parseJsonSafe<T>(val: string | null | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function tslChipLabel(tsl: TrailingStoplossConfig): string {
+  const type = tsl.tslType ?? "none";
+  if (type === "none") return "TSL Active";
+  const fmt = (v: number) => type === "amount" ? `${v}` : `${v}%`;
+  const parts: string[] = [];
+  if (tsl.activateAt)                                parts.push(`Act ${fmt(tsl.activateAt)}`);
+  if (tsl.lockProfitAt)                              parts.push(`Lock ${fmt(tsl.lockProfitAt)}`);
+  if (tsl.whenProfitIncreaseBy && tsl.increaseTslBy) parts.push(`Step ${fmt(tsl.whenProfitIncreaseBy)}→${fmt(tsl.increaseTslBy)}`);
+  const detail = parts.join(" · ");
+  const typeLabel = type === "amount" ? "Amt" : "%Cap";
+  const suffix    = type === "amount" ? " /lot" : "";
+  return detail ? `TSL(${typeLabel}): ${detail}${suffix}` : "TSL Active";
 }
 
 const DEPLOYMENT_STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Activity }> = {
@@ -508,7 +522,18 @@ export function BrokerLinking() {
 
   const [localState, setLocalState] = useState<Record<string, { brokerConfigId: string; isProxyMode: boolean }>>({});
   const [confirmAction, setConfirmAction] = useState<{ planId: string; action: string } | null>(null);
-  const [deployConfig, setDeployConfig] = useState<Record<string, { lotMultiplier: number; stoploss: number; profitTarget: number; baseStoploss: number; baseProfitTarget: number; brokerConfigId?: string }>>({});
+  const [deployConfig, setDeployConfig] = useState<Record<string, {
+    lotMultiplier: number;
+    stoploss: number; profitTarget: number;
+    baseStoploss: number; baseProfitTarget: number;
+    brokerConfigId?: string;
+    tslEnabled: boolean;
+    tslType: string;
+    tslActivateAt: number; tslLockProfitAt: number;
+    tslWhenProfitIncreaseBy: number; tslIncreaseTslBy: number;
+    baseTslActivateAt: number; baseTslLockProfitAt: number;
+    baseTslWhenProfitIncreaseBy: number; baseTslIncreaseTslBy: number;
+  }>>({});
   const [pnlSheetPlanId, setPnlSheetPlanId] = useState<string | null>(null);
   const [expandedCorrelationMaps, setExpandedCorrelationMaps] = useState<Set<string>>(new Set());
   const [expandedStrategyConfigs, setExpandedStrategyConfigs] = useState<Set<string>>(new Set());
@@ -605,6 +630,11 @@ export function BrokerLinking() {
     const tp = plan.tradeParams ? parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] }) : { legs: [] };
     const baseSL = tp.stoploss?.value || 0;
     const basePT = tp.profitTarget?.value || 0;
+    const tsl = (tp as TradeParams).trailingSL;
+    const baseAct  = tsl?.activateAt            || 0;
+    const baseLock = tsl?.lockProfitAt          || 0;
+    const baseStep = tsl?.whenProfitIncreaseBy  || 0;
+    const baseInc  = tsl?.increaseTslBy         || 0;
     setDeployConfig((prev) => ({
       ...prev,
       [plan.id]: {
@@ -614,6 +644,12 @@ export function BrokerLinking() {
         baseStoploss: baseSL,
         baseProfitTarget: basePT,
         brokerConfigId: plan.brokerConfigId || "",
+        tslEnabled: tsl?.enabled ?? false,
+        tslType: tsl?.tslType ?? "none",
+        tslActivateAt: baseAct, tslLockProfitAt: baseLock,
+        tslWhenProfitIncreaseBy: baseStep, tslIncreaseTslBy: baseInc,
+        baseTslActivateAt: baseAct, baseTslLockProfitAt: baseLock,
+        baseTslWhenProfitIncreaseBy: baseStep, baseTslIncreaseTslBy: baseInc,
       },
     }));
   };
@@ -622,6 +658,7 @@ export function BrokerLinking() {
     setDeployConfig((prev) => {
       const cfg = prev[planId];
       if (!cfg) return prev;
+      const isAmt = cfg.tslType === "amount";
       return {
         ...prev,
         [planId]: {
@@ -629,6 +666,10 @@ export function BrokerLinking() {
           lotMultiplier: multiplier,
           stoploss: parseFloat((cfg.baseStoploss * multiplier).toFixed(2)),
           profitTarget: parseFloat((cfg.baseProfitTarget * multiplier).toFixed(2)),
+          tslActivateAt:           isAmt ? parseFloat((cfg.baseTslActivateAt           * multiplier).toFixed(2)) : cfg.tslActivateAt,
+          tslLockProfitAt:         isAmt ? parseFloat((cfg.baseTslLockProfitAt         * multiplier).toFixed(2)) : cfg.tslLockProfitAt,
+          tslWhenProfitIncreaseBy: isAmt ? parseFloat((cfg.baseTslWhenProfitIncreaseBy * multiplier).toFixed(2)) : cfg.tslWhenProfitIncreaseBy,
+          tslIncreaseTslBy:        isAmt ? parseFloat((cfg.baseTslIncreaseTslBy        * multiplier).toFixed(2)) : cfg.tslIncreaseTslBy,
         },
       };
     });
@@ -881,7 +922,7 @@ export function BrokerLinking() {
                             <div className="flex flex-wrap gap-1.5">
                               {tp.stoploss?.enabled && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">SL: {tp.stoploss.value}{tp.stoploss.mode === "percentage" ? "%" : ""}</span>}
                               {tp.profitTarget?.enabled && <span className="text-xs text-emerald-400 bg-emerald-400/10 rounded px-2 py-0.5">Target: {tp.profitTarget.value}{tp.profitTarget.mode === "percentage" ? "%" : " INR"}</span>}
-                              {tp.trailingSL?.enabled && <span className="text-xs text-blue-400 bg-blue-400/10 rounded px-2 py-0.5">TSL Active</span>}
+                              {tp.trailingSL?.enabled && <span className="text-xs text-blue-400 bg-blue-400/10 rounded px-2 py-0.5">{tslChipLabel(tp.trailingSL)}</span>}
                               {tl.exitTime && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Exit @ {tl.exitTime}</span>}
                               {(tl.exitOnExpiry || !!tl.expiryType) && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">{expiryLabel}</span>}
                               {(tl.exitAfterDays ?? 0) > 0 && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Exit +{tl.exitAfterDays}d</span>}

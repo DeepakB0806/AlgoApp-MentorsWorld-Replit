@@ -28,6 +28,20 @@ function generateStrikeOptions(): string[] {
   return strikes;
 }
 
+function tslChipLabel(tsl: TrailingStoplossConfig): string {
+  const type = tsl.tslType ?? "none";
+  if (type === "none") return "TSL Active";
+  const fmt = (v: number) => type === "amount" ? `${v}` : `${v}%`;
+  const parts: string[] = [];
+  if (tsl.activateAt)                                    parts.push(`Act ${fmt(tsl.activateAt)}`);
+  if (tsl.lockProfitAt)                                  parts.push(`Lock ${fmt(tsl.lockProfitAt)}`);
+  if (tsl.whenProfitIncreaseBy && tsl.increaseTslBy)     parts.push(`Step ${fmt(tsl.whenProfitIncreaseBy)}→${fmt(tsl.increaseTslBy)}`);
+  const detail = parts.join(" · ");
+  const typeLabel = type === "amount" ? "Amt" : "%Cap";
+  const suffix    = type === "amount" ? " /lot" : "";
+  return detail ? `TSL(${typeLabel}): ${detail}${suffix}` : "TSL Active";
+}
+
 function InfoTip({ text }: { text: string }) {
   return (
     <TooltipProvider delayDuration={200}>
@@ -709,54 +723,62 @@ export function TradePlanning() {
                             </SelectContent>
                           </Select>
                         </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Activate At</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            value={trailingSL.activateAt || ""}
-                            onChange={(e) => setTrailingSL((s) => ({ ...s, activateAt: parseFloat(e.target.value) || 0 }))}
-                            placeholder="e.g. 2000"
-                            disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
-                            data-testid="input-tsl-activate-at"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Lock Profit At</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            value={trailingSL.lockProfitAt || ""}
-                            onChange={(e) => setTrailingSL((s) => ({ ...s, lockProfitAt: parseFloat(e.target.value) || 0 }))}
-                            placeholder="e.g. 1000"
-                            disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
-                            data-testid="input-tsl-lock-profit"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground">When Profit Increases By</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            value={trailingSL.whenProfitIncreaseBy || ""}
-                            onChange={(e) => setTrailingSL((s) => ({ ...s, whenProfitIncreaseBy: parseFloat(e.target.value) || 0 }))}
-                            placeholder="e.g. 500"
-                            disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
-                            data-testid="input-tsl-profit-increase"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Increase TSL By</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            value={trailingSL.increaseTslBy || ""}
-                            onChange={(e) => setTrailingSL((s) => ({ ...s, increaseTslBy: parseFloat(e.target.value) || 0 }))}
-                            placeholder="e.g. 250"
-                            disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
-                            data-testid="input-tsl-increase-by"
-                          />
-                        </div>
+                        {(() => {
+                          const tslType = trailingSL.tslType ?? "none";
+                          const tslUnit = tslType === "amount" ? " (per lot)" : tslType === "percentage_of_capital" ? " (% of capital)" : "";
+                          return (
+                            <>
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Activate At{tslUnit}</Label>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  value={trailingSL.activateAt || ""}
+                                  onChange={(e) => setTrailingSL((s) => ({ ...s, activateAt: parseFloat(e.target.value) || 0 }))}
+                                  placeholder="e.g. 2000"
+                                  disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
+                                  data-testid="input-tsl-activate-at"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Lock Profit At{tslUnit}</Label>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  value={trailingSL.lockProfitAt || ""}
+                                  onChange={(e) => setTrailingSL((s) => ({ ...s, lockProfitAt: parseFloat(e.target.value) || 0 }))}
+                                  placeholder="e.g. 1000"
+                                  disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
+                                  data-testid="input-tsl-lock-profit"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs text-muted-foreground">When Profit Increases By{tslUnit}</Label>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  value={trailingSL.whenProfitIncreaseBy || ""}
+                                  onChange={(e) => setTrailingSL((s) => ({ ...s, whenProfitIncreaseBy: parseFloat(e.target.value) || 0 }))}
+                                  placeholder="e.g. 500"
+                                  disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
+                                  data-testid="input-tsl-profit-increase"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Increase TSL By{tslUnit}</Label>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  value={trailingSL.increaseTslBy || ""}
+                                  onChange={(e) => setTrailingSL((s) => ({ ...s, increaseTslBy: parseFloat(e.target.value) || 0 }))}
+                                  placeholder="e.g. 250"
+                                  disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
+                                  data-testid="input-tsl-increase-by"
+                                />
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
@@ -1125,7 +1147,7 @@ export function TradePlanning() {
                       exitBadges.push({ label: `Target: ${tp2.profitTarget.value}${tp2.profitTarget.mode === "percentage" ? "%" : " INR"}`, color: "text-emerald-400" });
                     }
                     if (tp2.trailingSL?.enabled) {
-                      exitBadges.push({ label: "TSL Active", color: "text-blue-400" });
+                      exitBadges.push({ label: tslChipLabel(tp2.trailingSL), color: "text-blue-400" });
                     }
                     if (tp2.timeLogic?.exitTime) {
                       exitBadges.push({ label: `Exit @ ${tp2.timeLogic.exitTime}`, color: "text-yellow-400" });
