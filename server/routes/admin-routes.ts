@@ -4,8 +4,8 @@ import { sendEmail } from "../services/email";
 import { rescheduleScripMasterSync } from "../scrip-sync-scheduler";
 import { insertErrorRoutingSchema } from "@shared/schema";
 import { resetTradingHaltCache } from "./webhook-routes";
-import { getHsiStatus, forceReconnect as forceHsiReconnect } from "../hsi-kotak-neo-v3";
-import { getHsmStatus, forceReconnect as forceHsmReconnect } from "../hsm-kotak-neo-v3";
+import { getHsiStatus, getHsiHistory, forceReconnect as forceHsiReconnect } from "../hsi-kotak-neo-v3";
+import { getHsmStatus, getHsmHistory, forceReconnect as forceHsmReconnect } from "../hsm-kotak-neo-v3";
 
 export function registerAdminRoutes(app: Express, storage: IStorage) {
   app.get("/api/settings/mail", async (req, res) => {
@@ -232,6 +232,14 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.get("/api/admin/hsi/history", (_req, res) => {
+    try {
+      res.json(getHsiHistory());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/admin/hsm/status", (_req, res) => {
     try {
       res.json(getHsmStatus());
@@ -246,6 +254,14 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
       res.status(result.ok ? 200 : 400).json(result);
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });
+    }
+  });
+
+  app.get("/api/admin/hsm/history", (_req, res) => {
+    try {
+      res.json(getHsmHistory());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 }

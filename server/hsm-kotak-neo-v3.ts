@@ -30,6 +30,15 @@ let hsmLastConnectedAt: Date | null = null;
 let hsmLastHeartbeatAt: Date | null = null;
 let hsmStatusInterval: NodeJS.Timeout | null = null;
 let _hsmPrevOpen = false;
+let hsmLastDisconnectedAt: Date | null = null;
+
+interface ConnectionEvent { type: "connected" | "disconnected"; timestamp: string; }
+const MAX_HISTORY = 20;
+const hsmConnectionHistory: ConnectionEvent[] = [];
+function pushHsmEvent(type: "connected" | "disconnected"): void {
+  hsmConnectionHistory.push({ type, timestamp: new Date().toISOString() });
+  if (hsmConnectionHistory.length > MAX_HISTORY) hsmConnectionHistory.shift();
+}
 
 function startHsmStatusTracking(): void {
   if (hsmStatusInterval) clearInterval(hsmStatusInterval);
@@ -38,6 +47,11 @@ function startHsmStatusTracking(): void {
     const nowOpen = ws !== null && ws.readyState === WebSocket.OPEN;
     if (nowOpen && !_hsmPrevOpen) {
       hsmLastConnectedAt = new Date();
+      pushHsmEvent("connected");
+    }
+    if (!nowOpen && _hsmPrevOpen) {
+      hsmLastDisconnectedAt = new Date();
+      pushHsmEvent("disconnected");
     }
     if (nowOpen) {
       hsmLastHeartbeatAt = new Date();
@@ -61,9 +75,14 @@ export function getHsmStatus() {
     reconnectDelayMs: reconnectDelay,
     lastConnectedAt: hsmLastConnectedAt?.toISOString() ?? null,
     lastHeartbeatAt: hsmLastHeartbeatAt?.toISOString() ?? null,
+    lastDisconnectedAt: hsmLastDisconnectedAt?.toISOString() ?? null,
     hsmUrl: HSM_URL,
     subscriptionCount: subscriptions.size,
   };
+}
+
+export function getHsmHistory(): ConnectionEvent[] {
+  return [...hsmConnectionHistory].reverse();
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -204,6 +223,7 @@ export function refreshConfig(config: BrokerConfig): void {
   reconnectDelay = 1_000;
   hsmLastConnectedAt = null;
   hsmLastHeartbeatAt = null;
+  hsmLastDisconnectedAt = null;
   _hsmPrevOpen = false;
   activeConfig = config;
   connect(config);

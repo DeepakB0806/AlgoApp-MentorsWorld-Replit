@@ -2028,6 +2028,11 @@ function ErrorLogCard() {
   );
 }
 
+interface ConnectionEvent {
+  type: "connected" | "disconnected";
+  timestamp: string;
+}
+
 interface HsiStatusData {
   connected: boolean;
   reconnecting: boolean;
@@ -2049,6 +2054,7 @@ interface HsmStatusData {
   reconnectDelayMs: number;
   lastConnectedAt: string | null;
   lastHeartbeatAt: string | null;
+  lastDisconnectedAt: string | null;
   hsmUrl: string;
   subscriptionCount: number;
 }
@@ -2066,6 +2072,11 @@ function HsiStatusCard() {
     onSuccess: () => {
       setTimeout(() => refetch(), 2000);
     },
+  });
+
+  const { data: hsiHistory } = useQuery<ConnectionEvent[]>({
+    queryKey: ["/api/admin/hsi/history"],
+    refetchInterval: 10_000,
   });
 
   function formatExact(iso: string | null): string {
@@ -2194,6 +2205,22 @@ function HsiStatusCard() {
               </span>
             </div>
           </div>
+          {hsiHistory && hsiHistory.length > 0 && (
+            <div className="mt-3 rounded-lg border border-border/50 bg-muted/20 px-4 py-3">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Connection History</p>
+              <div className="space-y-1.5" data-testid="list-hsi-history">
+                {hsiHistory.slice(0, 12).map((event, i) => (
+                  <div key={i} className="flex items-center gap-2.5 text-xs">
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${event.type === "connected" ? "bg-green-500" : "bg-red-500"}`} />
+                    <span className="font-mono text-muted-foreground">{formatExact(event.timestamp)}</span>
+                    <span className={`font-medium ${event.type === "connected" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                      {event.type === "connected" ? "Connected" : "Disconnected"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {!isLoading && !data?.connected && (
             <div className="mt-3">
               <Button
@@ -2234,6 +2261,22 @@ function HsmStatusCard() {
       setTimeout(() => refetch(), 2000);
     },
   });
+
+  const { data: hsmHistory } = useQuery<ConnectionEvent[]>({
+    queryKey: ["/api/admin/hsm/history"],
+    refetchInterval: 10_000,
+  });
+
+  function formatExact(iso: string | null): string {
+    if (!iso) return "—";
+    try {
+      const date = new Date(iso);
+      if (isNaN(date.getTime())) return "—";
+      return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+    } catch {
+      return "—";
+    }
+  }
 
   function formatRelative(iso: string | null): string {
     if (!iso) return "—";
@@ -2308,15 +2351,21 @@ function HsmStatusCard() {
               </span>
             </div>
             <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-muted-foreground">Last Heartbeat</span>
-              <span className="font-medium" data-testid="text-hsm-last-heartbeat">
-                {isLoading ? "—" : formatRelative(data?.lastHeartbeatAt ?? null)}
+              <span className="text-muted-foreground">Last Heartbeat At</span>
+              <span className="font-mono text-xs" data-testid="text-hsm-last-heartbeat">
+                {isLoading ? "—" : formatExact(data?.lastHeartbeatAt ?? null)}
               </span>
             </div>
             <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-muted-foreground">Last Connected</span>
-              <span className="font-medium" data-testid="text-hsm-last-connected">
-                {isLoading ? "—" : formatRelative(data?.lastConnectedAt ?? null)}
+              <span className="text-muted-foreground">Last Connected At</span>
+              <span className="font-mono text-xs" data-testid="text-hsm-last-connected">
+                {isLoading ? "—" : formatExact(data?.lastConnectedAt ?? null)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">Last Disconnected At</span>
+              <span className="font-mono text-xs" data-testid="text-hsm-last-disconnected">
+                {isLoading ? "—" : formatExact(data?.lastDisconnectedAt ?? null)}
               </span>
             </div>
             <div className="flex items-center justify-between px-4 py-2.5">
@@ -2341,6 +2390,22 @@ function HsmStatusCard() {
               </span>
             </div>
           </div>
+          {hsmHistory && hsmHistory.length > 0 && (
+            <div className="mt-3 rounded-lg border border-border/50 bg-muted/20 px-4 py-3">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Connection History</p>
+              <div className="space-y-1.5" data-testid="list-hsm-history">
+                {hsmHistory.slice(0, 12).map((event, i) => (
+                  <div key={i} className="flex items-center gap-2.5 text-xs">
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${event.type === "connected" ? "bg-green-500" : "bg-red-500"}`} />
+                    <span className="font-mono text-muted-foreground">{formatExact(event.timestamp)}</span>
+                    <span className={`font-medium ${event.type === "connected" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                      {event.type === "connected" ? "Connected" : "Disconnected"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {!isLoading && !data?.connected && (
             <div className="mt-3">
               <Button

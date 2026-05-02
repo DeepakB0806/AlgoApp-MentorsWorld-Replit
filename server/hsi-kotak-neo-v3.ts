@@ -29,13 +29,25 @@ let hsiLastConnectedAt: Date | null = null;
 let hsiLastHeartbeatAt: Date | null = null;
 let hsiLastDisconnectedAt: Date | null = null;
 let hsiStatusInterval: NodeJS.Timeout | null = null;
+let _hsiPrevOpen = false;
+
+interface ConnectionEvent { type: "connected" | "disconnected"; timestamp: string; }
+const MAX_HISTORY = 20;
+const hsiConnectionHistory: ConnectionEvent[] = [];
+function pushHsiEvent(type: "connected" | "disconnected"): void {
+  hsiConnectionHistory.push({ type, timestamp: new Date().toISOString() });
+  if (hsiConnectionHistory.length > MAX_HISTORY) hsiConnectionHistory.shift();
+}
 
 function startHsiStatusTracking(): void {
   if (hsiStatusInterval) clearInterval(hsiStatusInterval);
+  _hsiPrevOpen = false;
   hsiStatusInterval = setInterval(() => {
-    if (ws !== null && ws.readyState === WebSocket.OPEN) {
-      hsiLastHeartbeatAt = new Date();
-    }
+    const nowOpen = ws !== null && ws.readyState === WebSocket.OPEN;
+    if (nowOpen && !_hsiPrevOpen) pushHsiEvent("connected");
+    if (!nowOpen && _hsiPrevOpen) pushHsiEvent("disconnected");
+    if (nowOpen) hsiLastHeartbeatAt = new Date();
+    _hsiPrevOpen = nowOpen;
   }, 20_000);
 }
 
@@ -58,6 +70,10 @@ export function getHsiStatus() {
     hsiUrl: HSI_URL,
     zombieCount,
   };
+}
+
+export function getHsiHistory(): ConnectionEvent[] {
+  return [...hsiConnectionHistory].reverse();
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
