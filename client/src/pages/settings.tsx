@@ -1205,7 +1205,10 @@ function MarketCalendarSettings() {
   }
 
   function setExchangeField(exchange: string, field: "marketOpenTime" | "marketCloseTime", value: string) {
-    setExchangeEdits(prev => ({ ...prev, [exchange]: { ...(prev[exchange] ?? {}), [field]: value } as any }));
+    setExchangeEdits(prev => {
+      const existing = prev[exchange] ?? { marketOpenTime: "", marketCloseTime: "" };
+      return { ...prev, [exchange]: { ...existing, [field]: value } };
+    });
   }
 
   // ── Index Expiry state ───────────────────────────────────────────────────

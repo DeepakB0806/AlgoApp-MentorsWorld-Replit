@@ -1,8 +1,13 @@
 import type { IStorage } from "./storage";
-import type { TimeLogicConfig, TradeParams } from "@shared/schema";
+import type { TimeLogicConfig, TradeParams, IndexExpirySetting } from "@shared/schema";
 import { startPersistentSquareOff, persistentSquareOffActive } from "./te-kotak-neo-v3";
 import { addProcessFlowLog } from "./process-flow-log";
 import { isWithinMarketHours, getISTDatetimeNow } from "./market-calendar";
+
+const DAY_INT_TO_NAME: Record<number, string> = {
+  0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday",
+  4: "Thursday", 5: "Friday", 6: "Saturday",
+};
 
 const LOG_PREFIX = "[PLAN-MONITOR]";
 const CHECK_INTERVAL_MS = 60 * 1000;
@@ -52,6 +57,15 @@ async function checkPlans(storage: IStorage): Promise<void> {
     (p) => (p.deploymentStatus === "active" || p.deploymentStatus === "deployed") && p.brokerConfigId
   );
 
+  // Load index expiry settings once for the whole tick — keyed by UPPERCASE index name
+  let indexExpiryMap: Map<string, IndexExpirySetting> = new Map();
+  try {
+    const rows = await storage.getIndexExpirySettings();
+    for (const row of rows) indexExpiryMap.set(row.indexName.toUpperCase(), row);
+  } catch (err: any) {
+    console.warn(`${LOG_PREFIX} Could not load indexExpirySettings — will fall back to instrConfig:`, err?.message);
+  }
+
   // Loop is a no-op when empty; TSL poll still runs regardless of deployed plan count
   for (const plan of deployedPlans) {
     try {
@@ -83,13 +97,24 @@ async function checkPlans(storage: IStorage): Promise<void> {
         reason = `exitTime reached for MIS position(s) (configured ${exitTime} IST, current ${istTime} IST)`;
       }
 
-      // exitOnExpiry applies ONLY to NRML/CNC positions, and only on expiry day
+      // exitOnExpiry applies ONLY to NRML/CNC positions, and only on expiry day.
+      // Expiry day resolution order:
+      //   1. indexExpirySettings DB table (admin-configurable via Market Calendar UI)
+      //   2. instrConfig.expiryDay from scrip master (fallback)
+      //   3. "Thursday" hard default
       if (!shouldSquareOff && exitOnExpiry && hasNRML) {
         const ticker = plan.ticker;
         const exchange = plan.exchange || "NFO";
         if (ticker) {
-          const instrConfig = await storage.getInstrumentConfig(ticker, exchange);
-          const expiryDay = instrConfig?.expiryDay || "Thursday";
+          let expiryDay: string;
+          const indexExpirySetting = indexExpiryMap.get(ticker.toUpperCase());
+          if (indexExpirySetting) {
+            expiryDay = DAY_INT_TO_NAME[indexExpirySetting.defaultExpiryDay] ?? "Thursday";
+            console.log(`${LOG_PREFIX} Expiry day for ${ticker} from Market Calendar DB: ${expiryDay} (day=${indexExpirySetting.defaultExpiryDay})`);
+          } else {
+            const instrConfig = await storage.getInstrumentConfig(ticker, exchange);
+            expiryDay = instrConfig?.expiryDay || "Thursday";
+          }
           if (istDayName === expiryDay) {
             const squareOffTime = exitTime || "15:20";
             if (istTime >= squareOffTime) {
