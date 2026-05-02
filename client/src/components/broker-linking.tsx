@@ -526,7 +526,7 @@ export function BrokerLinking() {
     queryKey: ["/api/webhooks"],
   });
 
-  const { data: scripStatus } = useQuery<{ lastSyncDateIST: string; lastSyncTimeIST: string; isStale: boolean; todayIST: string }>({
+  const { data: scripStatus } = useQuery<{ lastSyncDateIST: string; lastSyncTimeIST: string; isStale: boolean; todayIST: string; intradayIntervalMins: number }>({
     queryKey: ["/api/broker/kotak/scrip-status"],
     refetchInterval: 5 * 60 * 1000,
   });
@@ -919,11 +919,22 @@ export function BrokerLinking() {
                     ) : null;
                   })()}
                   {isDeployed && plan.estimatedMargin && (
-                    <div className="flex items-center justify-end gap-1 mt-1 text-[10px] text-muted-foreground/80 font-mono" data-testid={`text-margin-info-${plan.id}`}>
+                    <div className="flex items-center gap-1.5 mt-1.5 text-xs flex-wrap" data-testid={`text-margin-info-${plan.id}`}>
                       {plan.marginCalculatedAt && (
-                        <span>{new Date(plan.marginCalculatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).replace(",", "")}</span>
+                        <span className="text-muted-foreground">
+                          Date: {new Date(plan.marginCalculatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).replace(",", "")}
+                        </span>
                       )}
-                      <span className="ml-1">· Margin: ₹{Number(plan.estimatedMargin).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>
+                      <span className="text-muted-foreground/50">|</span>
+                      <span className="font-semibold text-amber-400">
+                        Margin Amt: ₹{Number(plan.estimatedMargin).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                      <span className="text-muted-foreground/50">|</span>
+                      <span className="text-muted-foreground">
+                        Margin Validity: {scripStatus?.intradayIntervalMins > 0
+                          ? `${scripStatus.intradayIntervalMins} mins`
+                          : "until next daily sync"}
+                      </span>
                     </div>
                   )}
                   {isDeployed && !plan.estimatedMargin && (depStatus === "active" || depStatus === "deployed") && (

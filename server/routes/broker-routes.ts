@@ -1178,11 +1178,13 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     res.json({ logs: entries, plans, total: totalCount });
   });
 
-  app.get("/api/broker/kotak/scrip-status", (req, res) => {
+  app.get("/api/broker/kotak/scrip-status", async (req, res) => {
     const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
     const todayIST = `${nowIST.getUTCFullYear()}-${String(nowIST.getUTCMonth() + 1).padStart(2, "0")}-${String(nowIST.getUTCDate()).padStart(2, "0")}`;
     const isStale = scripMasterSyncStatus.lastSyncDateIST !== todayIST;
-    res.json({ ...scripMasterSyncStatus, isStale, todayIST });
+    const intradaySetting = await storage.getSetting("scrip_master_intraday_interval_mins");
+    const intradayIntervalMins = parseInt(intradaySetting?.value || "0", 10) || 0;
+    res.json({ ...scripMasterSyncStatus, isStale, todayIST, intradayIntervalMins });
   });
 
   app.post("/api/broker-configs/:id/sync-scrip-master", async (req, res) => {
