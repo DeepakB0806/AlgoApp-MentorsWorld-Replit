@@ -211,6 +211,14 @@ export function refreshConfig(config: BrokerConfig): void {
   startHsmStatusTracking();
 }
 
+export function forceReconnect(): { ok: boolean; message: string } {
+  if (!activeConfig) {
+    return { ok: false, message: "No active broker config — HSM was never started" };
+  }
+  refreshConfig(activeConfig);
+  return { ok: true, message: "HSM reconnect triggered" };
+}
+
 export function subscribe(symbol: string): void {
   subscriptions.set(symbol, true);
   const token = brokerSymbolToTokenMap.get(symbol);

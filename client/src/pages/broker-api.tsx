@@ -2054,12 +2054,19 @@ interface HsmStatusData {
 }
 
 function HsiStatusCard() {
-  const { data, isLoading, dataUpdatedAt } = useQuery<HsiStatusData>({
+  const { data, isLoading, dataUpdatedAt, refetch } = useQuery<HsiStatusData>({
     queryKey: ["/api/admin/hsi/status"],
     refetchInterval: 10_000,
   });
 
   const [expanded, setExpanded] = useState(false);
+
+  const reconnectMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/admin/hsi/reconnect"),
+    onSuccess: () => {
+      setTimeout(() => refetch(), 2000);
+    },
+  });
 
   function formatExact(iso: string | null): string {
     if (!iso) return "—";
@@ -2187,6 +2194,21 @@ function HsiStatusCard() {
               </span>
             </div>
           </div>
+          {!isLoading && !data?.connected && (
+            <div className="mt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-2"
+                disabled={data?.reconnecting || reconnectMutation.isPending}
+                onClick={() => reconnectMutation.mutate()}
+                data-testid="button-hsi-reconnect"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${reconnectMutation.isPending ? "animate-spin" : ""}`} />
+                {reconnectMutation.isPending ? "Reconnecting…" : "Reconnect Now"}
+              </Button>
+            </div>
+          )}
           {dataUpdatedAt > 0 && (
             <p className="text-[11px] text-muted-foreground mt-2 text-right">
               Updated {formatRelative(new Date(dataUpdatedAt).toISOString())} · auto-refreshes every 10s
@@ -2199,12 +2221,19 @@ function HsiStatusCard() {
 }
 
 function HsmStatusCard() {
-  const { data, isLoading, dataUpdatedAt } = useQuery<HsmStatusData>({
+  const { data, isLoading, dataUpdatedAt, refetch } = useQuery<HsmStatusData>({
     queryKey: ["/api/admin/hsm/status"],
     refetchInterval: 10_000,
   });
 
   const [expanded, setExpanded] = useState(false);
+
+  const reconnectMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/admin/hsm/reconnect"),
+    onSuccess: () => {
+      setTimeout(() => refetch(), 2000);
+    },
+  });
 
   function formatRelative(iso: string | null): string {
     if (!iso) return "—";
@@ -2312,6 +2341,21 @@ function HsmStatusCard() {
               </span>
             </div>
           </div>
+          {!isLoading && !data?.connected && (
+            <div className="mt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-2"
+                disabled={data?.reconnecting || reconnectMutation.isPending}
+                onClick={() => reconnectMutation.mutate()}
+                data-testid="button-hsm-reconnect"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${reconnectMutation.isPending ? "animate-spin" : ""}`} />
+                {reconnectMutation.isPending ? "Reconnecting…" : "Reconnect Now"}
+              </Button>
+            </div>
+          )}
           {dataUpdatedAt > 0 && (
             <p className="text-[11px] text-muted-foreground mt-2 text-right">
               Updated {formatRelative(new Date(dataUpdatedAt).toISOString())} · auto-refreshes every 10s

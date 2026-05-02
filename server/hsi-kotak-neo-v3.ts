@@ -255,6 +255,14 @@ export function refreshConfig(config: BrokerConfig): void {
   startHsiStatusTracking();
 }
 
+export function forceReconnect(): { ok: boolean; message: string } {
+  if (!activeConfig) {
+    return { ok: false, message: "No active broker config — HSI was never started" };
+  }
+  refreshConfig(activeConfig);
+  return { ok: true, message: "HSI reconnect triggered" };
+}
+
 export async function startHsiGateway(storage: IStorage): Promise<void> {
   try {
     const configs = await storage.getBrokerConfigs();
