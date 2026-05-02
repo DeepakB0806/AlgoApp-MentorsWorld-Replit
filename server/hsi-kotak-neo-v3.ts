@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
+import { runProbe, getProbeThreshold } from "./kotak-probe";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -23,6 +24,18 @@ let relayFailed = false;
 let reconnectTimer: NodeJS.Timeout | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
 let zombieCount = 0;
+
+// ── HSI Probe auto-trigger (Build #164, outside locked blocks) ────────────────
+let hsiConsecutiveFailures = 0;
+let hsiAuthOkInSession = false;
+function checkHsiAutoProbe(): void {
+  const threshold = getProbeThreshold();
+  if (hsiConsecutiveFailures >= threshold && activeConfig) {
+    console.log(`[HSI] ${hsiConsecutiveFailures} consecutive reconnects without auth_ok — auto-running probe`);
+    runProbe(activeConfig, "hsi").catch(() => {});
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ── HSI Status tracking (outside locked blocks) ──────────────────────────────
 let hsiLastConnectedAt: Date | null = null;
@@ -103,6 +116,7 @@ function resolveHsiUrl(config: BrokerConfig): string {
 // HSI-1 amended by Build #153 (2026-04-27): zombieCount relay-bypass counter added — additive only.
 // HSI-1 amended by Build #155 (2026-04-27): removed duplicate scheduleReconnect() from zombie handler — ws.terminate() already fires ws.on("close") which calls scheduleReconnect; having both created two concurrent timers and two simultaneous WS connections.
 // HSI-1 amended by Build #163 (2026-05-01): exact connection/disconnection timestamps recorded in ws.on("open") and ws.on("close") — additive only, no existing logic changed.
+// HSI-1 amended by Build #164 (2026-05-02): hsiAuthOkInSession reset on open, set on cn:ok; hsiConsecutiveFailures incremented on close-without-auth; probe auto-triggered at threshold — additive only.
 function connect(config: BrokerConfig): void {
   if (!config.accessToken || !config.sessionId) {
     console.error(`${LOG_PREFIX} Missing accessToken/sessionId. Cannot connect HSI.`);
@@ -138,6 +152,7 @@ function connect(config: BrokerConfig): void {
 
   ws.on("open", () => {
     opened = true;
+    hsiAuthOkInSession = false; // HSI-1 Build #164: reset per-session auth flag
     hsiLastConnectedAt = new Date(); // HSI-1 Build #163: exact connect timestamp
     console.log(usingRelay ? `${LOG_PREFIX} Connected via relay. Sending Kotak auth...` : `${LOG_PREFIX} Connected directly to Kotak HSI. Sending auth...`);
     reconnectDelay = 1_000;
@@ -172,6 +187,8 @@ function connect(config: BrokerConfig): void {
       }
       if (type === "cn" && msg.ak === "ok") {
         zombieCount = 0;
+        hsiAuthOkInSession = true; // HSI-1 Build #164: mark auth ok, reset failure counter
+        hsiConsecutiveFailures = 0;
         console.log(`${LOG_PREFIX} Auth confirmed (cn ok) — relay healthy, zombie counter reset`);
         return;
       }
@@ -210,6 +227,7 @@ function connect(config: BrokerConfig): void {
   ws.on("close", (code: number, reason: Buffer) => {
     const reasonStr = reason ? reason.toString() : "";
     hsiLastDisconnectedAt = new Date(); // HSI-1 Build #163: exact disconnect timestamp
+    if (!hsiAuthOkInSession) { hsiConsecutiveFailures++; checkHsiAutoProbe(); } // HSI-1 Build #164: probe auto-trigger
     console.log(`${LOG_PREFIX} Disconnected code=${code} reason="${reasonStr}" — reconnecting in ${reconnectDelay}ms`);
     ws = null;
     scheduleReconnect(config);

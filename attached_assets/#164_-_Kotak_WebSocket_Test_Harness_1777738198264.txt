@@ -1,0 +1,97 @@
+#164 - Kotak WebSocket Test Harness + Auto Diagnostic Probe
+What & Why
+When HSM or HSI has a sustained connection failure, there is currently no way to distinguish between:
+
+"Our HSM/HSI code is broken"
+"Kotak changed their protocol"
+"Kotak's servers are down"
+This task builds a permanent, self-contained Kotak demo harness from the official zip (provided by Kotak's engineer) plus an automated diagnostic probe that fires when either gateway hits a sustained failure threshold.
+
+Key principle: The probe uses the raw Kotak demo code (no E41 wire format, no relay, no our abstractions) — a clean-room baseline. If the probe fails, the problem is on Kotak's side. If the probe succeeds but our gateway fails, the problem is in our code.
+
+Files to extract from zip
+Source: attached_assets/Websocket_Kotak_Neo_1777632679296.zip
+
+Extract these files — skip all __MACOSX/ and .DS_Store entries:
+
+Websocket/hslib.js → public/kotak-test/hslib.js
+Websocket/demo/demo.html → public/kotak-test/demo.html
+Websocket/demo/demo.js → public/kotak-test/demo.js
+Websocket/demo/neo.js → public/kotak-test/neo.js
+Also save the PDF for reference (already in attached_assets):
+
+attached_assets/NEO_Websocket_1773832939442.pdf is the existing copy — no need to extract again
+Do NOT extract __MACOSX/ files or .DS_Store.
+
+Modifications to demo.html after extraction
+The original demo.html uses relative ../hslib.js path — fix to ./hslib.js. Then add:
+
+A "Load Credentials from DB" button at the top of the green auth section that calls GET /api/admin/broker-credentials/active and auto-fills #token_id (accessToken), #sid (sessionId), and selects the matching #datacenter_id option
+A thin banner at the top: "Kotak Official Demo — for testing and diagnostics only. Not connected to production trade engine."
+No other changes to Kotak's files. Preserve the original logic exactly.
+
+Done looks like
+Manual path (superadmin card):
+A "WebSocket Test Harness" card appears in the Broker API page, positioned after the Process Flow Log button and before the Kotak Neo Setup Guide card (lines ~3400–3411 in client/src/pages/broker-api.tsx)
+Card has two buttons: "Open Test Harness" (opens /kotak-test/ in a new tab) and "Run Diagnostic Probe" (triggers the server-side probe immediately via POST /api/admin/probe/run)
+Card shows the last probe result: timestamp, verdict (colour-coded), and which gateway was tested
+Auto-run path:
+When HSI hits 5 consecutive reconnects without a successful auth → server auto-runs the probe for "hsi" and logs verdict
+When HSM hits 5 consecutive reconnects → server auto-runs the probe for "hsm"
+Both thresholds configurable via env var PROBE_TRIGGER_THRESHOLD (default 5)
+Probe never runs on a single 1006 drop — only sustained failure
+Probe log output (production logs):
+[PROBE] Running HSI diagnostic against wss://e41.kotaksecurities.com/realtime ...
+[PROBE] HSI: Kotak reachable, auth OK → bug is in our HSI code (or token expired)
+
+or
+
+[PROBE] HSI: Kotak unreachable → Kotak server down or URL changed
+
+Out of scope
+Automatic code changes or "auto-rectification" — probe diagnoses, human decides the fix
+Protocol diff detection between probe messages and our gateway messages
+Running on every minor disconnect
+Steps
+Extract zip — Run unzip -o "attached_assets/Websocket_Kotak_Neo_1777632679296.zip" -d /tmp/kotak-zip-extract. Copy the four files to public/kotak-test/. Patch demo.html: fix the ../hslib.js path to ./hslib.js, add the "Load Credentials from DB" fetch button, add the banner. Delete /tmp/kotak-zip-extract after.
+
+GET /api/admin/broker-credentials/active — Add to server/routes/admin-routes.ts. Returns {accessToken, sessionId, dataCenter} from the connected broker config. Auth-guarded (superadmin only). This is the endpoint that demo.html's "Load Credentials" button calls.
+
+server/kotak-probe.ts — New module:
+
+interface ProbeResult {
+  target: "hsm" | "hsi";
+  status: "auth_ok" | "auth_failed" | "unreachable" | "timeout";
+  endpoint: string;
+  testedAt: string; // ISO timestamp
+  durationMs: number;
+}
+
+runProbe(config, target): opens a raw ws WebSocket directly to Kotak URL (NO relay — bypassing relay is intentional for a clean-room test)
+Sends auth with quotes intact: JSON.stringify({type:"cn", Authorization: config.accessToken, Sid: config.sessionId, source:"WEB"})
+Waits up to 10s for {type:"cn", ak:"ok"} → "auth_ok", or error message → "auth_failed", or connection failure → "unreachable", or no response → "timeout"
+Stores last result in an in-memory Map<"hsm"|"hsi", ProbeResult> (exported as getLastProbeResults())
+Logs [PROBE] verdict clearly
+POST /api/admin/probe/run — Add to server/routes/admin-routes.ts. Accepts {target: "hsm"|"hsi"|"both"}. Runs probe immediately, returns result. Used by the dashboard card's "Run Diagnostic Probe" button.
+
+GET /api/admin/probe/status — Returns getLastProbeResults() — last probe result for HSM and HSI. Used by the dashboard card to show last result.
+
+HSI auto-trigger — In server/hsi-kotak-neo-v3.ts, add a consecutiveFailures counter (additive, no locked blocks). Increment after each reconnect attempt that ends without auth_ok. Reset to 0 when {type:"cn", ak:"ok"} received. When counter reaches PROBE_TRIGGER_THRESHOLD (default 5, from env or hardcoded), call runProbe(activeConfig, "hsi") asynchronously (fire-and-forget, never awaited synchronously to avoid blocking reconnect logic).
+
+HSM auto-trigger — Same pattern in server/hsm-kotak-neo-v3.ts. Additive only, no locked blocks.
+
+UI card — In client/src/pages/broker-api.tsx, insert a new KotakTestHarnessCard component between the Process Flow Log button section (line ~3400) and the Kotak Neo Setup Guide card (line ~3411). Card contents:
+
+Title: "WebSocket Test Harness"
+Description: "Official Kotak demo files for manual connection testing and automated diagnostics"
+Two buttons: "Open Test Harness" (opens /kotak-test/ in new tab, data-testid="button-open-test-harness") and "Run Probe Now" (POST to /api/admin/probe/run, data-testid="button-run-probe")
+Below buttons: last probe results for HSM and HSI — status badge (green/amber/red), endpoint tested, timestamp
+useQuery polling /api/admin/probe/status every 30s
+Relevant files
+attached_assets/Websocket_Kotak_Neo_1777632679296.zip — source zip (user provided)
+public/kotak-test/ — new directory (created by this task)
+server/kotak-probe.ts — new file
+server/hsi-kotak-neo-v3.ts — additive only (counter + probe trigger, no locked blocks)
+server/hsm-kotak-neo-v3.ts — additive only (counter + probe trigger, no locked blocks)
+server/routes/admin-routes.ts
+client/src/pages/broker-api.tsx:3400-3411 — card insertion point

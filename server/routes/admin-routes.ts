@@ -6,6 +6,7 @@ import { insertErrorRoutingSchema } from "@shared/schema";
 import { resetTradingHaltCache } from "./webhook-routes";
 import { getHsiStatus, getHsiHistory, forceReconnect as forceHsiReconnect } from "../hsi-kotak-neo-v3";
 import { getHsmStatus, getHsmHistory, forceReconnect as forceHsmReconnect } from "../hsm-kotak-neo-v3";
+import { runProbe, runProbeForBoth, getLastProbeResults } from "../kotak-probe";
 
 export function registerAdminRoutes(app: Express, storage: IStorage) {
   app.get("/api/settings/mail", async (req, res) => {
@@ -260,6 +261,51 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
   app.get("/api/admin/hsm/history", (_req, res) => {
     try {
       res.json(getHsmHistory());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ── Kotak Probe & Test Harness ─────────────────────────────────────────────
+
+  app.get("/api/admin/broker-credentials/active", async (_req, res) => {
+    try {
+      const configs = await storage.getBrokerConfigs();
+      const active = configs.find(c => c.brokerName === "kotak_neo" && c.isConnected);
+      if (!active) return res.status(404).json({ error: "No connected Kotak Neo broker found" });
+      res.json({
+        accessToken: active.accessToken ?? null,
+        sessionId: active.sessionId ?? null,
+        dataCenter: active.dataCenter ?? null,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/probe/run", async (req, res) => {
+    try {
+      const configs = await storage.getBrokerConfigs();
+      const active = configs.find(c => c.brokerName === "kotak_neo" && c.isConnected);
+      if (!active) return res.status(404).json({ error: "No connected Kotak Neo broker found" });
+      const target: string = req.body?.target ?? "both";
+      if (target === "both") {
+        const results = await runProbeForBoth(active);
+        res.json(results);
+      } else if (target === "hsi" || target === "hsm") {
+        const result = await runProbe(active, target);
+        res.json(result);
+      } else {
+        res.status(400).json({ error: "target must be hsm, hsi, or both" });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/probe/status", (_req, res) => {
+    try {
+      res.json(getLastProbeResults());
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

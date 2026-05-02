@@ -26,6 +26,124 @@ interface TestResult {
   error?: string;
 }
 
+interface ProbeResult {
+  target: "hsm" | "hsi";
+  status: "auth_ok" | "auth_failed" | "unreachable" | "timeout";
+  endpoint: string;
+  testedAt: string;
+  durationMs: number;
+}
+
+function KotakTestHarnessCard() {
+  const { toast } = useToast();
+
+  const { data: probeStatus, isLoading: probeLoading } = useQuery<{ hsm: ProbeResult | null; hsi: ProbeResult | null }>({
+    queryKey: ["/api/admin/probe/status"],
+    refetchInterval: 30_000,
+  });
+
+  const probeMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/admin/probe/run", { target: "both" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/probe/status"] });
+      toast({ title: "Probe complete", description: "Results updated below." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Probe failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  function statusColor(s: ProbeResult["status"] | undefined) {
+    if (!s) return "text-muted-foreground";
+    if (s === "auth_ok") return "text-primary";
+    if (s === "auth_failed") return "text-amber-400";
+    return "text-destructive";
+  }
+
+  function statusLabel(s: ProbeResult["status"] | undefined) {
+    if (!s) return "—";
+    if (s === "auth_ok") return "Auth OK";
+    if (s === "auth_failed") return "Auth Failed";
+    if (s === "unreachable") return "Unreachable";
+    return "Timeout";
+  }
+
+  function fmtTime(iso: string | undefined) {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleTimeString();
+  }
+
+  return (
+    <Card className="mt-6">
+      <CardHeader>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Radio className="w-4 h-4 text-primary" />
+              WebSocket Test Harness
+            </CardTitle>
+            <CardDescription>Official Kotak demo files for manual connection testing and automated diagnostics</CardDescription>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open("/kotak-test/", "_blank")}
+              data-testid="button-open-test-harness"
+            >
+              <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+              Open Test Harness
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => probeMutation.mutate()}
+              disabled={probeMutation.isPending}
+              data-testid="button-run-probe"
+            >
+              {probeMutation.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Activity className="w-3.5 h-3.5 mr-1.5" />
+              )}
+              Run Probe Now
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {probeLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading last probe results...
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {(["hsm", "hsi"] as const).map((target) => {
+              const r = probeStatus?.[target];
+              return (
+                <div key={target} className="rounded-md border bg-muted/30 px-3 py-2 text-sm space-y-1" data-testid={`probe-result-${target}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold uppercase text-xs tracking-wider text-muted-foreground">{target}</span>
+                    <span className={`font-semibold text-xs ${statusColor(r?.status)}`}>{statusLabel(r?.status)}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">{r?.endpoint ?? "—"}</div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{r ? `${r.durationMs}ms` : "—"}</span>
+                    <span>{fmtTime(r?.testedAt)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {!probeLoading && !probeStatus?.hsm && !probeStatus?.hsi && (
+          <p className="text-xs text-muted-foreground mt-2">No probe has been run yet. Click "Run Probe Now" to test connectivity.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 type EngineStep = { label: string; status: "waiting" | "running" | "done" | "error"; detail?: string };
 
 function ApiFieldsReference() {
@@ -3819,6 +3937,10 @@ export default function BrokerApi() {
         <div className="mt-6">
           <ErrorLogCard />
         </div>
+
+        {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
+          <KotakTestHarnessCard />
+        )}
 
         {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
           <Card className="mt-6">

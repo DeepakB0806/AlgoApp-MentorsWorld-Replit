@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import path from "path";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -171,6 +172,9 @@ app.use((req, res, next) => {
   registerAuthRoutes(app);
   
   await registerRoutes(httpServer, app);
+
+  // Serve Kotak official demo files (for diagnostics) at /kotak-test/
+  app.use("/kotak-test", express.static(path.resolve("public/kotak-test")));
 
   // DB warmup probe — waits for Neon to wake up before any subsystem queries the DB
   async function waitForDatabase() {

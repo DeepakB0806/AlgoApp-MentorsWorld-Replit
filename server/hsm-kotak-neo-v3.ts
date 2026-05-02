@@ -3,6 +3,7 @@ import * as marketData from "./md-kotak-neo-v3";
 import { brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
+import { runProbe, getProbeThreshold } from "./kotak-probe";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -24,6 +25,18 @@ let activeConfig: BrokerConfig | null = null;
 let relayFailed = false;
 let reconnectTimer: NodeJS.Timeout | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
+
+// ── HSM Probe auto-trigger (Build #164, outside locked blocks) ────────────────
+let hsmConsecutiveFailures = 0;
+let hsmAuthOkInSession = false;
+function checkHsmAutoProbe(): void {
+  const threshold = getProbeThreshold();
+  if (hsmConsecutiveFailures >= threshold && activeConfig) {
+    console.log(`[HSM] ${hsmConsecutiveFailures} consecutive reconnects without auth_ok — auto-running probe`);
+    runProbe(activeConfig, "hsm").catch(() => {});
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ── HSM Status tracking (outside locked blocks) ──────────────────────────────
 let hsmLastConnectedAt: Date | null = null;
@@ -114,6 +127,7 @@ function resubscribeAll(): void {
 }
 
 // 🔒 LOCKED BLOCK START — HSM connect: relay→direct auto-fallback (relayFailed=true on failure) must not be removed; subscriptions.forEach() only, not Array.from() [HSM-1, HSM-2]
+// HSM-1 amended by Build #164 (2026-05-02): hsmAuthOkInSession reset on open, set on cn:ok; hsmConsecutiveFailures incremented on close-without-auth; probe auto-triggered at threshold — additive only.
 function connect(config: BrokerConfig): void {
   if (!config.accessToken || !config.sessionId) {
     console.error(`${LOG_PREFIX} No accessToken/sessionId — skipping WS connection`);
@@ -148,6 +162,7 @@ function connect(config: BrokerConfig): void {
 
   ws.on("open", () => {
     opened = true;
+    hsmAuthOkInSession = false; // HSM-1 Build #164: reset per-session auth flag
     console.log(`${LOG_PREFIX} Connected to Kotak HSM`);
     reconnectDelay = 1_000;
     try {
@@ -161,6 +176,10 @@ function connect(config: BrokerConfig): void {
   ws.on("message", (raw: WebSocket.RawData) => {
     try {
       const parsed = JSON.parse(raw.toString());
+      if (parsed.type === "cn" && parsed.ak === "ok") { // HSM-1 Build #164: track auth confirmation
+        hsmAuthOkInSession = true;
+        hsmConsecutiveFailures = 0;
+      }
       const data = parsed.data || parsed;
       let symbol: string | undefined = data.trdSym || data.ts || data.sym;
       // Fallback: if payload carries only a token (tk), reverse-map it to a symbol
@@ -179,6 +198,7 @@ function connect(config: BrokerConfig): void {
   });
 
   ws.on("close", () => {
+    if (!hsmAuthOkInSession) { hsmConsecutiveFailures++; checkHsmAutoProbe(); } // HSM-1 Build #164: probe auto-trigger
     console.log(`${LOG_PREFIX} Disconnected — reconnecting in ${reconnectDelay}ms`);
     ws = null;
     scheduleReconnect(config);
