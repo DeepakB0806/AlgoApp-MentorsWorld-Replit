@@ -962,13 +962,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "is_proxy_mode": {
-          "name": "is_proxy_mode",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false,
-          "default": false
-        },
         "lot_multiplier": {
           "name": "lot_multiplier",
           "type": "integer",
