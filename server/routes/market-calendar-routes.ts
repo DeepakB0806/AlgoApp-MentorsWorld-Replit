@@ -84,12 +84,14 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  const DATE_YYYYMMDD = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
+
   const uploadSchema = z.object({
     year: z.number().int().min(2020).max(2100),
-    exchange: z.string().min(1),
+    exchange: z.string().min(1).max(10),
     rows: z.array(z.object({
-      date: z.string(),
-      description: z.string(),
+      date: z.string().regex(DATE_YYYYMMDD, "Date must be YYYY-MM-DD"),
+      description: z.string().min(1).max(255),
     })).min(1),
   });
 

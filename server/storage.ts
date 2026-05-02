@@ -1683,7 +1683,11 @@ export class DatabaseStorage implements IStorage {
       and(eq(marketHolidays.year, year), eq(marketHolidays.exchange, exchange))
     );
     if (rows.length === 0) return 0;
-    const inserted = await db.insert(marketHolidays).values(rows).returning();
+    // Deduplicate by (exchange, date) — last occurrence wins, matching DB unique constraint
+    const seen = new Map<string, InsertMarketHoliday>();
+    for (const row of rows) seen.set(`${row.exchange}|${row.date}`, row);
+    const deduped = Array.from(seen.values());
+    const inserted = await db.insert(marketHolidays).values(deduped).returning();
     return inserted.length;
   }
 

@@ -1,4 +1,4 @@
-import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp, jsonb, index, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp, jsonb, index, uniqueIndex, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -850,7 +850,7 @@ export const marketHolidays = pgTable("market_holidays", {
   isTradingHoliday: boolean("is_trading_holiday").notNull().default(true),
 }, (table) => [
   index("idx_market_holidays_exchange_year").on(table.exchange, table.year),
-  index("idx_market_holidays_date_exchange").on(table.date, table.exchange),
+  uniqueIndex("uq_market_holidays_exchange_date").on(table.exchange, table.date),
 ]);
 
 export const insertMarketHolidaySchema = createInsertSchema(marketHolidays).omit({ id: true });
