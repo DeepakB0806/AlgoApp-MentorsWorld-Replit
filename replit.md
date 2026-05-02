@@ -45,3 +45,12 @@ The application adheres to a database-centric design where every field is stored
 - **Speakeasy & QRCode**: Libraries for generating and managing Time-based One-Time Passwords (TOTP) for secure authentication.
 - **Bcryptjs**: Used for secure hashing of passwords.
 - **Zod**: Utilized for runtime schema validation across all API routes, ensuring data integrity.
+
+## Mandatory Agent Rules
+
+Before writing any implementation code for any task, load and answer the
+`.agents/skills/pre-build-checklist/SKILL.md` checklist. This is not optional.
+
+Key rule: If a feature introduces any new data field stored in the database,
+the schema change in `shared/schema.ts` and `npm run db:push` MUST be the
+first step — before storage, backend, or frontend code.
