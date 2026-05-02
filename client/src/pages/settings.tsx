@@ -1268,18 +1268,26 @@ function MarketCalendarSettings() {
 
   const syncHolidaysMutation = useMutation({
     mutationFn: async (payload: { year: number; exchange: string }) => {
-      const res = await apiRequest("POST", "/api/market-calendar/holidays/sync-nse", payload);
+      const res = await fetch("/api/market-calendar/holidays/sync-nse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Sync failed");
       return body as { inserted: number; year: number; exchange: string };
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays"] });
-      toast({ title: "Sync complete", description: `${data.inserted} holiday(s) synced for ${data.exchange} ${data.year}.` });
+      toast({
+        title: "Sync complete",
+        description: `Synced ${data.inserted} holidays for ${data.exchange} / ${data.year}.`,
+      });
     },
     onError: (err: any) => toast({
-      title: "Sync failed",
-      description: `${err.message} — use CSV upload as backup.`,
+      title: "Sync failed — please use CSV upload as backup",
+      description: err.message,
       variant: "destructive",
     }),
   });
