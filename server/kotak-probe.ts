@@ -28,14 +28,54 @@ function resolveHsiEndpoint(config: BrokerConfig): string {
   return "wss://mis.kotaksecurities.com/realtime";
 }
 
+const HSM_DIRECT_URL = "wss://mlhsm.kotaksecurities.com";
+
+function buildHsmAuthMessage(config: BrokerConfig): string {
+  return JSON.stringify({
+    type: "cn",
+    Authorization: config.viewToken ?? config.accessToken,
+    Sid: config.sidView ?? config.sessionId,
+    source: "WEB",
+    ...(config.dataCenter ? { dataCenter: config.dataCenter } : {}),
+  });
+}
+
+function buildHsiAuthMessage(config: BrokerConfig): string {
+  return JSON.stringify({
+    type: "cn",
+    Authorization: config.accessToken,
+    Sid: config.sessionId,
+    source: "WEB",
+  });
+}
+
 export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Promise<ProbeResult> {
-  const endpoint = target === "hsi"
-    ? resolveHsiEndpoint(config)
-    : "wss://mlhsm.kotaksecurities.com";
+  const RELAY_URL = process.env.RELAY_TARGET_URL;
+  const RELAY_SECRET = process.env.RELAY_SECRET_KEY;
+
+  // HSM: always route through relay (direct connections are blocked from this server)
+  // HSI: connect directly to Kotak (relay adds /realtime path which it can't forward)
+  let wsUrl: string;
+  let wsOptions: WebSocket.ClientOptions = {};
+  let displayEndpoint: string;
+
+  if (target === "hsm") {
+    if (RELAY_URL && RELAY_SECRET) {
+      const relayWs = RELAY_URL.replace("http://", "ws://").replace("https://", "wss://");
+      wsUrl = relayWs;
+      wsOptions = { headers: { "x-target-url": HSM_DIRECT_URL, "x-relay-secret": RELAY_SECRET } };
+      displayEndpoint = `${HSM_DIRECT_URL} (via relay)`;
+    } else {
+      wsUrl = HSM_DIRECT_URL;
+      displayEndpoint = HSM_DIRECT_URL;
+    }
+  } else {
+    wsUrl = resolveHsiEndpoint(config);
+    displayEndpoint = wsUrl;
+  }
 
   const startMs = Date.now();
-
-  console.log(`[PROBE] Running ${target.toUpperCase()} diagnostic against ${endpoint} ...`);
+  console.log(`[PROBE] Running ${target.toUpperCase()} diagnostic against ${displayEndpoint} ...`);
 
   const result = await new Promise<ProbeResult>((resolve) => {
     let settled = false;
@@ -46,7 +86,7 @@ export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Pro
       clearTimeout(timer);
       try { ws.terminate(); } catch {}
       const durationMs = Date.now() - startMs;
-      const r: ProbeResult = { target, status, endpoint, testedAt: new Date().toISOString(), durationMs };
+      const r: ProbeResult = { target, status, endpoint: displayEndpoint, testedAt: new Date().toISOString(), durationMs };
       resolve(r);
     };
 
@@ -54,7 +94,7 @@ export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Pro
 
     let ws: WebSocket;
     try {
-      ws = new WebSocket(endpoint);
+      ws = new WebSocket(wsUrl, wsOptions);
     } catch {
       settle("unreachable");
       return;
@@ -62,12 +102,7 @@ export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Pro
 
     ws.on("open", () => {
       try {
-        const auth = JSON.stringify({
-          type: "cn",
-          Authorization: config.accessToken,
-          Sid: config.sessionId,
-          source: "WEB",
-        });
+        const auth = target === "hsm" ? buildHsmAuthMessage(config) : buildHsiAuthMessage(config);
         ws.send(auth);
       } catch {
         settle("unreachable");
@@ -86,7 +121,9 @@ export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Pro
     });
 
     ws.on("error", () => settle("unreachable"));
-    ws.on("close", () => settle("unreachable"));
+    ws.on("close", (code) => {
+      if (!settled && code !== 1000) settle("unreachable");
+    });
   });
 
   lastResults.set(target, result);

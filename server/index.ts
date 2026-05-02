@@ -174,7 +174,7 @@ app.use((req, res, next) => {
   await registerRoutes(httpServer, app);
 
   // Serve Kotak official demo files (for diagnostics) at /kotak-test/
-  app.use("/kotak-test", express.static(path.resolve("public/kotak-test")));
+  app.use("/kotak-test", express.static(path.resolve("public/kotak-test"), { index: "demo.html" }));
 
   // DB warmup probe — waits for Neon to wake up before any subsystem queries the DB
   async function waitForDatabase() {

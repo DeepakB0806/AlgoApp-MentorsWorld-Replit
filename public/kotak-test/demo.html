@@ -23,20 +23,14 @@
 <div class="container-fluid">
   <h1>Subscribing to HSM demo</h1>
   <p>You can use this file to get Live Broadcast of a scrip, Pause, Unpause, Resume etc</p>
-  
-  
-  <div class="row">
-    
 
+  <div class="row">
     <div class="col-sm-12" style="background-color:MediumSeaGreen;">
 
-<button type="button" class="btn btn-warning btn-sm" style="margin-bottom:8px;" onclick="loadCredentialsFromDB()">Load Credentials from DB</button>
-<span id="cred_load_status" style="margin-left:10px;font-size:12px;"></span>
-<br />
+<span id="cred_load_status" style="font-size:12px;display:block;margin-bottom:6px;"></span>
 
 Token <input type="text" id="token_id" value=""  /> <br />
 SID   <input type="text" id="sid" value="" /> <br />
-<!-- HandshakeServerId <input type="text" id="serverid" value="" /> <i>eg. server32</i><br />  -->
 Data Center(select Your Data Center)  
 <select name="DataCenter" id="datacenter_id">
 <option value="gdc">gdc</option>
@@ -47,13 +41,9 @@ Data Center(select Your Data Center)
 <option value="e41">E41</option>
 <option value="e43">E43</option>
 </select>
-
 <br />
 </div>
-    
-
-
-</div>
+  </div>
 
 <div class="row" class="text-primary">
 
@@ -120,25 +110,20 @@ Streaming ... Orders <br />
 
 <hr />
 
-
-
 </div>
 
-  </div>
-</div>
 <p>
 For HandshakeServerId - Call POST https://lhsi.kotaksecurities.com/quick/user/handshake?sId=server34
-
 </p>
 
 <script>
 function loadCredentialsFromDB() {
   var statusEl = document.getElementById('cred_load_status');
-  statusEl.style.color = '#333';
-  statusEl.textContent = 'Loading...';
+  statusEl.style.color = '#1a1a1a';
+  statusEl.textContent = 'Loading credentials from platform...';
   fetch('/api/admin/broker-credentials/active')
     .then(function(res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' — no connected Kotak broker found');
       return res.json();
     })
     .then(function(data) {
@@ -155,13 +140,16 @@ function loadCredentialsFromDB() {
         }
       }
       statusEl.style.color = 'darkgreen';
-      statusEl.textContent = 'Credentials loaded!';
+      statusEl.textContent = 'Credentials loaded from connected broker.';
     })
     .catch(function(err) {
-      statusEl.style.color = 'red';
-      statusEl.textContent = 'Failed: ' + err.message;
+      statusEl.style.color = '#8b0000';
+      statusEl.textContent = 'Could not load credentials: ' + err.message;
     });
 }
+
+// Auto-load on page open
+window.addEventListener('load', loadCredentialsFromDB);
 </script>
 
 </body>
