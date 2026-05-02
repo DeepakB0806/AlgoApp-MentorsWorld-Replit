@@ -45,7 +45,7 @@ function buildHsiAuthMessage(config: BrokerConfig): string {
     type: "cn",
     Authorization: config.accessToken,
     Sid: config.sessionId,
-    source: "WEB",
+    src: "WEB",
   });
 }
 
@@ -59,9 +59,10 @@ export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Pro
   let wsOptions: WebSocket.ClientOptions = {};
   let displayEndpoint: string;
 
+  const relayWs = RELAY_URL ? RELAY_URL.replace("http://", "ws://").replace("https://", "wss://") : null;
+
   if (target === "hsm") {
-    if (RELAY_URL && RELAY_SECRET) {
-      const relayWs = RELAY_URL.replace("http://", "ws://").replace("https://", "wss://");
+    if (relayWs && RELAY_SECRET) {
       wsUrl = relayWs;
       wsOptions = { headers: { "x-target-url": HSM_DIRECT_URL, "x-relay-secret": RELAY_SECRET } };
       displayEndpoint = `${HSM_DIRECT_URL} (via relay)`;
@@ -70,8 +71,16 @@ export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Pro
       displayEndpoint = HSM_DIRECT_URL;
     }
   } else {
-    wsUrl = resolveHsiEndpoint(config);
-    displayEndpoint = wsUrl;
+    // HSI: mirror production exactly — relay with /realtime path suffix
+    const hsiDirectUrl = resolveHsiEndpoint(config);
+    if (relayWs && RELAY_SECRET) {
+      wsUrl = `${relayWs}/realtime`;
+      wsOptions = { headers: { "x-target-url": hsiDirectUrl, "x-relay-secret": RELAY_SECRET } };
+      displayEndpoint = `${hsiDirectUrl} (via relay)`;
+    } else {
+      wsUrl = hsiDirectUrl;
+      displayEndpoint = hsiDirectUrl;
+    }
   }
 
   const startMs = Date.now();
@@ -102,7 +111,13 @@ export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Pro
 
     ws.on("open", () => {
       try {
-        const auth = target === "hsm" ? buildHsmAuthMessage(config) : buildHsiAuthMessage(config);
+        let auth: string;
+        if (target === "hsm") {
+          auth = buildHsmAuthMessage(config);
+        } else {
+          // Production HSI strips all quote characters before sending — match exactly
+          auth = buildHsiAuthMessage(config).replace(/"/g, "");
+        }
         ws.send(auth);
       } catch {
         settle("unreachable");
