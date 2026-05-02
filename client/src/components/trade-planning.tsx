@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, Trash2, Edit, Settings, Link2, Loader2, Save, Clock, Shield, Target, TrendingUp, Info, CalendarIcon, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Edit, Settings, Link2, Loader2, Save, Clock, Shield, Target, TrendingUp, Info, CalendarIcon, ChevronRight, LogOut } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -639,7 +639,7 @@ export function TradePlanning() {
             )}
             {configId && (
               <div className="space-y-4">
-                <Label className="flex items-center gap-2"><Shield className="w-4 h-4" /> Exit & Risk Settings</Label>
+                <Label className="flex items-center gap-2"><Shield className="w-4 h-4 text-red-400" /> Risk Settings</Label>
 
                 <div className="border border-border rounded-md p-3 space-y-3">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -675,44 +675,6 @@ export function TradePlanning() {
                         data-testid="input-stoploss-value"
                       />
                       <span className="text-xs text-muted-foreground">{stoploss.mode === "percentage" ? "%" : "INR"}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="border border-border rounded-md p-3 space-y-3">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <Target className="w-3 h-3 text-emerald-400" />
-                      <span className="text-sm font-medium">Profit MTM Target</span>
-                    </div>
-                    <Switch
-                      checked={profitTarget.enabled}
-                      onCheckedChange={(v) => setProfitTarget((s) => ({ ...s, enabled: v }))}
-                      data-testid="switch-profit-enabled"
-                    />
-                  </div>
-                  {profitTarget.enabled && (
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Select value={profitTarget.mode} onValueChange={(v) => setProfitTarget((s) => ({ ...s, mode: v as "amount" | "percentage" }))}>
-                        <SelectTrigger className="w-32" data-testid="select-profit-mode">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="amount">Amount</SelectItem>
-                          <SelectItem value="percentage">Percentage %</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        type="number"
-                        min={0}
-                        step={profitTarget.mode === "percentage" ? 0.1 : 1}
-                        value={profitTarget.value || ""}
-                        onChange={(e) => setProfitTarget((s) => ({ ...s, value: parseFloat(e.target.value) || 0 }))}
-                        placeholder={profitTarget.mode === "percentage" ? "e.g. 5.0" : "e.g. 10000"}
-                        className="w-32"
-                        data-testid="input-profit-value"
-                      />
-                      <span className="text-xs text-muted-foreground">{profitTarget.mode === "percentage" ? "%" : "INR"}</span>
                     </div>
                   )}
                 </div>
@@ -798,6 +760,46 @@ export function TradePlanning() {
                       </div>
                     )}
                   </div>
+
+                <div className="border border-border rounded-md p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Target className="w-3 h-3 text-emerald-400" />
+                      <span className="text-sm font-medium">Profit MTM Target</span>
+                    </div>
+                    <Switch
+                      checked={profitTarget.enabled}
+                      onCheckedChange={(v) => setProfitTarget((s) => ({ ...s, enabled: v }))}
+                      data-testid="switch-profit-enabled"
+                    />
+                  </div>
+                  {profitTarget.enabled && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Select value={profitTarget.mode} onValueChange={(v) => setProfitTarget((s) => ({ ...s, mode: v as "amount" | "percentage" }))}>
+                        <SelectTrigger className="w-32" data-testid="select-profit-mode">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="amount">Amount</SelectItem>
+                          <SelectItem value="percentage">Percentage %</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={profitTarget.mode === "percentage" ? 0.1 : 1}
+                        value={profitTarget.value || ""}
+                        onChange={(e) => setProfitTarget((s) => ({ ...s, value: parseFloat(e.target.value) || 0 }))}
+                        placeholder={profitTarget.mode === "percentage" ? "e.g. 5.0" : "e.g. 10000"}
+                        className="w-32"
+                        data-testid="input-profit-value"
+                      />
+                      <span className="text-xs text-muted-foreground">{profitTarget.mode === "percentage" ? "%" : "INR"}</span>
+                    </div>
+                  )}
+                </div>
+
+                <Label className="flex items-center gap-2"><LogOut className="w-4 h-4 text-emerald-400" /> Exit Settings</Label>
 
                 <div className="border border-border rounded-md p-3 space-y-3">
                   <div className="flex items-center gap-2">
