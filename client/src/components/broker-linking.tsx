@@ -531,6 +531,22 @@ export function BrokerLinking() {
     refetchInterval: 5 * 60 * 1000,
   });
 
+  const { user } = useAuth();
+  const isSuperAdmin = (user as any)?.role === "super_admin" || (user as any)?.isSuperAdmin === true;
+
+  const recalculateMarginMutation = useMutation({
+    mutationFn: async (brokerConfigId: string) => {
+      return apiRequest("POST", `/api/broker-configs/${brokerConfigId}/calculate-margins`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/strategy-plans"] });
+      toast({ title: "Margins recalculated" });
+    },
+    onError: () => {
+      toast({ title: "Failed to recalculate margins", variant: "destructive" });
+    },
+  });
+
   const activePlans = plans.filter((p) => p.status === "active");
 
   const [localState, setLocalState] = useState<Record<string, { brokerConfigId: string; isProxyMode: boolean }>>({});
@@ -911,9 +927,29 @@ export function BrokerLinking() {
                     </div>
                   )}
                   {isDeployed && !plan.estimatedMargin && (depStatus === "active" || depStatus === "deployed") && (
-                    <div className="flex items-center gap-1 mt-1" data-testid={`badge-margin-uncalculated-${plan.id}`}>
-                      <AlertTriangle className="w-3 h-3 text-amber-400" />
-                      <span className="text-xs text-amber-400">Margin not calculated — verify before market open</span>
+                    <div className="flex items-center gap-1 mt-1 flex-wrap" data-testid={`badge-margin-uncalculated-${plan.id}`}>
+                      {scripStatus?.isStale ? (
+                        <>
+                          <AlertTriangle className="w-3 h-3 text-muted-foreground/50" />
+                          <span className="text-xs text-muted-foreground/50">Scrip not synced today — sync first to calculate margin</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle className="w-3 h-3 text-amber-400" />
+                          <span className="text-xs text-amber-400">Margin not calculated — verify before market open</span>
+                          {isSuperAdmin && linkedBroker && (
+                            <button
+                              onClick={() => recalculateMarginMutation.mutate(linkedBroker.id)}
+                              disabled={recalculateMarginMutation.isPending}
+                              className="ml-1 text-xs text-amber-400 hover:text-amber-300 underline underline-offset-2 disabled:opacity-50 flex items-center gap-0.5"
+                              data-testid={`button-recalculate-margin-${plan.id}`}
+                            >
+                              {recalculateMarginMutation.isPending && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                              {recalculateMarginMutation.isPending ? "Calculating..." : "Recalculate"}
+                            </button>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
                 </CardHeader>

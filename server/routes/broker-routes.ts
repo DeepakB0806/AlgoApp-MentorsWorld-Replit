@@ -12,7 +12,7 @@ import EL from "../el-kotak-neo-v3";
 import { startPersistentSquareOff } from "../te-kotak-neo-v3";
 import { refreshConfig as hsmRefreshConfig } from "../hsm-kotak-neo-v3";
 import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo-v3";
-import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
+import { scripMasterSyncStatus, calculatePlanMargins } from "../smc-kotak-neo-v3";
 import { getScripSyncStatus } from "../scrip-sync-scheduler";
 import { addProcessFlowLog, getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
 import { processTick, updateLastWsTick } from "../tsl-kotak-neo-v3";
@@ -113,6 +113,17 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       res.json({ success: true, id: req.params.id });
     } catch (error) {
       res.status(500).json({ error: "Failed to set primary broker config" });
+    }
+  });
+
+  app.post("/api/broker-configs/:id/calculate-margins", async (req, res) => {
+    try {
+      const config = await storage.getBrokerConfig(req.params.id);
+      if (!config) return res.status(404).json({ error: "Broker config not found" });
+      await calculatePlanMargins(storage, config);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to calculate margins" });
     }
   });
 

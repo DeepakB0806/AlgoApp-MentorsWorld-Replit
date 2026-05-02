@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
@@ -379,31 +380,89 @@ function EmailTemplates() {
 }
 
 function CapitalGatingStatus() {
+  const { toast } = useToast();
+  const { user } = useAuth();
+  const isSuperAdmin = (user as any)?.role === "super_admin" || (user as any)?.isSuperAdmin === true;
+
   const { data: plans = [], isLoading } = useQuery<StrategyPlan[]>({
     queryKey: ["/api/strategy-plans"],
   });
   const { data: brokerConfigs = [] } = useQuery<BrokerConfig[]>({
     queryKey: ["/api/broker-configs"],
   });
+  const { data: scripStatus } = useQuery<{ lastSyncDateIST: string; lastSyncTimeIST: string; isStale: boolean; todayIST: string }>({
+    queryKey: ["/api/broker/kotak/scrip-status"],
+    refetchInterval: 5 * 60 * 1000,
+  });
 
   const brokerById = new Map(brokerConfigs.map(bc => [bc.id, bc]));
+  const liveKotakBrokers = brokerConfigs.filter(bc => bc.isConnected && bc.brokerName === "kotak_neo");
 
   const activePlans = plans.filter(p =>
     p.deploymentStatus === "active" || p.deploymentStatus === "deployed"
   ).sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
 
+  const [recalcPending, setRecalcPending] = useState(false);
+
+  async function handleRecalculateAll() {
+    if (liveKotakBrokers.length === 0) {
+      toast({ title: "No connected Kotak Neo brokers", variant: "destructive" });
+      return;
+    }
+    setRecalcPending(true);
+    try {
+      await Promise.all(
+        liveKotakBrokers.map(bc =>
+          apiRequest("POST", `/api/broker-configs/${bc.id}/calculate-margins`)
+        )
+      );
+      queryClient.invalidateQueries({ queryKey: ["/api/strategy-plans"] });
+      toast({ title: "Margins recalculated for all active plans" });
+    } catch {
+      toast({ title: "Failed to recalculate margins", variant: "destructive" });
+    } finally {
+      setRecalcPending(false);
+    }
+  }
+
   return (
     <Card data-testid="card-capital-gating-status" className="mt-4">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <ShieldAlert className="w-4 h-4" />
-          Capital Gating Status
-        </CardTitle>
-        <CardDescription>
-          Active and deployed plans sorted by priority rank. Margin estimates are updated after each Scrip Master sync.
-        </CardDescription>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldAlert className="w-4 h-4" />
+              Capital Gating Status
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Active and deployed plans sorted by priority rank. Margin estimates are updated after each Scrip Master sync.
+            </CardDescription>
+          </div>
+          {isSuperAdmin && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRecalculateAll}
+              disabled={recalcPending || liveKotakBrokers.length === 0}
+              data-testid="button-recalculate-all-margins"
+              className="shrink-0 text-xs"
+            >
+              {recalcPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+              Recalculate All
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
+        {scripStatus?.isStale && (
+          <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-md bg-muted/40 border border-border/30 text-xs text-muted-foreground" data-testid="banner-scrip-stale">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>
+              Scrip Master is from <span className="font-mono text-foreground/70">{scripStatus.lastSyncDateIST}</span> — margins may be outdated.
+              Use Resync in Broker API to refresh.
+            </span>
+          </div>
+        )}
         {isLoading ? (
           <div className="text-center py-4 text-muted-foreground text-sm">Loading...</div>
         ) : activePlans.length === 0 ? (
@@ -443,6 +502,11 @@ function CapitalGatingStatus() {
                     <td className="px-2 py-1.5 text-right font-mono">
                       {plan.estimatedMargin ? (
                         <span className="text-foreground">₹{Number(plan.estimatedMargin).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>
+                      ) : scripStatus?.isStale ? (
+                        <span className="text-muted-foreground/50 flex items-center justify-end gap-1">
+                          <AlertTriangle className="w-3 h-3" />
+                          N/A
+                        </span>
                       ) : (
                         <span className="text-amber-400 flex items-center justify-end gap-1">
                           <AlertTriangle className="w-3 h-3" />

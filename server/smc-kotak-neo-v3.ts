@@ -335,7 +335,7 @@ function extractOrdMrgn(data: unknown): number {
   return search(data);
 }
 
-async function calculatePlanMargins(storage: IStorage, brokerConfig: BrokerConfig): Promise<void> {
+export async function calculatePlanMargins(storage: IStorage, brokerConfig: BrokerConfig): Promise<void> {
   const LOG = "[MARGIN-CALC]";
   try {
     const allPlans = await storage.getStrategyPlans();
