@@ -29,6 +29,7 @@ let heartbeatInterval: NodeJS.Timeout | null = null;
 // ── HSM Probe auto-trigger (Build #164, outside locked blocks) ────────────────
 let hsmConsecutiveFailures = 0;
 let hsmAuthOkInSession = false;
+let hsmFirstMessageLogged = false;
 function checkHsmAutoProbe(): void {
   const threshold = getProbeThreshold();
   if (hsmConsecutiveFailures >= threshold && activeConfig) {
@@ -168,6 +169,7 @@ function connect(config: BrokerConfig): void {
   ws.on("open", () => {
     opened = true;
     hsmAuthOkInSession = false; // HSM-1 Build #164: reset per-session auth flag
+    hsmFirstMessageLogged = false;
     console.log(`${LOG_PREFIX} Connected to Kotak HSM`);
     reconnectDelay = 1_000;
     try {
@@ -180,6 +182,10 @@ function connect(config: BrokerConfig): void {
 
   ws.on("message", (raw: WebSocket.RawData) => {
     try {
+      if (!hsmFirstMessageLogged) {
+        hsmFirstMessageLogged = true;
+        console.log(`${LOG_PREFIX} [DIAG] First raw message from Kotak: ${raw.toString()}`);
+      }
       const parsed = JSON.parse(raw.toString());
       // Kotak HSM returns auth response as array: [{"stat":"Ok","type":"cn",...}]
       const msgCn = Array.isArray(parsed) ? parsed[0] : parsed;
