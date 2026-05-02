@@ -13,6 +13,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import type { BrokerConfig, InsertBrokerConfig, BrokerTestLog, BrokerSessionLog, BrokerFieldMapping, UniversalField } from "@shared/schema";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -2552,6 +2553,8 @@ function HsmStatusCard() {
 
 function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; onDeleted?: () => void }) {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isSuperAdmin = (user as any)?.role === "super_admin" || (user as any)?.isSuperAdmin === true;
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [totp, setTotp] = useState("");
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -2690,6 +2693,19 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
     },
     onError: () => {
       toast({ title: "Failed to delete broker configuration", variant: "destructive" });
+    },
+  });
+
+  const setPrimaryMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("PATCH", `/api/broker-configs/${id}/set-primary`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
+      toast({ title: "Primary broker updated — scrip sync will use this broker for CSV download" });
+    },
+    onError: () => {
+      toast({ title: "Failed to set primary broker", variant: "destructive" });
     },
   });
 
@@ -2894,6 +2910,11 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                     <Badge variant={config.isConnected ? "default" : "secondary"}>
                       {config.isConnected ? "Active" : "Saved"}
                     </Badge>
+                    {config.isPrimary && (
+                      <Badge variant="outline" className="text-xs border-amber-500/60 text-amber-500 bg-amber-500/10" data-testid={`badge-primary-${config.id}`}>
+                        Primary
+                      </Badge>
+                    )}
                     {config?.accessToken && config.brokerName !== "binance" && (() => {
                       try {
                         const parts = config.accessToken!.split('.');
@@ -3055,6 +3076,24 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                     <LogIn className="w-4 h-4 mr-1" />
                     Sessions ({sessionLogs.length})
                   </Button>
+                  {isSuperAdmin && !config.isPrimary && config.brokerName !== "paper_trade" && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setPrimaryMutation.mutate(config.id)}
+                          disabled={setPrimaryMutation.isPending}
+                          data-testid={`button-set-primary-${config.id}`}
+                          className="text-xs text-amber-500 hover:text-amber-400"
+                        >
+                          {setPrimaryMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                          Set Primary
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Use this broker for scrip master CSV download (Phase A)</TooltipContent>
+                    </Tooltip>
+                  )}
                   {!confirmDelete ? (
                     <Button
                       variant="ghost"

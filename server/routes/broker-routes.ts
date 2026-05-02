@@ -104,6 +104,18 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.patch("/api/broker-configs/:id/set-primary", async (req, res) => {
+    try {
+      const config = await storage.getBrokerConfig(req.params.id);
+      if (!config) return res.status(404).json({ error: "Broker config not found" });
+      await storage.setPrimaryBrokerConfig(req.params.id);
+      tradingCache.invalidateBrokerConfig(req.params.id);
+      res.json({ success: true, id: req.params.id });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to set primary broker config" });
+    }
+  });
+
   app.post("/api/broker-configs/:id/test", async (req, res) => {
     try {
       const config = await storage.getBrokerConfig(req.params.id);

@@ -310,69 +310,82 @@ export async function processTradeSignal(
 
   const gateablePlans = nonProxyPlans.filter(p => p.autoResume !== false);
 
-  // Fetch available capital per broker (E10+E20: failure or zero → Infinity = no gate)
+  // #183: Read available capital from DB snapshots (refreshed by Capital Manager at 09:00 IST)
+  // E10+E20: missing/zero snapshot → Infinity = no gate
   const brokerAvailableCapital = new Map<string, number>();
   const uniqueBrokerIds = Array.from(new Set(gateablePlans.map(p => p.brokerConfigId!)));
+  const capitalSnapshots = await storage.getAllCapitalSnapshots();
+  const snapshotByUcc = new Map(capitalSnapshots.map(s => [s.ucc, s]));
   for (const bcId of uniqueBrokerIds) {
     const bc = brokerConfigs.get(bcId);
     if (!bc) { brokerAvailableCapital.set(bcId, Infinity); continue; }
-    try {
-      const limitsRes = await EL.getLimits(bc);
-      if (!limitsRes.success) {
-        console.warn(`[PFL] getLimits failed for broker ${bc.name}: ${(limitsRes as any).error} — gating disabled`);
-        brokerAvailableCapital.set(bcId, Infinity);
-      } else {
-        const cash = extractAvailableCash(limitsRes.data);
-        const effective = cash === 0 ? Infinity : cash;
-        brokerAvailableCapital.set(bcId, effective);
-        console.log(`[PFL] Available capital ${bc.name}: ₹${cash === 0 ? "∞ (zero reported)" : cash.toFixed(0)}`);
-      }
-    } catch {
-      brokerAvailableCapital.set(bcId, Infinity);
-    }
+    const snap = bc.ucc ? snapshotByUcc.get(bc.ucc) : undefined;
+    const cash = snap?.availableCapital ? Number(snap.availableCapital) : 0;
+    brokerAvailableCapital.set(bcId, cash === 0 ? Infinity : cash);
+    console.log(`[PFL] Capital ${bc.name} (snapshot): ₹${cash === 0 ? "∞ (no snapshot)" : cash.toFixed(0)}`);
   }
 
   // Sort by rank ascending (null/undefined → 999 = lowest priority)
   const rankedPlans = [...gateablePlans].sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
-  const brokerRemainingCapital = new Map<string, number>(brokerAvailableCapital);
 
   // Expiry day IST name for uplift check
   const nowIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const todayDayName = dayNames[nowIST.getDay()];
 
+  // #185: Group plans by brokerConfigId (= UCC) and execute groups concurrently
+  const concurrencySettingRaw = await storage.getSetting("te_ucc_concurrency");
+  const uccConcurrency = Math.max(1, parseInt(concurrencySettingRaw?.value || "50", 10) || 50);
+
+  const plansByBcId = new Map<string, typeof rankedPlans>();
   for (const plan of rankedPlans) {
-    const bc = brokerConfigs.get(plan.brokerConfigId!);
-    if (!bc) {
-      results.push({ success: false, action: "error", broker: "unknown", planId: plan.id, message: "Broker config not found" });
-      continue;
-    }
-
-    const estimatedMargin = plan.estimatedMargin ? Number(plan.estimatedMargin) : null;
-    if (estimatedMargin === null || estimatedMargin <= 0) {
-      // No margin estimate — fire ungated (amber warning already shown in UI)
-      console.log(`[PFL] Plan "${plan.name}" — no margin estimate, firing ungated`);
-      results.push(await executeTradeForPlan(storage, plan, bc, webhookData, signalContext));
-      continue;
-    }
-
-    // E9: expiry day 1.5x uplift (applied only at comparison, stored value unchanged)
-    const instrConf = tradingCache.getInstrumentConfig(plan.ticker || "", plan.exchange || "");
-    const isExpiryDay = !!(instrConf?.expiryDay && instrConf.expiryDay === todayDayName);
-    const gatingMargin = isExpiryDay ? estimatedMargin * 1.5 : estimatedMargin;
-
-    const remaining = brokerRemainingCapital.get(plan.brokerConfigId!) ?? Infinity;
-
-    if (gatingMargin > remaining) {
-      const msg = `Plan "${plan.name}" (rank=${plan.rank ?? "unranked"}) SKIPPED — margin ₹${gatingMargin.toFixed(0)}${isExpiryDay ? " (1.5x expiry)" : ""} > available ₹${remaining.toFixed(0)}`;
-      console.log(`[PFL] ⛔ ${msg}`);
-      logPFL(plan, bc.brokerName, webhookData, "skipped", msg, { resolvedAction: signalContext?.resolvedAction, ticker: plan.ticker || "", exchange: plan.exchange || "" });
-      results.push({ success: false, action: "hold", broker: bc.brokerName, planId: plan.id, message: msg });
-    } else {
-      brokerRemainingCapital.set(plan.brokerConfigId!, remaining - gatingMargin);
-      results.push(await executeTradeForPlan(storage, plan, bc, webhookData, signalContext));
-    }
+    const bcId = plan.brokerConfigId!;
+    if (!plansByBcId.has(bcId)) plansByBcId.set(bcId, []);
+    plansByBcId.get(bcId)!.push(plan);
   }
+
+  // Each UCC group processes plans sequentially (rank order) to honour per-UCC capital
+  const uccTasks = Array.from(plansByBcId.entries()).map(([bcId, groupPlans]) => {
+    return async (): Promise<TradeResult[]> => {
+      const bc = brokerConfigs.get(bcId);
+      if (!bc) {
+        return groupPlans.map(plan => ({
+          success: false as const, action: "error" as const,
+          broker: "unknown", planId: plan.id, message: "Broker config not found",
+        }));
+      }
+      const groupResults: TradeResult[] = [];
+      let remaining = brokerAvailableCapital.get(bcId) ?? Infinity;
+
+      for (const plan of groupPlans) {
+        const estimatedMargin = plan.estimatedMargin ? Number(plan.estimatedMargin) : null;
+        if (estimatedMargin === null || estimatedMargin <= 0) {
+          console.log(`[PFL] Plan "${plan.name}" — no margin estimate, firing ungated`);
+          groupResults.push(await executeTradeForPlan(storage, plan, bc, webhookData, signalContext));
+          continue;
+        }
+
+        // E9: expiry day 1.5x uplift (applied only at comparison, stored value unchanged)
+        const instrConf = tradingCache.getInstrumentConfig(plan.ticker || "", plan.exchange || "");
+        const isExpiryDay = !!(instrConf?.expiryDay && instrConf.expiryDay === todayDayName);
+        const gatingMargin = isExpiryDay ? estimatedMargin * 1.5 : estimatedMargin;
+
+        if (gatingMargin > remaining) {
+          const msg = `Plan "${plan.name}" (rank=${plan.rank ?? "unranked"}) SKIPPED — margin ₹${gatingMargin.toFixed(0)}${isExpiryDay ? " (1.5x expiry)" : ""} > available ₹${remaining.toFixed(0)}`;
+          console.log(`[PFL] ⛔ ${msg}`);
+          logPFL(plan, bc.brokerName, webhookData, "skipped", msg, { resolvedAction: signalContext?.resolvedAction, ticker: plan.ticker || "", exchange: plan.exchange || "" });
+          groupResults.push({ success: false, action: "hold", broker: bc.brokerName, planId: plan.id, message: msg });
+        } else {
+          remaining -= gatingMargin;
+          groupResults.push(await executeTradeForPlan(storage, plan, bc, webhookData, signalContext));
+        }
+      }
+      return groupResults;
+    };
+  });
+
+  const groupResultArrays = await runWithConcurrency(uccTasks, uccConcurrency);
+  for (const groupResults of groupResultArrays) results.push(...groupResults);
 
   return results.length > 0 ? results : [{ success: false, action: "hold", broker: "none", planId: "", message: "No broker plans matched" }];
 }
@@ -400,17 +413,18 @@ function getBlockConfig(tradeParams: Record<string, any> | null, blockType: stri
   return tradeParams[configKey] || {};
 }
 
-function extractAvailableCash(data: unknown): number {
-  if (!data || typeof data !== "object") return 0;
-  const search = (obj: any, depth = 0): number => {
-    if (depth > 5 || typeof obj !== "object" || obj === null) return 0;
-    for (const k of ["cashmarginavailable", "cash_margin_available", "net", "Net", "NetAmount", "netAmount", "available_cash", "availableCash", "payin", "cashAvailable"]) {
-      if (obj[k] !== undefined) { const v = Number(obj[k]); if (!isNaN(v) && v > 0) return v; }
+// #185: Run an array of async tasks with bounded concurrency
+async function runWithConcurrency<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
+  const results: T[] = new Array(tasks.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    while (next < tasks.length) {
+      const idx = next++;
+      results[idx] = await tasks[idx]();
     }
-    for (const v of Object.values(obj)) { const f = search(v, depth + 1); if (f > 0) return f; }
-    return 0;
-  };
-  return search(data);
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 function logPFL(plan: StrategyPlan, broker: string, data: WebhookData, actionTaken: string, message: string, extra?: Partial<{ resolvedAction: string; blockType: string; ticker: string; exchange: string; price: number; orderId: string; executionTimeMs: number }>) {

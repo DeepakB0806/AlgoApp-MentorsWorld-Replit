@@ -15,6 +15,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Plus, Trash2, Settings, Link2, Loader2, X, Clock, Shield, Target, TrendingUp, Rocket, Play, Pause, Square, Power, RefreshCw, Wifi, WifiOff, Activity, BarChart3, Archive, AlertTriangle, Maximize2, Minimize2, ChevronDown, ChevronUp, ChevronRight, Search } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl, Position } from "@shared/schema";
 import type { TradeParams, TimeLogicConfig, TrailingStoplossConfig } from "@shared/schema";
 import { buildBrokerOrderParams } from "@shared/schema";
@@ -41,6 +42,18 @@ function tslChipLabel(tsl: TrailingStoplossConfig): string {
   const typeLabel = type === "amount" ? "Amt" : "%Cap";
   const suffix    = type === "amount" ? " /lot" : "";
   return detail ? `TSL(${typeLabel}): ${detail}${suffix}` : "TSL Active";
+}
+
+function getBrokerInitial(brokerName?: string | null): string {
+  const map: Record<string, string> = {
+    kotak_neo: "KN",
+    binance: "B",
+    zerodha: "Z",
+    angel: "A",
+    paper_trade: "PT",
+  };
+  if (!brokerName) return "";
+  return map[brokerName] ?? brokerName.slice(0, 2).toUpperCase();
 }
 
 const DEPLOYMENT_STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Activity }> = {
@@ -1045,7 +1058,7 @@ export function BrokerLinking() {
                             <SelectContent>
                               <SelectItem value="unranked">Unranked</SelectItem>
                               {[1,2,3,4,5,6,7,8,9,10].map(r => (
-                                <SelectItem key={r} value={String(r)}>Priority {r}</SelectItem>
+                                <SelectItem key={r} value={String(r)}>{getBrokerInitial(linkedBroker?.brokerName)}{r}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>

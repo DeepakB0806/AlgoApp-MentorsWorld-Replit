@@ -1,5 +1,5 @@
 import type { IStorage } from "./storage";
-import { runScripMasterSync } from "./smc-kotak-neo-v3";
+import { runScripMasterSync, runScripMasterSyncPhaseB } from "./smc-kotak-neo-v3";
 import type { BrokerConfig } from "@shared/schema";
 
 // ── Intraday periodic refresh ───────────────────────────────────────────────
@@ -42,17 +42,24 @@ export function startIntradayScripRefresh(storage: IStorage): void {
       );
       if (liveBrokers.length === 0) return;
 
-      for (const bc of liveBrokers) {
-        try {
-          const result = await runScripMasterSync(storage, bc);
-          if (result.success) {
-            console.log(`[SCRIP-MASTER] Intraday refresh: ${result.synced} contracts reloaded for ${bc.ucc || bc.id}`);
-          } else {
-            console.warn(`[SCRIP-MASTER] Intraday refresh failed for ${bc.ucc || bc.id}: ${result.error}`);
-          }
-        } catch (err) {
-          console.warn(`[SCRIP-MASTER] Intraday refresh threw for ${bc.ucc || bc.id}: ${err}`);
+      // Phase A: CSV download once via primary (or first) connected broker
+      const primaryBroker = liveBrokers.find(bc => bc.isPrimary) || liveBrokers[0];
+      try {
+        const result = await runScripMasterSync(storage, primaryBroker);
+        if (result.success) {
+          console.log(`[SCRIP-MASTER] Intraday refresh (Phase A): ${result.synced} contracts via ${primaryBroker.ucc || primaryBroker.id}`);
+        } else {
+          console.warn(`[SCRIP-MASTER] Intraday refresh Phase A failed: ${result.error}`);
         }
+      } catch (err) {
+        console.warn(`[SCRIP-MASTER] Intraday refresh Phase A threw: ${err}`);
+      }
+      // Phase B: calculate margins for remaining brokers
+      const otherBrokers = liveBrokers.filter(bc => bc.id !== primaryBroker.id);
+      if (otherBrokers.length > 0) {
+        await runScripMasterSyncPhaseB(storage, otherBrokers).catch(err =>
+          console.warn(`[SCRIP-MASTER] Intraday refresh Phase B error: ${err}`)
+        );
       }
     } catch (err) {
       console.warn(`[SCRIP-MASTER] Intraday refresh loop error: ${err}`);
@@ -197,19 +204,26 @@ export async function rescheduleScripMasterSync(storage: IStorage): Promise<void
       if (liveBrokers.length === 0) {
         console.log(`[SCRIP-MASTER] Scheduled sync at ${syncClockStr} IST — no connected Kotak brokers, skipping`);
       } else {
-        for (const bc of liveBrokers) {
-          try {
-            const result = await runScripMasterSync(storage, bc);
-            if (result.success) {
-              console.log(`[SCRIP-MASTER] Scheduled daily sync (${syncClockStr} IST): ${result.synced} contracts loaded`);
-            } else {
-              console.warn(`[SCRIP-MASTER] Scheduled daily sync failed: ${result.error} — scheduling auto-recovery`);
-              scheduleScripSyncRetry(storage, bc, 1);
-            }
-          } catch (err) {
-            console.warn(`[SCRIP-MASTER] Scheduled daily sync threw: ${err} — scheduling auto-recovery`);
-            scheduleScripSyncRetry(storage, bc, 1);
+        // Phase A: download CSV once via primary (or first) connected broker
+        const primaryBroker = liveBrokers.find(bc => bc.isPrimary) || liveBrokers[0];
+        try {
+          const result = await runScripMasterSync(storage, primaryBroker);
+          if (result.success) {
+            console.log(`[SCRIP-MASTER] Daily sync Phase A (${syncClockStr} IST): ${result.synced} contracts via ${primaryBroker.ucc || primaryBroker.id}`);
+          } else {
+            console.warn(`[SCRIP-MASTER] Daily sync Phase A failed: ${result.error} — scheduling auto-recovery`);
+            scheduleScripSyncRetry(storage, primaryBroker, 1);
           }
+        } catch (err) {
+          console.warn(`[SCRIP-MASTER] Daily sync Phase A threw: ${err} — scheduling auto-recovery`);
+          scheduleScripSyncRetry(storage, primaryBroker, 1);
+        }
+        // Phase B: calculate margins for remaining brokers
+        const otherBrokers = liveBrokers.filter(bc => bc.id !== primaryBroker.id);
+        if (otherBrokers.length > 0) {
+          await runScripMasterSyncPhaseB(storage, otherBrokers).catch(err =>
+            console.warn(`[SCRIP-MASTER] Daily sync Phase B error: ${err}`)
+          );
         }
       }
     } catch (err) {
@@ -220,19 +234,24 @@ export async function rescheduleScripMasterSync(storage: IStorage): Promise<void
         const allBrokerConfigs = await storage.getBrokerConfigs();
         const liveBrokers = allBrokerConfigs.filter(bc => bc.isConnected && bc.brokerName === "kotak_neo");
         if (liveBrokers.length === 0) return;
-        for (const bc of liveBrokers) {
-          try {
-            const result = await runScripMasterSync(storage, bc);
-            if (result.success) {
-              console.log(`[SCRIP-MASTER] Scheduled daily sync (${syncClockStr} IST): ${result.synced} contracts loaded`);
-            } else {
-              console.warn(`[SCRIP-MASTER] Scheduled daily sync failed: ${result.error} — scheduling auto-recovery`);
-              scheduleScripSyncRetry(storage, bc, 1);
-            }
-          } catch (err) {
-            console.warn(`[SCRIP-MASTER] Scheduled daily sync threw: ${err} — scheduling auto-recovery`);
-            scheduleScripSyncRetry(storage, bc, 1);
+        const primaryBroker = liveBrokers.find(bc => bc.isPrimary) || liveBrokers[0];
+        try {
+          const result = await runScripMasterSync(storage, primaryBroker);
+          if (result.success) {
+            console.log(`[SCRIP-MASTER] Daily sync Phase A (interval): ${result.synced} contracts via ${primaryBroker.ucc || primaryBroker.id}`);
+          } else {
+            console.warn(`[SCRIP-MASTER] Daily sync Phase A (interval) failed: ${result.error} — scheduling auto-recovery`);
+            scheduleScripSyncRetry(storage, primaryBroker, 1);
           }
+        } catch (err) {
+          console.warn(`[SCRIP-MASTER] Daily sync Phase A (interval) threw: ${err} — scheduling auto-recovery`);
+          scheduleScripSyncRetry(storage, primaryBroker, 1);
+        }
+        const otherBrokers = liveBrokers.filter(bc => bc.id !== primaryBroker.id);
+        if (otherBrokers.length > 0) {
+          await runScripMasterSyncPhaseB(storage, otherBrokers).catch(err =>
+            console.warn(`[SCRIP-MASTER] Daily sync Phase B (interval) error: ${err}`)
+          );
         }
       } catch (err) {
         console.log(`[SCRIP-MASTER] Scheduled sync error: ${err}`);

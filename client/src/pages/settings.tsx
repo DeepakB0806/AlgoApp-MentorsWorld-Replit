@@ -18,7 +18,13 @@ import {
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
-import type { ErrorRouting, ExchangeSetting, IndexExpirySetting, MarketHoliday, StrategyPlan } from "@shared/schema";
+import type { BrokerConfig, ErrorRouting, ExchangeSetting, IndexExpirySetting, MarketHoliday, StrategyPlan } from "@shared/schema";
+
+function getBrokerInitial(brokerName?: string | null): string {
+  const map: Record<string, string> = { kotak_neo: "KN", binance: "B", zerodha: "Z", angel: "A", paper_trade: "PT" };
+  if (!brokerName) return "";
+  return map[brokerName] ?? brokerName.slice(0, 2).toUpperCase();
+}
 
 interface MailSettings {
   apiKeyConfigured: boolean;
@@ -376,6 +382,11 @@ function CapitalGatingStatus() {
   const { data: plans = [], isLoading } = useQuery<StrategyPlan[]>({
     queryKey: ["/api/strategy-plans"],
   });
+  const { data: brokerConfigs = [] } = useQuery<BrokerConfig[]>({
+    queryKey: ["/api/broker-configs"],
+  });
+
+  const brokerById = new Map(brokerConfigs.map(bc => [bc.id, bc]));
 
   const activePlans = plans.filter(p =>
     p.deploymentStatus === "active" || p.deploymentStatus === "deployed"
@@ -414,7 +425,9 @@ function CapitalGatingStatus() {
                 {activePlans.map(plan => (
                   <tr key={plan.id} className="border-b border-border/20 hover:bg-muted/20" data-testid={`row-capital-gating-${plan.id}`}>
                     <td className="px-2 py-1.5 font-mono text-muted-foreground">
-                      {plan.rank != null ? `#${plan.rank}` : <span className="text-muted-foreground/50">—</span>}
+                      {plan.rank != null
+                        ? `${getBrokerInitial(brokerById.get(plan.brokerConfigId ?? "")?.brokerName)}${plan.rank}`
+                        : <span className="text-muted-foreground/50">—</span>}
                     </td>
                     <td className="px-2 py-1.5 font-medium">{plan.name}</td>
                     <td className="px-2 py-1.5">

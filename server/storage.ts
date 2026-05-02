@@ -5,7 +5,7 @@ import {
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
   brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades, strategyDailyPnl,
   broker_field_mappings, universal_fields, instrumentConfigs, broker_exchange_maps, processFlowLogs, errorRouting,
-  exchangeSettings, indexExpirySettings, marketHolidays,
+  exchangeSettings, indexExpirySettings, marketHolidays, brokerCapitalSnapshots,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -28,6 +28,7 @@ import {
   type ExchangeSetting, type InsertExchangeSetting,
   type IndexExpirySetting, type InsertIndexExpirySetting,
   type MarketHoliday, type InsertMarketHoliday,
+  type BrokerCapitalSnapshot, type InsertBrokerCapitalSnapshot,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -211,6 +212,15 @@ export interface IStorage {
 
   // Startup utilities
   backfillUniqueCodes(): Promise<void>;
+
+  // Capital Snapshots (#183)
+  getCapitalSnapshot(ucc: string): Promise<BrokerCapitalSnapshot | undefined>;
+  upsertCapitalSnapshot(data: InsertBrokerCapitalSnapshot): Promise<BrokerCapitalSnapshot>;
+  getAllCapitalSnapshots(): Promise<BrokerCapitalSnapshot[]>;
+
+  // Primary broker config (#184)
+  getPrimaryBrokerConfig(): Promise<BrokerConfig | undefined>;
+  setPrimaryBrokerConfig(id: string): Promise<void>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -1703,6 +1713,49 @@ export class DatabaseStorage implements IStorage {
         )
       );
     return !row;
+  }
+
+  // ── Capital Snapshots (#183) ────────────────────────────────────────────────
+  async getCapitalSnapshot(ucc: string): Promise<BrokerCapitalSnapshot | undefined> {
+    const [row] = await db.select().from(brokerCapitalSnapshots).where(eq(brokerCapitalSnapshots.ucc, ucc));
+    return row ?? undefined;
+  }
+
+  async upsertCapitalSnapshot(data: InsertBrokerCapitalSnapshot): Promise<BrokerCapitalSnapshot> {
+    const [row] = await db
+      .insert(brokerCapitalSnapshots)
+      .values(data)
+      .onConflictDoUpdate({
+        target: brokerCapitalSnapshots.ucc,
+        set: {
+          brokerName: data.brokerName,
+          brokerConfigId: data.brokerConfigId ?? null,
+          availableCapital: data.availableCapital ?? null,
+          snapshotAt: data.snapshotAt ?? null,
+          rawResponse: data.rawResponse ?? null,
+        },
+      })
+      .returning();
+    return row;
+  }
+
+  async getAllCapitalSnapshots(): Promise<BrokerCapitalSnapshot[]> {
+    return await db.select().from(brokerCapitalSnapshots);
+  }
+
+  // ── Primary broker config (#184) ────────────────────────────────────────────
+  async getPrimaryBrokerConfig(): Promise<BrokerConfig | undefined> {
+    const [config] = await db
+      .select()
+      .from(brokerConfigs)
+      .where(eq(brokerConfigs.isPrimary, true))
+      .limit(1);
+    return config ?? undefined;
+  }
+
+  async setPrimaryBrokerConfig(id: string): Promise<void> {
+    await db.update(brokerConfigs).set({ isPrimary: false });
+    await db.update(brokerConfigs).set({ isPrimary: true }).where(eq(brokerConfigs.id, id));
   }
 
   async backfillUniqueCodes(): Promise<void> {

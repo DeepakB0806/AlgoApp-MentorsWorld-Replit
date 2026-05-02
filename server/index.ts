@@ -10,7 +10,8 @@ import { tradingCache } from "./cache";
 import TL from "./tl-kotak-neo-v3";
 import EL from "./el-kotak-neo-v3";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
-import { runScripMasterSync } from "./smc-kotak-neo-v3";
+import { runScripMasterSync, loadScripMasterFromDisk, runScripMasterSyncPhaseB } from "./smc-kotak-neo-v3";
+import { startCapitalManager } from "./capital-manager";
 import { rescheduleScripMasterSync, scheduleScripSyncRetry, scheduleStartupScripSyncRetry, startIntradayScripRefresh } from "./scrip-sync-scheduler";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
@@ -227,29 +228,58 @@ app.use((req, res, next) => {
     recoverUnprocessedSignals().catch(err => log(`[RECOVERY] Error: ${err}`));
   }, 3000);
 
+  // Startup disk loader — populate contract cache from today's on-disk CSVs before network sync
+  try {
+    const diskResult = await loadScripMasterFromDisk(storage);
+    if (diskResult.success) {
+      log(`[STARTUP] Scrip master disk load: ${diskResult.synced} instruments loaded (cache pre-warmed)`);
+    } else {
+      log(`[STARTUP] Scrip master disk load: ${diskResult.error} — will sync from network`);
+    }
+  } catch (err) {
+    log(`[STARTUP] Scrip master disk load warning: ${err}`);
+  }
+
   // Auto-sync scrip master for connected live brokers on startup
   try {
     const allBrokerConfigs = await storage.getBrokerConfigs();
     const liveBrokers = allBrokerConfigs.filter(
       (bc) => bc.isConnected === true && bc.brokerName === "kotak_neo"
     );
-    for (const brokerConfig of liveBrokers) {
+    if (liveBrokers.length > 0) {
+      // Phase A: download CSV once via primary (or first) connected broker
+      const primaryBroker = liveBrokers.find(bc => bc.isPrimary) || liveBrokers[0];
       try {
-        const result = await runScripMasterSync(storage, brokerConfig);
+        const result = await runScripMasterSync(storage, primaryBroker);
         if (result.success) {
-          log(`[STARTUP] Scrip master auto-sync: ${result.synced} contracts loaded for broker ${brokerConfig.ucc || brokerConfig.id}`);
+          log(`[STARTUP] Scrip master Phase A: ${result.synced} contracts via ${primaryBroker.ucc || primaryBroker.id}`);
         } else {
-          log(`[STARTUP] Scrip master auto-sync warning for broker ${brokerConfig.ucc || brokerConfig.id}: ${result.error} — scheduling auto-recovery`);
-          scheduleScripSyncRetry(storage, brokerConfig, 1);
+          log(`[STARTUP] Scrip master Phase A warning: ${result.error} — scheduling auto-recovery`);
+          scheduleScripSyncRetry(storage, primaryBroker, 1);
         }
       } catch (syncErr) {
-        log(`[STARTUP] Scrip master auto-sync warning for broker ${brokerConfig.ucc || brokerConfig.id}: ${syncErr} — scheduling auto-recovery`);
-        scheduleScripSyncRetry(storage, brokerConfig, 1);
+        log(`[STARTUP] Scrip master Phase A warning: ${syncErr} — scheduling auto-recovery`);
+        scheduleScripSyncRetry(storage, primaryBroker, 1);
+      }
+      // Phase B: calculate margins for remaining brokers
+      const otherBrokers = liveBrokers.filter(bc => bc.id !== primaryBroker.id);
+      if (otherBrokers.length > 0) {
+        runScripMasterSyncPhaseB(storage, otherBrokers).catch(err =>
+          log(`[STARTUP] Scrip master Phase B warning: ${err}`)
+        );
       }
     }
   } catch (err) {
     log(`[STARTUP] Scrip master auto-sync warning: ${err} — scheduling auto-recovery`);
     scheduleStartupScripSyncRetry(storage, 1);
+  }
+
+  // Start Capital Manager — refreshes broker capital snapshots at 09:00 IST daily
+  try {
+    await startCapitalManager(storage);
+    log(`Capital Manager started`);
+  } catch (err) {
+    log(`Capital Manager startup warning: ${err}`);
   }
 
   // Start plan monitor — auto square-off based on exitTime and exitOnExpiry
@@ -279,6 +309,8 @@ app.use((req, res, next) => {
     if (!existingMaxClose) await storage.setSetting("max_close_retry_count", "0");
     const existingHalted = await storage.getSetting("trading_halted");
     if (!existingHalted) await storage.setSetting("trading_halted", "false");
+    const existingUccConcurrency = await storage.getSetting("te_ucc_concurrency");
+    if (!existingUccConcurrency) await storage.setSetting("te_ucc_concurrency", "50");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
   }

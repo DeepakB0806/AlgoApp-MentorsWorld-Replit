@@ -453,6 +453,102 @@ async function calculatePlanMargins(storage: IStorage, brokerConfig: BrokerConfi
   }
 }
 
+// ─── Phase B: calculate margins for all connected broker UCCs, batched ────────
+export async function runScripMasterSyncPhaseB(
+  storage: IStorage,
+  connectedBrokers: BrokerConfig[],
+  batchSize = 10,
+): Promise<void> {
+  const LOG_B = "[SMC-PHASE-B]";
+  if (connectedBrokers.length === 0) return;
+  console.log(`${LOG_B} Calculating margins for ${connectedBrokers.length} UCC(s), batch=${batchSize}`);
+  for (let i = 0; i < connectedBrokers.length; i += batchSize) {
+    const batch = connectedBrokers.slice(i, i + batchSize);
+    await Promise.all(batch.map(bc => calculatePlanMargins(storage, bc)));
+    if (i + batchSize < connectedBrokers.length) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+  console.log(`${LOG_B} Phase B complete`);
+}
+
+// ─── Startup disk loader: populate cache from today's on-disk CSVs ────────────
+export async function loadScripMasterFromDisk(storage: IStorage): Promise<{ success: boolean; synced: number; error?: string }> {
+  try {
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+    // Collect tickers (same safety-net + strategy scan as Phase A)
+    const allConfigs = await storage.getStrategyConfigs();
+    const tickersByExchange = new Map<string, string[]>();
+    tickersByExchange.set("NFO", ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]);
+    tickersByExchange.set("BFO", ["SENSEX", "BANKEX"]);
+    for (const cfg of allConfigs) {
+      if (cfg.ticker && cfg.exchange && isOptionExchange(cfg.exchange)) {
+        const ex = cfg.exchange.toUpperCase();
+        if (!tickersByExchange.has(ex)) tickersByExchange.set(ex, []);
+        if (!tickersByExchange.get(ex)!.includes(cfg.ticker)) tickersByExchange.get(ex)!.push(cfg.ticker);
+      }
+      const plans = await storage.getStrategyPlansByConfig(cfg.id);
+      for (const plan of plans) {
+        if (plan.ticker && plan.exchange && isOptionExchange(plan.exchange)) {
+          const ex = plan.exchange.toUpperCase();
+          if (!tickersByExchange.has(ex)) tickersByExchange.set(ex, []);
+          if (!tickersByExchange.get(ex)!.includes(plan.ticker)) tickersByExchange.get(ex)!.push(plan.ticker);
+        }
+      }
+    }
+
+    const allRawContracts: RawContract[] = [];
+    const allInstruments: ParsedInstrument[] = [];
+    let loaded = 0;
+
+    for (const [exchange, tickers] of tickersByExchange.entries()) {
+      const filename = `scrip_master_${exchange.toLowerCase()}_${dateStr}.csv`;
+      const filePath = path.resolve(process.cwd(), filename);
+      if (!fs.existsSync(filePath)) {
+        if (exchange === "NFO") console.warn(`${LOG_PREFIX} Disk load: NFO not found (${filename})`);
+        continue;
+      }
+      try {
+        const csvText = fs.readFileSync(filePath, "utf-8");
+        const parsed = parseScripMasterCSV(csvText, exchange, tickers);
+        allRawContracts.push(...parsed.rawContracts);
+        allInstruments.push(...parsed.instruments);
+        loaded++;
+        console.log(`${LOG_PREFIX} Disk load ${exchange}: ${parsed.instruments.length} tickers, ${parsed.rawContracts.length} contracts`);
+      } catch (err) {
+        console.warn(`${LOG_PREFIX} Disk load failed for ${filename}: ${err}`);
+      }
+    }
+
+    if (loaded === 0) {
+      return { success: false, synced: 0, error: `No disk CSVs for ${dateStr}` };
+    }
+
+    populateContractCache(allRawContracts);
+    let synced = 0;
+    for (const inst of allInstruments) {
+      await storage.upsertInstrumentConfig({
+        ticker: inst.ticker, exchange: inst.exchange, lotSize: inst.lotSize,
+        strikeInterval: inst.strikeInterval, instrumentType: inst.instrumentType,
+        token: inst.token, source: "scrip_master", expiryDay: inst.expiryDay, expiryType: "weekly",
+      });
+      synced++;
+    }
+    tradingCache.invalidateInstrumentConfigs();
+
+    const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    scripMasterSyncStatus.lastSyncDateIST = dateStr;
+    scripMasterSyncStatus.lastSyncTimeIST = `${String(nowIST.getUTCHours()).padStart(2, "0")}:${String(nowIST.getUTCMinutes()).padStart(2, "0")}:${String(nowIST.getUTCSeconds()).padStart(2, "0")}`;
+
+    console.log(`${LOG_PREFIX} Disk load complete — ${synced} instruments from ${loaded} exchange(s)`);
+    return { success: true, synced };
+  } catch (error: any) {
+    return { success: false, synced: 0, error: error.message };
+  }
+}
+
 export async function runScripMasterSync(storage: IStorage, brokerConfig: BrokerConfig): Promise<{ success: boolean; synced: number; error?: string }> {
   console.log(`${LOG_PREFIX} Starting scrip master sync for broker ${brokerConfig.name}`);
   try {

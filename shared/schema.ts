@@ -462,6 +462,9 @@ export const brokerConfigs = pgTable("broker_configs", {
   mpin: text("mpin"), // 6-digit MPIN for Kotak Neo
   environment: text("environment").default("prod"), // "uat" or "prod"
   
+  // Primary flag — used for exchange-level scrip master downloads (Phase A)
+  isPrimary: boolean("is_primary").notNull().default(false),
+
   // Session data
   isConnected: boolean("is_connected").notNull().default(false),
   accessToken: text("access_token"),
@@ -860,6 +863,20 @@ export const marketHolidays = pgTable("market_holidays", {
 export const insertMarketHolidaySchema = createInsertSchema(marketHolidays).omit({ id: true });
 export type InsertMarketHoliday = z.infer<typeof insertMarketHolidaySchema>;
 export type MarketHoliday = typeof marketHolidays.$inferSelect;
+
+// Capital snapshots — one row per UCC, updated by Capital Manager after each scrip sync
+export const brokerCapitalSnapshots = pgTable("broker_capital_snapshots", {
+  ucc: text("ucc").primaryKey(),
+  brokerName: text("broker_name").notNull(),
+  brokerConfigId: varchar("broker_config_id", { length: 36 }),
+  availableCapital: numeric("available_capital"),
+  snapshotAt: bigint("snapshot_at", { mode: "number" }),
+  rawResponse: text("raw_response"),
+});
+
+export const insertBrokerCapitalSnapshotSchema = createInsertSchema(brokerCapitalSnapshots);
+export type InsertBrokerCapitalSnapshot = z.infer<typeof insertBrokerCapitalSnapshotSchema>;
+export type BrokerCapitalSnapshot = typeof brokerCapitalSnapshots.$inferSelect;
 
 // Export auth models (users, sessions, invitations)
 export * from "./models/auth";
