@@ -814,5 +814,48 @@ export function buildBrokerOrderParams(leg: PlanTradeLeg, config: { exchange?: s
   };
 }
 
+// ====== MARKET CALENDAR ======
+
+export const exchangeSettings = pgTable("exchange_settings", {
+  id: serial("id").primaryKey(),
+  exchange: text("exchange").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  marketOpenTime: text("market_open_time").notNull().default("09:15"),
+  marketCloseTime: text("market_close_time").notNull().default("15:30"),
+  isActive: boolean("is_active").notNull().default(true),
+});
+
+export const insertExchangeSettingSchema = createInsertSchema(exchangeSettings).omit({ id: true });
+export type InsertExchangeSetting = z.infer<typeof insertExchangeSettingSchema>;
+export type ExchangeSetting = typeof exchangeSettings.$inferSelect;
+
+export const indexExpirySettings = pgTable("index_expiry_settings", {
+  id: serial("id").primaryKey(),
+  indexName: text("index_name").notNull().unique(),
+  exchange: text("exchange").notNull(),
+  defaultExpiryDay: integer("default_expiry_day").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+});
+
+export const insertIndexExpirySettingSchema = createInsertSchema(indexExpirySettings).omit({ id: true });
+export type InsertIndexExpirySetting = z.infer<typeof insertIndexExpirySettingSchema>;
+export type IndexExpirySetting = typeof indexExpirySettings.$inferSelect;
+
+export const marketHolidays = pgTable("market_holidays", {
+  id: serial("id").primaryKey(),
+  date: text("date").notNull(),
+  description: text("description").notNull(),
+  year: integer("year").notNull(),
+  exchange: text("exchange").notNull().default("NSE"),
+  isTradingHoliday: boolean("is_trading_holiday").notNull().default(true),
+}, (table) => [
+  index("idx_market_holidays_exchange_year").on(table.exchange, table.year),
+  index("idx_market_holidays_date_exchange").on(table.date, table.exchange),
+]);
+
+export const insertMarketHolidaySchema = createInsertSchema(marketHolidays).omit({ id: true });
+export type InsertMarketHoliday = z.infer<typeof insertMarketHolidaySchema>;
+export type MarketHoliday = typeof marketHolidays.$inferSelect;
+
 // Export auth models (users, sessions, invitations)
 export * from "./models/auth";

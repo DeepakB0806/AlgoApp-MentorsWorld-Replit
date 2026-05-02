@@ -20,6 +20,7 @@ import { startHsiGateway } from "./hsi-kotak-neo-v3";
 import { startSettlementEngine } from "./se-kotak-neo-v3";
 import { startTslEngine } from "./tsl-kotak-neo-v3";
 import { startMtmMonitor } from "./mtm-monitor";
+import { seedMarketCalendarDefaults } from "./market-calendar";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 
@@ -253,6 +254,13 @@ app.use((req, res, next) => {
     log(`Plan monitor started`);
   } catch (err) {
     log(`Plan monitor startup warning: ${err}`);
+  }
+
+  // Seed market calendar defaults (exchange hours + index expiry days)
+  try {
+    await seedMarketCalendarDefaults(storage);
+  } catch (err) {
+    log(`[STARTUP] Market calendar seed warning: ${err}`);
   }
 
   // Seed default settings (only writes if key is absent)

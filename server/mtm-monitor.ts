@@ -6,16 +6,11 @@ import { processTick } from "./tsl-kotak-neo-v3";
 import { brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 import { addProcessFlowLog } from "./process-flow-log";
 import EL from "./el-kotak-neo-v3";
+import { isWithinMarketHours, getISTDatetimeNow } from "./market-calendar";
 
 const LOG_PREFIX = "[MTM-MONITOR]";
 const TICK_INTERVAL_MS = 5_000;
 
-function getISTTime(): string {
-  const istDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const hh = String(istDate.getHours()).padStart(2, "0");
-  const mm = String(istDate.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
-}
 
 function resolveThreshold(value: number, mode: string, capital: number): number {
   if (mode === "percentage") return (capital * value) / 100;
@@ -54,15 +49,21 @@ async function computePlanMTM(
 }
 
 async function runMtmCycle(storage: IStorage): Promise<void> {
-  const istTime = getISTTime();
-  if (istTime < "09:00" || istTime > "16:00") return;
+  const { time: istTime, date: istDate } = getISTDatetimeNow();
 
   // ── Part A: Drive TSL ticks at 5s cadence ─────────────────────────────────
   try {
     const tslTrades = await storage.getOpenTradesWithTsl();
     if (tslTrades.length > 0) {
       const planConfigCache = new Map<string, Awaited<ReturnType<IStorage["getBrokerConfig"]>>>();
+      const marketHoursCache = new Map<string, boolean>();
       for (const trade of tslTrades) {
+        const tradeExchange = trade.exchange || "NFO";
+        if (!marketHoursCache.has(tradeExchange)) {
+          marketHoursCache.set(tradeExchange, await isWithinMarketHours(storage, tradeExchange, istTime, istDate));
+        }
+        if (!marketHoursCache.get(tradeExchange)) continue;
+
         if (!planConfigCache.has(trade.planId)) {
           const plan = await storage.getStrategyPlan(trade.planId);
           const bc = plan?.brokerConfigId ? await storage.getBrokerConfig(plan.brokerConfigId) : undefined;
@@ -88,9 +89,16 @@ async function runMtmCycle(storage: IStorage): Promise<void> {
       (p) => (p.deploymentStatus === "active" || p.deploymentStatus === "deployed") && p.brokerConfigId
     );
 
+    const mtmMarketHoursCache = new Map<string, boolean>();
     for (const plan of deployedPlans) {
       try {
         if (persistentSquareOffActive.has(plan.id)) continue;
+
+        const planExchange = plan.exchange || "NFO";
+        if (!mtmMarketHoursCache.has(planExchange)) {
+          mtmMarketHoursCache.set(planExchange, await isWithinMarketHours(storage, planExchange, istTime, istDate));
+        }
+        if (!mtmMarketHoursCache.get(planExchange)) continue;
 
         const tp = parseTradeParams(plan);
         if (!tp) continue;

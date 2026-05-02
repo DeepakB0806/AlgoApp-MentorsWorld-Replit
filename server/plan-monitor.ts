@@ -2,6 +2,7 @@ import type { IStorage } from "./storage";
 import type { TimeLogicConfig, TradeParams } from "@shared/schema";
 import { startPersistentSquareOff, persistentSquareOffActive } from "./te-kotak-neo-v3";
 import { addProcessFlowLog } from "./process-flow-log";
+import { isWithinMarketHours, getISTDatetimeNow } from "./market-calendar";
 
 const LOG_PREFIX = "[PLAN-MONITOR]";
 const CHECK_INTERVAL_MS = 60 * 1000;
@@ -44,9 +45,7 @@ export function startPlanMonitor(storage: IStorage): void {
 }
 
 async function checkPlans(storage: IStorage): Promise<void> {
-  const { time: istTime, dayName: istDayName } = getISTDatetime();
-
-  if (istTime < "09:00" || istTime > "16:00") return;
+  const { date: istDate, time: istTime, dayName: istDayName } = getISTDatetime();
 
   const allPlans = await storage.getStrategyPlans();
   const deployedPlans = allPlans.filter(
@@ -57,6 +56,10 @@ async function checkPlans(storage: IStorage): Promise<void> {
   for (const plan of deployedPlans) {
     try {
       if (persistentSquareOffActive.has(plan.id)) continue;
+
+      const planExchange = plan.exchange || "NFO";
+      const withinHours = await isWithinMarketHours(storage, planExchange, istTime, istDate);
+      if (!withinHours) continue;
 
       const timeLogic = parseTimeLogic(plan.tradeParams);
       if (!timeLogic) continue;

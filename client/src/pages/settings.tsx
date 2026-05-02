@@ -13,12 +13,12 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
   ArrowLeft, Mail, Key, CheckCircle, XCircle, 
   Eye, EyeOff, AlertTriangle, FileText, Settings as SettingsIcon, Database,
-  ShieldAlert, Trash2, Plus, ToggleLeft, ToggleRight
+  ShieldAlert, Trash2, Plus, ToggleLeft, ToggleRight, CalendarDays, Upload, Save
 } from "lucide-react";
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
-import type { ErrorRouting } from "@shared/schema";
+import type { ErrorRouting, ExchangeSetting, IndexExpirySetting, MarketHoliday } from "@shared/schema";
 
 interface MailSettings {
   apiKeyConfigured: boolean;
@@ -29,7 +29,7 @@ interface MailSettings {
   fromName: string;
 }
 
-type SettingsSection = "general" | "mail" | "templates" | "retention" | "error-routing";
+type SettingsSection = "general" | "mail" | "templates" | "retention" | "error-routing" | "market-calendar";
 
 function MailApiSettings() {
   const [showApiKey, setShowApiKey] = useState(false);
@@ -1173,6 +1173,363 @@ function DataRetentionSettings() {
   );
 }
 
+const DAY_NAMES: Record<number, string> = {
+  0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday", 5: "Friday", 6: "Saturday",
+};
+
+function MarketCalendarSettings() {
+  const { toast } = useToast();
+  const currentYear = new Date().getFullYear();
+
+  // ── Exchange Settings state ──────────────────────────────────────────────
+  const [exchangeEdits, setExchangeEdits] = useState<Record<string, { marketOpenTime: string; marketCloseTime: string }>>({});
+
+  const { data: exchangeRows = [], isLoading: exchLoading } = useQuery<ExchangeSetting[]>({
+    queryKey: ["/api/market-calendar/exchange-settings"],
+  });
+
+  const saveExchangeMutation = useMutation({
+    mutationFn: async ({ exchange, data }: { exchange: string; data: { marketOpenTime: string; marketCloseTime: string } }) => {
+      const res = await apiRequest("POST", `/api/market-calendar/exchange-settings/${exchange}`, data);
+      return res.json();
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/exchange-settings"] });
+      toast({ title: "Saved", description: `${vars.exchange} trading hours updated.` });
+    },
+    onError: (err: any) => toast({ title: "Save failed", description: err.message, variant: "destructive" }),
+  });
+
+  function getExchangeEdit(row: ExchangeSetting) {
+    return exchangeEdits[row.exchange] ?? { marketOpenTime: row.marketOpenTime, marketCloseTime: row.marketCloseTime };
+  }
+
+  function setExchangeField(exchange: string, field: "marketOpenTime" | "marketCloseTime", value: string) {
+    setExchangeEdits(prev => ({ ...prev, [exchange]: { ...(prev[exchange] ?? {}), [field]: value } as any }));
+  }
+
+  // ── Index Expiry state ───────────────────────────────────────────────────
+  const [expiryEdits, setExpiryEdits] = useState<Record<string, number>>({});
+
+  const { data: expiryRows = [], isLoading: expiryLoading } = useQuery<IndexExpirySetting[]>({
+    queryKey: ["/api/market-calendar/index-expiry-settings"],
+  });
+
+  const saveExpiryMutation = useMutation({
+    mutationFn: async ({ indexName, defaultExpiryDay }: { indexName: string; defaultExpiryDay: number }) => {
+      const res = await apiRequest("POST", `/api/market-calendar/index-expiry-settings/${indexName}`, { defaultExpiryDay });
+      return res.json();
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/index-expiry-settings"] });
+      toast({ title: "Saved", description: `${vars.indexName} expiry day updated.` });
+    },
+    onError: (err: any) => toast({ title: "Save failed", description: err.message, variant: "destructive" }),
+  });
+
+  function getExpiryDay(row: IndexExpirySetting): number {
+    return expiryEdits[row.indexName] ?? row.defaultExpiryDay;
+  }
+
+  // ── Holiday Calendar state ───────────────────────────────────────────────
+  const [holidayYear, setHolidayYear] = useState<string>(String(currentYear));
+  const [holidayExchange, setHolidayExchange] = useState<string>("NSE");
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvParseError, setCsvParseError] = useState<string>("");
+
+  const { data: holidayRows = [], isLoading: holidayLoading } = useQuery<MarketHoliday[]>({
+    queryKey: ["/api/market-calendar/holidays", holidayYear, holidayExchange],
+    queryFn: async () => {
+      const res = await fetch(`/api/market-calendar/holidays?year=${holidayYear}&exchange=${holidayExchange}`);
+      return res.json();
+    },
+  });
+
+  const uploadHolidaysMutation = useMutation({
+    mutationFn: async (payload: { year: number; exchange: string; rows: { date: string; description: string }[] }) => {
+      const res = await apiRequest("POST", "/api/market-calendar/holidays/upload", payload);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays"] });
+      setCsvFile(null);
+      toast({ title: "Uploaded", description: `${data.inserted} holiday(s) saved for ${data.exchange} ${data.year}.` });
+    },
+    onError: (err: any) => toast({ title: "Upload failed", description: err.message, variant: "destructive" }),
+  });
+
+  // Parse NSE-format CSV: "DD-MMM-YYYY,Description" or "Description,DD-MMM-YYYY"
+  function parseNseCsv(text: string): { date: string; description: string }[] | null {
+    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+    const rows: { date: string; description: string }[] = [];
+    const months: Record<string, string> = {
+      Jan:"01", Feb:"02", Mar:"03", Apr:"04", May:"05", Jun:"06",
+      Jul:"07", Aug:"08", Sep:"09", Oct:"10", Nov:"11", Dec:"12",
+    };
+    for (const line of lines) {
+      const parts = line.split(",").map(p => p.trim());
+      if (parts.length < 2) continue;
+      // Try each column as the date
+      let dateStr = "";
+      let desc = "";
+      for (let i = 0; i < parts.length; i++) {
+        const m = parts[i].match(/^(\d{2})-([A-Za-z]{3})-(\d{4})$/);
+        if (m) {
+          const month = months[m[2]] ?? months[m[2].charAt(0).toUpperCase() + m[2].slice(1).toLowerCase()];
+          if (!month) continue;
+          dateStr = `${m[3]}-${month}-${m[1].padStart(2, "0")}`;
+          desc = parts.filter((_, j) => j !== i).join(", ").trim();
+          break;
+        }
+      }
+      if (!dateStr) continue;
+      rows.push({ date: dateStr, description: desc });
+    }
+    return rows.length > 0 ? rows : null;
+  }
+
+  function handleUpload() {
+    if (!csvFile) {
+      toast({ title: "No file selected", description: "Please choose a CSV file first.", variant: "destructive" });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const rows = parseNseCsv(text);
+      if (!rows) {
+        setCsvParseError("Could not parse CSV. Expected format: DD-MMM-YYYY, Description");
+        return;
+      }
+      setCsvParseError("");
+      uploadHolidaysMutation.mutate({ year: parseInt(holidayYear), exchange: holidayExchange, rows });
+    };
+    reader.readAsText(csvFile);
+  }
+
+  const yearOptions = [currentYear - 1, currentYear, currentYear + 1];
+
+  return (
+    <div className="space-y-6">
+      {/* Card 1 — Exchange Trading Hours */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Exchange Trading Hours</CardTitle>
+          <CardDescription>Configure market open/close times per exchange (IST). Changes take effect on the next monitor tick.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {exchLoading ? (
+            <div className="text-sm text-muted-foreground py-4">Loading...</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Exchange</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Open Time (IST)</TableHead>
+                  <TableHead>Close Time (IST)</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {exchangeRows.map((row) => {
+                  const edit = getExchangeEdit(row);
+                  return (
+                    <TableRow key={row.exchange}>
+                      <TableCell className="font-mono font-medium">{row.exchange}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{row.displayName}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="time"
+                          value={edit.marketOpenTime}
+                          onChange={e => setExchangeField(row.exchange, "marketOpenTime", e.target.value)}
+                          className="w-32"
+                          data-testid={`input-open-${row.exchange}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="time"
+                          value={edit.marketCloseTime}
+                          onChange={e => setExchangeField(row.exchange, "marketCloseTime", e.target.value)}
+                          className="w-32"
+                          data-testid={`input-close-${row.exchange}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={saveExchangeMutation.isPending}
+                          onClick={() => saveExchangeMutation.mutate({ exchange: row.exchange, data: edit })}
+                          data-testid={`button-save-exchange-${row.exchange}`}
+                        >
+                          <Save className="w-3 h-3 mr-1" />
+                          Save
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Card 2 — Index Expiry Days */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Index Expiry Days</CardTitle>
+          <CardDescription>Default weekly expiry day per index. Used by the plan monitor for exitOnExpiry logic.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {expiryLoading ? (
+            <div className="text-sm text-muted-foreground py-4">Loading...</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Index</TableHead>
+                  <TableHead>Exchange</TableHead>
+                  <TableHead>Default Expiry Day</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {expiryRows.map((row) => (
+                  <TableRow key={row.indexName}>
+                    <TableCell className="font-mono font-medium">{row.indexName}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{row.exchange}</TableCell>
+                    <TableCell>
+                      <Select
+                        value={String(getExpiryDay(row))}
+                        onValueChange={val => setExpiryEdits(prev => ({ ...prev, [row.indexName]: parseInt(val) }))}
+                      >
+                        <SelectTrigger className="w-40" data-testid={`select-expiry-${row.indexName}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[1,2,3,4,5].map(d => (
+                            <SelectItem key={d} value={String(d)}>{DAY_NAMES[d]}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={saveExpiryMutation.isPending}
+                        onClick={() => saveExpiryMutation.mutate({ indexName: row.indexName, defaultExpiryDay: getExpiryDay(row) })}
+                        data-testid={`button-save-expiry-${row.indexName}`}
+                      >
+                        <Save className="w-3 h-3 mr-1" />
+                        Save
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Card 3 — NSE Holiday Calendar */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Holiday Calendar</CardTitle>
+          <CardDescription>
+            Upload NSE/BSE holiday CSV. Format: <span className="font-mono text-xs">DD-MMM-YYYY, Description</span> (one holiday per line). On upload, the existing list for that year + exchange is replaced.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-3 items-end">
+            <div>
+              <Label className="text-xs mb-1 block">Year</Label>
+              <Select value={holidayYear} onValueChange={setHolidayYear}>
+                <SelectTrigger className="w-28" data-testid="select-holiday-year">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {yearOptions.map(y => (
+                    <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs mb-1 block">Exchange</Label>
+              <Select value={holidayExchange} onValueChange={setHolidayExchange}>
+                <SelectTrigger className="w-28" data-testid="select-holiday-exchange">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="NSE">NSE</SelectItem>
+                  <SelectItem value="BSE">BSE</SelectItem>
+                  <SelectItem value="MCX">MCX</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex-1 min-w-48">
+              <Label className="text-xs mb-1 block">CSV File</Label>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                onChange={e => { setCsvFile(e.target.files?.[0] ?? null); setCsvParseError(""); }}
+                className="block w-full text-sm text-muted-foreground file:mr-3 file:py-1 file:px-3 file:rounded file:border file:border-border file:text-xs file:bg-muted file:text-foreground cursor-pointer"
+                data-testid="input-holiday-csv"
+              />
+            </div>
+            <Button
+              onClick={handleUpload}
+              disabled={uploadHolidaysMutation.isPending || !csvFile}
+              data-testid="button-upload-holidays"
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              {uploadHolidaysMutation.isPending ? "Uploading..." : "Upload"}
+            </Button>
+          </div>
+          {csvParseError && (
+            <p className="text-sm text-destructive">{csvParseError}</p>
+          )}
+
+          {/* Holiday table */}
+          {holidayLoading ? (
+            <div className="text-sm text-muted-foreground py-2">Loading holidays...</div>
+          ) : holidayRows.length === 0 ? (
+            <div className="text-sm text-muted-foreground py-2 border border-dashed border-border rounded-md p-4 text-center">
+              No holidays uploaded for {holidayExchange} {holidayYear}
+            </div>
+          ) : (
+            <div className="border border-border rounded-md overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>#</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Description</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {holidayRows.map((h, i) => (
+                    <TableRow key={h.id} data-testid={`row-holiday-${h.id}`}>
+                      <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
+                      <TableCell className="font-mono text-sm">{h.date}</TableCell>
+                      <TableCell className="text-sm">{h.description}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function Settings() {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
 
@@ -1201,6 +1558,11 @@ export default function Settings() {
       id: "error-routing" as const,
       label: "Error Routing",
       icon: ShieldAlert,
+    },
+    {
+      id: "market-calendar" as const,
+      label: "Market Calendar India",
+      icon: CalendarDays,
     },
   ];
 
@@ -1255,6 +1617,7 @@ export default function Settings() {
             {activeSection === "templates" && <EmailTemplates />}
             {activeSection === "retention" && <DataRetentionSettings />}
             {activeSection === "error-routing" && <ErrorRoutingSettings />}
+            {activeSection === "market-calendar" && <MarketCalendarSettings />}
           </div>
         </main>
       </div>

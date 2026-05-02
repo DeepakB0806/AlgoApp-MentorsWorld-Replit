@@ -5,6 +5,7 @@ import {
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
   brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades, strategyDailyPnl,
   broker_field_mappings, universal_fields, instrumentConfigs, broker_exchange_maps, processFlowLogs, errorRouting,
+  exchangeSettings, indexExpirySettings, marketHolidays,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -24,6 +25,9 @@ import {
   type InstrumentConfig, type InsertInstrumentConfig,
   type ProcessFlowLog, type InsertProcessFlowLog,
   type ErrorRouting, type InsertErrorRouting,
+  type ExchangeSetting, type InsertExchangeSetting,
+  type IndexExpirySetting, type InsertIndexExpirySetting,
+  type MarketHoliday, type InsertMarketHoliday,
   type Position, type Order, type Holding, type PortfolioSummary
 } from "@shared/schema";
 
@@ -190,6 +194,20 @@ export interface IStorage {
   upsertErrorRoute(route: InsertErrorRouting): Promise<boolean>;
   updateErrorRoute(id: number, patch: Partial<InsertErrorRouting>): Promise<ErrorRouting | undefined>;
   deleteErrorRoute(id: number): Promise<boolean>;
+
+  // Market Calendar — Exchange Settings
+  getExchangeSettings(): Promise<ExchangeSetting[]>;
+  getExchangeSetting(exchange: string): Promise<ExchangeSetting | undefined>;
+  upsertExchangeSetting(exchange: string, data: Partial<InsertExchangeSetting>): Promise<ExchangeSetting>;
+
+  // Market Calendar — Index Expiry Settings
+  getIndexExpirySettings(): Promise<IndexExpirySetting[]>;
+  upsertIndexExpirySetting(indexName: string, data: Partial<InsertIndexExpirySetting>): Promise<IndexExpirySetting>;
+
+  // Market Calendar — Holidays
+  getMarketHolidays(year?: number, exchange?: string): Promise<MarketHoliday[]>;
+  bulkReplaceMarketHolidays(year: number, exchange: string, rows: InsertMarketHoliday[]): Promise<number>;
+  isTradingDay(dateStr: string, exchange: string): Promise<boolean>;
 
   // Startup utilities
   backfillUniqueCodes(): Promise<void>;
@@ -1593,6 +1611,94 @@ export class DatabaseStorage implements IStorage {
   async deleteErrorRoute(id: number): Promise<boolean> {
     const result = await db.delete(errorRouting).where(eq(errorRouting.id, id)).returning();
     return result.length > 0;
+  }
+
+  // ── Market Calendar ───────────────────────────────────────────────────────
+
+  async getExchangeSettings(): Promise<ExchangeSetting[]> {
+    return db.select().from(exchangeSettings).orderBy(exchangeSettings.exchange);
+  }
+
+  async getExchangeSetting(exchange: string): Promise<ExchangeSetting | undefined> {
+    const [row] = await db.select().from(exchangeSettings).where(eq(exchangeSettings.exchange, exchange));
+    return row;
+  }
+
+  async upsertExchangeSetting(exchange: string, data: Partial<InsertExchangeSetting>): Promise<ExchangeSetting> {
+    const [existing] = await db.select().from(exchangeSettings).where(eq(exchangeSettings.exchange, exchange));
+    if (existing) {
+      const [updated] = await db
+        .update(exchangeSettings)
+        .set(data)
+        .where(eq(exchangeSettings.exchange, exchange))
+        .returning();
+      return updated;
+    } else {
+      const [inserted] = await db
+        .insert(exchangeSettings)
+        .values({ exchange, displayName: data.displayName ?? exchange, ...data })
+        .returning();
+      return inserted;
+    }
+  }
+
+  async getIndexExpirySettings(): Promise<IndexExpirySetting[]> {
+    return db.select().from(indexExpirySettings).orderBy(indexExpirySettings.indexName);
+  }
+
+  async upsertIndexExpirySetting(indexName: string, data: Partial<InsertIndexExpirySetting>): Promise<IndexExpirySetting> {
+    const [existing] = await db.select().from(indexExpirySettings).where(eq(indexExpirySettings.indexName, indexName));
+    if (existing) {
+      const [updated] = await db
+        .update(indexExpirySettings)
+        .set(data)
+        .where(eq(indexExpirySettings.indexName, indexName))
+        .returning();
+      return updated;
+    } else {
+      const [inserted] = await db
+        .insert(indexExpirySettings)
+        .values({
+          indexName,
+          exchange: (data as InsertIndexExpirySetting).exchange ?? "NSE",
+          defaultExpiryDay: (data as InsertIndexExpirySetting).defaultExpiryDay ?? 4,
+          ...data,
+        })
+        .returning();
+      return inserted;
+    }
+  }
+
+  async getMarketHolidays(year?: number, exchange?: string): Promise<MarketHoliday[]> {
+    let query = db.select().from(marketHolidays).$dynamic();
+    const conditions = [];
+    if (year !== undefined) conditions.push(eq(marketHolidays.year, year));
+    if (exchange !== undefined) conditions.push(eq(marketHolidays.exchange, exchange));
+    if (conditions.length > 0) query = query.where(and(...conditions));
+    return query.orderBy(marketHolidays.date);
+  }
+
+  async bulkReplaceMarketHolidays(year: number, exchange: string, rows: InsertMarketHoliday[]): Promise<number> {
+    await db.delete(marketHolidays).where(
+      and(eq(marketHolidays.year, year), eq(marketHolidays.exchange, exchange))
+    );
+    if (rows.length === 0) return 0;
+    const inserted = await db.insert(marketHolidays).values(rows).returning();
+    return inserted.length;
+  }
+
+  async isTradingDay(dateStr: string, exchange: string): Promise<boolean> {
+    const [row] = await db
+      .select()
+      .from(marketHolidays)
+      .where(
+        and(
+          eq(marketHolidays.date, dateStr),
+          eq(marketHolidays.exchange, exchange),
+          eq(marketHolidays.isTradingHoliday, true),
+        )
+      );
+    return !row;
   }
 
   async backfillUniqueCodes(): Promise<void> {

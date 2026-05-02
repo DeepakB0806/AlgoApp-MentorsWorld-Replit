@@ -8,6 +8,7 @@ import { registerFieldMappingRoutes } from "./routes/field-mapping-routes";
 import { registerUniversalFieldRoutes } from "./routes/universal-field-routes";
 import { registerAdminRoutes } from "./routes/admin-routes";
 import { registerSseRoutes } from "./routes/sse-routes";
+import { registerMarketCalendarRoutes } from "./routes/market-calendar-routes";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -20,6 +21,7 @@ export async function registerRoutes(
   registerBrokerRoutes(app, storage);
   registerFieldMappingRoutes(app, storage);
   registerUniversalFieldRoutes(app, storage);
+  registerMarketCalendarRoutes(app, storage);
 
   return httpServer;
 }
