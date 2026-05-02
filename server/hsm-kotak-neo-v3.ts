@@ -73,6 +73,10 @@ function startHsmStatusTracking(): void {
   }, 20_000);
 }
 
+export function isHsmAuthOk(): boolean {
+  return hsmAuthOkInSession;
+}
+
 export function getHsmStatus() {
   const isConnected = ws !== null && ws.readyState === WebSocket.OPEN;
   const isReconnecting = !isConnected && reconnectTimer !== null;
@@ -91,6 +95,7 @@ export function getHsmStatus() {
     lastDisconnectedAt: hsmLastDisconnectedAt?.toISOString() ?? null,
     hsmUrl: HSM_URL,
     subscriptionCount: subscriptions.size,
+    authOk: hsmAuthOkInSession,
   };
 }
 
@@ -176,7 +181,9 @@ function connect(config: BrokerConfig): void {
   ws.on("message", (raw: WebSocket.RawData) => {
     try {
       const parsed = JSON.parse(raw.toString());
-      if (parsed.type === "cn" && parsed.ak === "ok") { // HSM-1 Build #164: track auth confirmation
+      // Kotak HSM returns auth response as array: [{"stat":"Ok","type":"cn",...}]
+      const msgCn = Array.isArray(parsed) ? parsed[0] : parsed;
+      if (msgCn && msgCn.type === "cn" && (msgCn.ak === "ok" || msgCn.stat === "Ok")) { // HSM-1 Build #164: track auth confirmation
         hsmAuthOkInSession = true;
         hsmConsecutiveFailures = 0;
       }

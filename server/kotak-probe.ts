@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import type { BrokerConfig } from "@shared/schema";
+import { getHsmStatus, isHsmAuthOk } from "./hsm-kotak-neo-v3";
 
 export interface ProbeResult {
   target: "hsm" | "hsi";
@@ -52,6 +53,33 @@ function buildHsiAuthMessage(config: BrokerConfig): string {
 export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Promise<ProbeResult> {
   const RELAY_URL = process.env.RELAY_TARGET_URL;
   const RELAY_SECRET = process.env.RELAY_SECRET_KEY;
+
+  // HSM shortcut: if the production gateway already holds the relay slot AND has confirmed
+  // auth_ok, opening a second connection would get no response (Kotak ignores it).
+  // Read the live gateway state instead of probing again.
+  if (target === "hsm") {
+    const hsmStatus = getHsmStatus();
+    if (hsmStatus.connected) {
+      const authOk = isHsmAuthOk();
+      const status: ProbeResult["status"] = authOk ? "auth_ok" : "timeout";
+      const displayEndpoint = hsmStatus.connectionMode === "relay"
+        ? `${HSM_DIRECT_URL} (via relay)`
+        : HSM_DIRECT_URL;
+      const note = authOk
+        ? "Gateway live — reading auth_ok from active production connection"
+        : "Gateway connected but auth_ok not yet confirmed — token may be expired";
+      console.log(`[PROBE] HSM shortcut (gateway active): ${note}`);
+      const r: ProbeResult = {
+        target: "hsm",
+        status,
+        endpoint: displayEndpoint,
+        testedAt: new Date().toISOString(),
+        durationMs: 0,
+      };
+      lastResults.set("hsm", r);
+      return r;
+    }
+  }
 
   // HSM: always route through relay (direct connections are blocked from this server)
   // HSI: connect directly to Kotak (relay adds /realtime path which it can't forward)
