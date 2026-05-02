@@ -126,12 +126,15 @@ export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Pro
 
     ws.on("message", (raw: WebSocket.RawData) => {
       try {
-        const msg = JSON.parse(raw.toString());
-        if (msg.type === "cn" && msg.ak === "ok") {
-          settle("auth_ok");
-        } else if (msg.type === "cn" || (typeof msg.msg === "string" && msg.msg.length > 0)) {
-          settle("auth_failed");
-        }
+        const parsed = JSON.parse(raw.toString());
+        // HSM returns an array: [{"stat":"Ok","type":"cn","msg":"successful","stCode":200}]
+        // HSI returns a plain object: {"ak":"ok","type":"cn","task":"cn","msg":"connected"}
+        const msg = Array.isArray(parsed) ? parsed[0] : parsed;
+        if (!msg) return;
+        const isOk = msg.type === "cn" && (msg.ak === "ok" || msg.stat === "Ok");
+        const isFailed = msg.type === "cn" || (typeof msg.msg === "string" && msg.msg.length > 0);
+        if (isOk) settle("auth_ok");
+        else if (isFailed) settle("auth_failed");
       } catch {}
     });
 
