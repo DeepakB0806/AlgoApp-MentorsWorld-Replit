@@ -13,7 +13,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
   ArrowLeft, Mail, Key, CheckCircle, XCircle, 
   Eye, EyeOff, AlertTriangle, FileText, Settings as SettingsIcon, Database,
-  ShieldAlert, Trash2, Plus, ToggleLeft, ToggleRight, CalendarDays, Upload, Save, RefreshCw, Loader2
+  ShieldAlert, Trash2, Plus, ToggleLeft, ToggleRight, CalendarDays, Upload, Save, RefreshCw, Loader2, CalendarCheck
 } from "lucide-react";
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
@@ -1253,6 +1253,13 @@ function MarketCalendarSettings() {
     },
   });
 
+  const { data: syncStatus } = useQuery<{ count: number; lastSyncedAt: string | null }>({
+    queryKey: ["/api/market-calendar/holidays/sync-status", holidayExchange, holidayYear],
+    queryFn: () =>
+      fetch(`/api/market-calendar/holidays/sync-status?exchange=${holidayExchange}&year=${holidayYear}`)
+        .then(r => r.json()),
+  });
+
   const uploadHolidaysMutation = useMutation({
     mutationFn: async (payload: { year: number; exchange: string; rows: { date: string; description: string }[] }) => {
       const res = await apiRequest("POST", "/api/market-calendar/holidays/upload", payload);
@@ -1260,6 +1267,7 @@ function MarketCalendarSettings() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays/sync-status"] });
       setCsvFile(null);
       toast({ title: "Uploaded", description: `${data.inserted} holiday(s) saved for ${data.exchange} ${data.year}.` });
     },
@@ -1280,6 +1288,7 @@ function MarketCalendarSettings() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays/sync-status"] });
       toast({
         title: "Sync complete",
         description: `Synced ${data.inserted} holidays for ${data.exchange} / ${data.year}.`,
@@ -1572,6 +1581,25 @@ function MarketCalendarSettings() {
             )}
           </div>
 
+          {/* Sync status bar */}
+          {syncStatus && syncStatus.count > 0 && (
+            <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-md px-3 py-2">
+              <CalendarCheck className="w-4 h-4 shrink-0" />
+              <span data-testid="text-holiday-sync-status">
+                <span className="font-medium">{syncStatus.count} holidays saved to schema</span>
+                {" "}for {holidayExchange} {holidayYear}
+                {syncStatus.lastSyncedAt && (
+                  <>
+                    {" · "}Last synced{" "}
+                    {new Date(syncStatus.lastSyncedAt).toLocaleDateString("en-IN", {
+                      day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata",
+                    })}
+                  </>
+                )}
+              </span>
+            </div>
+          )}
+
           {/* Holiday table */}
           {holidayLoading ? (
             <div className="text-sm text-muted-foreground py-2">Loading holidays...</div>
@@ -1580,21 +1608,21 @@ function MarketCalendarSettings() {
               No holidays uploaded for {holidayExchange} {holidayYear}
             </div>
           ) : (
-            <div className="border border-border rounded-md overflow-hidden">
+            <div className="border border-border rounded-md overflow-hidden text-xs">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Description</TableHead>
+                    <TableHead className="py-1 text-xs">#</TableHead>
+                    <TableHead className="py-1 text-xs">Date</TableHead>
+                    <TableHead className="py-1 text-xs">Description</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {holidayRows.map((h, i) => (
                     <TableRow key={h.id} data-testid={`row-holiday-${h.id}`}>
-                      <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
-                      <TableCell className="font-mono text-sm">{h.date}</TableCell>
-                      <TableCell className="text-sm">{h.description}</TableCell>
+                      <TableCell className="py-0.5 text-xs text-muted-foreground">{i + 1}</TableCell>
+                      <TableCell className="py-0.5 text-xs font-mono">{h.date}</TableCell>
+                      <TableCell className="py-0.5 text-xs">{h.description}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

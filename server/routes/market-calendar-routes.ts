@@ -234,6 +234,7 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
         isTradingHoliday: true as const,
       }));
       const count = await storage.bulkReplaceMarketHolidays(year, exchange, holidayRows);
+      await storage.setSetting(`holiday_last_sync_${exchange}_${year}`, new Date().toISOString());
       res.json({ inserted: count, year, exchange });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -245,6 +246,18 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
   const syncSchema = z.object({
     year:     z.number().int().min(2020).max(2100),
     exchange: z.enum(["NSE", "BSE"]),
+  });
+
+  app.get("/api/market-calendar/holidays/sync-status", async (req, res) => {
+    try {
+      const year     = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
+      const exchange = (req.query.exchange as string | undefined) ?? "NSE";
+      const rows     = await storage.getMarketHolidays(year, exchange);
+      const setting  = await storage.getSetting(`holiday_last_sync_${exchange}_${year}`);
+      res.json({ count: rows.length, lastSyncedAt: setting?.value ?? null, year, exchange });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.post("/api/market-calendar/holidays/sync-nse", async (req, res) => {
@@ -276,6 +289,7 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
       }));
       // No-partial-write: only save after full successful fetch + parse
       const inserted = await storage.bulkReplaceMarketHolidays(year, exchange, rows);
+      await storage.setSetting(`holiday_last_sync_${exchange}_${year}`, new Date().toISOString());
       res.json({ inserted, year, exchange });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
