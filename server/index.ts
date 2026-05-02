@@ -19,6 +19,7 @@ import { startWsGateway } from "./hsm-kotak-neo-v3";
 import { startHsiGateway } from "./hsi-kotak-neo-v3";
 import { startSettlementEngine } from "./se-kotak-neo-v3";
 import { startTslEngine } from "./tsl-kotak-neo-v3";
+import { startMtmMonitor } from "./mtm-monitor";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 
@@ -354,6 +355,14 @@ app.use((req, res, next) => {
     log(`TSL Engine started`);
   } catch (err) {
     log(`TSL Engine startup warning (non-fatal): ${err}`);
+  }
+
+  // Start MTM Monitor — 5s cycle: drives TSL ticks + monitors plan-level MTM stoploss/profit targets
+  try {
+    startMtmMonitor(storage);
+    log(`MTM Monitor started`);
+  } catch (err) {
+    log(`MTM Monitor startup warning (non-fatal): ${err}`);
   }
 
   // Start WebSocket Gateway — subscribes open NRML trades, non-fatal on failure

@@ -1,5 +1,5 @@
 import { randomUUID, randomBytes } from "crypto";
-import { eq, desc, and, inArray, lt, sql, isNotNull } from "drizzle-orm";
+import { eq, desc, and, inArray, lt, sql, isNotNull, gt } from "drizzle-orm";
 import { db } from "./db";
 import { 
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
@@ -147,7 +147,7 @@ export interface IStorage {
   deleteStrategyTradesOlderThan(days: number): Promise<number>;
   getUnsettledClosedTrades(): Promise<StrategyTrade[]>;
   markTradesPnlCalculated(ids: string[]): Promise<void>;
-  getOpenNrmlTradesWithTsl(): Promise<StrategyTrade[]>;
+  getOpenTradesWithTsl(): Promise<StrategyTrade[]>;
 
   // Strategy Daily P&L - daily P&L log entries
   getStrategyDailyPnl(planId: string): Promise<StrategyDailyPnl[]>;
@@ -960,11 +960,12 @@ export class DatabaseStorage implements IStorage {
       .where(inArray(strategyTrades.id, ids));
   }
 
-  async getOpenNrmlTradesWithTsl(): Promise<StrategyTrade[]> {
+  async getOpenTradesWithTsl(): Promise<StrategyTrade[]> {
     return await db.select().from(strategyTrades)
       .where(and(
-        eq(strategyTrades.status, "open"),
-        isNotNull(strategyTrades.initialSlPrice)
+        inArray(strategyTrades.status, ["open", "partially_closed"]),
+        isNotNull(strategyTrades.trailingStep),
+        gt(strategyTrades.trailingStep, 0)
       ));
   }
 

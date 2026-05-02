@@ -286,7 +286,7 @@ export async function processTradeSignal(
 // ═══════════════════════════════════════════════════════════════════════════════
 // PLAN HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
-function parseTradeParams(plan: StrategyPlan): Record<string, any> | null {
+export function parseTradeParams(plan: StrategyPlan): Record<string, any> | null {
   if (!plan.tradeParams) return null;
   try { return typeof plan.tradeParams === "string" ? JSON.parse(plan.tradeParams) : plan.tradeParams; } 
   catch { return null; }
@@ -859,8 +859,19 @@ async function executeLegBasket(
       }
 
       // FIX 3a: Immediate DB write as "pending_basket" — leg gets a real ID before any rollback can occur
-      const initialSl = (leg as any).initialSl ?? (ctx.blockConfig as any)?.initialSl ?? null;
-      const trailingStepVal = (leg as any).trailingStep ?? (ctx.blockConfig as any)?.trailingStep ?? null;
+      const trailingSLCfg = (tradeParams as any)?.trailingSL;
+      const tslEnabled = trailingSLCfg?.enabled === true && trailingSLCfg?.tslType !== "none";
+      const initialSl: number | null =
+        (leg as any).initialSl
+        ?? (ctx.blockConfig as any)?.initialSl
+        ?? (tslEnabled ? (Number(trailingSLCfg.activateAt) || null) : null);
+      const trailingStepVal: number | null =
+        (leg as any).trailingStep
+        ?? (ctx.blockConfig as any)?.trailingStep
+        ?? (tslEnabled ? (Number(trailingSLCfg.increaseTslBy) || null) : null);
+      const tslType: string = trailingSLCfg?.tslType ?? "none";
+      const tslLockProfitVal: number | null = tslEnabled ? (Number(trailingSLCfg.lockProfitAt) || null) : null;
+      const tslProfitStepVal: number | null = tslEnabled ? (Number(trailingSLCfg.whenProfitIncreaseBy) || null) : null;
       const stagedTrade = {
         planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${legIndex}`,
         tradingSymbol: resolved.tradingSymbol, exchange: ctx.exchange, quantity: actualFilledQty,
@@ -872,11 +883,14 @@ async function executeLegBasket(
         localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
         webhookDataId: ctx.data.id || undefined,
         rejectedReason: orderReason || null,
-        ...(productType === "NRML" && initialSl !== null ? {
-          initialSlPrice: Number(initialSl),
+        ...(initialSl !== null || trailingStepVal !== null ? {
+          initialSlPrice: initialSl !== null ? Number(initialSl) : null,
           trailingStep: trailingStepVal !== null ? Number(trailingStepVal) : null,
-          currentSlPrice: Number(initialSl),
+          currentSlPrice: initialSl !== null ? Number(initialSl) : null,
           highWaterMark: fillPrice,
+          tslType: tslType || "none",
+          tslLockProfit: tslLockProfitVal,
+          tslProfitStep: tslProfitStepVal,
         } : {}),
       };
 

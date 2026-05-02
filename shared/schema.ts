@@ -85,6 +85,7 @@ export type ProfitTargetConfig = {
 
 export type TrailingStoplossConfig = {
   enabled: boolean;
+  tslType?: "none" | "percentage_of_capital" | "amount";
   activateAt: number;
   lockProfitAt: number;
   whenProfitIncreaseBy: number;
@@ -222,6 +223,9 @@ export const strategyTrades = pgTable("strategy_trades", {
   trailingStep: real("trailing_step"),
   currentSlPrice: real("current_sl_price"),
   highWaterMark: real("high_water_mark"),
+  tslType: text("tsl_type"),
+  tslLockProfit: real("tsl_lock_profit"),
+  tslProfitStep: real("tsl_profit_step"),
 }, (table) => [
   index("idx_strategy_trades_plan_id").on(table.planId),
   index("idx_strategy_trades_status").on(table.status),

@@ -22,6 +22,11 @@ interface TslState {
   trailingStep: number;
   planId: string;
   dirty: boolean;
+  tslType: string;
+  tslLockProfit: number | null;
+  tslProfitStep: number | null;
+  entryPrice: number;
+  lockAchieved: boolean;
 }
 
 const trails = new Map<string, TslState>();
@@ -41,11 +46,35 @@ export function processTick(symbol: string, ltp: number): void {
     const isBuy = state.action === "BUY";
 
     if (isBuy) {
-      if (ltp > state.highWaterMark) {
-        state.highWaterMark = ltp;
-        state.currentSlPrice = ltp - state.trailingStep;
-        state.dirty = true;
+      if (state.tslType !== "none") {
+        const effectiveStep = state.tslType === "percentage_of_capital"
+          ? state.entryPrice * (state.trailingStep / 100)
+          : state.trailingStep;
+
+        if (!state.lockAchieved && state.tslLockProfit !== null && state.tslLockProfit > 0) {
+          const currentProfit = ltp - state.entryPrice;
+          if (currentProfit >= state.tslLockProfit) {
+            state.currentSlPrice = Math.max(state.currentSlPrice, state.entryPrice);
+            state.lockAchieved = true;
+            state.dirty = true;
+          }
+        }
+
+        if (state.tslProfitStep !== null && state.tslProfitStep > 0) {
+          if (ltp >= state.highWaterMark + state.tslProfitStep) {
+            state.highWaterMark = ltp;
+            state.currentSlPrice = ltp - effectiveStep;
+            state.dirty = true;
+          }
+        } else {
+          if (ltp > state.highWaterMark) {
+            state.highWaterMark = ltp;
+            state.currentSlPrice = ltp - effectiveStep;
+            state.dirty = true;
+          }
+        }
       }
+
       if (ltp <= state.currentSlPrice) {
         console.log(`${LOG_PREFIX} SL breach BUY trade ${tradeId}: ltp=${ltp} sl=${state.currentSlPrice}`);
         trails.delete(tradeId);
@@ -56,11 +85,35 @@ export function processTick(symbol: string, ltp: number): void {
         }
       }
     } else {
-      if (ltp < state.highWaterMark) {
-        state.highWaterMark = ltp;
-        state.currentSlPrice = ltp + state.trailingStep;
-        state.dirty = true;
+      if (state.tslType !== "none") {
+        const effectiveStep = state.tslType === "percentage_of_capital"
+          ? state.entryPrice * (state.trailingStep / 100)
+          : state.trailingStep;
+
+        if (!state.lockAchieved && state.tslLockProfit !== null && state.tslLockProfit > 0) {
+          const currentProfit = state.entryPrice - ltp;
+          if (currentProfit >= state.tslLockProfit) {
+            state.currentSlPrice = Math.min(state.currentSlPrice, state.entryPrice);
+            state.lockAchieved = true;
+            state.dirty = true;
+          }
+        }
+
+        if (state.tslProfitStep !== null && state.tslProfitStep > 0) {
+          if (ltp <= state.highWaterMark - state.tslProfitStep) {
+            state.highWaterMark = ltp;
+            state.currentSlPrice = ltp + effectiveStep;
+            state.dirty = true;
+          }
+        } else {
+          if (ltp < state.highWaterMark) {
+            state.highWaterMark = ltp;
+            state.currentSlPrice = ltp + effectiveStep;
+            state.dirty = true;
+          }
+        }
       }
+
       if (ltp >= state.currentSlPrice) {
         console.log(`${LOG_PREFIX} SL breach SELL trade ${tradeId}: ltp=${ltp} sl=${state.currentSlPrice}`);
         trails.delete(tradeId);
@@ -88,6 +141,11 @@ export function registerNewTrail(trade: StrategyTrade): void {
     trailingStep: trade.trailingStep,
     planId: trade.planId,
     dirty: false,
+    tslType: trade.tslType ?? "none",
+    tslLockProfit: trade.tslLockProfit ?? null,
+    tslProfitStep: trade.tslProfitStep ?? null,
+    entryPrice: trade.highWaterMark ?? (trade.ltp || trade.price || 0),
+    lockAchieved: false,
   });
   console.log(`${LOG_PREFIX} Registered trail for ${trade.tradingSymbol} [${isBuy ? "BUY" : "SELL"}] sl=${trade.currentSlPrice}`);
 }
@@ -125,7 +183,7 @@ export async function startTslEngine(
   _closeTradeById = closeTradeById;
 
   try {
-    const openTrades = await storage.getOpenNrmlTradesWithTsl();
+    const openTrades = await storage.getOpenTradesWithTsl();
     for (const trade of openTrades) {
       registerNewTrail(trade);
     }

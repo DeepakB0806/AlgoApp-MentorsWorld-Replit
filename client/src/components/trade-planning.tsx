@@ -72,7 +72,7 @@ export function TradePlanning() {
   const [neutralConfig, setNeutralConfig] = useState<BlockConfig>(defaultBlockConfig);
   const [stoploss, setStoploss] = useState<StoplossConfig>({ enabled: false, mode: "amount", value: 0 });
   const [profitTarget, setProfitTarget] = useState<ProfitTargetConfig>({ enabled: false, mode: "amount", value: 0 });
-  const [trailingSL, setTrailingSL] = useState<TrailingStoplossConfig>({ enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
+  const [trailingSL, setTrailingSL] = useState<TrailingStoplossConfig>({ enabled: false, tslType: "none", activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
   const [timeLogic, setTimeLogic] = useState<TimeLogicConfig>({ exitTime: "", exitOnExpiry: false, exitAfterDays: 0 });
 
   const { data: plans = [], isLoading } = useQuery<StrategyPlan[]>({
@@ -218,7 +218,7 @@ export function TradePlanning() {
     setNeutralConfig(tp.neutralConfig ? { priceMode: "LMT", ...tp.neutralConfig } : { productMode: deriveMode(loadedNeutral), priceMode: "LMT" });
     setStoploss(tp.stoploss || { enabled: false, mode: "amount", value: 0 });
     setProfitTarget(tp.profitTarget || { enabled: false, mode: "amount", value: 0 });
-    setTrailingSL(tp.trailingSL || { enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
+    setTrailingSL(tp.trailingSL || { enabled: false, tslType: "none", activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
     setTimeLogic(tp.timeLogic || { exitTime: "", exitOnExpiry: false, exitAfterDays: 0 });
     setIsDialogOpen(true);
   };
@@ -717,12 +717,11 @@ export function TradePlanning() {
                   )}
                 </div>
 
-                {hasMISLegs && (
-                  <div className="border border-border rounded-md p-3 space-y-3">
+                <div className="border border-border rounded-md p-3 space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
                         <TrendingUp className="w-3 h-3 text-blue-400" />
-                        <span className="text-sm font-medium">Trailing Stoploss (MIS Only)</span>
+                        <span className="text-sm font-medium">Trailing Stoploss</span>
                       </div>
                       <Switch
                         checked={trailingSL.enabled}
@@ -732,6 +731,22 @@ export function TradePlanning() {
                     </div>
                     {trailingSL.enabled && (
                       <div className="grid grid-cols-2 gap-3">
+                        <div className="col-span-2">
+                          <Label className="text-xs text-muted-foreground">Type</Label>
+                          <Select
+                            value={trailingSL.tslType ?? "none"}
+                            onValueChange={(val) => setTrailingSL((s) => ({ ...s, tslType: val as TrailingStoplossConfig["tslType"] }))}
+                          >
+                            <SelectTrigger data-testid="select-tsl-type">
+                              <SelectValue placeholder="Select type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None</SelectItem>
+                              <SelectItem value="percentage_of_capital">% of Capital</SelectItem>
+                              <SelectItem value="amount">Amount</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                         <div>
                           <Label className="text-xs text-muted-foreground">Activate At</Label>
                           <Input
@@ -740,6 +755,7 @@ export function TradePlanning() {
                             value={trailingSL.activateAt || ""}
                             onChange={(e) => setTrailingSL((s) => ({ ...s, activateAt: parseFloat(e.target.value) || 0 }))}
                             placeholder="e.g. 2000"
+                            disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
                             data-testid="input-tsl-activate-at"
                           />
                         </div>
@@ -751,17 +767,19 @@ export function TradePlanning() {
                             value={trailingSL.lockProfitAt || ""}
                             onChange={(e) => setTrailingSL((s) => ({ ...s, lockProfitAt: parseFloat(e.target.value) || 0 }))}
                             placeholder="e.g. 1000"
+                            disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
                             data-testid="input-tsl-lock-profit"
                           />
                         </div>
                         <div>
-                          <Label className="text-xs text-muted-foreground">When Profit Increase By</Label>
+                          <Label className="text-xs text-muted-foreground">When Profit Increases By</Label>
                           <Input
                             type="number"
                             min={0}
                             value={trailingSL.whenProfitIncreaseBy || ""}
                             onChange={(e) => setTrailingSL((s) => ({ ...s, whenProfitIncreaseBy: parseFloat(e.target.value) || 0 }))}
                             placeholder="e.g. 500"
+                            disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
                             data-testid="input-tsl-profit-increase"
                           />
                         </div>
@@ -773,13 +791,13 @@ export function TradePlanning() {
                             value={trailingSL.increaseTslBy || ""}
                             onChange={(e) => setTrailingSL((s) => ({ ...s, increaseTslBy: parseFloat(e.target.value) || 0 }))}
                             placeholder="e.g. 250"
+                            disabled={!trailingSL.tslType || trailingSL.tslType === "none"}
                             data-testid="input-tsl-increase-by"
                           />
                         </div>
                       </div>
                     )}
                   </div>
-                )}
 
                 <div className="border border-border rounded-md p-3 space-y-3">
                   <div className="flex items-center gap-2">
