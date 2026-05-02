@@ -48,20 +48,23 @@ async function fetchNseHolidayData(year: number): Promise<Array<{ date: string; 
   const data = await apiRes.json() as Record<string, any[]>;
 
   // NSE returns { CM: [...], FO: [...], IRD: [...], ... }
-  // CM (cash market) holidays cover all NSE segments
-  const list: any[] = data.CM ?? data.cm ?? [];
+  // Merge CM (cash market) and FO (F&O) — FO occasionally has extra clearing holidays.
+  // Deduplicate by date; FO entry wins on collision so F&O-specific closures are preserved.
+  const cmList: any[] = data.CM ?? data.cm ?? [];
+  const foList: any[] = data.FO ?? data.fo ?? [];
+  const combined = [...cmList, ...foList];
 
-  const holidays: Array<{ date: string; description: string }> = [];
-  for (const h of list) {
+  const seen = new Map<string, { date: string; description: string }>();
+  for (const h of combined) {
     const raw = h.tradingDate ?? h.trade_date ?? h.date ?? "";
     const isoDate = parseDDMMMYYYY(String(raw));
     if (!isoDate || !isoDate.startsWith(String(year))) continue;
-    holidays.push({
+    seen.set(isoDate, {
       date:        isoDate,
       description: String(h.description ?? h.desc ?? h.holidayName ?? "Market Holiday").trim(),
     });
   }
-  return holidays;
+  return Array.from(seen.values());
 }
 
 async function fetchBseHolidayData(year: number): Promise<Array<{ date: string; description: string }>> {
