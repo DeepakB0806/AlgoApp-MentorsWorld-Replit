@@ -4,10 +4,10 @@
 import fs from "fs";
 import path from "path";
 import type { IStorage } from "./storage";
-import type { BrokerConfig } from "@shared/schema";
+import type { BrokerConfig, StrategyPlan, PlanTradeLeg, InstrumentConfig } from "@shared/schema";
 import EL from "./el-kotak-neo-v3";
 import { tradingCache } from "./cache";
-import { isOptionExchange } from "./option-symbol-builder";
+import { isOptionExchange, getATMStrike } from "./option-symbol-builder";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -288,6 +288,171 @@ function populateContractCache(allRawContracts: RawContract[]): void {
 // and parses only the tickers the user has actually configured. No hardcoded
 // ticker lists — adding any ticker/exchange in the UI is sufficient.
 // ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// MARGIN ESTIMATION
+// Runs after every scrip master sync. Calls EL.checkMargin for each leg of
+// every active/deployed non-proxy plan linked to this broker. Stores sum of
+// ordMrgn across all legs as estimatedMargin. Failures are non-fatal.
+// ═══════════════════════════════════════════════════════════════════════════════
+function parseTradeParamsLocal(plan: StrategyPlan): Record<string, any> | null {
+  if (!plan.tradeParams) return null;
+  try { return typeof plan.tradeParams === "string" ? JSON.parse(plan.tradeParams) : plan.tradeParams; }
+  catch { return null; }
+}
+
+function selectLegsLocal(tradeParams: Record<string, any>, blockType: string): PlanTradeLeg[] {
+  const legs = tradeParams[blockType];
+  return Array.isArray(legs) ? legs : [];
+}
+
+function getBlockConfigLocal(tradeParams: Record<string, any>, blockType: string): Record<string, any> {
+  const configKey = blockType.replace("Legs", "Config");
+  return tradeParams[configKey] || {};
+}
+
+function findNearestExpiryDate(ticker: string): string | null {
+  let earliest: string | null = null;
+  for (const key of liveContractCache.keys()) {
+    if (!key.startsWith(`${ticker}_`)) continue;
+    const parts = key.split("_");
+    if (parts.length < 4) continue;
+    const date = parts[1];
+    if (!earliest || date < earliest) earliest = date;
+  }
+  return earliest;
+}
+
+function extractOrdMrgn(data: unknown): number {
+  if (!data || typeof data !== "object") return 0;
+  const search = (obj: any, depth = 0): number => {
+    if (depth > 5 || typeof obj !== "object" || obj === null) return 0;
+    for (const k of ["ordMrgn", "ord_mrgn", "orderMargin", "ordMargin", "margin"]) {
+      if (obj[k] !== undefined) { const v = Number(obj[k]); if (!isNaN(v)) return v; }
+    }
+    for (const v of Object.values(obj)) { const f = search(v, depth + 1); if (f !== 0) return f; }
+    return 0;
+  };
+  return search(data);
+}
+
+async function calculatePlanMargins(storage: IStorage, brokerConfig: BrokerConfig): Promise<void> {
+  const LOG = "[MARGIN-CALC]";
+  try {
+    const allPlans = await storage.getStrategyPlans();
+    const plansToCalc = allPlans
+      .filter(p =>
+        p.brokerConfigId === brokerConfig.id &&
+        (p.deploymentStatus === "active" || p.deploymentStatus === "deployed") &&
+        !p.isProxyMode
+      )
+      .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+
+    if (plansToCalc.length === 0) {
+      console.log(`${LOG} No active/deployed non-proxy plans for broker ${brokerConfig.name}`);
+      return;
+    }
+    console.log(`${LOG} Calculating margins for ${plansToCalc.length} plan(s) — broker ${brokerConfig.name}`);
+
+    for (const plan of plansToCalc) {
+      try {
+        const tradeParams = parseTradeParamsLocal(plan);
+        if (!tradeParams) { console.warn(`${LOG} Plan "${plan.name}" — tradeParams missing, skipping`); continue; }
+
+        const allLegs: PlanTradeLeg[] = ["legs", "uptrendLegs", "downtrendLegs", "neutralLegs"]
+          .flatMap(bt => selectLegsLocal(tradeParams, bt));
+        if (allLegs.length === 0) { console.warn(`${LOG} Plan "${plan.name}" — no legs, skipping`); continue; }
+
+        const productMode = (
+          getBlockConfigLocal(tradeParams, "uptrendLegs").productMode ||
+          getBlockConfigLocal(tradeParams, "downtrendLegs").productMode ||
+          getBlockConfigLocal(tradeParams, "neutralLegs").productMode ||
+          getBlockConfigLocal(tradeParams, "legsConfig").productMode ||
+          "MIS"
+        ) as string;
+
+        const ticker = plan.ticker;
+        const exchange = plan.exchange;
+        if (!ticker || !exchange || !isOptionExchange(exchange)) {
+          console.warn(`${LOG} Plan "${plan.name}" — no ticker/exchange or non-option exchange, skipping`);
+          continue;
+        }
+
+        let instrumentConfig: InstrumentConfig | undefined = tradingCache.getInstrumentConfig(ticker, exchange);
+        if (!instrumentConfig) {
+          instrumentConfig = await storage.getInstrumentConfig(ticker, exchange);
+          if (instrumentConfig) tradingCache.setInstrumentConfig(ticker, exchange, instrumentConfig);
+        }
+        if (!instrumentConfig?.token || !instrumentConfig?.strikeInterval) {
+          console.warn(`${LOG} Plan "${plan.name}" — instrumentConfig missing token/strikeInterval, skipping`);
+          continue;
+        }
+
+        const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(exchange), instrumentConfig.token);
+        if (!quoteRes.success || !quoteRes.ltp) {
+          console.warn(`${LOG} Plan "${plan.name}" — LTP fetch failed: ${quoteRes.error}`);
+          continue;
+        }
+        const atmStrike = getATMStrike(quoteRes.ltp, instrumentConfig.strikeInterval ?? 50);
+        const nearestDate = findNearestExpiryDate(ticker);
+        if (!nearestDate) { console.warn(`${LOG} Plan "${plan.name}" — no cache entries for ticker ${ticker}`); continue; }
+
+        const lotMultiplier = plan.lotMultiplier || 1;
+        const lotSize = instrumentConfig.lotSize ?? 1;
+        let totalMargin = 0;
+        let anyFailed = false;
+
+        for (const leg of allLegs) {
+          const legType = (leg.type || "").toUpperCase();
+          if (legType !== "CE" && legType !== "PE" && legType !== "FUT") continue;
+
+          let token: string | undefined;
+          if (legType === "FUT") {
+            token = liveContractCache.get(`${ticker}_${nearestDate}_0_FUT`)?.token;
+          } else {
+            token = liveContractCache.get(`${ticker}_${nearestDate}_${atmStrike}_${legType}`)?.token;
+          }
+          if (!token) {
+            console.warn(`${LOG} Plan "${plan.name}" leg ${legType} — token not in cache`);
+            anyFailed = true;
+            continue;
+          }
+
+          const marginRes = await EL.checkMargin(brokerConfig, {
+            exSeg: EL.mapExchange(exchange),
+            prc: "0", prcTp: "MKT", prod: productMode,
+            qty: String((leg.lots || 1) * lotMultiplier * lotSize),
+            tok: token,
+            trnsTp: leg.action === "BUY" ? "B" : "S",
+            brkName: "KOTAK", brnchId: "ONLINE",
+          }, true);
+
+          if (!marginRes.success) {
+            console.warn(`${LOG} Plan "${plan.name}" leg ${legType} — checkMargin failed: ${(marginRes as any).error}`);
+            anyFailed = true;
+          } else {
+            totalMargin += extractOrdMrgn(marginRes.data);
+          }
+          await new Promise(r => setTimeout(r, 100));
+        }
+
+        if (!anyFailed || totalMargin > 0) {
+          await storage.updateStrategyPlan(plan.id, {
+            estimatedMargin: String(totalMargin.toFixed(2)),
+            marginCalculatedAt: new Date().toISOString(),
+          });
+          console.log(`${LOG} Plan "${plan.name}" — ₹${totalMargin.toFixed(2)}${anyFailed ? " (partial legs)" : ""}`);
+        } else {
+          console.warn(`${LOG} Plan "${plan.name}" — all leg margin calls failed; estimatedMargin unchanged`);
+        }
+      } catch (planErr: any) {
+        console.error(`${LOG} Plan "${plan.name}" — unexpected error: ${planErr.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error(`${LOG} calculatePlanMargins outer error: ${err.message}`);
+  }
+}
+
 export async function runScripMasterSync(storage: IStorage, brokerConfig: BrokerConfig): Promise<{ success: boolean; synced: number; error?: string }> {
   console.log(`${LOG_PREFIX} Starting scrip master sync for broker ${brokerConfig.name}`);
   try {
@@ -467,6 +632,7 @@ export async function runScripMasterSync(storage: IStorage, brokerConfig: Broker
     scripMasterSyncStatus.lastSyncTimeIST = `${String(nowIST.getUTCHours()).padStart(2, "0")}:${String(nowIST.getUTCMinutes()).padStart(2, "0")}:${String(nowIST.getUTCSeconds()).padStart(2, "0")}`;
     console.log(`${LOG_PREFIX} Scrip Master Sync Timestamp Updated to: ${scripMasterSyncStatus.lastSyncDateIST} ${scripMasterSyncStatus.lastSyncTimeIST} IST`);
 
+    await calculatePlanMargins(storage, brokerConfig);
     return { success: true, synced };
   } catch (error: any) {
     return { success: false, synced: 0, error: error.message };

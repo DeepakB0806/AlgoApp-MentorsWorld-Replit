@@ -593,6 +593,13 @@ export function BrokerLinking() {
     onError: () => toast({ title: "Failed to update multiplier", variant: "destructive" }),
   });
 
+  const rankResumeMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+      apiRequest("PATCH", `/api/strategy-plans/${id}`, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/strategy-plans"] }); },
+    onError: () => toast({ title: "Failed to update capital gating settings", variant: "destructive" }),
+  });
+
   const handleLink = (planId: string) => {
     const state = localState[planId];
     if (!state) return;
@@ -882,6 +889,20 @@ export function BrokerLinking() {
                       </div>
                     ) : null;
                   })()}
+                  {isDeployed && plan.estimatedMargin && (
+                    <div className="flex items-center justify-end gap-1 mt-1 text-[10px] text-muted-foreground/80 font-mono" data-testid={`text-margin-info-${plan.id}`}>
+                      {plan.marginCalculatedAt && (
+                        <span>{new Date(plan.marginCalculatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).replace(",", "")}</span>
+                      )}
+                      <span className="ml-1">· Margin: ₹{Number(plan.estimatedMargin).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>
+                    </div>
+                  )}
+                  {isDeployed && !plan.estimatedMargin && (depStatus === "active" || depStatus === "deployed") && (
+                    <div className="flex items-center gap-1 mt-1" data-testid={`badge-margin-uncalculated-${plan.id}`}>
+                      <AlertTriangle className="w-3 h-3 text-amber-400" />
+                      <span className="text-xs text-amber-400">Margin not calculated — verify before market open</span>
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent className="px-3 pb-3 space-y-2 pt-0">
                   {/* ── Section 2: Strategy Configuration (collapsible) ── */}
@@ -1005,6 +1026,41 @@ export function BrokerLinking() {
                         </div>
                       </div>
                     </>
+                  )}
+
+                  {(depStatus === "active" || depStatus === "paused" || depStatus === "deployed") && (
+                    <div className="border border-border/30 rounded-lg px-3 py-2.5 space-y-2" data-testid={`container-capital-gating-${plan.id}`}>
+                      <span className="font-semibold uppercase tracking-widest text-[10px] text-muted-foreground block">Capital Gating</span>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <Label className="text-xs text-muted-foreground whitespace-nowrap">Rank</Label>
+                          <Select
+                            value={plan.rank != null ? String(plan.rank) : "unranked"}
+                            onValueChange={(v) => rankResumeMutation.mutate({ id: plan.id, data: { rank: v === "unranked" ? null : Number(v) } })}
+                            disabled={rankResumeMutation.isPending}
+                          >
+                            <SelectTrigger className="h-7 text-xs w-28" data-testid={`select-rank-${plan.id}`}>
+                              <SelectValue placeholder="Unranked" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="unranked">Unranked</SelectItem>
+                              {[1,2,3,4,5,6,7,8,9,10].map(r => (
+                                <SelectItem key={r} value={String(r)}>Priority {r}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={plan.autoResume !== false}
+                            onCheckedChange={(v) => rankResumeMutation.mutate({ id: plan.id, data: { autoResume: v } })}
+                            disabled={rankResumeMutation.isPending}
+                            data-testid={`switch-auto-resume-${plan.id}`}
+                          />
+                          <Label className="text-xs cursor-pointer">Auto Resume</Label>
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   {(depStatus === "active" || depStatus === "paused") && (

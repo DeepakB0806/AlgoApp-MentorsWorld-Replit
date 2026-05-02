@@ -18,7 +18,7 @@ import {
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
-import type { ErrorRouting, ExchangeSetting, IndexExpirySetting, MarketHoliday } from "@shared/schema";
+import type { ErrorRouting, ExchangeSetting, IndexExpirySetting, MarketHoliday, StrategyPlan } from "@shared/schema";
 
 interface MailSettings {
   apiKeyConfigured: boolean;
@@ -367,6 +367,87 @@ function EmailTemplates() {
             )}
           </div>
         ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CapitalGatingStatus() {
+  const { data: plans = [], isLoading } = useQuery<StrategyPlan[]>({
+    queryKey: ["/api/strategy-plans"],
+  });
+
+  const activePlans = plans.filter(p =>
+    p.deploymentStatus === "active" || p.deploymentStatus === "deployed"
+  ).sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+
+  return (
+    <Card data-testid="card-capital-gating-status" className="mt-4">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ShieldAlert className="w-4 h-4" />
+          Capital Gating Status
+        </CardTitle>
+        <CardDescription>
+          Active and deployed plans sorted by priority rank. Margin estimates are updated after each Scrip Master sync.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="text-center py-4 text-muted-foreground text-sm">Loading...</div>
+        ) : activePlans.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No active or deployed plans.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border/30">
+                  <th className="text-left px-2 py-1.5 text-muted-foreground">Rank</th>
+                  <th className="text-left px-2 py-1.5 text-muted-foreground">Plan</th>
+                  <th className="text-left px-2 py-1.5 text-muted-foreground">Status</th>
+                  <th className="text-left px-2 py-1.5 text-muted-foreground">Auto Resume</th>
+                  <th className="text-right px-2 py-1.5 text-muted-foreground">Est. Margin</th>
+                  <th className="text-right px-2 py-1.5 text-muted-foreground">Calc. At</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activePlans.map(plan => (
+                  <tr key={plan.id} className="border-b border-border/20 hover:bg-muted/20" data-testid={`row-capital-gating-${plan.id}`}>
+                    <td className="px-2 py-1.5 font-mono text-muted-foreground">
+                      {plan.rank != null ? `#${plan.rank}` : <span className="text-muted-foreground/50">—</span>}
+                    </td>
+                    <td className="px-2 py-1.5 font-medium">{plan.name}</td>
+                    <td className="px-2 py-1.5">
+                      <Badge variant="outline" className="text-[10px]">{plan.deploymentStatus}</Badge>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {plan.autoResume !== false ? (
+                        <Badge className="text-[10px] bg-emerald-500/20 text-emerald-400 border-emerald-400/30">ON</Badge>
+                      ) : (
+                        <Badge className="text-[10px] bg-red-500/20 text-red-400 border-red-400/30">OFF</Badge>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono">
+                      {plan.estimatedMargin ? (
+                        <span className="text-foreground">₹{Number(plan.estimatedMargin).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>
+                      ) : (
+                        <span className="text-amber-400 flex items-center justify-end gap-1">
+                          <AlertTriangle className="w-3 h-3" />
+                          N/A
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 text-right text-muted-foreground">
+                      {plan.marginCalculatedAt
+                        ? new Date(plan.marginCalculatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).replace(",", "")
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -1765,7 +1846,12 @@ export default function Settings() {
 
         <main className="flex-1 p-8">
           <div className="max-w-3xl">
-            {activeSection === "general" && <GeneralTradingSettings />}
+            {activeSection === "general" && (
+              <>
+                <GeneralTradingSettings />
+                <CapitalGatingStatus />
+              </>
+            )}
             {activeSection === "mail" && <MailApiSettings />}
             {activeSection === "templates" && <EmailTemplates />}
             {activeSection === "retention" && <DataRetentionSettings />}

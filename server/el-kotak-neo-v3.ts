@@ -748,6 +748,7 @@ class ExecutionLayer {
   async checkMargin(
     config: BrokerConfig,
     universalParams: Record<string, any>,
+    bypassTL = false,
   ): Promise<ApiResponse<unknown>> {
     if (!this.ready && !(await this.ensureReady())) return { success: false, error: `EL not ready: ${this.initError || "initialization failed"}` };
 
@@ -762,7 +763,7 @@ class ExecutionLayer {
       });
 
       let body: Record<string, any>;
-      if (TL.isReady()) {
+      if (!bypassTL && TL.isReady()) {
         const result = TL.buildRequestPayload("margin", universalParams);
         body = result.payload;
       } else {

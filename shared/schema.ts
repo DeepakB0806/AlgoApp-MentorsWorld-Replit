@@ -1,4 +1,4 @@
-import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp, jsonb, index, uniqueIndex, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp, jsonb, index, uniqueIndex, serial, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -173,6 +173,10 @@ export const strategyPlans = pgTable("strategy_plans", {
   updatedAt: text("updated_at"),
   uniqueCode: varchar("unique_code", { length: 10 }),
   linkedPlanCode: varchar("linked_plan_code", { length: 10 }),
+  rank: integer("rank"),
+  autoResume: boolean("auto_resume").default(true).notNull(),
+  estimatedMargin: numeric("estimated_margin"),
+  marginCalculatedAt: text("margin_calculated_at"),
 }, (table) => [
   index("idx_strategy_plans_config_id").on(table.configId),
   index("idx_strategy_plans_broker_config_id").on(table.brokerConfigId),
