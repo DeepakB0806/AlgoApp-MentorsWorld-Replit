@@ -2,6 +2,68 @@ import type { Express } from "express";
 import type { IStorage } from "../storage";
 import { z } from "zod";
 
+// ── NSE / BSE holiday fetch helpers ──────────────────────────────────────────
+
+const MONTH_MAP: Record<string, string> = {
+  Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
+  Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
+};
+
+function parseDDMMMYYYY(raw: string): string | null {
+  const parts = raw.trim().split("-");
+  if (parts.length !== 3) return null;
+  const [dd, mmm, yyyy] = parts;
+  const mm = MONTH_MAP[mmm];
+  if (!mm) return null;
+  return `${yyyy}-${mm}-${dd.padStart(2, "0")}`;
+}
+
+const NSE_HEADERS = {
+  "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Accept":          "application/json, text/plain, */*",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Referer":         "https://www.nseindia.com/",
+};
+
+async function fetchNseHolidayData(year: number): Promise<Array<{ date: string; description: string }>> {
+  // Step 1 — establish session cookie
+  const homeRes = await fetch("https://www.nseindia.com/", {
+    headers: {
+      "User-Agent":      NSE_HEADERS["User-Agent"],
+      "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+    signal: AbortSignal.timeout(12000),
+  });
+  const rawCookies = homeRes.headers.getSetCookie?.() ?? [];
+  const cookieStr  = rawCookies.map((c: string) => c.split(";")[0]).join("; ");
+
+  // Step 2 — fetch trading holidays
+  const apiRes = await fetch("https://www.nseindia.com/api/holiday-master?type=trading", {
+    headers: { ...NSE_HEADERS, Cookie: cookieStr },
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!apiRes.ok) throw new Error(`NSE API responded with HTTP ${apiRes.status}`);
+
+  const data = await apiRes.json() as Record<string, any[]>;
+
+  // NSE returns { CM: [...], FO: [...], IRD: [...], ... }
+  // CM (cash market) holidays cover all NSE segments
+  const list: any[] = data.CM ?? data.cm ?? [];
+
+  const holidays: Array<{ date: string; description: string }> = [];
+  for (const h of list) {
+    const raw = h.tradingDate ?? h.trade_date ?? h.date ?? "";
+    const isoDate = parseDDMMMYYYY(String(raw));
+    if (!isoDate || !isoDate.startsWith(String(year))) continue;
+    holidays.push({
+      date:        isoDate,
+      description: String(h.description ?? h.desc ?? h.holidayName ?? "Market Holiday").trim(),
+    });
+  }
+  return holidays;
+}
+
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const exchangeUpdateSchema = z.object({
@@ -114,6 +176,50 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
       res.json({ inserted: count, year, exchange });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Auto-sync from NSE/BSE ─────────────────────────────────────────────────
+
+  const syncSchema = z.object({
+    year:     z.number().int().min(2020).max(2100),
+    exchange: z.enum(["NSE", "BSE"]),
+  });
+
+  app.post("/api/market-calendar/holidays/sync-nse", async (req, res) => {
+    const parsed = syncSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+      return;
+    }
+    const { year, exchange } = parsed.data;
+    try {
+      // Both NSE and BSE use NSE's public holiday-master API.
+      // Indian market holidays are identical across NSE/BSE (driven by RBI/SEBI calendar).
+      const holidays = await fetchNseHolidayData(year);
+      if (holidays.length === 0) {
+        res.status(502).json({
+          error: `No holidays found for ${year} in NSE response. NSE may not have published ${year} holidays yet, or the connection was blocked.`,
+        });
+        return;
+      }
+      const rows = holidays.map((h) => ({
+        date: h.date,
+        description: h.description,
+        year,
+        exchange,
+        isTradingHoliday: true as const,
+      }));
+      const inserted = await storage.bulkReplaceMarketHolidays(year, exchange, rows);
+      res.json({ inserted, year, exchange });
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      const isNetworkErr = msg.includes("fetch") || msg.includes("timeout") || msg.includes("ENOTFOUND") || msg.includes("HTTP 4") || msg.includes("HTTP 5");
+      res.status(502).json({
+        error: isNetworkErr
+          ? `Could not reach NSE (${msg}). Use CSV upload as backup.`
+          : `Sync failed: ${msg}`,
+      });
     }
   });
 }

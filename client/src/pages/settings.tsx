@@ -13,7 +13,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
   ArrowLeft, Mail, Key, CheckCircle, XCircle, 
   Eye, EyeOff, AlertTriangle, FileText, Settings as SettingsIcon, Database,
-  ShieldAlert, Trash2, Plus, ToggleLeft, ToggleRight, CalendarDays, Upload, Save
+  ShieldAlert, Trash2, Plus, ToggleLeft, ToggleRight, CalendarDays, Upload, Save, RefreshCw, Loader2
 } from "lucide-react";
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
@@ -1266,6 +1266,24 @@ function MarketCalendarSettings() {
     onError: (err: any) => toast({ title: "Upload failed", description: err.message, variant: "destructive" }),
   });
 
+  const syncHolidaysMutation = useMutation({
+    mutationFn: async (payload: { year: number; exchange: string }) => {
+      const res = await apiRequest("POST", "/api/market-calendar/holidays/sync-nse", payload);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Sync failed");
+      return body as { inserted: number; year: number; exchange: string };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays"] });
+      toast({ title: "Sync complete", description: `${data.inserted} holiday(s) synced for ${data.exchange} ${data.year}.` });
+    },
+    onError: (err: any) => toast({
+      title: "Sync failed",
+      description: `${err.message} — use CSV upload as backup.`,
+      variant: "destructive",
+    }),
+  });
+
   // Parse NSE-format CSV: "DD-MMM-YYYY,Description" or "Description,DD-MMM-YYYY"
   function parseNseCsv(text: string): { date: string; description: string }[] | null {
     const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
@@ -1457,10 +1475,11 @@ function MarketCalendarSettings() {
         <CardHeader>
           <CardTitle>Holiday Calendar</CardTitle>
           <CardDescription>
-            Upload NSE/BSE holiday CSV. Format: <span className="font-mono text-xs">DD-MMM-YYYY, Description</span> (one holiday per line). On upload, the existing list for that year + exchange is replaced.
+            Sync trading holidays automatically from NSE, or upload a CSV as backup. MCX holidays must always be uploaded manually.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Year + Exchange selectors (shared by both sync and upload) */}
           <div className="flex flex-wrap gap-3 items-end">
             <div>
               <Label className="text-xs mb-1 block">Year</Label>
@@ -1488,28 +1507,58 @@ function MarketCalendarSettings() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex-1 min-w-48">
-              <Label className="text-xs mb-1 block">CSV File</Label>
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                onChange={e => { setCsvFile(e.target.files?.[0] ?? null); setCsvParseError(""); }}
-                className="block w-full text-sm text-muted-foreground file:mr-3 file:py-1 file:px-3 file:rounded file:border file:border-border file:text-xs file:bg-muted file:text-foreground cursor-pointer"
-                data-testid="input-holiday-csv"
-              />
+          </div>
+
+          {/* Primary: Auto-sync from NSE */}
+          <div className="flex flex-wrap gap-3 items-center rounded-md border border-border bg-muted/40 px-4 py-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Sync from NSE</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {holidayExchange === "MCX"
+                  ? "Auto-sync is not available for MCX — use CSV upload below."
+                  : `Fetches the ${holidayYear} trading holiday list directly from NSE and saves it for ${holidayExchange}.`}
+              </p>
             </div>
             <Button
-              onClick={handleUpload}
-              disabled={uploadHolidaysMutation.isPending || !csvFile}
-              data-testid="button-upload-holidays"
+              onClick={() => syncHolidaysMutation.mutate({ year: parseInt(holidayYear), exchange: holidayExchange as "NSE" | "BSE" })}
+              disabled={syncHolidaysMutation.isPending || holidayExchange === "MCX"}
+              variant={holidayExchange === "MCX" ? "outline" : "default"}
+              data-testid="button-sync-holidays"
             >
-              <Upload className="w-4 h-4 mr-2" />
-              {uploadHolidaysMutation.isPending ? "Uploading..." : "Upload"}
+              {syncHolidaysMutation.isPending
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Syncing…</>
+                : <><RefreshCw className="w-4 h-4 mr-2" />Sync Holidays</>}
             </Button>
           </div>
-          {csvParseError && (
-            <p className="text-sm text-destructive">{csvParseError}</p>
-          )}
+
+          {/* Backup: CSV upload */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CSV Upload (backup)</p>
+            <div className="flex flex-wrap gap-3 items-end">
+              <div className="flex-1 min-w-48">
+                <Label className="text-xs mb-1 block">CSV File <span className="font-normal text-muted-foreground">(DD-MMM-YYYY, Description)</span></Label>
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={e => { setCsvFile(e.target.files?.[0] ?? null); setCsvParseError(""); }}
+                  className="block w-full text-sm text-muted-foreground file:mr-3 file:py-1 file:px-3 file:rounded file:border file:border-border file:text-xs file:bg-muted file:text-foreground cursor-pointer"
+                  data-testid="input-holiday-csv"
+                />
+              </div>
+              <Button
+                onClick={handleUpload}
+                disabled={uploadHolidaysMutation.isPending || !csvFile}
+                variant="outline"
+                data-testid="button-upload-holidays"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                {uploadHolidaysMutation.isPending ? "Uploading..." : "Upload CSV"}
+              </Button>
+            </div>
+            {csvParseError && (
+              <p className="text-sm text-destructive">{csvParseError}</p>
+            )}
+          </div>
 
           {/* Holiday table */}
           {holidayLoading ? (
