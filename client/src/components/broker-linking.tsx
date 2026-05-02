@@ -549,7 +549,7 @@ export function BrokerLinking() {
 
   const activePlans = plans.filter((p) => p.status === "active");
 
-  const [localState, setLocalState] = useState<Record<string, { brokerConfigId: string; isProxyMode: boolean }>>({});
+  const [localState, setLocalState] = useState<Record<string, { brokerConfigId: string }>>({});
   const [confirmAction, setConfirmAction] = useState<{ planId: string; action: string } | null>(null);
   const [deployConfig, setDeployConfig] = useState<Record<string, {
     lotMultiplier: number;
@@ -568,13 +568,12 @@ export function BrokerLinking() {
   const [expandedStrategyConfigs, setExpandedStrategyConfigs] = useState<Set<string>>(new Set());
   const [expandedMultipliers, setExpandedMultipliers] = useState<Set<string>>(new Set());
 
-  const plansKey = activePlans.map((p) => `${p.id}:${p.brokerConfigId}:${p.isProxyMode}`).join(",");
+  const plansKey = activePlans.map((p) => `${p.id}:${p.brokerConfigId}`).join(",");
   useEffect(() => {
-    const state: Record<string, { brokerConfigId: string; isProxyMode: boolean }> = {};
+    const state: Record<string, { brokerConfigId: string }> = {};
     activePlans.forEach((p) => {
       state[p.id] = {
         brokerConfigId: p.brokerConfigId || "",
-        isProxyMode: p.isProxyMode || false,
       };
     });
     setLocalState(state);
@@ -636,7 +635,6 @@ export function BrokerLinking() {
       id: planId,
       data: {
         brokerConfigId: state.brokerConfigId || null,
-        isProxyMode: state.isProxyMode,
       },
     });
   };
@@ -646,12 +644,11 @@ export function BrokerLinking() {
       id: planId,
       data: {
         brokerConfigId: null,
-        isProxyMode: false,
       },
     });
     setLocalState((prev) => ({
       ...prev,
-      [planId]: { brokerConfigId: "", isProxyMode: false },
+      [planId]: { brokerConfigId: "" },
     }));
   };
 
@@ -840,7 +837,7 @@ export function BrokerLinking() {
       ) : (
         <div className="grid gap-4">
           {activePlans.map((plan) => {
-            const state = localState[plan.id] || { brokerConfigId: "", isProxyMode: false };
+            const state = localState[plan.id] || { brokerConfigId: "" };
             const depStatus = plan.deploymentStatus || "draft";
             const depConfig = DEPLOYMENT_STATUS_CONFIG[depStatus] || DEPLOYMENT_STATUS_CONFIG.draft;
             const DepIcon = depConfig.icon;
@@ -1072,10 +1069,6 @@ export function BrokerLinking() {
                         </Select>
                       </div>
                       <div className="flex items-center justify-between gap-4 flex-wrap">
-                        <div className="flex items-center gap-2">
-                          <Switch checked={state.isProxyMode} onCheckedChange={(v) => updateLocalState(plan.id, "isProxyMode", v)} disabled={isDeployed} data-testid={`switch-proxy-${plan.id}`} />
-                          <Label className="text-xs cursor-pointer">Proxy Mode</Label>
-                        </div>
                         <div className="flex gap-2">
                           <Button size="sm" onClick={() => handleLink(plan.id)} disabled={linkMutation.isPending} data-testid={`button-link-${plan.id}`}>
                             {linkMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Link2 className="w-3 h-3 mr-1" />}Link

@@ -918,7 +918,6 @@ export class DatabaseStorage implements IStorage {
       tradeParams: insertPlan.tradeParams ?? null,
       status: insertPlan.status ?? "draft",
       brokerConfigId: insertPlan.brokerConfigId ?? null,
-      isProxyMode: insertPlan.isProxyMode ?? false,
       createdBy: insertPlan.createdBy ?? null,
       createdAt: now,
       updatedAt: now,

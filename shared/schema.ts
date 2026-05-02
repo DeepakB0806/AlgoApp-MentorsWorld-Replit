@@ -163,7 +163,6 @@ export const strategyPlans = pgTable("strategy_plans", {
   deploymentStatus: text("deployment_status").notNull().default("draft"),
   deployedConfigVersion: integer("deployed_config_version"),
   brokerConfigId: varchar("broker_config_id", { length: 36 }),
-  isProxyMode: boolean("is_proxy_mode").default(false),
   lotMultiplier: integer("lot_multiplier").default(1),
   deployStoploss: real("deploy_stoploss"),
   deployProfitTarget: real("deploy_profit_target"),

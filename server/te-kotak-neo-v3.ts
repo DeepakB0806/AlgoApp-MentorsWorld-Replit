@@ -281,25 +281,8 @@ export async function processTradeSignal(
   }
 
   // ENTRY path ────────────────────────────────────────────────────────────────
-  // E17: Proxy plans fire immediately in parallel (never gated)
-  const proxyPlans = plans.filter(p => p.isProxyMode);
-  const nonProxyPlans = plans.filter(p => !p.isProxyMode);
-
-  if (proxyPlans.length > 0) {
-    const proxyPromises = proxyPlans.map((plan) => {
-      const bc = brokerConfigs.get(plan.brokerConfigId!);
-      if (!bc) return Promise.resolve<TradeResult>({ success: false, action: "error", broker: "unknown", planId: plan.id, message: "Broker config not found" });
-      return executeTradeForPlan(storage, plan, bc, webhookData, signalContext);
-    });
-    const proxySettled = await Promise.allSettled(proxyPromises);
-    for (const r of proxySettled) {
-      if (r.status === "fulfilled") results.push(r.value);
-      else results.push({ success: false, action: "error", broker: "unknown", planId: "", message: r.reason?.message || "Trade execution failed" });
-    }
-  }
-
   // autoResume=false: skip entirely
-  const autoResumeOff = nonProxyPlans.filter(p => p.autoResume === false);
+  const autoResumeOff = plans.filter(p => p.autoResume === false);
   for (const plan of autoResumeOff) {
     const bc = brokerConfigs.get(plan.brokerConfigId!);
     const msg = `Plan "${plan.name}" skipped — Auto Resume is OFF`;
@@ -308,7 +291,7 @@ export async function processTradeSignal(
     results.push({ success: false, action: "hold", broker: bc?.brokerName || "unknown", planId: plan.id, message: msg });
   }
 
-  const gateablePlans = nonProxyPlans.filter(p => p.autoResume !== false);
+  const gateablePlans = plans.filter(p => p.autoResume !== false);
 
   // #183: Read available capital from DB snapshots (refreshed by Capital Manager at 09:00 IST)
   // E10+E20: missing/zero snapshot → Infinity = no gate

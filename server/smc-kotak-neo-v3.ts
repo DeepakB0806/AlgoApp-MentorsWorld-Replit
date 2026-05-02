@@ -342,13 +342,12 @@ export async function calculatePlanMargins(storage: IStorage, brokerConfig: Brok
     const plansToCalc = allPlans
       .filter(p =>
         p.brokerConfigId === brokerConfig.id &&
-        (p.deploymentStatus === "active" || p.deploymentStatus === "deployed") &&
-        !p.isProxyMode
+        (p.deploymentStatus === "active" || p.deploymentStatus === "deployed")
       )
       .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
 
     if (plansToCalc.length === 0) {
-      console.log(`${LOG} No active/deployed non-proxy plans for broker ${brokerConfig.name}`);
+      console.log(`${LOG} No active/deployed plans for broker ${brokerConfig.name}`);
       return;
     }
     console.log(`${LOG} Calculating margins for ${plansToCalc.length} plan(s) — broker ${brokerConfig.name}`);
