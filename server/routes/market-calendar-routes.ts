@@ -64,6 +64,64 @@ async function fetchNseHolidayData(year: number): Promise<Array<{ date: string; 
   return holidays;
 }
 
+async function fetchBseHolidayData(year: number): Promise<Array<{ date: string; description: string }>> {
+  // BSE publishes trading holidays via their public API — no session cookie required.
+  const apiRes = await fetch(
+    `https://api.bseindia.com/BseIndiaAPI/api/DefaultData/w?flag=0&page=1&pageSize=50&searchtext=&category=Holidays`,
+    {
+      headers: {
+        "User-Agent":   NSE_HEADERS["User-Agent"],
+        "Accept":       "application/json, text/plain, */*",
+        "Origin":       "https://www.bseindia.com",
+        "Referer":      "https://www.bseindia.com/",
+      },
+      signal: AbortSignal.timeout(12000),
+    }
+  );
+  if (!apiRes.ok) throw new Error(`BSE API responded with HTTP ${apiRes.status}`);
+
+  const data = await apiRes.json();
+
+  // BSE response shape variants: array at root, or nested under Table/data/result
+  const list: any[] = Array.isArray(data)
+    ? data
+    : (data.Table ?? data.data ?? data.result ?? data.HolidayList ?? []);
+
+  if (!Array.isArray(list) || list.length === 0) {
+    throw new Error("BSE API returned an unrecognised response format or empty list");
+  }
+
+  const holidays: Array<{ date: string; description: string }> = [];
+  for (const h of list) {
+    // Try all known BSE date field variants
+    const rawDate =
+      h.tradingDate ?? h.trade_date ?? h.HolidayDate ?? h.holiday_date ??
+      h.TradeDate ?? h.Date ?? h.date ?? "";
+    const rawDesc =
+      h.description ?? h.Description ?? h.desc ?? h.HolidayDescription ??
+      h.holiday_description ?? h.Reason ?? "";
+
+    // BSE dates may be DD-MMM-YYYY or YYYY-MM-DD or DD/MM/YYYY
+    let isoDate: string | null = null;
+    const s = String(rawDate).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      isoDate = s.slice(0, 10); // already YYYY-MM-DD
+    } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+      const [d2, m2, y2] = s.split("/");
+      isoDate = `${y2}-${m2}-${d2}`;
+    } else {
+      isoDate = parseDDMMMYYYY(s);
+    }
+
+    if (!isoDate || !isoDate.startsWith(String(year))) continue;
+    holidays.push({
+      date:        isoDate,
+      description: String(rawDesc || "Market Holiday").trim(),
+    });
+  }
+  return holidays;
+}
+
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const exchangeUpdateSchema = z.object({
@@ -193,13 +251,16 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
       return;
     }
     const { year, exchange } = parsed.data;
+    const sourceName = exchange === "BSE" ? "BSE" : "NSE";
     try {
-      // Both NSE and BSE use NSE's public holiday-master API.
-      // Indian market holidays are identical across NSE/BSE (driven by RBI/SEBI calendar).
-      const holidays = await fetchNseHolidayData(year);
+      // Branch on exchange — NSE and BSE have separate independent fetch paths
+      const holidays = exchange === "BSE"
+        ? await fetchBseHolidayData(year)
+        : await fetchNseHolidayData(year);
+
       if (holidays.length === 0) {
         res.status(502).json({
-          error: `No holidays found for ${year} in NSE response. NSE may not have published ${year} holidays yet, or the connection was blocked.`,
+          error: `No holidays found for ${year} in ${sourceName} response. ${sourceName} may not have published ${year} holidays yet, or the connection was blocked.`,
         });
         return;
       }
@@ -210,6 +271,7 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
         exchange,
         isTradingHoliday: true as const,
       }));
+      // No-partial-write: only save after full successful fetch + parse
       const inserted = await storage.bulkReplaceMarketHolidays(year, exchange, rows);
       res.json({ inserted, year, exchange });
     } catch (err: any) {
@@ -217,7 +279,7 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
       const isNetworkErr = msg.includes("fetch") || msg.includes("timeout") || msg.includes("ENOTFOUND") || msg.includes("HTTP 4") || msg.includes("HTTP 5");
       res.status(502).json({
         error: isNetworkErr
-          ? `Could not reach NSE (${msg}). Use CSV upload as backup.`
+          ? `Could not reach ${sourceName} (${msg}). Use CSV upload as backup.`
           : `Sync failed: ${msg}`,
       });
     }

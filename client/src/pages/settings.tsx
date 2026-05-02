@@ -1512,11 +1512,15 @@ function MarketCalendarSettings() {
           {/* Primary: Auto-sync from NSE */}
           <div className="flex flex-wrap gap-3 items-center rounded-md border border-border bg-muted/40 px-4 py-3">
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Sync from NSE</p>
+              <p className="text-sm font-medium">
+                {holidayExchange === "BSE" ? "Sync from BSE" : "Sync from NSE"}
+              </p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {holidayExchange === "MCX"
                   ? "Auto-sync is not available for MCX — use CSV upload below."
-                  : `Fetches the ${holidayYear} trading holiday list directly from NSE and saves it for ${holidayExchange}.`}
+                  : holidayExchange === "BSE"
+                    ? `Fetches the ${holidayYear} trading holiday list directly from BSE and saves it for BSE.`
+                    : `Fetches the ${holidayYear} trading holiday list directly from NSE and saves it for NSE.`}
               </p>
             </div>
             <Button
