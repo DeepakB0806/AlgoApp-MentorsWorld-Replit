@@ -102,8 +102,8 @@ export function getHsmHistory(): ConnectionEvent[] {
 function buildAuthMessage(config: BrokerConfig): object {
   return {
     type: "cn",
-    Authorization: config.viewToken,
-    Sid: config.sidView,
+    Authorization: config.viewToken || config.accessToken,
+    Sid: config.sidView || config.sessionId,
     source: "WEB",
     ...(config.dataCenter ? { dataCenter: config.dataCenter } : {}),
   };
