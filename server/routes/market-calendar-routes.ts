@@ -1,7 +1,21 @@
 import type { Express } from "express";
 import type { IStorage } from "../storage";
-import { insertExchangeSettingSchema, insertIndexExpirySettingSchema, insertMarketHolidaySchema } from "@shared/schema";
 import { z } from "zod";
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+const exchangeUpdateSchema = z.object({
+  marketOpenTime:  z.string().regex(TIME_RE, "Must be HH:MM").optional(),
+  marketCloseTime: z.string().regex(TIME_RE, "Must be HH:MM").optional(),
+  displayName:     z.string().min(1).max(64).optional(),
+  isActive:        z.boolean().optional(),
+});
+
+const indexExpiryUpdateSchema = z.object({
+  defaultExpiryDay: z.number().int().min(0).max(6).optional(),
+  exchange:         z.string().min(1).max(10).optional(),
+  isActive:         z.boolean().optional(),
+});
 
 export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
 
@@ -19,8 +33,12 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
   app.post("/api/market-calendar/exchange-settings/:exchange", async (req, res) => {
     try {
       const { exchange } = req.params;
-      const body = req.body as { marketOpenTime?: string; marketCloseTime?: string; displayName?: string; isActive?: boolean };
-      const updated = await storage.upsertExchangeSetting(exchange, body);
+      const parsed = exchangeUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+        return;
+      }
+      const updated = await storage.upsertExchangeSetting(exchange, parsed.data);
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -41,8 +59,12 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
   app.post("/api/market-calendar/index-expiry-settings/:indexName", async (req, res) => {
     try {
       const { indexName } = req.params;
-      const body = req.body as { defaultExpiryDay?: number; exchange?: string; isActive?: boolean };
-      const updated = await storage.upsertIndexExpirySetting(indexName, body);
+      const parsed = indexExpiryUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+        return;
+      }
+      const updated = await storage.upsertIndexExpirySetting(indexName, parsed.data);
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

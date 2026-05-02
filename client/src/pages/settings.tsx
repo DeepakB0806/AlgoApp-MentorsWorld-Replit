@@ -1182,14 +1182,15 @@ function MarketCalendarSettings() {
   const currentYear = new Date().getFullYear();
 
   // ── Exchange Settings state ──────────────────────────────────────────────
-  const [exchangeEdits, setExchangeEdits] = useState<Record<string, { marketOpenTime: string; marketCloseTime: string }>>({});
+  type ExchangeEdit = { marketOpenTime: string; marketCloseTime: string; isActive: boolean };
+  const [exchangeEdits, setExchangeEdits] = useState<Record<string, ExchangeEdit>>({});
 
   const { data: exchangeRows = [], isLoading: exchLoading } = useQuery<ExchangeSetting[]>({
     queryKey: ["/api/market-calendar/exchange-settings"],
   });
 
   const saveExchangeMutation = useMutation({
-    mutationFn: async ({ exchange, data }: { exchange: string; data: { marketOpenTime: string; marketCloseTime: string } }) => {
+    mutationFn: async ({ exchange, data }: { exchange: string; data: ExchangeEdit }) => {
       const res = await apiRequest("POST", `/api/market-calendar/exchange-settings/${exchange}`, data);
       return res.json();
     },
@@ -1200,13 +1201,17 @@ function MarketCalendarSettings() {
     onError: (err: any) => toast({ title: "Save failed", description: err.message, variant: "destructive" }),
   });
 
-  function getExchangeEdit(row: ExchangeSetting) {
-    return exchangeEdits[row.exchange] ?? { marketOpenTime: row.marketOpenTime, marketCloseTime: row.marketCloseTime };
+  function getExchangeEdit(row: ExchangeSetting): ExchangeEdit {
+    return exchangeEdits[row.exchange] ?? {
+      marketOpenTime: row.marketOpenTime,
+      marketCloseTime: row.marketCloseTime,
+      isActive: row.isActive,
+    };
   }
 
-  function setExchangeField(exchange: string, field: "marketOpenTime" | "marketCloseTime", value: string) {
+  function setExchangeField(exchange: string, field: keyof ExchangeEdit, value: string | boolean) {
     setExchangeEdits(prev => {
-      const existing = prev[exchange] ?? { marketOpenTime: "", marketCloseTime: "" };
+      const existing: ExchangeEdit = prev[exchange] ?? { marketOpenTime: "", marketCloseTime: "", isActive: true };
       return { ...prev, [exchange]: { ...existing, [field]: value } };
     });
   }
@@ -1331,6 +1336,7 @@ function MarketCalendarSettings() {
                   <TableHead>Description</TableHead>
                   <TableHead>Open Time (IST)</TableHead>
                   <TableHead>Close Time (IST)</TableHead>
+                  <TableHead>Active</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
@@ -1357,6 +1363,13 @@ function MarketCalendarSettings() {
                           onChange={e => setExchangeField(row.exchange, "marketCloseTime", e.target.value)}
                           className="w-32"
                           data-testid={`input-close-${row.exchange}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Switch
+                          checked={edit.isActive}
+                          onCheckedChange={val => setExchangeField(row.exchange, "isActive", val)}
+                          data-testid={`switch-active-${row.exchange}`}
                         />
                       </TableCell>
                       <TableCell>

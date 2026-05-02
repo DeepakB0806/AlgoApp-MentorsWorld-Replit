@@ -17,9 +17,28 @@ export function getISTDatetimeNow(): { date: string; time: string } {
 }
 
 /**
+ * Maps derivative/currency segment codes to their parent cash exchange for
+ * holiday calendar lookups. NSE holiday data covers NFO (NSE F&O) and CDS
+ * (NSE Currency). BSE holiday data covers BFO (BSE F&O).
+ * MCX has its own calendar and maps to itself.
+ */
+function holidayExchange(exchange: string): string {
+  switch (exchange.toUpperCase()) {
+    case "NFO": return "NSE";
+    case "BFO": return "BSE";
+    case "CDS": return "NSE";
+    default:    return exchange.toUpperCase();
+  }
+}
+
+/**
  * Returns true if the given IST time and date fall within the trading window
  * for the given exchange, and it is not a market holiday.
  * Fail-open: if no settings row exists for the exchange, always returns true.
+ *
+ * Holiday lookups are normalized: NFO→NSE, BFO→BSE, CDS→NSE.
+ * Exchange hours are looked up using the original exchange code first, then
+ * the normalized cash exchange as a fallback.
  */
 export async function isWithinMarketHours(
   storage: IStorage,
@@ -28,16 +47,20 @@ export async function isWithinMarketHours(
   istDateStr: string,
 ): Promise<boolean> {
   try {
-    const settings = await storage.getExchangeSetting(exchange);
+    const settings =
+      await storage.getExchangeSetting(exchange) ??
+      await storage.getExchangeSetting(holidayExchange(exchange));
     if (!settings || !settings.isActive) {
       return true;
     }
     if (istTime < settings.marketOpenTime || istTime > settings.marketCloseTime) {
       return false;
     }
-    const isHoliday = !(await storage.isTradingDay(istDateStr, exchange));
+    // Holiday lookup: use normalized cash exchange so uploads for NSE cover NFO/CDS plans
+    const calExchange = holidayExchange(exchange);
+    const isHoliday = !(await storage.isTradingDay(istDateStr, calExchange));
     if (isHoliday) {
-      console.log(`${LOG_PREFIX} ${exchange} market holiday on ${istDateStr} — skipping`);
+      console.log(`${LOG_PREFIX} ${exchange} (holiday calendar: ${calExchange}) market holiday on ${istDateStr} — skipping`);
       return false;
     }
     return true;

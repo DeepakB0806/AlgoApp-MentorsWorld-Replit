@@ -2,7 +2,7 @@ import type { IStorage } from "./storage";
 import type { TimeLogicConfig, TradeParams, IndexExpirySetting } from "@shared/schema";
 import { startPersistentSquareOff, persistentSquareOffActive } from "./te-kotak-neo-v3";
 import { addProcessFlowLog } from "./process-flow-log";
-import { isWithinMarketHours, getISTDatetimeNow } from "./market-calendar";
+import { isWithinMarketHours } from "./market-calendar";
 
 const DAY_INT_TO_NAME: Record<number, string> = {
   0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday",
