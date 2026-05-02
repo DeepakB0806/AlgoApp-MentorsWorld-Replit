@@ -1,0 +1,52 @@
+Task #100.1: Market Calendar India — Database, APIs, and UI
+
+What & Why
+We are building an Autonomous Expiry Engine to break our dependency on Kotak's Scrip Master CSV. We need a UI in the General Settings to upload NSE Market Holidays (CSV) and configure the default weekly expiry days for indices (NIFTY, BANKNIFTY, etc.). This data will be saved to PostgreSQL via Drizzle.
+
+Done looks like
+
+shared/schema.ts includes market_holidays and index_expiry_settings tables.
+
+server/routes/admin-routes.ts (or routes.ts) has APIs to upload holiday CSVs and update index settings.
+
+client/src/pages/settings.tsx features a new "Market Calendar India" card with a CSV uploader and an Index Expiry configuration table.
+
+Tasks:
+
+Task 1 — Schema Update
+File: shared/schema.ts
+Add these tables and export their Drizzle schemas/types:
+
+TypeScript
+export const marketHolidays = pgTable("market_holidays", {
+  id: serial("id").primaryKey(),
+  date: timestamp("date", { mode: "date" }).notNull().unique(),
+  description: text("description").notNull(),
+  year: integer("year").notNull(),
+  isTradingHoliday: boolean("is_trading_holiday").default(true).notNull(),
+});
+
+export const indexExpirySettings = pgTable("index_expiry_settings", {
+  id: serial("id").primaryKey(),
+  indexName: text("index_name").notNull().unique(), 
+  defaultExpiryDay: integer("default_expiry_day").notNull(), // 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri
+  isActive: boolean("is_active").default(true).notNull(),
+});
+Task 2 — Backend APIs (CSV Parser & Config)
+File: server/routes.ts
+
+Create POST /api/admin/holidays/upload. It should expect a JSON payload containing an array of parsed CSV rows: { date: string, description: string, year: number }. Clear existing holidays for that year and bulk insert the new array.
+
+Create GET /api/admin/index-expiry-settings and POST /api/admin/index-expiry-settings to upsert the expiry day integers for symbols like NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, and SENSEX.
+
+Task 3 — Frontend UI implementation
+File: client/src/pages/settings.tsx
+Add a <Card> titled "Market Calendar India".
+
+Left side: A file <Input type="file" accept=".csv" /> and a "Upload NSE Calendar" button. Write a lightweight frontend CSV parser (e.g., splitting by \n and ,) that converts the CSV into the JSON array required by the API. (Assume CSV format: DD-MMM-YYYY, Description).
+
+Right side: A simple mapped list/table for the 5 major indices. For each index, show a <Select> dropdown with days of the week (Monday-Friday) mapping to integers 1-5. Add a "Save Expiry Days" button.
+
+Constraint Check: Ensure migrations are run successfully. Do not touch the Trade Engine execution logic yet; this is purely the settings administration phase.
+
+Let me know the moment Replit deploys this. I have the perfectly formatted 2026 NSE Holiday CSV ready to give you to test the upload!
