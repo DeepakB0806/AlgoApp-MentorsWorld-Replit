@@ -1,5 +1,6 @@
 import EL from "./el-kotak-neo-v3";
 import type { BrokerConfig } from "@shared/schema";
+import { broadcast } from "./sse-hub";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -20,6 +21,7 @@ const priceCache = new Map<string, PriceEntry>();
 
 export function updatePrice(symbol: string, ltp: number): void {
   priceCache.set(symbol, { ltp, updatedAt: Date.now() });
+  broadcast("price", { symbol, ltp });
 }
 
 export function injectPrice(symbol: string, ltp: number): void {

@@ -380,6 +380,7 @@ function GeneralTradingSettings() {
   const [bufferPoints, setBufferPoints] = useState<string>("");
   const [orderDelayMs, setOrderDelayMs] = useState<string>("");
   const [syncClockValue, setSyncClockValue] = useState<string>("09:10");
+  const [intradayIntervalValue, setIntradayIntervalValue] = useState<string>("0");
   const { toast } = useToast();
 
   const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
@@ -408,6 +409,10 @@ function GeneralTradingSettings() {
 
   const { data: syncClockSetting, isLoading: syncClockLoading } = useQuery<{ key: string; value: string | null }>({
     queryKey: ["/api/settings/scrip_master_sync_time"],
+  });
+
+  const { data: intradayIntervalSetting, isLoading: intradayIntervalLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/scrip_master_intraday_interval_mins"],
   });
 
   useEffect(() => {
@@ -463,6 +468,14 @@ function GeneralTradingSettings() {
       setSyncClockValue("09:10");
     }
   }, [syncClockSetting, syncClockLoading]);
+
+  useEffect(() => {
+    if (intradayIntervalSetting?.value !== undefined && intradayIntervalSetting?.value !== null) {
+      setIntradayIntervalValue(intradayIntervalSetting.value);
+    } else if (!intradayIntervalLoading) {
+      setIntradayIntervalValue("0");
+    }
+  }, [intradayIntervalSetting, intradayIntervalLoading]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -575,6 +588,21 @@ function GeneralTradingSettings() {
     },
   });
 
+  const saveIntradayIntervalMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/settings/scrip_master_intraday_interval_mins", { value: intradayIntervalValue });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/scrip_master_intraday_interval_mins"] });
+      const label = intradayIntervalValue === "0" ? "disabled" : `every ${intradayIntervalValue} minutes during market hours`;
+      toast({ title: "Saved", description: `Intraday scrip refresh ${label}.` });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   return (
     <Card data-testid="card-general-trading-settings">
       <CardHeader>
@@ -587,7 +615,7 @@ function GeneralTradingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isLoading || shortfallLoading || rollbackLoading || maxCloseRetryLoading || bufferLoading || orderDelayLoading || syncClockLoading ? (
+        {isLoading || shortfallLoading || rollbackLoading || maxCloseRetryLoading || bufferLoading || orderDelayLoading || syncClockLoading || intradayIntervalLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
           <>
@@ -801,6 +829,40 @@ function GeneralTradingSettings() {
                 disabled={saveSyncClockMutation.isPending}
               >
                 {saveSyncClockMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="select-intraday-interval">
+                Intraday Scrip Master Refresh Interval
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Re-downloads the scrip master during market hours (09:30–15:30 IST) at the selected interval. Useful on expiry days when new contracts roll in mid-session. Set to Disabled to rely solely on the daily sync.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Select
+                  value={intradayIntervalValue}
+                  onValueChange={setIntradayIntervalValue}
+                >
+                  <SelectTrigger id="select-intraday-interval" data-testid="select-intraday-interval" className="w-48">
+                    <SelectValue placeholder="Select interval" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Disabled</SelectItem>
+                    <SelectItem value="30">Every 30 minutes</SelectItem>
+                    <SelectItem value="60">Every 60 minutes</SelectItem>
+                    <SelectItem value="120">Every 2 hours</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-xs text-muted-foreground">Default: Disabled. Enable on days with heavy expiry activity.</p>
+              <Button
+                data-testid="button-save-intraday-interval"
+                onClick={() => saveIntradayIntervalMutation.mutate()}
+                disabled={saveIntradayIntervalMutation.isPending}
+              >
+                {saveIntradayIntervalMutation.isPending ? "Saving..." : "Save"}
               </Button>
             </div>
           </>

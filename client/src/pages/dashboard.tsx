@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { TrendingUp, TrendingDown, RefreshCw, Home, Wifi, WifiOff, Search, BarChart3, Activity, Play, Pause, Square, Power, Rocket, Clock, ChevronDown, ChevronUp } from "lucide-react";
+import { TrendingUp, TrendingDown, RefreshCw, Home, Wifi, WifiOff, Search, BarChart3, Activity, Play, Pause, Square, Power, Rocket, Clock, ChevronDown, ChevronUp, Radio } from "lucide-react";
 import { Link } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 
@@ -24,6 +24,71 @@ export default function Dashboard() {
   const [searchPositions, setSearchPositions] = useState("");
   const [searchHoldings, setSearchHoldings] = useState("");
 
+  // ── SSE live price state ─────────────────────────────────────────────────
+  const livePricesRef = useRef<Map<string, number>>(new Map());
+  const pendingFlushRef = useRef(false);
+  const [livePrices, setLivePrices] = useState<Map<string, number>>(new Map());
+  const [sseStatus, setSseStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let destroyed = false;
+
+    function connect() {
+      if (destroyed) return;
+      setSseStatus("connecting");
+      es = new EventSource("/api/sse/feed");
+
+      es.addEventListener("ping", () => {
+        setSseStatus("connected");
+      });
+
+      es.addEventListener("price", (e) => {
+        try {
+          const { symbol, ltp } = JSON.parse(e.data);
+          livePricesRef.current.set(symbol, ltp);
+          pendingFlushRef.current = true;
+        } catch { /* ignore parse errors */ }
+      });
+
+      es.addEventListener("refresh", () => {
+        queryClient.invalidateQueries({ queryKey: ["/api/positions"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/portfolio-summary"] });
+      });
+
+      es.onerror = () => {
+        setSseStatus("disconnected");
+        es?.close();
+        es = null;
+        if (!destroyed) setTimeout(connect, 5000);
+      };
+
+      es.onopen = () => {
+        setSseStatus("connected");
+      };
+    }
+
+    connect();
+
+    return () => {
+      destroyed = true;
+      es?.close();
+    };
+  }, []);
+
+  // Flush accumulated price ticks to React state at most every 500ms
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (pendingFlushRef.current) {
+        pendingFlushRef.current = false;
+        setLivePrices(new Map(livePricesRef.current));
+      }
+    }, 500);
+    return () => clearInterval(timer);
+  }, []);
+
+  // ── Data queries ─────────────────────────────────────────────────────────
   const { data: positions = [], isLoading: positionsLoading, refetch: refetchPositions } = useQuery<Position[]>({
     queryKey: ["/api/positions"],
   });
@@ -56,6 +121,17 @@ export default function Dashboard() {
 
   const isLoading = positionsLoading || ordersLoading || holdingsLoading || summaryLoading;
 
+  // ── Live LTP helper ───────────────────────────────────────────────────────
+  const getLiveLtp = (symbol: string | undefined, fallback: number): number => {
+    if (!symbol) return fallback;
+    return livePrices.get(symbol) ?? fallback;
+  };
+
+  const hasLivePrice = (symbol: string | undefined): boolean => {
+    if (!symbol) return false;
+    return livePrices.has(symbol);
+  };
+
   // F&O detection
   const isFnO = (exchange: string) => {
     const ex = (exchange || "").toLowerCase();
@@ -79,16 +155,20 @@ export default function Dashboard() {
     (h.trading_symbol || "").toLowerCase().includes(searchHoldings.toLowerCase())
   );
 
-  // Calculate position summaries - use API fields when available, otherwise compute
-  const positionTotals = {
+  // Calculate position summaries - use live LTP when available
+  const positionTotals = useMemo(() => ({
     totalPnL: positions.reduce((sum, p) => sum + Number(p.pnl || 0), 0),
     unrealisedPnL: positions.reduce((sum, p) => {
       if (p.unrealised_pnl !== undefined) return sum + Number(p.unrealised_pnl);
-      return sum + ((Number(p.ltp || 0) - Number(p.buy_avg || 0)) * Number(p.quantity || 0));
+      const ltp = getLiveLtp(p.trading_symbol, Number(p.ltp || 0));
+      return sum + ((ltp - Number(p.buy_avg || 0)) * Number(p.quantity || 0));
     }, 0),
     realisedPnL: positions.reduce((sum, p) => sum + Number(p.realised_pnl || 0), 0),
-    netTradedValue: positions.reduce((sum, p) => sum + (Number(p.ltp || 0) * Math.abs(Number(p.quantity || 0))), 0),
-  };
+    netTradedValue: positions.reduce((sum, p) => {
+      const ltp = getLiveLtp(p.trading_symbol, Number(p.ltp || 0));
+      return sum + (ltp * Math.abs(Number(p.quantity || 0)));
+    }, 0),
+  }), [positions, livePrices]);
 
   // Calculate holdings summaries - use API values when available
   const holdingTotals = {
@@ -99,11 +179,9 @@ export default function Dashboard() {
   };
   
   // Calculate percentages
-  // Overall P&L %: profit as percentage of invested value
   const pnlPercent = holdingTotals.investedValue > 0 
     ? ((holdingTotals.currentValue - holdingTotals.investedValue) / holdingTotals.investedValue) * 100 
     : 0;
-  // Today's P&L %: today's change as percentage of previous day value (current - today's pnl)
   const prevDayValue = holdingTotals.currentValue - holdingTotals.todayPnL;
   const todayPnlPercent = prevDayValue > 0 
     ? (holdingTotals.todayPnL / prevDayValue) * 100
@@ -146,6 +224,20 @@ export default function Dashboard() {
                   </>
                 )}
               </Badge>
+              <Badge
+                variant="outline"
+                className={`flex items-center gap-1 text-xs ${
+                  sseStatus === "connected"
+                    ? "border-emerald-500/50 text-emerald-500"
+                    : sseStatus === "connecting"
+                    ? "border-amber-500/50 text-amber-500"
+                    : "border-red-500/50 text-red-500"
+                }`}
+                data-testid="badge-sse-status"
+              >
+                <Radio className="w-3 h-3" />
+                {sseStatus === "connected" ? "STREAM" : sseStatus === "connecting" ? "LINKING" : "NO STREAM"}
+              </Badge>
             </div>
             <div className="flex gap-2 flex-wrap">
               <Button
@@ -186,12 +278,11 @@ export default function Dashboard() {
             </TabsTrigger>
           </TabsList>
 
-          {/* INVESTMENTS Tab - Holdings - Kotak Neo Layout */}
+          {/* INVESTMENTS Tab - Holdings */}
           <TabsContent value="investments">
             <Card>
               <CardHeader className="pb-4">
                 <div className="flex justify-between items-start gap-4 flex-wrap">
-                  {/* Summary cards matching Kotak Neo: Current value, Total invested, Profit/Loss, Today's profit/loss */}
                   <div className="flex gap-8 flex-wrap">
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Current value</p>
@@ -358,7 +449,9 @@ export default function Dashboard() {
                       </TableHeader>
                       <TableBody>
                         {filteredPositions.map((position, index) => {
-                          const unrealisedPnl = Number(position.unrealised_pnl ?? ((Number(position.ltp || 0) - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
+                          const livePrice = getLiveLtp(position.trading_symbol, Number(position.ltp || 0));
+                          const isLive = hasLivePrice(position.trading_symbol);
+                          const unrealisedPnl = Number(position.unrealised_pnl ?? ((livePrice - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
                           return (
                             <TableRow key={index} data-testid={`row-position-${index}`}>
                               <TableCell>
@@ -373,7 +466,12 @@ export default function Dashboard() {
                               <TableCell className="text-right">{Math.abs(Number(position.quantity || 0))}</TableCell>
                               <TableCell className="text-right">{Number(position.buy_avg || 0).toFixed(2)}</TableCell>
                               <TableCell className="text-right">{Number(position.sell_avg || 0).toFixed(2)}</TableCell>
-                              <TableCell className="text-right">{Number(position.ltp || 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-right" data-testid={`text-ltp-position-${index}`}>
+                                <span className={isLive ? "text-emerald-400 font-medium" : ""}>
+                                  {livePrice.toFixed(2)}
+                                </span>
+                                {isLive && <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse align-middle" />}
+                              </TableCell>
                               <TableCell className={`text-right font-medium ${Number(position.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
                                 {Number(position.pnl || 0) >= 0 ? "+" : ""}{Number(position.pnl || 0).toFixed(2)}
                               </TableCell>
@@ -459,7 +557,9 @@ export default function Dashboard() {
                       </TableHeader>
                       <TableBody>
                         {filteredNfoPositions.map((position, index) => {
-                          const unrealisedPnl = Number(position.unrealised_pnl ?? ((Number(position.ltp || 0) - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
+                          const livePrice = getLiveLtp(position.trading_symbol, Number(position.ltp || 0));
+                          const isLive = hasLivePrice(position.trading_symbol);
+                          const unrealisedPnl = Number(position.unrealised_pnl ?? ((livePrice - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
                           const instType = (position as any).instrument_type || "";
                           const token = (position as any).token || "";
                           return (
@@ -497,7 +597,12 @@ export default function Dashboard() {
                               <TableCell className="text-right">{Math.abs(Number(position.quantity || 0))}</TableCell>
                               <TableCell className="text-right">{Number(position.buy_avg || 0).toFixed(2)}</TableCell>
                               <TableCell className="text-right">{Number(position.sell_avg || 0).toFixed(2)}</TableCell>
-                              <TableCell className="text-right">{Number(position.ltp || 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-right" data-testid={`text-ltp-nfo-${index}`}>
+                                <span className={isLive ? "text-emerald-400 font-medium" : ""}>
+                                  {livePrice.toFixed(2)}
+                                </span>
+                                {isLive && <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse align-middle" />}
+                              </TableCell>
                               <TableCell className={`text-right font-medium ${Number(position.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
                                 {Number(position.pnl || 0) >= 0 ? "+" : ""}{Number(position.pnl || 0).toFixed(2)}
                               </TableCell>
@@ -592,7 +697,7 @@ export default function Dashboard() {
           </TabsContent>
 
           <TabsContent value="live-trades">
-            <LiveTradesPanel nfoPositions={nfoPositions} />
+            <LiveTradesPanel nfoPositions={nfoPositions} livePrices={livePrices} />
           </TabsContent>
         </Tabs>
       </div>
@@ -609,7 +714,7 @@ const DEPLOY_STATUS_MAP: Record<string, { label: string; color: string; icon: ty
   closed: { label: "Closed", color: "text-muted-foreground", icon: Power },
 };
 
-function DashboardTradeCard({ plan, configs, brokerConfigs, nfoPositions }: { plan: StrategyPlan; configs: StrategyConfig[]; brokerConfigs: BrokerConfig[]; nfoPositions: Position[] }) {
+function DashboardTradeCard({ plan, configs, brokerConfigs, nfoPositions, livePrices }: { plan: StrategyPlan; configs: StrategyConfig[]; brokerConfigs: BrokerConfig[]; nfoPositions: Position[]; livePrices: Map<string, number> }) {
   const depStatus = plan.deploymentStatus || "draft";
   const depConfig = DEPLOY_STATUS_MAP[depStatus] || DEPLOY_STATUS_MAP.draft;
   const DepIcon = depConfig.icon;
@@ -699,7 +804,9 @@ function DashboardTradeCard({ plan, configs, brokerConfigs, nfoPositions }: { pl
               </TableHeader>
               <TableBody>
                 {strategyPositions.map((position, index) => {
-                  const unrealisedPnl = Number(position.unrealised_pnl ?? ((Number(position.ltp || 0) - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
+                  const livePrice = livePrices.get(position.trading_symbol || "") ?? Number(position.ltp || 0);
+                  const isLive = livePrices.has(position.trading_symbol || "");
+                  const unrealisedPnl = Number(position.unrealised_pnl ?? ((livePrice - Number(position.buy_avg || 0)) * Number(position.quantity || 0)));
                   const instType = (position as any).instrument_type || "";
                   const token = (position as any).token || "";
                   return (
@@ -737,7 +844,12 @@ function DashboardTradeCard({ plan, configs, brokerConfigs, nfoPositions }: { pl
                       <TableCell className="text-right">{Math.abs(Number(position.quantity || 0))}</TableCell>
                       <TableCell className="text-right">{Number(position.buy_avg || 0).toFixed(2)}</TableCell>
                       <TableCell className="text-right">{Number(position.sell_avg || 0).toFixed(2)}</TableCell>
-                      <TableCell className="text-right">{Number(position.ltp || 0).toFixed(2)}</TableCell>
+                      <TableCell className="text-right" data-testid={`text-ltp-live-trade-${plan.id}-${index}`}>
+                        <span className={isLive ? "text-emerald-400 font-medium" : ""}>
+                          {livePrice.toFixed(2)}
+                        </span>
+                        {isLive && <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse align-middle" />}
+                      </TableCell>
                       <TableCell className={`text-right font-medium ${Number(position.pnl || 0) >= 0 ? "text-primary" : "text-destructive"}`}>
                         {Number(position.pnl || 0) >= 0 ? "+" : ""}{Number(position.pnl || 0).toFixed(2)}
                       </TableCell>
@@ -760,7 +872,7 @@ function DashboardTradeCard({ plan, configs, brokerConfigs, nfoPositions }: { pl
   );
 }
 
-function LiveTradesPanel({ nfoPositions }: { nfoPositions: Position[] }) {
+function LiveTradesPanel({ nfoPositions, livePrices }: { nfoPositions: Position[]; livePrices: Map<string, number> }) {
   const { data: plans = [] } = useQuery<StrategyPlan[]>({
     queryKey: ["/api/strategy-plans"],
   });
@@ -794,7 +906,7 @@ function LiveTradesPanel({ nfoPositions }: { nfoPositions: Position[] }) {
       ) : (
         <div className="space-y-4">
           {deployedPlans.map((plan) => (
-            <DashboardTradeCard key={plan.id} plan={plan} configs={configs} brokerConfigs={brokerConfigs} nfoPositions={nfoPositions} />
+            <DashboardTradeCard key={plan.id} plan={plan} configs={configs} brokerConfigs={brokerConfigs} nfoPositions={nfoPositions} livePrices={livePrices} />
           ))}
         </div>
       )}

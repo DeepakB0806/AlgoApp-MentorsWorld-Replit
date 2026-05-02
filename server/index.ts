@@ -10,7 +10,7 @@ import TL from "./tl-kotak-neo-v3";
 import EL from "./el-kotak-neo-v3";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
 import { runScripMasterSync } from "./smc-kotak-neo-v3";
-import { rescheduleScripMasterSync, scheduleScripSyncRetry, scheduleStartupScripSyncRetry } from "./scrip-sync-scheduler";
+import { rescheduleScripMasterSync, scheduleScripSyncRetry, scheduleStartupScripSyncRetry, startIntradayScripRefresh } from "./scrip-sync-scheduler";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
 import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback, closeTradeById } from "./te-kotak-neo-v3";
@@ -260,6 +260,8 @@ app.use((req, res, next) => {
     if (!existingRollback) await storage.setSetting("rollback_api_retry_count", "5");
     const existingSyncClock = await storage.getSetting("scrip_master_sync_time");
     if (!existingSyncClock) await storage.setSetting("scrip_master_sync_time", "09:10");
+    const existingIntradayInterval = await storage.getSetting("scrip_master_intraday_interval_mins");
+    if (!existingIntradayInterval) await storage.setSetting("scrip_master_intraday_interval_mins", "0");
     const existingMaxClose = await storage.getSetting("max_close_retry_count");
     if (!existingMaxClose) await storage.setSetting("max_close_retry_count", "0");
     const existingHalted = await storage.getSetting("trading_halted");
@@ -312,6 +314,14 @@ app.use((req, res, next) => {
     await rescheduleScripMasterSync(storage);
   } catch (err) {
     log(`[SCRIP-MASTER] Daily sync scheduler startup warning: ${err}`);
+  }
+
+  // Intraday periodic scrip master refresh — re-runs sync during market hours per user setting
+  try {
+    startIntradayScripRefresh(storage);
+    log(`[SCRIP-MASTER] Intraday refresh scheduler started`);
+  } catch (err) {
+    log(`[SCRIP-MASTER] Intraday refresh scheduler startup warning: ${err}`);
   }
 
   // Start scheduled data retention job — prunes old rows from all major tables daily

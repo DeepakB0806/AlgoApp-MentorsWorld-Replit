@@ -2,6 +2,64 @@ import type { IStorage } from "./storage";
 import { runScripMasterSync } from "./smc-kotak-neo-v3";
 import type { BrokerConfig } from "@shared/schema";
 
+// ── Intraday periodic refresh ───────────────────────────────────────────────
+let intradayHandle: ReturnType<typeof setInterval> | null = null;
+let lastIntradaySyncAt: number | null = null;
+
+/**
+ * Starts a 60-second polling loop that re-runs `runScripMasterSync` during
+ * market hours (09:30–15:30 IST) whenever the user has configured a non-zero
+ * `scrip_master_intraday_interval_mins` setting. Idempotent — calling a second
+ * time while already running is a no-op.
+ */
+export function startIntradayScripRefresh(storage: IStorage): void {
+  if (intradayHandle !== null) return;
+
+  intradayHandle = setInterval(async () => {
+    try {
+      const setting = await storage.getSetting("scrip_master_intraday_interval_mins");
+      const intervalMins = parseInt(setting?.value || "0", 10);
+      if (!intervalMins || intervalMins <= 0) return;
+
+      // Only fire between 09:30 and 15:30 IST
+      const nowUTC = Date.now();
+      const nowIST = new Date(nowUTC + 5.5 * 60 * 60 * 1000);
+      const timeMinutes = nowIST.getUTCHours() * 60 + nowIST.getUTCMinutes();
+      if (timeMinutes < 9 * 60 + 30 || timeMinutes > 15 * 60 + 30) return;
+
+      // Enforce minimum interval between syncs
+      if (lastIntradaySyncAt !== null) {
+        const minsElapsed = (nowUTC - lastIntradaySyncAt) / 60_000;
+        if (minsElapsed < intervalMins) return;
+      }
+
+      lastIntradaySyncAt = nowUTC;
+      console.log(`[SCRIP-MASTER] Intraday refresh triggered (every ${intervalMins} min)`);
+
+      const allBrokerConfigs = await storage.getBrokerConfigs();
+      const liveBrokers = allBrokerConfigs.filter(
+        (bc) => bc.isConnected && bc.brokerName === "kotak_neo",
+      );
+      if (liveBrokers.length === 0) return;
+
+      for (const bc of liveBrokers) {
+        try {
+          const result = await runScripMasterSync(storage, bc);
+          if (result.success) {
+            console.log(`[SCRIP-MASTER] Intraday refresh: ${result.synced} contracts reloaded for ${bc.ucc || bc.id}`);
+          } else {
+            console.warn(`[SCRIP-MASTER] Intraday refresh failed for ${bc.ucc || bc.id}: ${result.error}`);
+          }
+        } catch (err) {
+          console.warn(`[SCRIP-MASTER] Intraday refresh threw for ${bc.ucc || bc.id}: ${err}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[SCRIP-MASTER] Intraday refresh loop error: ${err}`);
+    }
+  }, 60_000);
+}
+
 // Module-level handles so any call to rescheduleScripMasterSync cancels the
 // previous timer/interval before setting a new one. This allows the Settings UI
 // to update the sync clock without a server restart.

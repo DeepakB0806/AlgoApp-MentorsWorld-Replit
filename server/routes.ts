@@ -7,11 +7,13 @@ import { registerBrokerRoutes } from "./routes/broker-routes";
 import { registerFieldMappingRoutes } from "./routes/field-mapping-routes";
 import { registerUniversalFieldRoutes } from "./routes/universal-field-routes";
 import { registerAdminRoutes } from "./routes/admin-routes";
+import { registerSseRoutes } from "./routes/sse-routes";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  registerSseRoutes(app);
   registerAdminRoutes(app, storage);
   registerStrategyRoutes(app, storage);
   registerWebhookRoutes(app, storage);
