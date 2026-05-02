@@ -34,7 +34,7 @@ export default function Strategies() {
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-6">
+      <div className="container mx-auto px-4 pt-6 pb-20">
         <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="tabs-strategy">
           <TabsList className="mb-6" data-testid="tabslist-strategy">
             <TabsTrigger value="configurator" data-testid="tab-configurator">Mother Configurator</TabsTrigger>
