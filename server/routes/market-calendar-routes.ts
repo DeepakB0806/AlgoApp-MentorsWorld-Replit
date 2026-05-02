@@ -248,6 +248,27 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
     exchange: z.enum(["NSE", "BSE"]),
   });
 
+  app.get("/api/market-calendar/holidays/sync-status-all", async (req, res) => {
+    try {
+      const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
+      const exchanges = ["NSE", "BSE", "MCX"] as const;
+      const results = await Promise.all(
+        exchanges.map(async (ex) => {
+          const [rows, setting] = await Promise.all([
+            storage.getMarketHolidays(year, ex),
+            storage.getSetting(`holiday_last_sync_${ex}_${year}`),
+          ]);
+          return { exchange: ex, count: rows.length, lastSyncedAt: setting?.value ?? null };
+        })
+      );
+      const out: Record<string, { count: number; lastSyncedAt: string | null }> = {};
+      for (const r of results) out[r.exchange] = { count: r.count, lastSyncedAt: r.lastSyncedAt };
+      res.json({ year, ...out });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/market-calendar/holidays/sync-status", async (req, res) => {
     try {
       const year     = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
@@ -267,12 +288,12 @@ export function registerMarketCalendarRoutes(app: Express, storage: IStorage) {
       return;
     }
     const { year, exchange } = parsed.data;
-    const sourceName = exchange === "BSE" ? "BSE" : "NSE";
+    const sourceName = "NSE";
     try {
-      // Branch on exchange — NSE and BSE have separate independent fetch paths
-      const holidays = exchange === "BSE"
-        ? await fetchBseHolidayData(year)
-        : await fetchNseHolidayData(year);
+      // BSE and NSE share identical trading holidays (confirmed by operator).
+      // fetchBseHolidayData() hits api.bseindia.com which is unreliable in server env.
+      // For both exchanges: fetch from NSE and store under the requested exchange label.
+      const holidays = await fetchNseHolidayData(year);
 
       if (holidays.length === 0) {
         res.status(502).json({

@@ -1244,6 +1244,8 @@ function MarketCalendarSettings() {
   const [holidayExchange, setHolidayExchange] = useState<string>("NSE");
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvParseError, setCsvParseError] = useState<string>("");
+  const [holidayTableOpen, setHolidayTableOpen] = useState<boolean>(false);
+  const [confirmReSync, setConfirmReSync] = useState<boolean>(false);
 
   const { data: holidayRows = [], isLoading: holidayLoading } = useQuery<MarketHoliday[]>({
     queryKey: ["/api/market-calendar/holidays", holidayYear, holidayExchange],
@@ -1253,10 +1255,17 @@ function MarketCalendarSettings() {
     },
   });
 
-  const { data: syncStatus } = useQuery<{ count: number; lastSyncedAt: string | null }>({
-    queryKey: ["/api/market-calendar/holidays/sync-status", holidayExchange, holidayYear],
+  type SyncStatusAll = {
+    year: number;
+    NSE: { count: number; lastSyncedAt: string | null };
+    BSE: { count: number; lastSyncedAt: string | null };
+    MCX: { count: number; lastSyncedAt: string | null };
+  };
+
+  const { data: syncStatusAll } = useQuery<SyncStatusAll>({
+    queryKey: ["/api/market-calendar/holidays/sync-status-all", holidayYear],
     queryFn: () =>
-      fetch(`/api/market-calendar/holidays/sync-status?exchange=${holidayExchange}&year=${holidayYear}`)
+      fetch(`/api/market-calendar/holidays/sync-status-all?year=${holidayYear}`)
         .then(r => r.json()),
   });
 
@@ -1267,8 +1276,9 @@ function MarketCalendarSettings() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays/sync-status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays/sync-status-all"] });
       setCsvFile(null);
+      setHolidayTableOpen(true);
       toast({ title: "Uploaded", description: `${data.inserted} holiday(s) saved for ${data.exchange} ${data.year}.` });
     },
     onError: (err: any) => toast({ title: "Upload failed", description: err.message, variant: "destructive" }),
@@ -1288,17 +1298,22 @@ function MarketCalendarSettings() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays/sync-status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/holidays/sync-status-all"] });
+      setConfirmReSync(false);
+      setHolidayTableOpen(true);
       toast({
         title: "Sync complete",
         description: `Synced ${data.inserted} holidays for ${data.exchange} / ${data.year}.`,
       });
     },
-    onError: (err: any) => toast({
-      title: "Sync failed — please use CSV upload as backup",
-      description: err.message,
-      variant: "destructive",
-    }),
+    onError: (err: any) => {
+      setConfirmReSync(false);
+      toast({
+        title: "Sync failed — please use CSV upload as backup",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
   });
 
   // Parse NSE-format CSV: "DD-MMM-YYYY,Description" or "Description,DD-MMM-YYYY"
@@ -1487,21 +1502,34 @@ function MarketCalendarSettings() {
         </CardContent>
       </Card>
 
-      {/* Card 3 — NSE Holiday Calendar */}
+      {/* Card 3 — Holiday Calendar */}
       <Card>
         <CardHeader>
           <CardTitle>Holiday Calendar</CardTitle>
           <CardDescription>
-            Sync trading holidays automatically from NSE, or upload a CSV as backup. MCX holidays must always be uploaded manually.
+            NSE/BSE holidays sync automatically from NSE. CSV upload is always available as backup. MCX holidays must always be uploaded manually.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Year + Exchange selectors (shared by both sync and upload) */}
-          <div className="flex flex-wrap gap-3 items-end">
-            <div>
-              <Label className="text-xs mb-1 block">Year</Label>
-              <Select value={holidayYear} onValueChange={setHolidayYear}>
-                <SelectTrigger className="w-28" data-testid="select-holiday-year">
+
+          {/* Row 1 — Index tabs + Year selector */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex gap-1.5">
+              {(["NSE", "BSE", "MCX"] as const).map((ex) => (
+                <Button
+                  key={ex}
+                  size="sm"
+                  variant={holidayExchange === ex ? "default" : "outline"}
+                  onClick={() => { setHolidayExchange(ex); setConfirmReSync(false); }}
+                  data-testid={`button-exchange-tab-${ex}`}
+                >
+                  {ex}
+                </Button>
+              ))}
+            </div>
+            <div className="ml-auto">
+              <Select value={holidayYear} onValueChange={(v) => { setHolidayYear(v); setConfirmReSync(false); }}>
+                <SelectTrigger className="w-24" data-testid="select-holiday-year">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1511,50 +1539,76 @@ function MarketCalendarSettings() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <Label className="text-xs mb-1 block">Exchange</Label>
-              <Select value={holidayExchange} onValueChange={setHolidayExchange}>
-                <SelectTrigger className="w-28" data-testid="select-holiday-exchange">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="NSE">NSE</SelectItem>
-                  <SelectItem value="BSE">BSE</SelectItem>
-                  <SelectItem value="MCX">MCX</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
 
-          {/* Primary: Auto-sync from NSE */}
-          <div className="flex flex-wrap gap-3 items-center rounded-md border border-border bg-muted/40 px-4 py-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">
-                {holidayExchange === "BSE" ? "Sync from BSE" : "Sync from NSE"}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {holidayExchange === "MCX"
-                  ? "Auto-sync is not available for MCX — use CSV upload below."
-                  : holidayExchange === "BSE"
-                    ? `Fetches the ${holidayYear} trading holiday list directly from BSE and saves it for BSE.`
-                    : `Fetches the ${holidayYear} trading holiday list directly from NSE and saves it for NSE.`}
-              </p>
+          {/* Row 2 — All-index status strip */}
+          {syncStatusAll && (
+            <div className="flex flex-wrap gap-3 text-xs border border-border rounded-md px-3 py-2 bg-muted/20" data-testid="container-sync-status-all">
+              {(["NSE", "BSE", "MCX"] as const).map((ex) => {
+                const st = syncStatusAll[ex];
+                const synced = st.count > 0;
+                return (
+                  <span key={ex} className={`flex items-center gap-1.5 ${synced ? "text-emerald-500" : "text-muted-foreground"}`} data-testid={`text-sync-status-${ex}`}>
+                    <CalendarCheck className={`w-3 h-3 shrink-0 ${synced ? "text-emerald-500" : "text-muted-foreground/40"}`} />
+                    <span className="font-medium">{ex}</span>
+                    {synced
+                      ? <span>{st.count} holidays{st.lastSyncedAt ? ` · ${new Date(st.lastSyncedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", timeZone: "Asia/Kolkata" })}` : ""}</span>
+                      : <span className="text-muted-foreground/60">— not synced</span>
+                    }
+                  </span>
+                );
+              })}
             </div>
-            <Button
-              onClick={() => syncHolidaysMutation.mutate({ year: parseInt(holidayYear), exchange: holidayExchange as "NSE" | "BSE" })}
-              disabled={syncHolidaysMutation.isPending || holidayExchange === "MCX"}
-              variant={holidayExchange === "MCX" ? "outline" : "default"}
-              data-testid="button-sync-holidays"
-            >
-              {syncHolidaysMutation.isPending
-                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Syncing…</>
-                : <><RefreshCw className="w-4 h-4 mr-2" />Sync Holidays</>}
-            </Button>
-          </div>
+          )}
 
-          {/* Backup: CSV upload */}
+          {/* Row 3 — Auto-sync row (hidden for MCX) */}
+          {holidayExchange !== "MCX" && (() => {
+            const alreadySynced = (syncStatusAll?.[holidayExchange as "NSE" | "BSE"]?.count ?? 0) > 0;
+            return (
+              <div className={`flex flex-wrap gap-3 items-center rounded-md border px-4 py-3 ${alreadySynced && !confirmReSync ? "border-amber-500/30 bg-amber-500/5" : "border-border bg-muted/40"}`}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">
+                    {alreadySynced && !confirmReSync ? `Already synced — ${syncStatusAll![holidayExchange as "NSE" | "BSE"].count} holidays saved` : `Sync from NSE`}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {alreadySynced && !confirmReSync
+                      ? "Clicking Re-Sync will overwrite the existing holiday list for this exchange and year."
+                      : `Fetches the ${holidayYear} trading holiday list from NSE and saves it for ${holidayExchange}.`}
+                  </p>
+                </div>
+                {alreadySynced && !confirmReSync ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-amber-500/50 text-amber-500 hover:bg-amber-500/10"
+                    onClick={() => setConfirmReSync(true)}
+                    data-testid="button-confirm-resync"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 mr-1.5" />Re-Sync
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={() => syncHolidaysMutation.mutate({ year: parseInt(holidayYear), exchange: holidayExchange as "NSE" | "BSE" })}
+                    disabled={syncHolidaysMutation.isPending}
+                    variant={confirmReSync ? "destructive" : "default"}
+                    data-testid="button-sync-holidays"
+                  >
+                    {syncHolidaysMutation.isPending
+                      ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Syncing…</>
+                      : confirmReSync
+                        ? <><RefreshCw className="w-4 h-4 mr-2" />Confirm Overwrite</>
+                        : <><RefreshCw className="w-4 h-4 mr-2" />Sync Holidays</>}
+                  </Button>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Row 4 — CSV upload (always visible) */}
           <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CSV Upload (backup)</p>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              {holidayExchange === "MCX" ? "CSV Upload (required for MCX)" : "CSV Upload (backup)"}
+            </p>
             <div className="flex flex-wrap gap-3 items-end">
               <div className="flex-1 min-w-48">
                 <Label className="text-xs mb-1 block">CSV File <span className="font-normal text-muted-foreground">(DD-MMM-YYYY, Description)</span></Label>
@@ -1576,57 +1630,51 @@ function MarketCalendarSettings() {
                 {uploadHolidaysMutation.isPending ? "Uploading..." : "Upload CSV"}
               </Button>
             </div>
-            {csvParseError && (
-              <p className="text-sm text-destructive">{csvParseError}</p>
-            )}
+            {csvParseError && <p className="text-sm text-destructive">{csvParseError}</p>}
           </div>
 
-          {/* Sync status bar */}
-          {syncStatus && syncStatus.count > 0 && (
-            <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-md px-3 py-2">
-              <CalendarCheck className="w-4 h-4 shrink-0" />
-              <span data-testid="text-holiday-sync-status">
-                <span className="font-medium">{syncStatus.count} holidays saved to schema</span>
-                {" "}for {holidayExchange} {holidayYear}
-                {syncStatus.lastSyncedAt && (
-                  <>
-                    {" · "}Last synced{" "}
-                    {new Date(syncStatus.lastSyncedAt).toLocaleDateString("en-IN", {
-                      day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata",
-                    })}
-                  </>
-                )}
-              </span>
-            </div>
-          )}
-
-          {/* Holiday table */}
+          {/* Row 5 — Collapsible holiday table */}
           {holidayLoading ? (
             <div className="text-sm text-muted-foreground py-2">Loading holidays...</div>
           ) : holidayRows.length === 0 ? (
             <div className="text-sm text-muted-foreground py-2 border border-dashed border-border rounded-md p-4 text-center">
-              No holidays uploaded for {holidayExchange} {holidayYear}
+              No holidays saved for {holidayExchange} {holidayYear}
             </div>
           ) : (
-            <div className="border border-border rounded-md overflow-hidden text-xs">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="py-1 text-xs">#</TableHead>
-                    <TableHead className="py-1 text-xs">Date</TableHead>
-                    <TableHead className="py-1 text-xs">Description</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {holidayRows.map((h, i) => (
-                    <TableRow key={h.id} data-testid={`row-holiday-${h.id}`}>
-                      <TableCell className="py-0.5 text-xs text-muted-foreground">{i + 1}</TableCell>
-                      <TableCell className="py-0.5 text-xs font-mono">{h.date}</TableCell>
-                      <TableCell className="py-0.5 text-xs">{h.description}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="border border-border rounded-md overflow-hidden">
+              <button
+                className="flex items-center justify-between w-full px-3 py-2 text-xs hover:bg-muted/30 transition-colors"
+                onClick={() => setHolidayTableOpen(v => !v)}
+                data-testid="button-toggle-holiday-table"
+              >
+                <span className="flex items-center gap-2 font-medium">
+                  <CalendarCheck className="w-3.5 h-3.5 text-emerald-500" />
+                  {holidayRows.length} holidays — {holidayExchange} {holidayYear}
+                </span>
+                <span className="text-muted-foreground">{holidayTableOpen ? "▲ hide" : "▼ show"}</span>
+              </button>
+              {holidayTableOpen && (
+                <div className="border-t border-border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="py-1 text-xs">#</TableHead>
+                        <TableHead className="py-1 text-xs">Date</TableHead>
+                        <TableHead className="py-1 text-xs">Description</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {holidayRows.map((h, i) => (
+                        <TableRow key={h.id} data-testid={`row-holiday-${h.id}`}>
+                          <TableCell className="py-0.5 text-xs text-muted-foreground">{i + 1}</TableCell>
+                          <TableCell className="py-0.5 text-xs font-mono">{h.date}</TableCell>
+                          <TableCell className="py-0.5 text-xs">{h.description}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
