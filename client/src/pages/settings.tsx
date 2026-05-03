@@ -1912,7 +1912,7 @@ export default function Settings() {
               <button
                 key={item.id}
                 onClick={() => setActiveSection(item.id)}
-                className={`flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors ${
+                className={`flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors md:w-full ${
                   activeSection === item.id
                     ? "bg-primary/10 text-primary font-medium"
                     : "text-muted-foreground hover:text-foreground hover-elevate"
