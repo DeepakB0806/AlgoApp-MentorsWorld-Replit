@@ -29,3 +29,9 @@ The application adopts a database-centric design with a `universal_fields` table
 - **Speakeasy & QRCode**: Libraries for TOTP generation and management.
 - **Bcryptjs**: For secure password hashing.
 - **Zod**: For runtime schema validation across API routes.
+
+## Testing Credentials
+
+- **Super Admin**: `webadmin@mentorsworld.org` / `H2so4#Hcl`
+- Role: `super_admin` — full access to all routes and UI features.
+- Use these credentials in all automated test plans (email/password login flow on `/login`).
