@@ -1130,7 +1130,7 @@ export default function Webhooks() {
           </SheetHeader>
           <div className="mt-6 space-y-4 flex-1 overflow-hidden flex flex-col">
             {selectedWebhook && (
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <Button
                   onClick={() => testMutation.mutate(selectedWebhook.id)}
                   disabled={testMutation.isPending}
@@ -1188,7 +1188,7 @@ export default function Webhooks() {
                       <Card key={log.id} className="p-3">
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <div className="flex items-center gap-2 flex-nowrap">
+                            <div className="flex items-center gap-2 flex-wrap">
                               {log.status === "success" ? (
                                 <CheckCircle className="w-4 h-4 text-primary flex-shrink-0" />
                               ) : (
@@ -1199,7 +1199,7 @@ export default function Webhooks() {
                                 <Badge variant="outline" className="text-xs flex-shrink-0">{log.statusCode}</Badge>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-nowrap">
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                               <span className="flex-shrink-0">{new Date(log.testedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</span>
                               {log.responseTime && (
                                 <span className="flex items-center gap-1 flex-shrink-0">

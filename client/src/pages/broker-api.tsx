@@ -2132,7 +2132,7 @@ function ErrorLogCard() {
               <summary className="text-muted-foreground cursor-pointer hover:text-foreground" data-testid="button-toggle-error-codes">
                 Kotak Error Code Reference
               </summary>
-              <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
                 {Object.entries(errorLogsQuery.data.kotakErrorCodes).map(([code, desc]) => (
                   <div key={code} className="flex items-center gap-1.5 text-muted-foreground">
                     <Badge variant="outline" className="text-[10px] font-mono">{code}</Badge>
