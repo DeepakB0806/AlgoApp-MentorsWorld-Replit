@@ -158,24 +158,10 @@ export async function startCapitalManager(storage: IStorage): Promise<void> {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CAPITAL MANAGER — calculatePlanMargins  (Dual-Mode: API primary, SPAN fallback)
-//
-// Fully autonomous — no import from smc-kotak-neo-v3 or te-kotak-neo-v3.
-// The on-disk scrip master CSV is the sole data source.
-//
-// Mode 1 (API — primary, requires live session):
-//   EL.getQuote → live LTP → snap to ATM
-//   Per leg: parseStrikeSpec + getOTMStrike → token from CSV tokenMap
-//   → EL.checkMargin → sum ordMrgn per block
-//
-// Mode 2 (SPAN fallback — pre-market / token missing / API down):
-//   CSV put-call parity ATM (col 58 pScripBasePrice ÷ 100)
-//   Per leg: csvPremium × spanRate × lotSize × lotMultiplier × lots
-//   SELL subtracts, BUY adds; block result = |total|
-//
-// Both modes:
-//   UT block = uptrendLegs + neutralLegs  (combined before compute)
-//   DT block = downtrendLegs + neutralLegs
-//   estimatedMargin = max(UT, DT)
+// Autonomous — no SMC/TE imports. CSV is the sole data source.
+// Mode 1 API: EL.getQuote LTP → ATM; per-leg EL.checkMargin; sum ordMrgn.
+// Mode 2 SPAN: CSV put-call parity ATM; csvPremium × spanRate; SELL−, BUY+.
+// UT = uptrendLegs+neutralLegs; DT = downtrendLegs+neutralLegs; max(UT,DT).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
@@ -202,52 +188,30 @@ function cmParseTradeParams(plan: { tradeParams?: any }): Record<string, any> | 
   }
 }
 
-// Kotak 1980 epoch → YYYY-MM-DD.
-// Mirrors SMC's locked parseExpiryDate [SMC-1] without importing it.
-// Kotak timestamps are seconds since 1980; + 315_532_800 converts to Unix seconds.
+// Kotak 1980 epoch → YYYY-MM-DD. Mirrors SMC [SMC-1] without importing it.
 function cmParseExpiryEpoch(raw: string): string | null {
-  const trimmed = raw.trim().replace(/"/g, "");
-  const asMs = Number(trimmed);
-  if (!isNaN(asMs) && asMs > 946684800000) {
-    const d = new Date(asMs);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
-  const asSec = Number(trimmed);
-  if (!isNaN(asSec) && asSec > 946684800 && asSec < 4102444800) {
-    const d = new Date((asSec + 315_532_800) * 1000);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
-  return null;
+  const sec = Number(raw.trim().replace(/"/g, ""));
+  if (isNaN(sec) || sec <= 946684800 || sec >= 4102444800) return null;
+  const d = new Date((sec + 315_532_800) * 1000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// Deep-walk checkMargin response for the margin value field.
 function cmExtractOrdMrgn(data: unknown): number {
   if (!data || typeof data !== "object") return 0;
-  const search = (obj: any, depth = 0): number => {
-    if (depth > 5 || typeof obj !== "object" || obj === null) return 0;
-    for (const k of ["ordMrgn", "ord_mrgn", "orderMargin", "ordMargin", "margin"]) {
+  const search = (obj: Record<string, unknown>, depth = 0): number => {
+    if (depth > 5) return 0;
+    for (const k of ["ordMrgn", "ord_mrgn", "orderMargin", "ordMargin"]) {
       if (obj[k] !== undefined) { const v = Number(obj[k]); if (!isNaN(v)) return v; }
     }
-    for (const v of Object.values(obj)) { const f = search(v, depth + 1); if (f !== 0) return f; }
+    for (const v of Object.values(obj)) {
+      if (v && typeof v === "object") { const f = search(v as Record<string, unknown>, depth + 1); if (f !== 0) return f; }
+    }
     return 0;
   };
-  return search(data);
+  return search(data as Record<string, unknown>);
 }
 
-// ─── CSV: build token map + price map for a specific ticker + expiry ──────────
-//
-// Single CSV pass. Column layout (1-indexed → array index):
-//   col  1 (idx  0) → pSymbol        token string
-//   col  5 (idx  4) → pSymbolName    base ticker  (e.g. "NIFTY")
-//   col  7 (idx  6) → pOptionType    "CE" / "PE" / "XX"
-//   col 18 (idx 17) → lExpiryDate    Kotak 1980 epoch → cmParseExpiryEpoch
-//   col 21 (idx 20) → dStrikePrice   strike × 100
-//   col 58 (idx 57) → pScripBasePrice price  × 100
-//
-// Returns:
-//   tokenMap  — Map<"${strike}_${optType}", token>
-//   priceMap  — Map<strike, {CE?, PE?}>
-//   atmStrike — snapped via put-call parity + getATMStrike
+// Single CSV pass (cols 1,5,7,18,21,58) → tokenMap + priceMap + ATM via put-call parity.
 function cmBuildTokenAndPriceMap(
   ticker: string,
   exchange: string,
@@ -371,7 +335,7 @@ async function cmApiBlock(
     }, true);
 
     if (!marginRes.success) {
-      console.warn(`${MLOG}   ${blockLabel} API: checkMargin failed (${(marginRes as any).error})`);
+      console.warn(`${MLOG}   ${blockLabel} API: checkMargin failed (${(marginRes as { error?: string }).error ?? "unknown"})`);
       anyFailed = true;
     } else {
       const mrgn = cmExtractOrdMrgn(marginRes.data);
@@ -519,13 +483,14 @@ export async function calculatePlanMargins(
         const dtLegs = [...cmSelectLegs(tradeParams, "downtrendLegs"), ...cmSelectLegs(tradeParams, "neutralLegs")];
 
         // 7. productMode — resolved from block config objects (same lookup order used by TE/SMC)
+        type BlockCfg = { productMode?: string };
         const productMode = (
-          (tradeParams.uptrendConfig as any)?.productMode  ||
-          (tradeParams.downtrendConfig as any)?.productMode ||
-          (tradeParams.neutralConfig as any)?.productMode  ||
-          (tradeParams.legsConfig as any)?.productMode     ||
+          (tradeParams.uptrendConfig  as BlockCfg | undefined)?.productMode ||
+          (tradeParams.downtrendConfig as BlockCfg | undefined)?.productMode ||
+          (tradeParams.neutralConfig  as BlockCfg | undefined)?.productMode ||
+          (tradeParams.legsConfig     as BlockCfg | undefined)?.productMode ||
           "MIS"
-        ) as string;
+        );
 
         // 8. Try Mode 1: API (only when broker session is live)
         let utMargin = 0;
