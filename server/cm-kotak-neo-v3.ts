@@ -9,6 +9,8 @@
 // Margin = SPAN rate × targetStrike × lotSize × lotMultiplier × sellLots.
 // UT and DT are computed separately; estimatedMargin = max(UT, DT).
 // ═══════════════════════════════════════════════════════════════════════════════
+import fs from "fs";
+import path from "path";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
 import EL from "./el-kotak-neo-v3";
@@ -190,7 +192,38 @@ function cmIsExpiryDay(targetExpiryDate: string): boolean {
   return todayIST === targetExpiryDate;
 }
 
-// Scan rawCsvCache for the given exchange's CSV to find ATM via put-call parity.
+// Resolve the raw CSV text for the given exchange.
+// Primary: rawCsvCache (populated during sync, cleared to disk afterwards).
+// Fallback: on-disk file written by SMC as scrip_master_{exchange}_{YYYY-MM-DD}.csv.
+function cmLoadRawCsv(exchange: string): string | null {
+  const MLOG = "[MARGIN-CALC]";
+
+  // 1. Try in-memory cache first (present only briefly during runScripMasterSync)
+  const cached = rawCsvCache.get(exchange)
+    ?? rawCsvCache.get(exchange.toUpperCase())
+    ?? rawCsvCache.get(exchange.toLowerCase());
+  if (cached) return cached;
+
+  // 2. Fall back to today's on-disk file (SMC writes it immediately before clearing cache)
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const fileName = `scrip_master_${exchange.toLowerCase()}_${dateStr}.csv`;
+  const filePath = path.resolve(process.cwd(), fileName);
+  try {
+    if (fs.existsSync(filePath)) {
+      const text = fs.readFileSync(filePath, "utf8");
+      console.log(`${MLOG} cmLoadRawCsv: loaded ${exchange} from disk (${fileName}, ${text.length} chars)`);
+      return text;
+    }
+  } catch (err) {
+    console.warn(`${MLOG} cmLoadRawCsv: disk read failed for ${fileName}: ${err}`);
+  }
+
+  console.warn(`${MLOG} cmLoadRawCsv: no CSV available for exchange "${exchange}" (cache empty, no disk file at ${fileName})`);
+  return null;
+}
+
+// Scan the raw CSV for the given exchange to find ATM via put-call parity.
 //
 // CSV column indices (1-indexed, i.e. array index = col - 1):
 //   col  1  → pSymbol       (token, string)
@@ -229,10 +262,10 @@ function cmFindAtmFromCsv(
     return null;
   }
 
-  // Step 2: scan raw CSV for matching tokens and read pScripBasePrice
-  const rawCsv = rawCsvCache.get(exchange) ?? rawCsvCache.get(exchange.toUpperCase()) ?? rawCsvCache.get(exchange.toLowerCase());
+  // Step 2: load raw CSV (cache or disk)
+  const rawCsv = cmLoadRawCsv(exchange);
   if (!rawCsv) {
-    console.warn(`${MLOG} cmFindAtmFromCsv: no rawCsvCache entry for exchange "${exchange}"`);
+    console.warn(`${MLOG} cmFindAtmFromCsv: no CSV source for exchange "${exchange}"`);
     return null;
   }
 
