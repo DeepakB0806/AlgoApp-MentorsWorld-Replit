@@ -320,6 +320,10 @@ export async function processTradeSignal(
   const concurrencySettingRaw = await storage.getSetting("te_ucc_concurrency");
   const uccConcurrency = Math.max(1, parseInt(concurrencySettingRaw?.value || "50", 10) || 50);
 
+  // #209 Auto-pause threshold (consecutive capital-skips before plan auto-pauses)
+  const autoPauseSettingRaw = await storage.getSetting("auto_pause_skip_threshold");
+  const autoPauseThreshold = Math.max(1, parseInt(autoPauseSettingRaw?.value || "3", 10) || 3);
+
   const plansByBcId = new Map<string, typeof rankedPlans>();
   for (const plan of rankedPlans) {
     const bcId = plan.brokerConfigId!;
@@ -358,9 +362,30 @@ export async function processTradeSignal(
           console.log(`[PFL] ⛔ ${msg}`);
           logPFL(plan, bc.brokerName, webhookData, "skipped", msg, { resolvedAction: signalContext?.resolvedAction, ticker: plan.ticker || "", exchange: plan.exchange || "" });
           groupResults.push({ success: false, action: "hold", broker: bc.brokerName, planId: plan.id, message: msg });
+
+          // #209 Auto-pause guardrail: increment skip counter, auto-pause if threshold hit
+          try {
+            const newCount = await storage.incrementConsecutiveCapitalSkips(plan.id);
+            if (newCount >= autoPauseThreshold) {
+              const paused = await storage.autoPausePlan(plan.id, "insufficient_funds");
+              if (paused) {
+                const pauseMsg = `AUTO-PAUSED after ${newCount} consecutive capital skips — top up funds or re-rank to resume`;
+                console.log(`[PFL] 🛑 ${pauseMsg}`);
+                logPFL(plan, bc.brokerName, webhookData, "info", pauseMsg, { resolvedAction: signalContext?.resolvedAction, ticker: plan.ticker || "", exchange: plan.exchange || "" });
+                tradingCache.invalidatePlans(plan.configId);
+              }
+            }
+          } catch (err) {
+            console.warn(`[PFL] Auto-pause increment failed for plan ${plan.id}: ${err}`);
+          }
         } else {
           remaining -= gatingMargin;
-          groupResults.push(await executeTradeForPlan(storage, plan, bc, webhookData, signalContext));
+          const tradeRes = await executeTradeForPlan(storage, plan, bc, webhookData, signalContext);
+          groupResults.push(tradeRes);
+          // #209 Reset skip counter on successful order placement (fire-and-forget)
+          if (tradeRes.success) {
+            void storage.resetConsecutiveCapitalSkips(plan.id).catch(() => {});
+          }
         }
       }
       return groupResults;

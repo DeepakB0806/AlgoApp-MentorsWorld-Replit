@@ -13,7 +13,7 @@ import { startPersistentSquareOff } from "../te-kotak-neo-v3";
 import { refreshConfig as hsmRefreshConfig } from "../hsm-kotak-neo-v3";
 import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo-v3";
 import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
-import { calculatePlanMargins } from "../cm-kotak-neo-v3";
+import { calculatePlanMargins, refreshCapitalForBrokerConfig } from "../cm-kotak-neo-v3";
 import { getScripSyncStatus } from "../scrip-sync-scheduler";
 import { addProcessFlowLog, getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
 import { processTick, updateLastWsTick } from "../tsl-kotak-neo-v3";
@@ -114,6 +114,43 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       res.json({ success: true, id: req.params.id });
     } catch (error) {
       res.status(500).json({ error: "Failed to set primary broker config" });
+    }
+  });
+
+  // #206 List all capital snapshots (one row per UCC) — UI Funds Available chip
+  app.get("/api/broker-capital-snapshots", async (_req, res) => {
+    try {
+      const snaps = await storage.getAllCapitalSnapshots();
+      const out = snaps.map(s => ({
+        ucc: s.ucc,
+        brokerConfigId: s.brokerConfigId,
+        brokerName: s.brokerName,
+        availableCapital: s.availableCapital !== null ? Number(s.availableCapital) : null,
+        snapshotAt: s.snapshotAt !== null ? Number(s.snapshotAt) : null,
+      }));
+      res.json(out);
+    } catch (error) {
+      console.error("[BROKER-ROUTES] Failed to fetch capital snapshots:", error);
+      res.status(500).json({ error: "Failed to fetch capital snapshots" });
+    }
+  });
+
+  // #206 Manual single-UCC refresh — server-side 30s debounce inside cm helper
+  app.post("/api/broker-capital-snapshots/:brokerConfigId/refresh", async (req, res) => {
+    try {
+      const result = await refreshCapitalForBrokerConfig(storage, req.params.brokerConfigId);
+      const snap = result.snapshot;
+      const out = snap ? {
+        ucc: snap.ucc,
+        brokerConfigId: snap.brokerConfigId,
+        brokerName: snap.brokerName,
+        availableCapital: snap.availableCapital !== null && snap.availableCapital !== undefined ? Number(snap.availableCapital) : null,
+        snapshotAt: snap.snapshotAt !== null && snap.snapshotAt !== undefined ? Number(snap.snapshotAt) : null,
+      } : null;
+      res.json({ refreshed: result.refreshed, reason: result.reason, snapshot: out });
+    } catch (error) {
+      console.error("[BROKER-ROUTES] Capital refresh failed:", error);
+      res.status(500).json({ error: "Failed to refresh capital snapshot" });
     }
   });
 

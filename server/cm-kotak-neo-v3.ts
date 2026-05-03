@@ -126,8 +126,81 @@ export async function refreshAllCapital(storage: IStorage): Promise<void> {
   }
 }
 
+// ─── Single-UCC refresh (manual/intraday) ───────────────────────────────────
+// 30s server-side debounce — returns existing snapshot if still fresh.
+// Per-brokerConfigId in-flight coalescing — concurrent callers share one broker call.
+const REFRESH_DEBOUNCE_MS = 30_000;
+const inFlightRefresh = new Map<string, Promise<{ refreshed: boolean; snapshot: any | null; reason?: string }>>();
+
+export async function refreshCapitalForBrokerConfig(
+  storage: IStorage,
+  brokerConfigId: string,
+): Promise<{ refreshed: boolean; snapshot: any | null; reason?: string }> {
+  const existingPromise = inFlightRefresh.get(brokerConfigId);
+  if (existingPromise) return existingPromise;
+
+  const promise = doRefreshCapitalForBrokerConfig(storage, brokerConfigId)
+    .finally(() => { inFlightRefresh.delete(brokerConfigId); });
+  inFlightRefresh.set(brokerConfigId, promise);
+  return promise;
+}
+
+async function doRefreshCapitalForBrokerConfig(
+  storage: IStorage,
+  brokerConfigId: string,
+): Promise<{ refreshed: boolean; snapshot: any | null; reason?: string }> {
+  const bc = await storage.getBrokerConfig(brokerConfigId);
+  if (!bc || !bc.ucc) {
+    return { refreshed: false, snapshot: null, reason: "broker not found or missing UCC" };
+  }
+  if (bc.brokerName !== "kotak_neo") {
+    return { refreshed: false, snapshot: null, reason: "only kotak_neo supported" };
+  }
+  if (!bc.isConnected) {
+    const existing = await storage.getCapitalSnapshot(bc.ucc);
+    return { refreshed: false, snapshot: existing ?? null, reason: "broker not connected" };
+  }
+
+  const existing = await storage.getCapitalSnapshot(bc.ucc);
+  if (existing?.snapshotAt && Date.now() - Number(existing.snapshotAt) < REFRESH_DEBOUNCE_MS) {
+    return { refreshed: false, snapshot: existing, reason: "debounced (snapshot < 30s old)" };
+  }
+
+  try {
+    const limitsRes = await EL.getLimits(bc);
+    const cash = limitsRes.success ? extractAvailableCash(limitsRes.data) : 0;
+    const snap = await storage.upsertCapitalSnapshot({
+      ucc: bc.ucc!,
+      brokerName: bc.brokerName,
+      brokerConfigId: bc.id,
+      availableCapital: cash > 0 ? String(cash) : null,
+      snapshotAt: Date.now(),
+      rawResponse: limitsRes.success ? JSON.stringify(limitsRes.data).slice(0, 2000) : null,
+    });
+    console.log(`${LOG} Manual refresh UCC ${bc.ucc}: ₹${cash > 0 ? cash.toFixed(0) : "∞ (zero/failed)"}`);
+    return { refreshed: true, snapshot: snap };
+  } catch (err) {
+    console.warn(`${LOG} Manual refresh failed for UCC ${bc.ucc}: ${err}`);
+    try {
+      const snap = await storage.upsertCapitalSnapshot({
+        ucc: bc.ucc!,
+        brokerName: bc.brokerName,
+        brokerConfigId: bc.id,
+        availableCapital: null,
+        snapshotAt: Date.now(),
+        rawResponse: null,
+      });
+      return { refreshed: true, snapshot: snap, reason: "broker call failed; snapshot cleared" };
+    } catch {
+      return { refreshed: false, snapshot: existing ?? null, reason: "broker call + persist both failed" };
+    }
+  }
+}
+
 // ─── Scheduler ───────────────────────────────────────────────────────────────
 let capitalRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let intradayRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let intradayLastRunMs = 0;
 
 function scheduleNextCapitalRefresh(storage: IStorage): void {
   if (capitalRefreshTimer !== null) { clearTimeout(capitalRefreshTimer); capitalRefreshTimer = null; }
@@ -147,6 +220,32 @@ function scheduleNextCapitalRefresh(storage: IStorage): void {
   }, msUntil);
 }
 
+// Intraday refresh — fires every N minutes during market hours (09:15-15:30 IST).
+// N is read from settings on every tick, so admin can change without restart.
+function startIntradayCapitalRefresh(storage: IStorage): void {
+  if (intradayRefreshTimer !== null) { clearInterval(intradayRefreshTimer); intradayRefreshTimer = null; }
+  intradayRefreshTimer = setInterval(async () => {
+    try {
+      const setting = await storage.getSetting("cm_intraday_refresh_mins");
+      const intervalMins = Math.max(1, parseInt(setting?.value || "5", 10) || 5);
+      const intervalMs = intervalMins * 60 * 1000;
+
+      // 09:15-15:30 IST = 03:45-10:00 UTC
+      const now = new Date();
+      const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+      if (utcMinutes < 225 /* 03:45 */ || utcMinutes > 600 /* 10:00 */) return;
+
+      if (Date.now() - intradayLastRunMs < intervalMs) return;
+      intradayLastRunMs = Date.now();
+
+      console.log(`${LOG} Intraday refresh tick (every ${intervalMins} min)`);
+      await refreshAllCapital(storage);
+    } catch (err) {
+      console.warn(`${LOG} Intraday tick error: ${err}`);
+    }
+  }, 60_000); // poll every minute, gate inside
+}
+
 export async function startCapitalManager(storage: IStorage): Promise<void> {
   try {
     await refreshAllCapital(storage);
@@ -154,6 +253,7 @@ export async function startCapitalManager(storage: IStorage): Promise<void> {
     console.warn(`${LOG} Startup refresh warning: ${err}`);
   }
   scheduleNextCapitalRefresh(storage);
+  startIntradayCapitalRefresh(storage);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

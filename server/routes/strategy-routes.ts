@@ -185,6 +185,26 @@ export function registerStrategyRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  // #209 Resume an auto-paused plan (only when paused due to insufficient_funds)
+  app.post("/api/strategy-plans/:id/resume-auto-paused", async (req: any, res) => {
+    try {
+      const user = requireTeamOrSuperAdmin(req, res);
+      if (!user) return;
+      const existing = await storage.getStrategyPlan(req.params.id);
+      if (!existing) return res.status(404).json({ error: "Plan not found" });
+      if (existing.autoPauseReason !== "insufficient_funds") {
+        return res.status(400).json({ error: "Plan is not auto-paused for insufficient_funds" });
+      }
+      const resumed = await storage.resumeAutoPausedPlan(req.params.id);
+      if (!resumed) return res.status(409).json({ error: "Plan was modified concurrently — refresh and retry" });
+      tradingCache.invalidatePlans(resumed.configId);
+      res.json(resumed);
+    } catch (error) {
+      console.error("[STRATEGY-ROUTES] Failed to resume auto-paused plan:", error);
+      res.status(500).json({ error: "Failed to resume plan" });
+    }
+  });
+
   app.post("/api/strategy-plans", async (req: any, res) => {
     try {
       const user = requireTeamOrSuperAdmin(req, res);

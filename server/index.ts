@@ -311,6 +311,10 @@ app.use((req, res, next) => {
     if (!existingHalted) await storage.setSetting("trading_halted", "false");
     const existingUccConcurrency = await storage.getSetting("te_ucc_concurrency");
     if (!existingUccConcurrency) await storage.setSetting("te_ucc_concurrency", "50");
+    const existingIntradayCapital = await storage.getSetting("cm_intraday_refresh_mins");
+    if (!existingIntradayCapital) await storage.setSetting("cm_intraday_refresh_mins", "5");
+    const existingAutoPauseThreshold = await storage.getSetting("auto_pause_skip_threshold");
+    if (!existingAutoPauseThreshold) await storage.setSetting("auto_pause_skip_threshold", "3");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
   }

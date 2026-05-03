@@ -16,10 +16,18 @@ import { Plus, Trash2, Settings, Link2, Loader2, X, Clock, Shield, Target, Trend
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl, Position } from "@shared/schema";
+import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl, Position, InstrumentConfig } from "@shared/schema";
 import type { TradeParams, TimeLogicConfig, TrailingStoplossConfig } from "@shared/schema";
 import { buildBrokerOrderParams } from "@shared/schema";
 import type { BrokerConfig, Webhook } from "@shared/schema";
+
+type CapitalSnapshot = {
+  ucc: string;
+  brokerConfigId: string | null;
+  brokerName: string;
+  availableCapital: number | null;
+  snapshotAt: number | null;
+};
 
 function parseJsonSafe<T>(val: string | null | undefined, fallback: T): T {
   if (!val) return fallback;
@@ -531,6 +539,43 @@ export function BrokerLinking() {
     refetchInterval: 5 * 60 * 1000,
   });
 
+  // #206 Capital snapshots — refreshed every 60s
+  const { data: capitalSnapshots = [] } = useQuery<CapitalSnapshot[]>({
+    queryKey: ["/api/broker-capital-snapshots"],
+    refetchInterval: 60 * 1000,
+  });
+
+  // #206 Instrument configs — used to read expiryDay for 1.5x uplift
+  const { data: instrumentConfigs = [] } = useQuery<InstrumentConfig[]>({
+    queryKey: ["/api/instrument-configs"],
+  });
+
+  const refreshCapitalMutation = useMutation({
+    mutationFn: async (brokerConfigId: string) => {
+      const res = await apiRequest("POST", `/api/broker-capital-snapshots/${brokerConfigId}/refresh`);
+      return await res.json();
+    },
+    onSuccess: (payload: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-capital-snapshots"] });
+      if (payload?.refreshed === false && payload?.reason) {
+        toast({ title: "Funds not refreshed", description: payload.reason });
+      } else {
+        toast({ title: "Funds refreshed" });
+      }
+    },
+    onError: () => toast({ title: "Failed to refresh funds", variant: "destructive" }),
+  });
+
+  // #209 Resume an auto-paused plan
+  const resumeAutoPausedMutation = useMutation({
+    mutationFn: async (planId: string) => apiRequest("POST", `/api/strategy-plans/${planId}/resume-auto-paused`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/strategy-plans"] });
+      toast({ title: "Plan resumed" });
+    },
+    onError: () => toast({ title: "Failed to resume plan", variant: "destructive" }),
+  });
+
   const { user } = useAuth();
   const isSuperAdmin = (user as any)?.role === "super_admin" || (user as any)?.isSuperAdmin === true;
 
@@ -548,6 +593,67 @@ export function BrokerLinking() {
   });
 
   const activePlans = plans.filter((p) => p.status === "active");
+
+  // #206 Per-broker capital gating mirror — must match server TE logic exactly:
+  // sort gateable plans by rank, deduct estimatedMargin (1.5x on expiry day) per plan.
+  // Returns map: planId -> { remainingAfter, fits, gatingMargin, isExpiryDay }
+  const fundsByPlan = (() => {
+    const out = new Map<string, { remainingAfter: number; fits: boolean; gatingMargin: number; isExpiryDay: boolean; brokerConfigId: string }>();
+    const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+    const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const today = dayNames[istNow.getDay()];
+    const snapByBcId = new Map<string, CapitalSnapshot>();
+    for (const s of capitalSnapshots) if (s.brokerConfigId) snapByBcId.set(s.brokerConfigId, s);
+    const instrByKey = new Map<string, InstrumentConfig>();
+    for (const ic of instrumentConfigs) instrByKey.set(`${ic.ticker}|${ic.exchange}`, ic);
+
+    const gateable = activePlans.filter(p =>
+      p.brokerConfigId &&
+      (p.deploymentStatus === "active" || p.deploymentStatus === "deployed") &&
+      p.estimatedMargin && Number(p.estimatedMargin) > 0,
+    );
+    const byBc = new Map<string, typeof gateable>();
+    for (const p of gateable) {
+      const arr = byBc.get(p.brokerConfigId!) ?? [];
+      arr.push(p); byBc.set(p.brokerConfigId!, arr);
+    }
+    for (const [bcId, group] of byBc) {
+      const snap = snapByBcId.get(bcId);
+      const cash = snap?.availableCapital ?? 0;
+      let remaining = cash > 0 ? cash : Infinity; // mirror TE: 0/null → ∞ (no gate)
+      const sorted = [...group].sort((a,b) => (a.rank ?? 999) - (b.rank ?? 999));
+      for (const p of sorted) {
+        const ic = instrByKey.get(`${p.ticker}|${p.exchange}`);
+        const isExpiryDay = !!(ic?.expiryDay && ic.expiryDay === today);
+        const est = Number(p.estimatedMargin);
+        const gatingMargin = isExpiryDay ? est * 1.5 : est;
+        const fits = gatingMargin <= remaining;
+        if (fits) remaining -= gatingMargin;
+        out.set(p.id, { remainingAfter: remaining, fits, gatingMargin, isExpiryDay, brokerConfigId: bcId });
+      }
+    }
+    return out;
+  })();
+
+  const linkedBrokerSummaries = (() => {
+    const seen = new Map<string, { bc: BrokerConfig; snap?: CapitalSnapshot }>();
+    for (const p of activePlans) {
+      if (!p.brokerConfigId || seen.has(p.brokerConfigId)) continue;
+      const bc = brokerConfigs.find(b => b.id === p.brokerConfigId);
+      if (!bc) continue;
+      const snap = capitalSnapshots.find(s => s.brokerConfigId === bc.id);
+      seen.set(bc.id, { bc, snap });
+    }
+    return Array.from(seen.values());
+  })();
+
+  const formatAge = (snapshotAt: number | null | undefined): string => {
+    if (!snapshotAt) return "never";
+    const ageMs = Date.now() - snapshotAt;
+    if (ageMs < 60_000) return `${Math.floor(ageMs / 1000)}s ago`;
+    if (ageMs < 3600_000) return `${Math.floor(ageMs / 60_000)}m ago`;
+    return `${Math.floor(ageMs / 3600_000)}h ago`;
+  };
 
   const [localState, setLocalState] = useState<Record<string, { brokerConfigId: string }>>({});
   const [confirmAction, setConfirmAction] = useState<{ planId: string; action: string } | null>(null);
@@ -826,6 +932,43 @@ export function BrokerLinking() {
         </div>
       )}
 
+      {linkedBrokerSummaries.length > 0 && (
+        <Card data-testid="card-broker-funds-overview">
+          <CardHeader className="px-3 pt-3 pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Available Funds</CardTitle>
+          </CardHeader>
+          <CardContent className="px-3 pb-3 pt-0 flex flex-wrap gap-3">
+            {linkedBrokerSummaries.map(({ bc, snap }) => {
+              const cash = snap?.availableCapital;
+              return (
+                <div key={bc.id} className="flex items-center gap-2 border border-border/40 rounded-lg px-3 py-1.5 bg-muted/30" data-testid={`row-broker-funds-${bc.id}`}>
+                  <span className="text-xs font-semibold">{bc.name || bc.brokerName}{bc.ucc ? ` (${bc.ucc})` : ""}</span>
+                  <span className="text-muted-foreground/50">|</span>
+                  <span className="font-mono text-xs text-emerald-400" data-testid={`text-broker-funds-${bc.id}`}>
+                    {cash != null ? `₹${cash.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground" data-testid={`chip-snapshot-age-${bc.id}`}>
+                    {formatAge(snap?.snapshotAt)}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2"
+                    onClick={() => refreshCapitalMutation.mutate(bc.id)}
+                    disabled={refreshCapitalMutation.isPending}
+                    data-testid={`button-refresh-funds-${bc.id}`}
+                  >
+                    {refreshCapitalMutation.isPending
+                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                      : <RefreshCw className="w-3 h-3" />}
+                  </Button>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
       {activePlans.length === 0 ? (
         <Card className="text-center py-12">
           <CardContent>
@@ -891,6 +1034,11 @@ export function BrokerLinking() {
                     <span className="text-base font-bold leading-tight">{plan.name}</span>
                     {isDeployed && <Badge className={`text-xs ${badgeCls}`}>{depConfig.label}</Badge>}
                     {plan.brokerConfigId && <Badge variant="secondary" className="text-xs"><Link2 className="w-3 h-3 mr-1" />Linked</Badge>}
+                    {plan.autoPauseReason === "insufficient_funds" && (
+                      <Badge className="text-xs bg-amber-500 text-black border-transparent" data-testid={`badge-auto-paused-${plan.id}`}>
+                        <AlertTriangle className="w-3 h-3 mr-1" />Auto-paused: insufficient funds
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Config: {getConfigName(plan.configId)}{plan.exchange && <> · {plan.exchange}</>}{plan.ticker && <> / {plan.ticker}</>}
@@ -914,6 +1062,22 @@ export function BrokerLinking() {
                         <span className="text-xs text-amber-400 font-medium">New Version Available (v{parentVersion}) — Archive & Re-deploy to update</span>
                       </div>
                     ) : null;
+                  })()}
+                  {(() => {
+                    const fp = fundsByPlan.get(plan.id);
+                    if (!fp) return null;
+                    const remDisplay = fp.remainingAfter === Infinity ? "∞" : `₹${fp.remainingAfter.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+                    return (
+                      <div className="flex items-center gap-1.5 mt-1 text-xs flex-wrap" data-testid={`text-funds-after-rank-${plan.id}`}>
+                        <span className="text-muted-foreground">Funds after Rank {plan.rank ?? "—"}:</span>
+                        <span className={`font-mono font-semibold ${fp.fits ? "text-emerald-400" : "text-red-400"}`}>{remDisplay}</span>
+                        {fp.fits ? (
+                          <span className="text-emerald-400">✓ fits</span>
+                        ) : (
+                          <span className="text-red-400">⛔ skip — needs ₹{fp.gatingMargin.toLocaleString("en-IN", { maximumFractionDigits: 0 })}{fp.isExpiryDay ? " (1.5x expiry)" : ""}</span>
+                        )}
+                      </div>
+                    );
                   })()}
                   {isDeployed && plan.estimatedMargin && (
                     <div className="flex items-center gap-1.5 mt-1.5 text-xs flex-wrap" data-testid={`text-margin-info-${plan.id}`}>
@@ -1038,7 +1202,19 @@ export function BrokerLinking() {
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5" data-testid={`container-deployment-actions-${plan.id}`}>
-                        {actions.map((a) => {
+                        {plan.autoPauseReason === "insufficient_funds" ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="bg-amber-500 hover:bg-amber-600 text-black border-transparent"
+                            onClick={() => resumeAutoPausedMutation.mutate(plan.id)}
+                            disabled={resumeAutoPausedMutation.isPending}
+                            data-testid={`button-resume-auto-paused-${plan.id}`}
+                          >
+                            {resumeAutoPausedMutation.isPending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}
+                            Resume
+                          </Button>
+                        ) : actions.map((a) => {
                           const ActionIcon = a.icon;
                           const btnCls: Record<string, string> = {
                             paused: "bg-slate-500 hover:bg-slate-600 text-white border-transparent",
@@ -1059,7 +1235,8 @@ export function BrokerLinking() {
                               <ActionIcon className="w-3 h-3 mr-1" />{a.label}
                             </Button>
                           );
-                        })}
+                        })
+                        }
                         <Button
                           size="sm"
                           variant="outline"

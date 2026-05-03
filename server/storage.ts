@@ -138,6 +138,11 @@ export interface IStorage {
   createStrategyPlan(plan: InsertStrategyPlan): Promise<StrategyPlan>;
   updateStrategyPlan(id: string, plan: Partial<InsertStrategyPlan>): Promise<StrategyPlan | undefined>;
   deleteStrategyPlan(id: string): Promise<boolean>;
+  // #209 Auto-pause guardrail (insufficient funds)
+  incrementConsecutiveCapitalSkips(planId: string): Promise<number>;
+  resetConsecutiveCapitalSkips(planId: string): Promise<void>;
+  autoPausePlan(planId: string, reason: string): Promise<StrategyPlan | undefined>;
+  resumeAutoPausedPlan(planId: string): Promise<StrategyPlan | undefined>;
 
   // Strategy Trades - records trades executed by strategy plans
   getStrategyTrade(id: string): Promise<StrategyTrade | undefined>;
@@ -939,6 +944,45 @@ export class DatabaseStorage implements IStorage {
   async deleteStrategyPlan(id: string): Promise<boolean> {
     const result = await db.delete(strategyPlans).where(eq(strategyPlans.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // ── #209 Auto-pause guardrail (insufficient funds) ──────────────────────────
+  async incrementConsecutiveCapitalSkips(planId: string): Promise<number> {
+    const [row] = await db.update(strategyPlans)
+      .set({ consecutiveCapitalSkips: sql`${strategyPlans.consecutiveCapitalSkips} + 1` })
+      .where(eq(strategyPlans.id, planId))
+      .returning({ count: strategyPlans.consecutiveCapitalSkips });
+    return row?.count ?? 0;
+  }
+
+  async resetConsecutiveCapitalSkips(planId: string): Promise<void> {
+    await db.update(strategyPlans)
+      .set({ consecutiveCapitalSkips: 0 })
+      .where(and(eq(strategyPlans.id, planId), gt(strategyPlans.consecutiveCapitalSkips, 0)));
+  }
+
+  async autoPausePlan(planId: string, reason: string): Promise<StrategyPlan | undefined> {
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const [plan] = await db.update(strategyPlans)
+      .set({ deploymentStatus: "paused", autoPauseReason: reason, autoPausedAt: now, updatedAt: now })
+      .where(and(eq(strategyPlans.id, planId), sql`${strategyPlans.autoPauseReason} IS NULL`))
+      .returning();
+    return plan || undefined;
+  }
+
+  async resumeAutoPausedPlan(planId: string): Promise<StrategyPlan | undefined> {
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const [plan] = await db.update(strategyPlans)
+      .set({
+        deploymentStatus: "active",
+        autoPauseReason: null,
+        autoPausedAt: null,
+        consecutiveCapitalSkips: 0,
+        updatedAt: now,
+      })
+      .where(and(eq(strategyPlans.id, planId), eq(strategyPlans.autoPauseReason, "insufficient_funds")))
+      .returning();
+    return plan || undefined;
   }
 
   async getStrategyTrade(id: string): Promise<StrategyTrade | undefined> {

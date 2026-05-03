@@ -176,6 +176,9 @@ export const strategyPlans = pgTable("strategy_plans", {
   autoResume: boolean("auto_resume").default(true).notNull(),
   estimatedMargin: numeric("estimated_margin"),
   marginCalculatedAt: text("margin_calculated_at"),
+  consecutiveCapitalSkips: integer("consecutive_capital_skips").default(0).notNull(),
+  autoPauseReason: text("auto_pause_reason"),
+  autoPausedAt: text("auto_paused_at"),
 }, (table) => [
   index("idx_strategy_plans_config_id").on(table.configId),
   index("idx_strategy_plans_broker_config_id").on(table.brokerConfigId),
