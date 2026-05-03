@@ -919,7 +919,7 @@ export function BrokerLinking() {
                     <div className="flex items-center gap-1.5 mt-1.5 text-xs flex-wrap" data-testid={`text-margin-info-${plan.id}`}>
                       {plan.marginCalculatedAt && (
                         <span className="text-muted-foreground">
-                          Date: {new Date(plan.marginCalculatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).replace(",", "")}
+                          Date: {new Date(plan.marginCalculatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).replace(",", "")} IST
                         </span>
                       )}
                       <span className="text-muted-foreground/50">|</span>

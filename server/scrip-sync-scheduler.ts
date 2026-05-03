@@ -1,6 +1,7 @@
 import type { IStorage } from "./storage";
 import { runScripMasterSync, runScripMasterSyncPhaseB } from "./smc-kotak-neo-v3";
 import type { BrokerConfig } from "@shared/schema";
+import { calculatePlanMargins } from "./capital-manager";
 
 // ── Intraday periodic refresh ───────────────────────────────────────────────
 let intradayHandle: ReturnType<typeof setInterval> | null = null;
@@ -48,6 +49,9 @@ export function startIntradayScripRefresh(storage: IStorage): void {
         const result = await runScripMasterSync(storage, primaryBroker);
         if (result.success) {
           console.log(`[SCRIP-MASTER] Intraday refresh (Phase A): ${result.synced} contracts via ${primaryBroker.ucc || primaryBroker.id}`);
+          await calculatePlanMargins(storage, primaryBroker).catch(err =>
+            console.warn(`[SCRIP-MASTER] Capital margin calc error (intraday Phase A): ${err}`)
+          );
         } else {
           console.warn(`[SCRIP-MASTER] Intraday refresh Phase A failed: ${result.error}`);
         }
@@ -60,6 +64,11 @@ export function startIntradayScripRefresh(storage: IStorage): void {
         await runScripMasterSyncPhaseB(storage, otherBrokers).catch(err =>
           console.warn(`[SCRIP-MASTER] Intraday refresh Phase B error: ${err}`)
         );
+        for (const bc of otherBrokers) {
+          await calculatePlanMargins(storage, bc).catch(err =>
+            console.warn(`[SCRIP-MASTER] Capital margin calc error (intraday Phase B, ${bc.ucc}): ${err}`)
+          );
+        }
       }
     } catch (err) {
       console.warn(`[SCRIP-MASTER] Intraday refresh loop error: ${err}`);
@@ -119,6 +128,9 @@ export function scheduleStartupScripSyncRetry(storage: IStorage, attempt: number
             console.log(
               `[SCRIP-MASTER] Startup auto-recovery: recovered after ${attempt} attempt(s) — ${result.synced} contracts loaded`,
             );
+            await calculatePlanMargins(storage, bc).catch(err =>
+              console.warn(`[SCRIP-MASTER] Capital margin calc error (startup recovery): ${err}`)
+            );
           } else {
             console.warn(`[SCRIP-MASTER] Startup auto-recovery attempt ${attempt} failed for broker ${bc.ucc || bc.id}: ${result.error}`);
             scheduleScripSyncRetry(storage, bc, 1);
@@ -165,6 +177,9 @@ export function scheduleScripSyncRetry(
         console.log(
           `[SCRIP-MASTER] Auto-recovery: recovered after ${attempt} attempt(s) — ${result.synced} contracts loaded`,
         );
+        await calculatePlanMargins(storage, brokerConfig).catch(err =>
+          console.warn(`[SCRIP-MASTER] Capital margin calc error (retry recovery): ${err}`)
+        );
       } else {
         console.warn(`[SCRIP-MASTER] Auto-recovery: attempt ${attempt} failed: ${result.error}`);
         scheduleScripSyncRetry(storage, brokerConfig, attempt + 1);
@@ -210,6 +225,9 @@ export async function rescheduleScripMasterSync(storage: IStorage): Promise<void
           const result = await runScripMasterSync(storage, primaryBroker);
           if (result.success) {
             console.log(`[SCRIP-MASTER] Daily sync Phase A (${syncClockStr} IST): ${result.synced} contracts via ${primaryBroker.ucc || primaryBroker.id}`);
+            await calculatePlanMargins(storage, primaryBroker).catch(err =>
+              console.warn(`[SCRIP-MASTER] Capital margin calc error (daily Phase A): ${err}`)
+            );
           } else {
             console.warn(`[SCRIP-MASTER] Daily sync Phase A failed: ${result.error} — scheduling auto-recovery`);
             scheduleScripSyncRetry(storage, primaryBroker, 1);
@@ -224,6 +242,11 @@ export async function rescheduleScripMasterSync(storage: IStorage): Promise<void
           await runScripMasterSyncPhaseB(storage, otherBrokers).catch(err =>
             console.warn(`[SCRIP-MASTER] Daily sync Phase B error: ${err}`)
           );
+          for (const bc of otherBrokers) {
+            await calculatePlanMargins(storage, bc).catch(err =>
+              console.warn(`[SCRIP-MASTER] Capital margin calc error (daily Phase B, ${bc.ucc}): ${err}`)
+            );
+          }
         }
       }
     } catch (err) {
@@ -239,6 +262,9 @@ export async function rescheduleScripMasterSync(storage: IStorage): Promise<void
           const result = await runScripMasterSync(storage, primaryBroker);
           if (result.success) {
             console.log(`[SCRIP-MASTER] Daily sync Phase A (interval): ${result.synced} contracts via ${primaryBroker.ucc || primaryBroker.id}`);
+            await calculatePlanMargins(storage, primaryBroker).catch(err =>
+              console.warn(`[SCRIP-MASTER] Capital margin calc error (daily interval Phase A): ${err}`)
+            );
           } else {
             console.warn(`[SCRIP-MASTER] Daily sync Phase A (interval) failed: ${result.error} — scheduling auto-recovery`);
             scheduleScripSyncRetry(storage, primaryBroker, 1);
@@ -252,6 +278,11 @@ export async function rescheduleScripMasterSync(storage: IStorage): Promise<void
           await runScripMasterSyncPhaseB(storage, otherBrokers).catch(err =>
             console.warn(`[SCRIP-MASTER] Daily sync Phase B (interval) error: ${err}`)
           );
+          for (const bc of otherBrokers) {
+            await calculatePlanMargins(storage, bc).catch(err =>
+              console.warn(`[SCRIP-MASTER] Capital margin calc error (daily interval Phase B, ${bc.ucc}): ${err}`)
+            );
+          }
         }
       } catch (err) {
         console.log(`[SCRIP-MASTER] Scheduled sync error: ${err}`);
