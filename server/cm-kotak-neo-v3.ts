@@ -4,19 +4,17 @@
 // snapshots to broker_capital_snapshots. TE reads these instead of calling
 // getLimits live.
 //
-// calculatePlanMargins — pure CSV SPAN engine, zero Kotak API calls.
-// ATM is derived from put-call parity by reading today's on-disk scrip master
-// CSV (col 58 pScripBasePrice) from process.cwd().
-// Margin = SPAN rate × targetStrike × lotSize × lotMultiplier × sellLots.
-// UT and DT are computed separately; estimatedMargin = max(UT, DT).
+// calculatePlanMargins — Dual-Mode margin engine. Fully autonomous; no SMC import.
+//   Mode 1 (API):  EL.getQuote → LTP → ATM; per-leg EL.checkMargin → sum ordMrgn.
+//   Mode 2 (SPAN): CSV put-call parity ATM; csvPremium × spanRate per leg.
+//   UT = uptrendLegs + neutralLegs combined; DT = downtrendLegs + neutralLegs.
+//   estimatedMargin = max(UT, DT).
 // ═══════════════════════════════════════════════════════════════════════════════
 import fs from "fs";
 import path from "path";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
 import EL from "./el-kotak-neo-v3";
-import { parseTradeParams } from "./te-kotak-neo-v3";
-import { liveContractCache } from "./smc-kotak-neo-v3";
 import {
   getTargetExpiry,
   parseStrikeSpec,
@@ -159,168 +157,242 @@ export async function startCapitalManager(storage: IStorage): Promise<void> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CAPITAL MANAGER — calculatePlanMargins  (pure CSV SPAN engine)
+// CAPITAL MANAGER — calculatePlanMargins  (Dual-Mode: API primary, SPAN fallback)
 //
-// Zero Kotak API calls. ATM is derived from put-call parity:
-//   read today's on-disk scrip_master_{exchange}_{date}.csv from process.cwd(),
-//   scan col 58 (pScripBasePrice ÷ 100) for the target expiry's CE and PE
-//   tokens; find strike where |CE_price − PE_price| is minimum; snap to
-//   strikeInterval via getATMStrike. Returns null if disk file is absent.
+// Fully autonomous — no import from smc-kotak-neo-v3 or te-kotak-neo-v3.
+// The on-disk scrip master CSV is the sole data source.
 //
-// Margin formula per SELL leg:
-//   spanRate × targetStrike × lotSize × lotMultiplier × leg.lots
-// BUY legs contribute ₹0.
+// Mode 1 (API — primary, requires live session):
+//   EL.getQuote → live LTP → snap to ATM
+//   Per leg: parseStrikeSpec + getOTMStrike → token from CSV tokenMap
+//   → EL.checkMargin → sum ordMrgn per block
 //
-// UT = SELL margins from uptrendLegs  + SELL margins from neutralLegs
-// DT = SELL margins from downtrendLegs + SELL margins from neutralLegs
-// estimatedMargin = max(UT, DT)
+// Mode 2 (SPAN fallback — pre-market / token missing / API down):
+//   CSV put-call parity ATM (col 58 pScripBasePrice ÷ 100)
+//   Per leg: csvPremium × spanRate × lotSize × lotMultiplier × lots
+//   SELL subtracts, BUY adds; block result = |total|
 //
-// On expiry day (today IST == targetExpiryDate) the effective SPAN rate is
-// scaled by expiry_day_span_multiplier (default 1.5×).
+// Both modes:
+//   UT block = uptrendLegs + neutralLegs  (combined before compute)
+//   DT block = downtrendLegs + neutralLegs
+//   estimatedMargin = max(UT, DT)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
-// Return leg array for a given blockType from parsed tradeParams.
 function cmSelectLegs(tradeParams: Record<string, any>, blockType: string): any[] {
   const legs = tradeParams[blockType];
   return Array.isArray(legs) ? legs : [];
 }
 
-// True if today IST matches the target expiry date string (YYYY-MM-DD).
 function cmIsExpiryDay(targetExpiryDate: string): boolean {
   const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   return todayIST === targetExpiryDate;
 }
 
-// Read the on-disk CSV for the given exchange and today's IST date to find ATM
-// via put-call parity. Filename matches SMC's write pattern:
-//   scrip_master_{exchange.toLowerCase()}_{YYYY-MM-DD}.csv  in process.cwd()
+// Local tradeParams parser — no TE import needed.
+function cmParseTradeParams(plan: { tradeParams?: any }): Record<string, any> | null {
+  if (!plan.tradeParams) return null;
+  try {
+    return typeof plan.tradeParams === "string"
+      ? JSON.parse(plan.tradeParams)
+      : plan.tradeParams;
+  } catch {
+    return null;
+  }
+}
+
+// Kotak 1980 epoch → YYYY-MM-DD.
+// Mirrors SMC's locked parseExpiryDate [SMC-1] without importing it.
+// Kotak timestamps are seconds since 1980; + 315_532_800 converts to Unix seconds.
+function cmParseExpiryEpoch(raw: string): string | null {
+  const trimmed = raw.trim().replace(/"/g, "");
+  const asMs = Number(trimmed);
+  if (!isNaN(asMs) && asMs > 946684800000) {
+    const d = new Date(asMs);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  const asSec = Number(trimmed);
+  if (!isNaN(asSec) && asSec > 946684800 && asSec < 4102444800) {
+    const d = new Date((asSec + 315_532_800) * 1000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  return null;
+}
+
+// Deep-walk checkMargin response for the margin value field.
+function cmExtractOrdMrgn(data: unknown): number {
+  if (!data || typeof data !== "object") return 0;
+  const search = (obj: any, depth = 0): number => {
+    if (depth > 5 || typeof obj !== "object" || obj === null) return 0;
+    for (const k of ["ordMrgn", "ord_mrgn", "orderMargin", "ordMargin", "margin"]) {
+      if (obj[k] !== undefined) { const v = Number(obj[k]); if (!isNaN(v)) return v; }
+    }
+    for (const v of Object.values(obj)) { const f = search(v, depth + 1); if (f !== 0) return f; }
+    return 0;
+  };
+  return search(data);
+}
+
+// ─── CSV: build token map + price map for a specific ticker + expiry ──────────
 //
-// CSV column indices (1-indexed, i.e. array index = col - 1):
-//   col  1  → pSymbol       (token, string)
-//   col  5  → pSymbolName   (ticker)
-//   col  7  → pOptionType   ("CE" / "PE" / "XX")
-//   col 18  → lExpiryDate   (epoch seconds since Kotak 1980 epoch — not used here)
-//   col 21  → dStrikePrice  (strike × 100)
-//   col 58  → pScripBasePrice (base price × 100)
+// Single CSV pass. Column layout (1-indexed → array index):
+//   col  1 (idx  0) → pSymbol        token string
+//   col  5 (idx  4) → pSymbolName    base ticker  (e.g. "NIFTY")
+//   col  7 (idx  6) → pOptionType    "CE" / "PE" / "XX"
+//   col 18 (idx 17) → lExpiryDate    Kotak 1980 epoch → cmParseExpiryEpoch
+//   col 21 (idx 20) → dStrikePrice   strike × 100
+//   col 58 (idx 57) → pScripBasePrice price  × 100
 //
-// We use liveContractCache (already keyed by ticker_date_strike_optType) to
-// identify which tokens belong to the target expiry — no CSV date parsing needed.
-// Returns null if the disk file is absent.
-function cmFindAtmFromCsv(
+// Returns:
+//   tokenMap  — Map<"${strike}_${optType}", token>
+//   priceMap  — Map<strike, {CE?, PE?}>
+//   atmStrike — snapped via put-call parity + getATMStrike
+function cmBuildTokenAndPriceMap(
   ticker: string,
   exchange: string,
   targetExpiryDate: string,
   strikeInterval: number,
-): number | null {
+): { atmStrike: number; tokenMap: Map<string, string>; priceMap: Map<number, { CE?: number; PE?: number }> } | null {
   const MLOG = "[MARGIN-CALC]";
 
-  // Step 1: collect token → {strike, optType} from liveContractCache
-  const tokenMeta = new Map<string, { strike: number; optType: string }>();
-  for (const key of liveContractCache.keys()) {
-    if (!key.startsWith(`${ticker}_${targetExpiryDate}_`)) continue;
-    const parts = key.split("_");
-    if (parts.length !== 4) continue;
-    const strike = Number(parts[2]);
-    const optType = parts[3];
-    if (isNaN(strike) || strike <= 0) continue;
-    if (optType !== "CE" && optType !== "PE") continue;
-    const entry = liveContractCache.get(key);
-    if (entry?.token) tokenMeta.set(entry.token, { strike, optType });
-  }
-
-  if (tokenMeta.size === 0) {
-    console.warn(`${MLOG} cmFindAtmFromCsv: no cache keys for ${ticker}_${targetExpiryDate}`);
-    return null;
-  }
-
-  // Step 2: read raw CSV from disk (SMC writes then discards the text from RAM;
-  // the on-disk file is the only reliable source)
   const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const csvFilename = `scrip_master_${exchange.toLowerCase()}_${todayIST}.csv`;
   const csvFilePath = path.resolve(process.cwd(), csvFilename);
   if (!fs.existsSync(csvFilePath)) {
-    console.warn(`${MLOG} cmFindAtmFromCsv: disk CSV not found (${csvFilename}) — run scrip sync first`);
+    console.warn(`${MLOG} cmBuildTokenAndPriceMap: CSV not found (${csvFilename}) — run scrip sync first`);
     return null;
   }
+
   const rawCsv = fs.readFileSync(csvFilePath, "utf-8");
+  const tokenMap = new Map<string, string>();
+  const priceMap = new Map<number, { CE?: number; PE?: number }>();
 
-  // Step 3: scan CSV rows; read col 1 (token) and col 58 (pScripBasePrice ÷ 100)
-  const strikePrices = new Map<number, { CE?: number; PE?: number }>();
-
-  const lines = rawCsv.split("\n");
-  for (const line of lines) {
+  for (const line of rawCsv.split("\n")) {
     if (!line.trim()) continue;
     const cols = line.split(",");
     if (cols.length < 58) continue;
 
-    const token = cols[0].trim().replace(/"/g, "");
-    const meta = tokenMeta.get(token);
-    if (!meta) continue;
+    const rowTicker = cols[4]?.trim().replace(/"/g, "");
+    if (rowTicker !== ticker) continue;
 
-    const rawPrice = cols[57].trim().replace(/"/g, "");
-    const price = Number(rawPrice) / 100;
+    const optType = cols[6]?.trim().replace(/"/g, "");
+    if (optType !== "CE" && optType !== "PE") continue;
+
+    const expiryDate = cmParseExpiryEpoch(cols[17] ?? "");
+    if (expiryDate !== targetExpiryDate) continue;
+
+    const token = cols[0]?.trim().replace(/"/g, "");
+    if (!token) continue;
+
+    const strike = Math.round(Number(cols[20]?.trim().replace(/"/g, "")) / 100);
+    if (!strike || strike <= 0) continue;
+
+    const price = Number(cols[57]?.trim().replace(/"/g, "")) / 100;
     if (isNaN(price) || price <= 0) continue;
 
-    const existing = strikePrices.get(meta.strike) ?? {};
-    if (meta.optType === "CE") existing.CE = price;
-    else if (meta.optType === "PE") existing.PE = price;
-    strikePrices.set(meta.strike, existing);
+    tokenMap.set(`${strike}_${optType}`, token);
+    const existing = priceMap.get(strike) ?? {};
+    if (optType === "CE") existing.CE = price;
+    else existing.PE = price;
+    priceMap.set(strike, existing);
   }
 
-  if (strikePrices.size === 0) {
-    console.warn(`${MLOG} cmFindAtmFromCsv: no prices found in CSV for ${ticker}_${targetExpiryDate}`);
+  if (priceMap.size === 0) {
+    console.warn(`${MLOG} cmBuildTokenAndPriceMap: no entries for ${ticker} ${targetExpiryDate} in ${csvFilename}`);
     return null;
   }
 
-  // Step 4: put-call parity — find strike where |CE − PE| is minimum
   let bestStrike: number | null = null;
   let bestDiff = Infinity;
-
-  for (const [strike, prices] of strikePrices) {
+  for (const [strike, prices] of priceMap) {
     if (prices.CE === undefined || prices.PE === undefined) continue;
     const diff = Math.abs(prices.CE - prices.PE);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      bestStrike = strike;
-    }
+    if (diff < bestDiff) { bestDiff = diff; bestStrike = strike; }
   }
-
   if (bestStrike === null) {
-    console.warn(`${MLOG} cmFindAtmFromCsv: could not find paired CE+PE for ${ticker}_${targetExpiryDate}`);
+    console.warn(`${MLOG} cmBuildTokenAndPriceMap: no paired CE+PE found for ${ticker} ${targetExpiryDate}`);
     return null;
   }
 
-  const strikePair = strikePrices.get(bestStrike)!;
+  const atmStrike = getATMStrike(bestStrike, strikeInterval);
+  const pair = priceMap.get(bestStrike)!;
   console.log(
-    `${MLOG} ATM=${bestStrike} via put-call parity (|CE-PE|=${bestDiff.toFixed(2)}, CE=${strikePair.CE?.toFixed(2)}, PE=${strikePair.PE?.toFixed(2)})`,
+    `${MLOG} ATM=${atmStrike} (parity |CE-PE|=${bestDiff.toFixed(2)}, CE=${pair.CE?.toFixed(2)}, PE=${pair.PE?.toFixed(2)}) — ${priceMap.size} strikes for ${targetExpiryDate}`,
   );
-
-  return getATMStrike(bestStrike, strikeInterval);
+  return { atmStrike, tokenMap, priceMap };
 }
 
-// Compute net SPAN margin for a list of legs — works for any strategy type.
-//
-// For every leg:
-//   contribution = spanRate × resolvedStrike × lotSize × lotMultiplier × lots
-//   SELL → total -= contribution  (you receive — negative)
-//   BUY  → total += contribution  (you pay     — positive)
-// Returns Math.abs(total) so the result is always positive.
-//
-// This handles all strategy types uniformly:
-//   Option buying  (all BUY)  → |0 − BUY_sum|       = BUY_sum
-//   Option selling (SELL+BUY) → |SELL_sum − BUY_sum| = net margin
-//   SELL-only                 → |SELL_sum − 0|       = SELL_sum
-//
-// lotSize comes from instrumentConfig per index — never hardcoded.
-function cmComputeBlockMargin(
+// ─── Mode 1: API block ────────────────────────────────────────────────────────
+async function cmApiBlock(
   legs: any[],
   atmStrike: number,
   strikeInterval: number,
+  tokenMap: Map<string, string>,
   lotSize: number,
   lotMultiplier: number,
+  brokerConfig: BrokerConfig,
+  exchange: string,
+  productMode: string,
+  blockLabel: string,
+): Promise<{ total: number; anyFailed: boolean }> {
+  const MLOG = "[MARGIN-CALC]";
+  let total = 0;
+  let anyFailed = false;
+
+  for (const leg of legs) {
+    const legType = (leg.type || "").toUpperCase() as "CE" | "PE" | "FUT";
+    if (legType !== "CE" && legType !== "PE" && legType !== "FUT") continue;
+
+    const legAction = (leg.action || "SELL").toUpperCase();
+    const qty = (leg.lots || 1) * lotMultiplier * lotSize;
+
+    let token: string | undefined;
+    if (legType === "FUT") {
+      token = tokenMap.get(`0_FUT`);
+    } else {
+      const spec = parseStrikeSpec(leg.strike || "ATM");
+      const resolvedStrike = getOTMStrike(atmStrike, spec, strikeInterval, legType as "CE" | "PE");
+      token = tokenMap.get(`${resolvedStrike}_${legType}`);
+      if (!token) {
+        console.warn(`${MLOG}   ${blockLabel} API: no token for ${legType} strike=${resolvedStrike}`);
+        anyFailed = true;
+        continue;
+      }
+    }
+    if (!token) { anyFailed = true; continue; }
+
+    const marginRes = await EL.checkMargin(brokerConfig, {
+      exSeg: EL.mapExchange(exchange),
+      prc: "0", prcTp: "MKT", prod: productMode,
+      qty: String(qty), tok: token,
+      trnsTp: legAction === "BUY" ? "B" : "S",
+      brkName: "KOTAK", brnchId: "ONLINE",
+    }, true);
+
+    if (!marginRes.success) {
+      console.warn(`${MLOG}   ${blockLabel} API: checkMargin failed (${(marginRes as any).error})`);
+      anyFailed = true;
+    } else {
+      const mrgn = cmExtractOrdMrgn(marginRes.data);
+      total += mrgn;
+      console.log(`${MLOG}   ${blockLabel} API: ${legAction} ${legType} ordMrgn=₹${mrgn.toFixed(2)}`);
+    }
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return { total, anyFailed };
+}
+
+// ─── Mode 2: SPAN fallback block ─────────────────────────────────────────────
+// csvPremium × spanRate × lotSize × lotMult × lots; SELL−, BUY+; |total|
+function cmSpanBlock(
+  legs: any[],
+  atmStrike: number,
+  strikeInterval: number,
+  priceMap: Map<number, { CE?: number; PE?: number }>,
   effectiveSpanRate: number,
+  lotSize: number,
+  lotMultiplier: number,
   blockLabel: string,
 ): number {
   const MLOG = "[MARGIN-CALC]";
@@ -331,46 +403,50 @@ function cmComputeBlockMargin(
     if (legType !== "CE" && legType !== "PE" && legType !== "FUT") continue;
 
     const legAction = (leg.action || "SELL").toUpperCase();
+    const lots = leg.lots || 1;
 
-    let targetStrike: number;
+    let resolvedStrike: number;
     if (legType === "FUT") {
-      targetStrike = atmStrike;
+      resolvedStrike = atmStrike;
     } else {
       const spec = parseStrikeSpec(leg.strike || "ATM");
-      targetStrike = getOTMStrike(atmStrike, spec, strikeInterval, legType as "CE" | "PE");
+      resolvedStrike = getOTMStrike(atmStrike, spec, strikeInterval, legType as "CE" | "PE");
     }
 
-    const lots = leg.lots || 1;
-    const contribution = effectiveSpanRate * targetStrike * lotSize * lotMultiplier * lots;
+    const priceEntry = priceMap.get(resolvedStrike);
+    const csvPremium = legType === "FUT"
+      ? resolvedStrike
+      : ((legType === "CE" ? priceEntry?.CE : priceEntry?.PE) ?? 0);
 
+    if (csvPremium <= 0) {
+      console.warn(`${MLOG}   ${blockLabel} SPAN: no price for ${legType} strike=${resolvedStrike} — ₹0`);
+    }
+
+    const contribution = csvPremium * effectiveSpanRate * lotSize * lotMultiplier * lots;
     if (legAction === "SELL") {
       total -= contribution;
-      console.log(`${MLOG}   ${blockLabel} SELL ${legType} strike=${targetStrike} lots=${lots}×${lotMultiplier}×${lotSize} −₹${contribution.toFixed(2)}`);
+      console.log(`${MLOG}   ${blockLabel} SPAN: SELL ${legType} @${resolvedStrike} prem=₹${csvPremium} −₹${contribution.toFixed(2)}`);
     } else {
       total += contribution;
-      console.log(`${MLOG}   ${blockLabel} BUY  ${legType} strike=${targetStrike} lots=${lots}×${lotMultiplier}×${lotSize} +₹${contribution.toFixed(2)}`);
+      console.log(`${MLOG}   ${blockLabel} SPAN: BUY  ${legType} @${resolvedStrike} prem=₹${csvPremium} +₹${contribution.toFixed(2)}`);
     }
   }
-
   return Math.abs(total);
 }
 
 // ─── calculatePlanMargins ────────────────────────────────────────────────────
-// Signature identical to the old version for drop-in compatibility.
-// Runs after SMC's sync and overwrites estimatedMargin with correct values.
 export async function calculatePlanMargins(
   storage: IStorage,
   brokerConfig: BrokerConfig,
 ): Promise<void> {
   const MLOG = "[MARGIN-CALC]";
   try {
-    // ── Read SPAN settings (defaults: 5.0% and 1.5×) ────────────────────────
-    const spanRateSetting = await storage.getSetting("span_rate_percent");
+    const spanRateSetting   = await storage.getSetting("span_rate_percent");
     const expiryMultSetting = await storage.getSetting("expiry_day_span_multiplier");
-    const parsedSpanRate = parseFloat(spanRateSetting?.value || "");
-    const parsedExpiryMult = parseFloat(expiryMultSetting?.value || "");
-    const baseSpanRate = (isNaN(parsedSpanRate) || parsedSpanRate <= 0) ? 0.05 : parsedSpanRate / 100;
-    const expiryMultiplier = (isNaN(parsedExpiryMult) || parsedExpiryMult < 1) ? 1.5 : parsedExpiryMult;
+    const parsedSpanRate    = parseFloat(spanRateSetting?.value || "");
+    const parsedExpiryMult  = parseFloat(expiryMultSetting?.value || "");
+    const baseSpanRate      = (isNaN(parsedSpanRate)   || parsedSpanRate   <= 0) ? 0.05 : parsedSpanRate / 100;
+    const expiryMultiplier  = (isNaN(parsedExpiryMult) || parsedExpiryMult < 1)  ? 1.5  : parsedExpiryMult;
 
     const allPlans = await storage.getStrategyPlans();
     const plansToCalc = allPlans
@@ -388,95 +464,110 @@ export async function calculatePlanMargins(
 
     for (const plan of plansToCalc) {
       try {
-        // ── 1. Parse tradeParams ─────────────────────────────────────────────
-        const tradeParams = parseTradeParams(plan);
-        if (!tradeParams) {
-          console.warn(`${MLOG} Plan "${plan.name}" — tradeParams missing or invalid, skipping`);
-          continue;
-        }
+        // 1. Parse tradeParams (local, no TE import)
+        const tradeParams = cmParseTradeParams(plan);
+        if (!tradeParams) { console.warn(`${MLOG} Plan "${plan.name}" — tradeParams missing, skipping`); continue; }
 
-        const ticker = plan.ticker;
+        const ticker   = plan.ticker;
         const exchange = plan.exchange;
-
         if (!ticker || !exchange || !isOptionExchange(exchange)) {
           console.warn(`${MLOG} Plan "${plan.name}" — no ticker/exchange or non-option exchange, skipping`);
           continue;
         }
 
-        // ── 2. Get instrumentConfig ──────────────────────────────────────────
+        // 2. instrumentConfig
         const instrumentConfig = await storage.getInstrumentConfig(ticker, exchange);
         if (!instrumentConfig) {
           console.warn(`${MLOG} Plan "${plan.name}" — no instrumentConfig for ${ticker}/${exchange}, skipping`);
           continue;
         }
-
         const strikeInterval = instrumentConfig.strikeInterval ?? 50;
-        const lotSize = instrumentConfig.lotSize ?? 1;
-        const lotMultiplier = plan.lotMultiplier || 1;
+        const lotSize        = instrumentConfig.lotSize ?? 1;
+        const lotMultiplier  = plan.lotMultiplier || 1;
+        const expiryDay      = instrumentConfig.expiryDay;
+        if (!expiryDay) { console.warn(`${MLOG} Plan "${plan.name}" — expiryDay missing, skipping`); continue; }
 
-        // ── 3. Resolve target expiry via plan's timeLogic ────────────────────
-        const expiryDay = instrumentConfig.expiryDay;
-        if (!expiryDay) {
-          console.warn(`${MLOG} Plan "${plan.name}" — expiryDay missing in instrumentConfig, skipping`);
-          continue;
-        }
-        const timeLogic = tradeParams.timeLogic as { expiryType?: string; expiryWeekOffset?: number } | undefined;
-        const expiryType = timeLogic?.expiryType || "weekly";
-        const weekOffset = timeLogic?.expiryWeekOffset || 0;
+        // 3. Resolve target expiry (respects expiryWeekOffset)
+        const timeLogic        = tradeParams.timeLogic as { expiryType?: string; expiryWeekOffset?: number } | undefined;
+        const expiryType       = timeLogic?.expiryType || "weekly";
+        const weekOffset       = timeLogic?.expiryWeekOffset || 0;
+        const targetDate       = getTargetExpiry(expiryDay, expiryType, weekOffset);
+        const targetExpiryDate = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, "0")}-${String(targetDate.getDate()).padStart(2, "0")}`;
+        console.log(`${MLOG} Plan "${plan.name}" — expiry: ${expiryDay} ${expiryType} offset=${weekOffset} → ${targetExpiryDate}`);
 
-        const targetDate = getTargetExpiry(expiryDay, expiryType, weekOffset);
-        const ey = targetDate.getFullYear();
-        const em = String(targetDate.getMonth() + 1).padStart(2, "0");
-        const ed = String(targetDate.getDate()).padStart(2, "0");
-        const targetExpiryDate = `${ey}-${em}-${ed}`;
-
-        console.log(`${MLOG} Plan "${plan.name}" — expiry resolved: ${expiryDay} ${expiryType} offset=${weekOffset} → ${targetExpiryDate}`);
-
-        // ── 4. Expiry-day multiplier ─────────────────────────────────────────
-        const isExpiry = cmIsExpiryDay(targetExpiryDate);
+        // 4. Expiry-day SPAN multiplier
+        const isExpiry          = cmIsExpiryDay(targetExpiryDate);
         const effectiveSpanRate = baseSpanRate * (isExpiry ? expiryMultiplier : 1);
-        if (isExpiry) {
-          console.log(`${MLOG} Plan "${plan.name}" — EXPIRY DAY: SPAN rate ×${expiryMultiplier} → ${(effectiveSpanRate * 100).toFixed(2)}%`);
-        }
+        if (isExpiry) console.log(`${MLOG} Plan "${plan.name}" — EXPIRY DAY: spanRate ×${expiryMultiplier} → ${(effectiveSpanRate * 100).toFixed(2)}%`);
 
-        // ── 5. Derive ATM from CSV put-call parity ───────────────────────────
-        const atmStrike = cmFindAtmFromCsv(ticker, exchange, targetExpiryDate, strikeInterval);
-        if (atmStrike === null) {
-          console.warn(`${MLOG} Plan "${plan.name}" — ATM unavailable from CSV for ${targetExpiryDate}; skipping`);
+        // 5. Build token map + price map from CSV (fully autonomous)
+        const csvResult = cmBuildTokenAndPriceMap(ticker, exchange, targetExpiryDate, strikeInterval);
+        if (!csvResult) {
+          console.warn(`${MLOG} Plan "${plan.name}" — CSV data unavailable for ${targetExpiryDate}; skipping`);
           continue;
         }
-        console.log(`${MLOG} Plan "${plan.name}" — ATM=${atmStrike} (${ticker} ${targetExpiryDate})`);
+        const { atmStrike, tokenMap, priceMap } = csvResult;
+        console.log(`${MLOG} Plan "${plan.name}" — ATM=${atmStrike} (CSV parity, ${ticker} ${targetExpiryDate})`);
 
-        // ── 6. Compute UT and DT margins separately ──────────────────────────
-        const uptrendLegs   = cmSelectLegs(tradeParams, "uptrendLegs");
-        const downtrendLegs = cmSelectLegs(tradeParams, "downtrendLegs");
-        const neutralLegs   = cmSelectLegs(tradeParams, "neutralLegs");
+        // 6. Combine legs: UT = uptrendLegs+neutralLegs, DT = downtrendLegs+neutralLegs
+        const utLegs = [...cmSelectLegs(tradeParams, "uptrendLegs"),   ...cmSelectLegs(tradeParams, "neutralLegs")];
+        const dtLegs = [...cmSelectLegs(tradeParams, "downtrendLegs"), ...cmSelectLegs(tradeParams, "neutralLegs")];
 
-        const neutralMargin = cmComputeBlockMargin(
-          neutralLegs, atmStrike, strikeInterval, lotSize, lotMultiplier, effectiveSpanRate, "neutralLegs",
-        );
-        const utMargin = cmComputeBlockMargin(
-          uptrendLegs, atmStrike, strikeInterval, lotSize, lotMultiplier, effectiveSpanRate, "uptrendLegs",
-        ) + neutralMargin;
-        const dtMargin = cmComputeBlockMargin(
-          downtrendLegs, atmStrike, strikeInterval, lotSize, lotMultiplier, effectiveSpanRate, "downtrendLegs",
-        ) + neutralMargin;
+        // 7. productMode (from leg orderType or default MIS)
+        const productMode = ([...utLegs, ...dtLegs].find((l: any) => l.orderType)?.orderType || "MIS") as string;
+
+        // 8. Try Mode 1: API (only when broker session is live)
+        let utMargin = 0;
+        let dtMargin = 0;
+        let usedMode = "SPAN";
+
+        if (brokerConfig.isConnected && brokerConfig.accessToken) {
+          console.log(`${MLOG} Plan "${plan.name}" — trying API mode`);
+          let apiAtmStrike = atmStrike;
+          try {
+            const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(exchange), instrumentConfig.token ?? "");
+            if (quoteRes.success && quoteRes.ltp && quoteRes.ltp > 0) {
+              apiAtmStrike = getATMStrike(quoteRes.ltp, strikeInterval);
+              console.log(`${MLOG} Plan "${plan.name}" — LTP=${quoteRes.ltp} → live ATM=${apiAtmStrike}`);
+            }
+          } catch { /* non-fatal — use CSV ATM */ }
+
+          const [utRes, dtRes] = await Promise.all([
+            cmApiBlock(utLegs, apiAtmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, productMode, "UT"),
+            cmApiBlock(dtLegs, apiAtmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, productMode, "DT"),
+          ]);
+
+          if (!utRes.anyFailed && !dtRes.anyFailed && (utRes.total > 0 || dtRes.total > 0)) {
+            utMargin = utRes.total;
+            dtMargin = dtRes.total;
+            usedMode = "API";
+            console.log(`${MLOG} Plan "${plan.name}" — API: UT=₹${utMargin.toFixed(2)} DT=₹${dtMargin.toFixed(2)}`);
+          } else {
+            console.log(`${MLOG} Plan "${plan.name}" — API partial/failed; using SPAN fallback`);
+          }
+        }
+
+        // 9. Mode 2: SPAN fallback
+        if (usedMode === "SPAN") {
+          utMargin = cmSpanBlock(utLegs, atmStrike, strikeInterval, priceMap, effectiveSpanRate, lotSize, lotMultiplier, "UT");
+          dtMargin = cmSpanBlock(dtLegs, atmStrike, strikeInterval, priceMap, effectiveSpanRate, lotSize, lotMultiplier, "DT");
+          console.log(`${MLOG} Plan "${plan.name}" — SPAN: UT=₹${utMargin.toFixed(2)} DT=₹${dtMargin.toFixed(2)}`);
+        }
 
         const totalMargin = Math.max(utMargin, dtMargin);
-        console.log(`${MLOG} Plan "${plan.name}" — UT=₹${utMargin.toFixed(2)} DT=₹${dtMargin.toFixed(2)} → estimatedMargin=₹${totalMargin.toFixed(2)}`);
+        console.log(`${MLOG} Plan "${plan.name}" [${usedMode}] → estimatedMargin=₹${totalMargin.toFixed(2)}`);
 
-        // ── 7. Persist result ────────────────────────────────────────────────
+        // 10. Persist
         await storage.updateStrategyPlan(plan.id, {
           estimatedMargin: String(totalMargin.toFixed(2)),
           marginCalculatedAt: new Date().toISOString(),
         });
-        console.log(`${MLOG} Plan "${plan.name}" — persisted ₹${totalMargin.toFixed(2)}`);
+
       } catch (planErr: any) {
         console.error(`${MLOG} Plan "${plan.name}" — unexpected error: ${planErr.message}`);
       }
     }
 
-    // ── E2: Invalidate plan cache so TE reads fresh estimatedMargin ──────────
     tradingCache.invalidatePlans(brokerConfig.id);
     console.log(`${MLOG} Cache invalidated for broker ${brokerConfig.name}`);
   } catch (err: any) {
