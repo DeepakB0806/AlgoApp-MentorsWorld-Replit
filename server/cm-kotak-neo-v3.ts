@@ -375,8 +375,13 @@ async function cmApiBlock(
       anyFailed = true;
     } else {
       const mrgn = cmExtractOrdMrgn(marginRes.data);
-      total += mrgn;
-      console.log(`${MLOG}   ${blockLabel} API: ${legAction} ${legType} ordMrgn=₹${mrgn.toFixed(2)}`);
+      if (mrgn <= 0) {
+        console.warn(`${MLOG}   ${blockLabel} API: ordMrgn not found or zero in response — treating as failure`);
+        anyFailed = true;
+      } else {
+        total += mrgn;
+        console.log(`${MLOG}   ${blockLabel} API: ${legAction} ${legType} ordMrgn=₹${mrgn.toFixed(2)}`);
+      }
     }
     await new Promise(r => setTimeout(r, 100));
   }
@@ -513,8 +518,14 @@ export async function calculatePlanMargins(
         const utLegs = [...cmSelectLegs(tradeParams, "uptrendLegs"),   ...cmSelectLegs(tradeParams, "neutralLegs")];
         const dtLegs = [...cmSelectLegs(tradeParams, "downtrendLegs"), ...cmSelectLegs(tradeParams, "neutralLegs")];
 
-        // 7. productMode (from leg orderType or default MIS)
-        const productMode = ([...utLegs, ...dtLegs].find((l: any) => l.orderType)?.orderType || "MIS") as string;
+        // 7. productMode — resolved from block config objects (same lookup order used by TE/SMC)
+        const productMode = (
+          (tradeParams.uptrendConfig as any)?.productMode  ||
+          (tradeParams.downtrendConfig as any)?.productMode ||
+          (tradeParams.neutralConfig as any)?.productMode  ||
+          (tradeParams.legsConfig as any)?.productMode     ||
+          "MIS"
+        ) as string;
 
         // 8. Try Mode 1: API (only when broker session is live)
         let utMargin = 0;
