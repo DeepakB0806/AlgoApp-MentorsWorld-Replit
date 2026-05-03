@@ -322,6 +322,20 @@ function findNearestExpiryDate(ticker: string): string | null {
   return earliest;
 }
 
+function findAtmStrikeFromCache(ticker: string, expiryDate: string): number | null {
+  const strikes: number[] = [];
+  for (const key of liveContractCache.keys()) {
+    if (!key.startsWith(`${ticker}_${expiryDate}_`)) continue;
+    const parts = key.split("_");
+    if (parts.length < 4) continue;
+    const strike = Number(parts[2]);
+    if (!isNaN(strike) && strike > 0) strikes.push(strike);
+  }
+  if (strikes.length === 0) return null;
+  const sorted = [...new Set(strikes)].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
 function extractOrdMrgn(data: unknown): number {
   if (!data || typeof data !== "object") return 0;
   const search = (obj: any, depth = 0): number => {
@@ -386,14 +400,23 @@ export async function calculatePlanMargins(storage: IStorage, brokerConfig: Brok
           continue;
         }
 
-        const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(exchange), instrumentConfig.token);
-        if (!quoteRes.success || !quoteRes.ltp) {
-          console.warn(`${LOG} Plan "${plan.name}" — LTP fetch failed: ${quoteRes.error}`);
-          continue;
-        }
-        const atmStrike = getATMStrike(quoteRes.ltp, instrumentConfig.strikeInterval ?? 50);
         const nearestDate = findNearestExpiryDate(ticker);
         if (!nearestDate) { console.warn(`${LOG} Plan "${plan.name}" — no cache entries for ticker ${ticker}`); continue; }
+
+        let atmStrike: number;
+        const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(exchange), instrumentConfig.token);
+        if (quoteRes.success && quoteRes.ltp && quoteRes.ltp > 0) {
+          atmStrike = getATMStrike(quoteRes.ltp, instrumentConfig.strikeInterval ?? 50);
+          console.log(`${LOG} Plan "${plan.name}" — LTP=${quoteRes.ltp}, ATM=${atmStrike} (live)`);
+        } else {
+          const cacheAtm = findAtmStrikeFromCache(ticker, nearestDate);
+          if (cacheAtm === null) {
+            console.warn(`${LOG} Plan "${plan.name}" — LTP unavailable and no strikes in cache for ATM fallback; skipping`);
+            continue;
+          }
+          atmStrike = cacheAtm;
+          console.log(`${LOG} Plan "${plan.name}" — LTP unavailable (${quoteRes.error ?? "pre-market/non-trading hours"}), using cache ATM fallback: ${atmStrike} (${nearestDate})`);
+        }
 
         const lotMultiplier = plan.lotMultiplier || 1;
         const lotSize = instrumentConfig.lotSize ?? 1;
