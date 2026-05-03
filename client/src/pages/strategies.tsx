@@ -60,8 +60,7 @@ export default function Strategies() {
           {activeTab === "planning" && <TradePlanning />}
           {activeTab === "broker" && <BrokerLinking />}
         </Suspense>
-      </div>
-      <PageFooter />
+        <PageFooter />
     </div>
   );
 }

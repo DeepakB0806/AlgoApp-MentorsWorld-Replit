@@ -50,6 +50,10 @@ The application adheres to a database-centric design where every field is stored
 - **Bcryptjs**: Used for secure hashing of passwords.
 - **Zod**: Utilized for runtime schema validation across all API routes, ensuring data integrity.
 
+## Credentials
+
+- **Super Admin login**: webadmin@mentorsworld.org / H2so4#Hcl
+
 ## Mandatory Agent Rules
 
 Before writing any implementation code for any task, load and answer the

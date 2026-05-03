@@ -1,5 +1,5 @@
       import { Button } from "@/components/ui/button";
-      import { BarChart3, Activity, ArrowRight, Zap, Shield, Globe, LogIn, CheckCircle2, Bot, LineChart, Bell } from "lucide-react";
+      import { TrendingUp, BarChart3, Activity, ArrowRight, Zap, Shield, Globe, LogIn, CheckCircle2, Bot, LineChart, Bell } from "lucide-react";
       import { Link } from "wouter";
       import { PageFooter } from "@/components/page-footer";
       import { useAuth } from "@/hooks/use-auth";
