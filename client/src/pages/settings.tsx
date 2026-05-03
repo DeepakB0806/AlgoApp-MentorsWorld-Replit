@@ -540,6 +540,8 @@ function GeneralTradingSettings() {
   const [orderDelayMs, setOrderDelayMs] = useState<string>("");
   const [syncClockValue, setSyncClockValue] = useState<string>("09:10");
   const [intradayIntervalValue, setIntradayIntervalValue] = useState<string>("0");
+  const [spanRateValue, setSpanRateValue] = useState<string>("5.0");
+  const [expiryMultiplierValue, setExpiryMultiplierValue] = useState<string>("1.5");
   const { toast } = useToast();
 
   const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
@@ -572,6 +574,14 @@ function GeneralTradingSettings() {
 
   const { data: intradayIntervalSetting, isLoading: intradayIntervalLoading } = useQuery<{ key: string; value: string | null }>({
     queryKey: ["/api/settings/scrip_master_intraday_interval_mins"],
+  });
+
+  const { data: spanRateSetting, isLoading: spanRateLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/span_rate_percent"],
+  });
+
+  const { data: expiryMultiplierSetting, isLoading: expiryMultiplierLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/expiry_day_span_multiplier"],
   });
 
   useEffect(() => {
@@ -635,6 +645,22 @@ function GeneralTradingSettings() {
       setIntradayIntervalValue("0");
     }
   }, [intradayIntervalSetting, intradayIntervalLoading]);
+
+  useEffect(() => {
+    if (spanRateSetting?.value !== undefined && spanRateSetting?.value !== null) {
+      setSpanRateValue(spanRateSetting.value);
+    } else if (!spanRateLoading) {
+      setSpanRateValue("5.0");
+    }
+  }, [spanRateSetting, spanRateLoading]);
+
+  useEffect(() => {
+    if (expiryMultiplierSetting?.value !== undefined && expiryMultiplierSetting?.value !== null) {
+      setExpiryMultiplierValue(expiryMultiplierSetting.value);
+    } else if (!expiryMultiplierLoading) {
+      setExpiryMultiplierValue("1.5");
+    }
+  }, [expiryMultiplierSetting, expiryMultiplierLoading]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -762,6 +788,38 @@ function GeneralTradingSettings() {
     },
   });
 
+  const saveSpanRateMutation = useMutation({
+    mutationFn: async () => {
+      const val = parseFloat(spanRateValue);
+      if (isNaN(val) || val <= 0 || val > 100) throw new Error("Enter a valid percentage between 0 and 100");
+      const res = await apiRequest("POST", "/api/settings/span_rate_percent", { value: String(val) });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/span_rate_percent"] });
+      toast({ title: "Saved", description: "SPAN rate updated." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const saveExpiryMultiplierMutation = useMutation({
+    mutationFn: async () => {
+      const val = parseFloat(expiryMultiplierValue);
+      if (isNaN(val) || val < 1) throw new Error("Enter a multiplier ≥ 1.0");
+      const res = await apiRequest("POST", "/api/settings/expiry_day_span_multiplier", { value: String(val) });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/expiry_day_span_multiplier"] });
+      toast({ title: "Saved", description: "Expiry day SPAN multiplier updated." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   return (
     <Card data-testid="card-general-trading-settings">
       <CardHeader>
@@ -774,7 +832,7 @@ function GeneralTradingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isLoading || shortfallLoading || rollbackLoading || maxCloseRetryLoading || bufferLoading || orderDelayLoading || syncClockLoading || intradayIntervalLoading ? (
+        {isLoading || shortfallLoading || rollbackLoading || maxCloseRetryLoading || bufferLoading || orderDelayLoading || syncClockLoading || intradayIntervalLoading || spanRateLoading || expiryMultiplierLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
           <>
@@ -1022,6 +1080,69 @@ function GeneralTradingSettings() {
                 disabled={saveIntradayIntervalMutation.isPending}
               >
                 {saveIntradayIntervalMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="input-span-rate">
+                SPAN Rate for Margin Calculation (%)
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Percentage of the strike price used as the SPAN margin estimate per SELL lot. The engine computes UT and DT margins separately and uses the larger of the two as the estimated margin for capital gating. BUY legs are excluded (they reduce net SPAN in a live basket, but are ignored here for a conservative estimate).
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Input
+                  id="input-span-rate"
+                  data-testid="input-span-rate"
+                  type="number"
+                  min="0.1"
+                  max="100"
+                  step="0.1"
+                  value={spanRateValue}
+                  onChange={(e) => setSpanRateValue(e.target.value)}
+                  placeholder="5.0"
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">%</span>
+              </div>
+              <p className="text-xs text-muted-foreground">Default: 5.0%. Formula: rate × strike × lotSize × lotMultiplier × lots (SELL only).</p>
+              <Button
+                data-testid="button-save-span-rate"
+                onClick={() => saveSpanRateMutation.mutate()}
+                disabled={saveSpanRateMutation.isPending}
+              >
+                {saveSpanRateMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="input-expiry-multiplier">
+                Expiry Day SPAN Multiplier
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                On expiry day the effective SPAN rate is multiplied by this value to account for elevated margin requirements near settlement. Applied automatically when today's IST date matches the plan's target expiry date.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Input
+                  id="input-expiry-multiplier"
+                  data-testid="input-expiry-multiplier"
+                  type="number"
+                  min="1.0"
+                  step="0.1"
+                  value={expiryMultiplierValue}
+                  onChange={(e) => setExpiryMultiplierValue(e.target.value)}
+                  placeholder="1.5"
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">×</span>
+              </div>
+              <p className="text-xs text-muted-foreground">Default: 1.5×. e.g. at 5% rate, expiry day effective rate = 7.5%.</p>
+              <Button
+                data-testid="button-save-expiry-multiplier"
+                onClick={() => saveExpiryMultiplierMutation.mutate()}
+                disabled={saveExpiryMultiplierMutation.isPending}
+              >
+                {saveExpiryMultiplierMutation.isPending ? "Saving..." : "Save"}
               </Button>
             </div>
           </>

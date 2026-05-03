@@ -13,7 +13,7 @@ import { startPersistentSquareOff } from "../te-kotak-neo-v3";
 import { refreshConfig as hsmRefreshConfig } from "../hsm-kotak-neo-v3";
 import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo-v3";
 import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
-import { calculatePlanMargins } from "../capital-manager";
+import { calculatePlanMargins } from "../cm-kotak-neo-v3";
 import { getScripSyncStatus } from "../scrip-sync-scheduler";
 import { addProcessFlowLog, getProcessFlowLogs, getProcessFlowPlans } from "../process-flow-log";
 import { processTick, updateLastWsTick } from "../tsl-kotak-neo-v3";

@@ -11,7 +11,7 @@ import TL from "./tl-kotak-neo-v3";
 import EL from "./el-kotak-neo-v3";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
 import { runScripMasterSync, loadScripMasterFromDisk, runScripMasterSyncPhaseB } from "./smc-kotak-neo-v3";
-import { startCapitalManager } from "./capital-manager";
+import { startCapitalManager } from "./cm-kotak-neo-v3";
 import { rescheduleScripMasterSync, scheduleScripSyncRetry, scheduleStartupScripSyncRetry, startIntradayScripRefresh } from "./scrip-sync-scheduler";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
@@ -311,6 +311,10 @@ app.use((req, res, next) => {
     if (!existingHalted) await storage.setSetting("trading_halted", "false");
     const existingUccConcurrency = await storage.getSetting("te_ucc_concurrency");
     if (!existingUccConcurrency) await storage.setSetting("te_ucc_concurrency", "50");
+    const existingSpanRate = await storage.getSetting("span_rate_percent");
+    if (!existingSpanRate) await storage.setSetting("span_rate_percent", "5.0");
+    const existingExpiryMult = await storage.getSetting("expiry_day_span_multiplier");
+    if (!existingExpiryMult) await storage.setSetting("expiry_day_span_multiplier", "1.5");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
   }

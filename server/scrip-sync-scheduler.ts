@@ -1,7 +1,7 @@
 import type { IStorage } from "./storage";
 import { runScripMasterSync, runScripMasterSyncPhaseB } from "./smc-kotak-neo-v3";
 import type { BrokerConfig } from "@shared/schema";
-import { calculatePlanMargins } from "./capital-manager";
+import { calculatePlanMargins } from "./cm-kotak-neo-v3";
 
 // ── Intraday periodic refresh ───────────────────────────────────────────────
 let intradayHandle: ReturnType<typeof setInterval> | null = null;
