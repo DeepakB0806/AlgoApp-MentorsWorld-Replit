@@ -1538,6 +1538,7 @@ function MarketCalendarSettings() {
           {exchLoading ? (
             <div className="text-sm text-muted-foreground py-4">Loading...</div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -1598,6 +1599,7 @@ function MarketCalendarSettings() {
                 })}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -1612,6 +1614,7 @@ function MarketCalendarSettings() {
           {expiryLoading ? (
             <div className="text-sm text-muted-foreground py-4">Loading...</div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -1657,6 +1660,7 @@ function MarketCalendarSettings() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
