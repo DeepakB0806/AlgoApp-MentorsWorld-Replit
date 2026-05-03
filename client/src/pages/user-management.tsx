@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
+import { PageFooter } from "@/components/page-footer";
 import {
   Dialog,
   DialogContent,
@@ -300,24 +301,24 @@ export default function UserManagement() {
                   {(teamMembers ?? []).map((member) => (
                     <div
                       key={member.id}
-                      className="flex items-center justify-between p-4 border rounded-lg"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-lg gap-3"
                       data-testid={`member-${member.id}`}
                     >
                       <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                        <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
                           <Shield className="w-5 h-5 text-primary" />
                         </div>
-                        <div>
-                          <p className="font-medium">
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">
                             {member.firstName && member.lastName
                               ? `${member.firstName} ${member.lastName}`
                               : member.email}
                           </p>
-                          <p className="text-sm text-muted-foreground">{member.email}</p>
+                          <p className="text-sm text-muted-foreground truncate">{member.email}</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-4">
-                        <div className="flex gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex gap-2 flex-wrap">
                           {member.emailVerified ? (
                             <Badge variant="secondary">
                               <CheckCircle className="w-3 h-3 mr-1" /> Email Verified
@@ -453,6 +454,7 @@ export default function UserManagement() {
           </Card>
         </div>
       </div>
+      <PageFooter />
     </div>
   );
 }

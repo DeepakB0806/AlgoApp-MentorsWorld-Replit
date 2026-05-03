@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import { Loader2 } from "lucide-react";
+import { PageFooter } from "@/components/page-footer";
 
 const MotherConfigurator = lazy(() => import("@/components/strategy-config").then(m => ({ default: m.MotherConfigurator })));
 const TradePlanning = lazy(() => import("@/components/trade-planning").then(m => ({ default: m.TradePlanning })));
@@ -34,7 +35,7 @@ export default function Strategies() {
         </div>
       </header>
 
-      <div className="container mx-auto px-4 pt-6 pb-32">
+      <div className="container mx-auto px-4 pt-6 pb-10">
         <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="tabs-strategy">
           <TabsList className="mb-6" data-testid="tabslist-strategy">
             <TabsTrigger value="configurator" data-testid="tab-configurator">Mother Configurator</TabsTrigger>
@@ -49,6 +50,7 @@ export default function Strategies() {
           {activeTab === "broker" && <BrokerLinking />}
         </Suspense>
       </div>
+      <PageFooter />
     </div>
   );
 }

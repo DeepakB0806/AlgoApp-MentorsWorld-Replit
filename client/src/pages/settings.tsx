@@ -20,6 +20,7 @@ import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
 import type { BrokerConfig, ErrorRouting, ExchangeSetting, IndexExpirySetting, MarketHoliday, StrategyPlan } from "@shared/schema";
+import { PageFooter } from "@/components/page-footer";
 
 function getBrokerInitial(brokerName?: string | null): string {
   const map: Record<string, string> = { kotak_neo: "KN", binance: "B", zerodha: "Z", angel: "A", paper_trade: "PT" };
@@ -1900,14 +1901,14 @@ export default function Settings() {
         </div>
       </header>
 
-      <div className="flex">
-        <nav className="w-64 min-h-[calc(100vh-73px)] border-r border-border bg-card/30 p-4">
-          <div className="space-y-1">
+      <div className="flex flex-col md:flex-row">
+        <nav className="w-full md:w-64 border-b border-border md:border-b-0 md:border-r md:min-h-[calc(100vh-73px)] bg-card/30 p-4">
+          <div className="flex flex-row flex-wrap gap-1 md:flex-col md:space-y-1">
             {navItems.map((item) => (
               <button
                 key={item.id}
                 onClick={() => setActiveSection(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors ${
+                className={`flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors ${
                   activeSection === item.id
                     ? "bg-primary/10 text-primary font-medium"
                     : "text-muted-foreground hover:text-foreground hover-elevate"
@@ -1921,7 +1922,7 @@ export default function Settings() {
           </div>
         </nav>
 
-        <main className="flex-1 p-8">
+        <main className="flex-1 p-4 md:p-8">
           <div className="max-w-3xl">
             {activeSection === "general" && (
               <>
@@ -1937,6 +1938,7 @@ export default function Settings() {
           </div>
         </main>
       </div>
+      <PageFooter />
     </div>
   );
 }

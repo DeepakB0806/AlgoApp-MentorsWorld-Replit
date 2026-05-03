@@ -19,6 +19,7 @@ import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Webhook as WebhookType, InsertWebhook, Strategy, WebhookStatusLog, AppSetting, WebhookData } from "@shared/schema";
+import { PageFooter } from "@/components/page-footer";
 
 type WebhookStats = {
   total: number;
@@ -845,7 +846,7 @@ export default function Webhooks() {
                             </Button>
                           </CardDescription>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap mt-2 sm:mt-0">
                           <Button
                             variant="outline"
                             size="sm"
@@ -988,6 +989,7 @@ export default function Webhooks() {
 
         </Tabs>
       </div>
+      <PageFooter />
 
       <Sheet open={isDataSheetOpen} onOpenChange={setIsDataSheetOpen}>
         <SheetContent className={`${dataExpandedView ? "w-full sm:max-w-full" : "w-full max-w-[800px]"} h-full max-h-screen overflow-hidden flex flex-col`} side="right">

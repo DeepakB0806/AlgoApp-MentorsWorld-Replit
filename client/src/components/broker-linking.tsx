@@ -793,7 +793,7 @@ export function BrokerLinking() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-10">
       <h2 className="text-lg font-semibold" data-testid="text-broker-linking-title">Broker Linking</h2>
 
       {scripStatus?.isStale && (

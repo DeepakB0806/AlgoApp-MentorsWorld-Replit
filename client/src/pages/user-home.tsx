@@ -1,11 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, BarChart3, Activity, ArrowRight, Webhook, Key, Users, LogOut, LayoutDashboard, Cog, CheckCircle, XCircle } from "lucide-react";
+import { BarChart3, Activity, ArrowRight, Webhook, Key, Users, LogOut, LayoutDashboard, Cog, CheckCircle, XCircle } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "@tanstack/react-query";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
+import { PageFooter } from "@/components/page-footer";
 
 interface BrokerConfig {
   id: string;
@@ -280,21 +281,7 @@ export default function UserHome() {
         )}
       </div>
 
-      <footer className="border-t border-border py-8 mt-auto">
-        <div className="container mx-auto px-4">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                <TrendingUp className="w-4 h-4 text-primary" />
-              </div>
-              <span className="font-semibold text-foreground">MentorsWorld Algo Trading</span>
-            </div>
-            <p className="text-muted-foreground text-sm" data-testid="text-footer">
-              Automated Trading Made Simple
-            </p>
-          </div>
-        </div>
-      </footer>
+      <PageFooter />
     </div>
   );
 }

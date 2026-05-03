@@ -13,6 +13,7 @@ import { queryClient } from "@/lib/queryClient";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import type { Position, Order, Holding, PortfolioSummary, StrategyPlan, StrategyConfig, BrokerConfig, StrategyTrade } from "@shared/schema";
 import { Target } from "lucide-react";
+import { PageFooter } from "@/components/page-footer";
 
 interface BrokerSessionStatus {
   isAuthenticated: boolean;
@@ -260,23 +261,25 @@ export default function Dashboard() {
 
       <div className="container mx-auto px-4 py-4">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="bg-card border border-border h-12" data-testid="tabs-dashboard">
-            <TabsTrigger value="investments" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-investments">
-              INVESTMENTS <Badge variant="secondary" className="ml-2">{holdings.length}</Badge>
+          <div className="overflow-x-auto">
+          <TabsList className="bg-card border border-border h-12 w-max min-w-full" data-testid="tabs-dashboard">
+            <TabsTrigger value="investments" className="px-3 sm:px-6 data-[state=active]:bg-primary/10" data-testid="tab-investments">
+              <span className="hidden sm:inline">INVESTMENTS</span><span className="sm:hidden">INVEST</span> <Badge variant="secondary" className="ml-1 sm:ml-2">{holdings.length}</Badge>
             </TabsTrigger>
-            <TabsTrigger value="positions" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-positions">
-              POSITIONS <Badge variant="secondary" className="ml-2">{equityPositions.length}</Badge>
+            <TabsTrigger value="positions" className="px-3 sm:px-6 data-[state=active]:bg-primary/10" data-testid="tab-positions">
+              <span className="hidden sm:inline">POSITIONS</span><span className="sm:hidden">POS</span> <Badge variant="secondary" className="ml-1 sm:ml-2">{equityPositions.length}</Badge>
             </TabsTrigger>
-            <TabsTrigger value="nfo-pos" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-nfo-pos">
-              NFO POS <Badge variant="secondary" className="ml-2">{nfoPositions.length}</Badge>
+            <TabsTrigger value="nfo-pos" className="px-3 sm:px-6 data-[state=active]:bg-primary/10" data-testid="tab-nfo-pos">
+              NFO POS <Badge variant="secondary" className="ml-1 sm:ml-2">{nfoPositions.length}</Badge>
             </TabsTrigger>
-            <TabsTrigger value="orders" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-orders">
-              ORDERS <Badge variant="secondary" className="ml-2">{orders.length}</Badge>
+            <TabsTrigger value="orders" className="px-3 sm:px-6 data-[state=active]:bg-primary/10" data-testid="tab-orders">
+              ORDERS <Badge variant="secondary" className="ml-1 sm:ml-2">{orders.length}</Badge>
             </TabsTrigger>
-            <TabsTrigger value="live-trades" className="px-6 data-[state=active]:bg-primary/10" data-testid="tab-live-trades">
-              LIVE TRADES <Badge variant="secondary" className="ml-2"><Activity className="w-3 h-3" /></Badge>
+            <TabsTrigger value="live-trades" className="px-3 sm:px-6 data-[state=active]:bg-primary/10" data-testid="tab-live-trades">
+              <span className="hidden sm:inline">LIVE TRADES</span><span className="sm:hidden">LIVE</span> <Badge variant="secondary" className="ml-1 sm:ml-2"><Activity className="w-3 h-3" /></Badge>
             </TabsTrigger>
           </TabsList>
+          </div>
 
           {/* INVESTMENTS Tab - Holdings */}
           <TabsContent value="investments">
@@ -701,6 +704,7 @@ export default function Dashboard() {
           </TabsContent>
         </Tabs>
       </div>
+      <PageFooter />
     </div>
   );
 }

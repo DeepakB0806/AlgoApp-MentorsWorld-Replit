@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { PageFooter } from "@/components/page-footer";
 
 interface TestResult {
   success: boolean;
@@ -4050,6 +4051,7 @@ export default function BrokerApi() {
           </AlertDescription>
         </Alert>
       </div>
+      <PageFooter />
     </div>
   );
 }
