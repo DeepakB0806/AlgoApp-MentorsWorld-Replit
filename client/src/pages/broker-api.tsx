@@ -1158,7 +1158,7 @@ function ApiFieldsReference() {
                 </Button>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <span className="text-[10px] font-medium text-blue-400 uppercase tracking-wider">Broker API Fields DB</span>
                   <div className="text-xs space-y-0.5">

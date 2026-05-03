@@ -37,11 +37,22 @@ export default function Strategies() {
 
       <div className="container mx-auto px-4 pt-6 pb-10">
         <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="tabs-strategy">
-          <TabsList className="mb-6" data-testid="tabslist-strategy">
-            <TabsTrigger value="configurator" data-testid="tab-configurator">Mother Configurator</TabsTrigger>
-            <TabsTrigger value="planning" data-testid="tab-planning">Trade Planning</TabsTrigger>
-            <TabsTrigger value="broker" data-testid="tab-broker">Broker Linking</TabsTrigger>
-          </TabsList>
+          <div className="overflow-x-auto mb-6">
+            <TabsList data-testid="tabslist-strategy">
+              <TabsTrigger value="configurator" data-testid="tab-configurator">
+                <span className="hidden sm:inline">Mother Configurator</span>
+                <span className="sm:hidden">Configurator</span>
+              </TabsTrigger>
+              <TabsTrigger value="planning" data-testid="tab-planning">
+                <span className="hidden sm:inline">Trade Planning</span>
+                <span className="sm:hidden">Planning</span>
+              </TabsTrigger>
+              <TabsTrigger value="broker" data-testid="tab-broker">
+                <span className="hidden sm:inline">Broker Linking</span>
+                <span className="sm:hidden">Broker</span>
+              </TabsTrigger>
+            </TabsList>
+          </div>
         </Tabs>
 
         <Suspense fallback={<TabLoader />}>

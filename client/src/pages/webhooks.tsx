@@ -938,7 +938,7 @@ export default function Webhooks() {
                       </div>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid md:grid-cols-4 gap-4 text-sm">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <div>
                           <p className="text-muted-foreground">Total Triggers</p>
                           <p className="font-medium">{webhook.totalTriggers || 0}</p>

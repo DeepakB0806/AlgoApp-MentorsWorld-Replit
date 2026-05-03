@@ -1813,7 +1813,7 @@ function MarketCalendarSettings() {
                 <span className="text-muted-foreground">{holidayTableOpen ? "▲ hide" : "▼ show"}</span>
               </button>
               {holidayTableOpen && (
-                <div className="border-t border-border">
+                <div className="border-t border-border overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
