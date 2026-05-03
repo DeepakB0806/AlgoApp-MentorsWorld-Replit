@@ -28,7 +28,7 @@ const BATCH_SIZE = 10;
 const BATCH_GAP_MS = 200;
 
 // ─── extractAvailableCash ────────────────────────────────────────────────────
-// Moved here from te-kotak-neo-v3.ts so TE can import from capital-manager.
+// Moved here from te-kotak-neo-v3.ts so TE can import from cm-kotak-neo-v3.
 // Walks any nesting depth looking for the first positive cash-like field.
 export function extractAvailableCash(data: unknown): number {
   if (!data || typeof data !== "object") return 0;
@@ -348,8 +348,10 @@ export async function calculatePlanMargins(
     // ── Read SPAN settings (defaults: 5.0% and 1.5×) ────────────────────────
     const spanRateSetting = await storage.getSetting("span_rate_percent");
     const expiryMultSetting = await storage.getSetting("expiry_day_span_multiplier");
-    const baseSpanRate = parseFloat(spanRateSetting?.value || "5.0") / 100;
-    const expiryMultiplier = parseFloat(expiryMultSetting?.value || "1.5");
+    const parsedSpanRate = parseFloat(spanRateSetting?.value || "");
+    const parsedExpiryMult = parseFloat(expiryMultSetting?.value || "");
+    const baseSpanRate = (isNaN(parsedSpanRate) || parsedSpanRate <= 0) ? 0.05 : parsedSpanRate / 100;
+    const expiryMultiplier = (isNaN(parsedExpiryMult) || parsedExpiryMult < 1) ? 1.5 : parsedExpiryMult;
 
     const allPlans = await storage.getStrategyPlans();
     const plansToCalc = allPlans
