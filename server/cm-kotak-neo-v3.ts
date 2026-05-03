@@ -196,17 +196,18 @@ function cmParseExpiryEpoch(raw: string): string | null {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function cmExtractOrdMrgn(data: unknown): number {
-  if (!data || typeof data !== "object") return 0;
-  const search = (obj: Record<string, unknown>, depth = 0): number => {
-    if (depth > 5) return 0;
+// Returns the numeric margin when the field is found (including 0), or null when absent.
+function cmExtractOrdMrgn(data: unknown): number | null {
+  if (!data || typeof data !== "object") return null;
+  const search = (obj: Record<string, unknown>, depth = 0): number | null => {
+    if (depth > 5) return null;
     for (const k of ["ordMrgn", "ord_mrgn", "orderMargin", "ordMargin"]) {
       if (obj[k] !== undefined) { const v = Number(obj[k]); if (!isNaN(v)) return v; }
     }
     for (const v of Object.values(obj)) {
-      if (v && typeof v === "object") { const f = search(v as Record<string, unknown>, depth + 1); if (f !== 0) return f; }
+      if (v && typeof v === "object") { const f = search(v as Record<string, unknown>, depth + 1); if (f !== null) return f; }
     }
-    return 0;
+    return null;
   };
   return search(data as Record<string, unknown>);
 }
@@ -340,8 +341,8 @@ async function cmApiBlock(
       anyFailed = true;
     } else {
       const mrgn = cmExtractOrdMrgn(marginRes.data);
-      if (mrgn <= 0) {
-        console.warn(`${MLOG}   ${blockLabel} API: ordMrgn not found or zero in response — treating as failure`);
+      if (mrgn === null) {
+        console.warn(`${MLOG}   ${blockLabel} API: ordMrgn field absent in response — treating as failure`);
         anyFailed = true;
       } else {
         total += mrgn;
