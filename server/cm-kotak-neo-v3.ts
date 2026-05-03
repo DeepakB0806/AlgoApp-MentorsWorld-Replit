@@ -483,35 +483,28 @@ export async function calculatePlanMargins(
         const utLegs = [...cmSelectLegs(tradeParams, "uptrendLegs"),   ...cmSelectLegs(tradeParams, "neutralLegs")];
         const dtLegs = [...cmSelectLegs(tradeParams, "downtrendLegs"), ...cmSelectLegs(tradeParams, "neutralLegs")];
 
-        // 7. productMode — resolved from block config objects (same lookup order used by TE/SMC)
+        // 7. productMode per block — resolved from each block's config, falling back to legsConfig then "MIS".
         type BlockCfg = { productMode?: string };
-        const productMode = (
-          (tradeParams.uptrendConfig  as BlockCfg | undefined)?.productMode ||
-          (tradeParams.downtrendConfig as BlockCfg | undefined)?.productMode ||
-          (tradeParams.neutralConfig  as BlockCfg | undefined)?.productMode ||
-          (tradeParams.legsConfig     as BlockCfg | undefined)?.productMode ||
-          "MIS"
-        );
+        const sharedFallback = (tradeParams.legsConfig as BlockCfg | undefined)?.productMode ?? "MIS";
+        const utProductMode = (tradeParams.uptrendConfig  as BlockCfg | undefined)?.productMode
+          ?? (tradeParams.neutralConfig as BlockCfg | undefined)?.productMode
+          ?? sharedFallback;
+        const dtProductMode = (tradeParams.downtrendConfig as BlockCfg | undefined)?.productMode
+          ?? (tradeParams.neutralConfig as BlockCfg | undefined)?.productMode
+          ?? sharedFallback;
 
         // 8. Try Mode 1: API (only when broker session is live)
+        // ATM comes from CSV put-call parity — instrumentConfig.token is not guaranteed
+        // to be an underlying/index token, so EL.getQuote LTP refinement is intentionally skipped.
         let utMargin = 0;
         let dtMargin = 0;
         let usedMode = "SPAN";
 
         if (brokerConfig.isConnected && brokerConfig.accessToken) {
-          console.log(`${MLOG} Plan "${plan.name}" — trying API mode`);
-          let apiAtmStrike = atmStrike;
-          try {
-            const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(exchange), instrumentConfig.token ?? "");
-            if (quoteRes.success && quoteRes.ltp && quoteRes.ltp > 0) {
-              apiAtmStrike = getATMStrike(quoteRes.ltp, strikeInterval);
-              console.log(`${MLOG} Plan "${plan.name}" — LTP=${quoteRes.ltp} → live ATM=${apiAtmStrike}`);
-            }
-          } catch { /* non-fatal — use CSV ATM */ }
-
+          console.log(`${MLOG} Plan "${plan.name}" — trying API mode (ATM=${atmStrike} from CSV)`);
           const [utRes, dtRes] = await Promise.all([
-            cmApiBlock(utLegs, apiAtmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, productMode, "UT"),
-            cmApiBlock(dtLegs, apiAtmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, productMode, "DT"),
+            cmApiBlock(utLegs, atmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, utProductMode, "UT"),
+            cmApiBlock(dtLegs, atmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, dtProductMode, "DT"),
           ]);
 
           if (!utRes.anyFailed && !dtRes.anyFailed && (utRes.total > 0 || dtRes.total > 0)) {
