@@ -932,6 +932,23 @@ export function BrokerLinking() {
                           ? `${scripStatus.intradayIntervalMins} mins`
                           : "until next daily sync"}
                       </span>
+                      {isSuperAdmin && linkedBroker && (
+                        <>
+                          <span className="text-muted-foreground/50">|</span>
+                          <button
+                            onClick={() => recalculateMarginMutation.mutate(linkedBroker.id)}
+                            disabled={recalculateMarginMutation.isPending}
+                            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 disabled:opacity-50 flex items-center gap-0.5"
+                            data-testid={`button-recalculate-margin-inline-${plan.id}`}
+                          >
+                            {recalculateMarginMutation.isPending ? (
+                              <><Loader2 className="w-2.5 h-2.5 animate-spin" />Calculating...</>
+                            ) : (
+                              <>↻ Recalculate</>
+                            )}
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
                   {isDeployed && !plan.estimatedMargin && (depStatus === "active" || depStatus === "deployed") && (
