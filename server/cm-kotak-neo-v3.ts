@@ -252,14 +252,15 @@ function cmBuildTokenAndPriceMap(
     const strike = Math.round(Number(cols[20]?.trim().replace(/"/g, "")) / 100);
     if (!strike || strike <= 0) continue;
 
-    const price = Number(cols[57]?.trim().replace(/"/g, "")) / 100;
-    if (isNaN(price) || price <= 0) continue;
-
     tokenMap.set(`${strike}_${optType}`, token);
-    const existing = priceMap.get(strike) ?? {};
-    if (optType === "CE") existing.CE = price;
-    else existing.PE = price;
-    priceMap.set(strike, existing);
+
+    const price = Number(cols[57]?.trim().replace(/"/g, "")) / 100;
+    if (!isNaN(price) && price > 0) {
+      const existing = priceMap.get(strike) ?? {};
+      if (optType === "CE") existing.CE = price;
+      else existing.PE = price;
+      priceMap.set(strike, existing);
+    }
   }
 
   if (priceMap.size === 0) {
