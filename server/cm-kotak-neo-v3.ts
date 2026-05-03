@@ -5,8 +5,8 @@
 // getLimits live.
 //
 // calculatePlanMargins — pure CSV SPAN engine, zero Kotak API calls.
-// ATM is derived from put-call parity reading the on-disk scrip master CSV
-// (col 58 pScripBasePrice). rawCsvCache is NOT used — it is always empty.
+// ATM is derived from put-call parity by reading today's on-disk scrip master
+// CSV (col 58 pScripBasePrice) from process.cwd().
 // Margin = SPAN rate × targetStrike × lotSize × lotMultiplier × sellLots.
 // UT and DT are computed separately; estimatedMargin = max(UT, DT).
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -162,10 +162,10 @@ export async function startCapitalManager(storage: IStorage): Promise<void> {
 // CAPITAL MANAGER — calculatePlanMargins  (pure CSV SPAN engine)
 //
 // Zero Kotak API calls. ATM is derived from put-call parity:
-//   scan rawCsvCache.get(exchange) col 58 (pScripBasePrice ÷ 100) for the
-//   target expiry's CE and PE tokens; find strike where |CE_price − PE_price|
-//   is minimum; snap to strikeInterval via getATMStrike.
-//   Returns null if rawCsvCache has no data for the exchange.
+//   read today's on-disk scrip_master_{exchange}_{date}.csv from process.cwd(),
+//   scan col 58 (pScripBasePrice ÷ 100) for the target expiry's CE and PE
+//   tokens; find strike where |CE_price − PE_price| is minimum; snap to
+//   strikeInterval via getATMStrike. Returns null if disk file is absent.
 //
 // Margin formula per SELL leg:
 //   spanRate × targetStrike × lotSize × lotMultiplier × leg.lots
@@ -235,8 +235,8 @@ function cmFindAtmFromCsv(
     return null;
   }
 
-  // Step 2: read raw CSV from disk (SMC writes scrip_master_{ex}_{date}.csv then
-  // deletes it from rawCsvCache immediately — disk is the only reliable source)
+  // Step 2: read raw CSV from disk (SMC writes then discards the text from RAM;
+  // the on-disk file is the only reliable source)
   const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const csvFilename = `scrip_master_${exchange.toLowerCase()}_${todayIST}.csv`;
   const csvFilePath = path.resolve(process.cwd(), csvFilename);
