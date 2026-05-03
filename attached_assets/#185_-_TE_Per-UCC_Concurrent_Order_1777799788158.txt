@@ -1,0 +1,42 @@
+#185 - TE Per-UCC Concurrent Order Execution at 1000+ Users
+
+What & Why
+Task #181's capital gating loop in processTradeSignal iterates over all ranked plans across all users sequentially. For 1000+ users with deployed plans, a single webhook signal triggers sequential EL.placeOrder REST calls — one per plan, one after another. At ~300ms per call, 1000 users × 3 plans = ~15 minutes. Orders placed 15 minutes after a signal is worthless.
+
+The fix: group plans by UCC (each UCC = one independent user account), then execute all UCC groups concurrently with a controlled concurrency cap. Within each UCC group, plans still fire sequentially in rank order (capital gating is per-user). Across UCC groups, execution is fully parallel.
+
+Key constraints confirmed:
+
+Kotak's REST API is the only mechanism for order placement — HSI WebSocket is receive-only (order status streaming). No WebSocket-based order placement is possible.
+Each order must use the individual user's own accessToken + sessionId. The Super Admin's session cannot place orders on behalf of other users.
+After Task #183, capital is read from broker_capital_snapshots DB table (instant DB read) — no live API call inside the per-UCC loop.
+Done looks like
+When a webhook ENTRY signal fires with 200 active users' plans, all 200 UCC groups execute concurrently (capped at 50 parallel)
+Total execution time for 200 active users: ~1.2 seconds (200/50 × 300ms) instead of ~3 minutes sequentially
+Within each UCC group, plans still fire in rank order with capital deducted progressively (capital gating logic from #181 preserved exactly)
+EXIT/HOLD signals continue to fire all plans in parallel as before (unchanged)
+Process Flow Log entries remain correct — each plan's log entry shows its UCC and result
+A runWithConcurrency utility function is added, reusable across the codebase
+No changes to EL, TL, SMC, HSI, or any other module
+Out of scope
+Order status tracking at 1000-user scale (HSI only tracks one account today — separate future task)
+Changing order placement from REST to any other mechanism (not possible with Kotak's API)
+Paper trading engine (separate engine, not TE)
+Steps
+Concurrency utility — Add a runWithConcurrency<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> helper in server/te-kotak-neo-v3.ts (or a shared util file). Executes at most limit tasks concurrently, preserving result order.
+
+Group plans by UCC — In processTradeSignal, after the existing split of proxy plans / autoResume=false plans / gateable plans, group rankedPlans by bc.ucc (broker config UCC). Each group is one user's plans in rank order.
+
+Concurrent UCC execution — Replace the current for...of rankedPlans sequential loop with runWithConcurrency over UCC groups, cap at 50. Each UCC group runs its own isolated capital gating loop: reads broker_capital_snapshots for that UCC (Task #183), deducts estimated margin, fires plans in rank order. Capital state is local to each UCC group — no shared mutable capital map across users.
+
+Preserve proxy and EXIT/HOLD paths — Proxy plans (E17) and EXIT/HOLD signals keep their existing Promise.all parallel execution. Only the ENTRY gateable-plans loop changes.
+
+Concurrency cap as a setting — Read the cap from app settings (te_ucc_concurrency) with a default of 50. This allows tuning without a redeploy if Kotak rate-limits.
+
+Relevant files
+server/te-kotak-neo-v3.ts:280-378 — current capital gating loop (rankedPlans for...of)
+server/te-kotak-neo-v3.ts:403-415 — extractAvailableCash (moves to Capital Manager in #183)
+shared/schema.ts — app_settings table (for te_ucc_concurrency setting)
+server/storage.ts — getSetting
+Dependencies
+Capital Manager service & broker_capital_snapshots schema
