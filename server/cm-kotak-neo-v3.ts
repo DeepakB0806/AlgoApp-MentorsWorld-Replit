@@ -5,15 +5,18 @@
 // getLimits live.
 //
 // calculatePlanMargins — pure CSV SPAN engine, zero Kotak API calls.
-// ATM is derived from put-call parity using rawCsvCache (col 58 pScripBasePrice).
+// ATM is derived from put-call parity reading the on-disk scrip master CSV
+// (col 58 pScripBasePrice). rawCsvCache is NOT used — it is always empty.
 // Margin = SPAN rate × targetStrike × lotSize × lotMultiplier × sellLots.
 // UT and DT are computed separately; estimatedMargin = max(UT, DT).
 // ═══════════════════════════════════════════════════════════════════════════════
+import fs from "fs";
+import path from "path";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
 import EL from "./el-kotak-neo-v3";
 import { parseTradeParams } from "./te-kotak-neo-v3";
-import { liveContractCache, rawCsvCache } from "./smc-kotak-neo-v3";
+import { liveContractCache } from "./smc-kotak-neo-v3";
 import {
   getTargetExpiry,
   parseStrikeSpec,
@@ -190,7 +193,9 @@ function cmIsExpiryDay(targetExpiryDate: string): boolean {
   return todayIST === targetExpiryDate;
 }
 
-// Scan rawCsvCache for the given exchange's CSV to find ATM via put-call parity.
+// Read the on-disk CSV for the given exchange and today's IST date to find ATM
+// via put-call parity. Filename matches SMC's write pattern:
+//   scrip_master_{exchange.toLowerCase()}_{YYYY-MM-DD}.csv  in process.cwd()
 //
 // CSV column indices (1-indexed, i.e. array index = col - 1):
 //   col  1  → pSymbol       (token, string)
@@ -202,7 +207,7 @@ function cmIsExpiryDay(targetExpiryDate: string): boolean {
 //
 // We use liveContractCache (already keyed by ticker_date_strike_optType) to
 // identify which tokens belong to the target expiry — no CSV date parsing needed.
-// Returns null if rawCsvCache has no entry for the exchange.
+// Returns null if the disk file is absent.
 function cmFindAtmFromCsv(
   ticker: string,
   exchange: string,
@@ -230,14 +235,16 @@ function cmFindAtmFromCsv(
     return null;
   }
 
-  // Step 2: read raw CSV from in-memory cache
-  const rawCsv = rawCsvCache.get(exchange)
-    ?? rawCsvCache.get(exchange.toUpperCase())
-    ?? rawCsvCache.get(exchange.toLowerCase());
-  if (!rawCsv) {
-    console.warn(`${MLOG} cmFindAtmFromCsv: rawCsvCache has no entry for exchange "${exchange}" — returning null`);
+  // Step 2: read raw CSV from disk (SMC writes scrip_master_{ex}_{date}.csv then
+  // deletes it from rawCsvCache immediately — disk is the only reliable source)
+  const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  const csvFilename = `scrip_master_${exchange.toLowerCase()}_${todayIST}.csv`;
+  const csvFilePath = path.resolve(process.cwd(), csvFilename);
+  if (!fs.existsSync(csvFilePath)) {
+    console.warn(`${MLOG} cmFindAtmFromCsv: disk CSV not found (${csvFilename}) — run scrip sync first`);
     return null;
   }
+  const rawCsv = fs.readFileSync(csvFilePath, "utf-8");
 
   // Step 3: scan CSV rows; read col 1 (token) and col 58 (pScripBasePrice ÷ 100)
   const strikePrices = new Map<number, { CE?: number; PE?: number }>();
