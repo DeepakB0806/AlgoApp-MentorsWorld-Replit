@@ -311,10 +311,6 @@ app.use((req, res, next) => {
     if (!existingHalted) await storage.setSetting("trading_halted", "false");
     const existingUccConcurrency = await storage.getSetting("te_ucc_concurrency");
     if (!existingUccConcurrency) await storage.setSetting("te_ucc_concurrency", "50");
-    const existingSpanRate = await storage.getSetting("span_rate_percent");
-    if (!existingSpanRate) await storage.setSetting("span_rate_percent", "5.0");
-    const existingExpiryMult = await storage.getSetting("expiry_day_span_multiplier");
-    if (!existingExpiryMult) await storage.setSetting("expiry_day_span_multiplier", "1.5");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
   }
