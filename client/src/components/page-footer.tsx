@@ -7,7 +7,7 @@ export function PageFooter() {
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-              <TrendingUp className="w-4 h-4 text-primary" />
+              <TrendingUp className="w-2 h-2 text-primary" />
             </div>
             <span className="font-semibold text-foreground">Copyright @ MentorsWorld Ventures Pvt. Ltd.</span>
           </div>

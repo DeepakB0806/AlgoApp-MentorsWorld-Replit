@@ -3857,7 +3857,7 @@ export default function BrokerApi() {
               <h1 className="text-2xl font-bold text-foreground" data-testid="text-broker-title">Broker & Exchange API</h1>
               <p className="text-muted-foreground text-sm">Manage your broker credentials and configurations</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button

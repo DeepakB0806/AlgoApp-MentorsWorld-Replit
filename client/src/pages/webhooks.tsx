@@ -716,7 +716,7 @@ export default function Webhooks() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex gap-2 items-end">
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
               <div className="flex-1">
                 <Label>Domain Name</Label>
                 <Input
@@ -729,6 +729,7 @@ export default function Webhooks() {
               <Button
                 onClick={() => saveDomainMutation.mutate(tempDomainName)}
                 disabled={saveDomainMutation.isPending || !tempDomainName}
+                className="w-full sm:w-auto"
                 data-testid="button-save-domain"
               >
                 <Save className="w-4 h-4 mr-2" />

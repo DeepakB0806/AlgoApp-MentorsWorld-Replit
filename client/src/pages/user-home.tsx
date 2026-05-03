@@ -104,7 +104,7 @@ export default function UserHome() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-2">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="p-3 rounded-lg bg-muted/50" data-testid="stat-brokers">
                 <div className="text-xs text-muted-foreground mb-1.5">Brokers</div>
                 {connectedBrokers.length > 0 ? (

@@ -381,11 +381,11 @@ export default function UserManagement() {
                     .map((invitation) => (
                       <div
                         key={invitation.id}
-                        className="flex items-center justify-between p-4 border rounded-lg"
+                        className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-lg gap-3"
                         data-testid={`invitation-${invitation.id}`}
                       >
-                        <div className="flex-1">
-                          <p className="font-medium">{invitation.email}</p>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate">{invitation.email}</p>
                           <div className="flex flex-wrap items-center gap-2 mt-1">
                             <span className="text-sm text-muted-foreground">
                               Expires: {new Date(invitation.expiresAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}
@@ -407,7 +407,7 @@ export default function UserManagement() {
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 flex-shrink-0">
                           {getStatusBadge(invitation.status)}
                           <Button
                             variant="ghost"
