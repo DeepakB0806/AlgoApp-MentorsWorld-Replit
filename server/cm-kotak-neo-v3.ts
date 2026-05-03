@@ -494,17 +494,26 @@ export async function calculatePlanMargins(
           ?? sharedFallback;
 
         // 8. Try Mode 1: API (only when broker session is live)
-        // ATM comes from CSV put-call parity — instrumentConfig.token is not guaranteed
-        // to be an underlying/index token, so EL.getQuote LTP refinement is intentionally skipped.
         let utMargin = 0;
         let dtMargin = 0;
         let usedMode = "SPAN";
 
         if (brokerConfig.isConnected && brokerConfig.accessToken) {
-          console.log(`${MLOG} Plan "${plan.name}" — trying API mode (ATM=${atmStrike} from CSV)`);
+          // Refine ATM with live LTP from the underlying/index token stored in instrumentConfig.
+          // Falls back to CSV parity ATM when the quote is unavailable or returns no LTP.
+          let apiAtmStrike = atmStrike;
+          try {
+            const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(exchange), instrumentConfig.token ?? "");
+            if (quoteRes.success && quoteRes.ltp && quoteRes.ltp > 0) {
+              apiAtmStrike = getATMStrike(quoteRes.ltp, strikeInterval);
+              console.log(`${MLOG} Plan "${plan.name}" — LTP=${quoteRes.ltp} → live ATM=${apiAtmStrike}`);
+            }
+          } catch { /* non-fatal — keep CSV parity ATM */ }
+
+          console.log(`${MLOG} Plan "${plan.name}" — trying API mode (ATM=${apiAtmStrike})`);
           const [utRes, dtRes] = await Promise.all([
-            cmApiBlock(utLegs, atmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, utProductMode, "UT"),
-            cmApiBlock(dtLegs, atmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, dtProductMode, "DT"),
+            cmApiBlock(utLegs, apiAtmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, utProductMode, "UT"),
+            cmApiBlock(dtLegs, apiAtmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, dtProductMode, "DT"),
           ]);
 
           if (!utRes.anyFailed && !dtRes.anyFailed && (utRes.total > 0 || dtRes.total > 0)) {
