@@ -500,14 +500,19 @@ export async function calculatePlanMargins(
         let usedMode = "SPAN";
 
         if (brokerConfig.isConnected && brokerConfig.accessToken) {
-          // Refine ATM with live LTP from the underlying/index token stored in instrumentConfig.
-          // Falls back to CSV parity ATM when the quote is unavailable or returns no LTP.
+          // Attempt live ATM refinement using EL.getQuote with instrumentConfig.token.
+          // instrumentConfig.token is set during scrip master sync from the first OPT/FUT
+          // row for the ticker; it may be a futures or option token. We validate the LTP:
+          // index/futures prices are in thousands, option premiums are < strikeInterval×200.
+          // Only accept if ltp > strikeInterval × 200 (e.g. >10000 for NIFTY/50).
           let apiAtmStrike = atmStrike;
           try {
             const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(exchange), instrumentConfig.token ?? "");
-            if (quoteRes.success && quoteRes.ltp && quoteRes.ltp > 0) {
+            if (quoteRes.success && quoteRes.ltp && quoteRes.ltp > strikeInterval * 200) {
               apiAtmStrike = getATMStrike(quoteRes.ltp, strikeInterval);
               console.log(`${MLOG} Plan "${plan.name}" — LTP=${quoteRes.ltp} → live ATM=${apiAtmStrike}`);
+            } else if (quoteRes.success && quoteRes.ltp) {
+              console.log(`${MLOG} Plan "${plan.name}" — LTP=${quoteRes.ltp} below index threshold; using CSV parity ATM=${atmStrike}`);
             }
           } catch { /* non-fatal — keep CSV parity ATM */ }
 
