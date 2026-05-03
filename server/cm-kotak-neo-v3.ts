@@ -9,8 +9,6 @@
 // Margin = SPAN rate × targetStrike × lotSize × lotMultiplier × sellLots.
 // UT and DT are computed separately; estimatedMargin = max(UT, DT).
 // ═══════════════════════════════════════════════════════════════════════════════
-import fs from "fs";
-import path from "path";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@shared/schema";
 import EL from "./el-kotak-neo-v3";
@@ -161,14 +159,14 @@ export async function startCapitalManager(storage: IStorage): Promise<void> {
 // CAPITAL MANAGER — calculatePlanMargins  (pure CSV SPAN engine)
 //
 // Zero Kotak API calls. ATM is derived from put-call parity:
-//   scan rawCsvCache col 58 (pScripBasePrice ÷ 100) for the target expiry's
-//   CE and PE tokens; find strike where |CE_price − PE_price| is minimum;
-//   snap to strikeInterval via getATMStrike.
+//   scan rawCsvCache.get(exchange) col 58 (pScripBasePrice ÷ 100) for the
+//   target expiry's CE and PE tokens; find strike where |CE_price − PE_price|
+//   is minimum; snap to strikeInterval via getATMStrike.
+//   Returns null if rawCsvCache has no data for the exchange.
 //
 // Margin formula per SELL leg:
 //   spanRate × targetStrike × lotSize × lotMultiplier × leg.lots
-// BUY legs contribute ₹0 (they reduce requirement in a real SPAN basket, but
-// for the conservative worst-case estimate we simply ignore them).
+// BUY legs contribute ₹0.
 //
 // UT = SELL margins from uptrendLegs  + SELL margins from neutralLegs
 // DT = SELL margins from downtrendLegs + SELL margins from neutralLegs
@@ -192,38 +190,7 @@ function cmIsExpiryDay(targetExpiryDate: string): boolean {
   return todayIST === targetExpiryDate;
 }
 
-// Resolve the raw CSV text for the given exchange.
-// Primary: rawCsvCache (populated during sync, cleared to disk afterwards).
-// Fallback: on-disk file written by SMC as scrip_master_{exchange}_{YYYY-MM-DD}.csv.
-function cmLoadRawCsv(exchange: string): string | null {
-  const MLOG = "[MARGIN-CALC]";
-
-  // 1. Try in-memory cache first (present only briefly during runScripMasterSync)
-  const cached = rawCsvCache.get(exchange)
-    ?? rawCsvCache.get(exchange.toUpperCase())
-    ?? rawCsvCache.get(exchange.toLowerCase());
-  if (cached) return cached;
-
-  // 2. Fall back to today's on-disk file (SMC writes it immediately before clearing cache)
-  const today = new Date();
-  const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const fileName = `scrip_master_${exchange.toLowerCase()}_${dateStr}.csv`;
-  const filePath = path.resolve(process.cwd(), fileName);
-  try {
-    if (fs.existsSync(filePath)) {
-      const text = fs.readFileSync(filePath, "utf8");
-      console.log(`${MLOG} cmLoadRawCsv: loaded ${exchange} from disk (${fileName}, ${text.length} chars)`);
-      return text;
-    }
-  } catch (err) {
-    console.warn(`${MLOG} cmLoadRawCsv: disk read failed for ${fileName}: ${err}`);
-  }
-
-  console.warn(`${MLOG} cmLoadRawCsv: no CSV available for exchange "${exchange}" (cache empty, no disk file at ${fileName})`);
-  return null;
-}
-
-// Scan the raw CSV for the given exchange to find ATM via put-call parity.
+// Scan rawCsvCache for the given exchange's CSV to find ATM via put-call parity.
 //
 // CSV column indices (1-indexed, i.e. array index = col - 1):
 //   col  1  → pSymbol       (token, string)
@@ -235,6 +202,7 @@ function cmLoadRawCsv(exchange: string): string | null {
 //
 // We use liveContractCache (already keyed by ticker_date_strike_optType) to
 // identify which tokens belong to the target expiry — no CSV date parsing needed.
+// Returns null if rawCsvCache has no entry for the exchange.
 function cmFindAtmFromCsv(
   ticker: string,
   exchange: string,
@@ -262,14 +230,16 @@ function cmFindAtmFromCsv(
     return null;
   }
 
-  // Step 2: load raw CSV (cache or disk)
-  const rawCsv = cmLoadRawCsv(exchange);
+  // Step 2: read raw CSV from in-memory cache
+  const rawCsv = rawCsvCache.get(exchange)
+    ?? rawCsvCache.get(exchange.toUpperCase())
+    ?? rawCsvCache.get(exchange.toLowerCase());
   if (!rawCsv) {
-    console.warn(`${MLOG} cmFindAtmFromCsv: no CSV source for exchange "${exchange}"`);
+    console.warn(`${MLOG} cmFindAtmFromCsv: rawCsvCache has no entry for exchange "${exchange}" — returning null`);
     return null;
   }
 
-  // {strike → {CE: price, PE: price}}
+  // Step 3: scan CSV rows; read col 1 (token) and col 58 (pScripBasePrice ÷ 100)
   const strikePrices = new Map<number, { CE?: number; PE?: number }>();
 
   const lines = rawCsv.split("\n");
@@ -297,7 +267,7 @@ function cmFindAtmFromCsv(
     return null;
   }
 
-  // Step 3: put-call parity — find strike where |CE − PE| is minimum
+  // Step 4: put-call parity — find strike where |CE − PE| is minimum
   let bestStrike: number | null = null;
   let bestDiff = Infinity;
 
@@ -457,29 +427,22 @@ export async function calculatePlanMargins(
         console.log(`${MLOG} Plan "${plan.name}" — ATM=${atmStrike} (${ticker} ${targetExpiryDate})`);
 
         // ── 6. Compute UT and DT margins separately ──────────────────────────
-        const uptrendLegs  = cmSelectLegs(tradeParams, "uptrendLegs");
+        const uptrendLegs   = cmSelectLegs(tradeParams, "uptrendLegs");
         const downtrendLegs = cmSelectLegs(tradeParams, "downtrendLegs");
-        const neutralLegs  = cmSelectLegs(tradeParams, "neutralLegs");
-        const legacyLegs   = cmSelectLegs(tradeParams, "legs");
+        const neutralLegs   = cmSelectLegs(tradeParams, "neutralLegs");
 
-        const neutralMargin = cmComputeBlockMargin(neutralLegs, atmStrike, strikeInterval, lotSize, lotMultiplier, effectiveSpanRate, "neutralLegs");
+        const neutralMargin = cmComputeBlockMargin(
+          neutralLegs, atmStrike, strikeInterval, lotSize, lotMultiplier, effectiveSpanRate, "neutralLegs",
+        );
+        const utMargin = cmComputeBlockMargin(
+          uptrendLegs, atmStrike, strikeInterval, lotSize, lotMultiplier, effectiveSpanRate, "uptrendLegs",
+        ) + neutralMargin;
+        const dtMargin = cmComputeBlockMargin(
+          downtrendLegs, atmStrike, strikeInterval, lotSize, lotMultiplier, effectiveSpanRate, "downtrendLegs",
+        ) + neutralMargin;
 
-        const utMargin = cmComputeBlockMargin(uptrendLegs, atmStrike, strikeInterval, lotSize, lotMultiplier, effectiveSpanRate, "uptrendLegs") + neutralMargin;
-        const dtMargin = cmComputeBlockMargin(downtrendLegs, atmStrike, strikeInterval, lotSize, lotMultiplier, effectiveSpanRate, "downtrendLegs") + neutralMargin;
-
-        // Legacy single-block plans: treat legs as both UT and DT
-        const legacyMargin = legacyLegs.length > 0
-          ? cmComputeBlockMargin(legacyLegs, atmStrike, strikeInterval, lotSize, lotMultiplier, effectiveSpanRate, "legs")
-          : 0;
-
-        let totalMargin: number;
-        if (uptrendLegs.length === 0 && downtrendLegs.length === 0 && legacyLegs.length > 0) {
-          totalMargin = legacyMargin;
-          console.log(`${MLOG} Plan "${plan.name}" — legacy legs=${legacyMargin.toFixed(2)}`);
-        } else {
-          totalMargin = Math.max(utMargin + legacyMargin, dtMargin + legacyMargin);
-          console.log(`${MLOG} Plan "${plan.name}" — UT=₹${utMargin.toFixed(2)} DT=₹${dtMargin.toFixed(2)} → estimatedMargin=₹${totalMargin.toFixed(2)}`);
-        }
+        const totalMargin = Math.max(utMargin, dtMargin);
+        console.log(`${MLOG} Plan "${plan.name}" — UT=₹${utMargin.toFixed(2)} DT=₹${dtMargin.toFixed(2)} → estimatedMargin=₹${totalMargin.toFixed(2)}`);
 
         // ── 7. Persist result ────────────────────────────────────────────────
         await storage.updateStrategyPlan(plan.id, {
