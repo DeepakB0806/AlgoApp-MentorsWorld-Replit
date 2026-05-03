@@ -61,6 +61,7 @@ export default function Strategies() {
           {activeTab === "broker" && <BrokerLinking />}
         </Suspense>
         <PageFooter />
+      </div>
     </div>
   );
 }
