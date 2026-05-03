@@ -300,8 +300,20 @@ function cmFindAtmFromCsv(
   return getATMStrike(bestStrike, strikeInterval);
 }
 
-// Compute SPAN margin for a list of legs (SELL only — BUY = ₹0).
-// Returns the total margin for the block.
+// Compute net SPAN margin for a list of legs — works for any strategy type.
+//
+// For every leg:
+//   contribution = spanRate × resolvedStrike × lotSize × lotMultiplier × lots
+//   SELL → total -= contribution  (you receive — negative)
+//   BUY  → total += contribution  (you pay     — positive)
+// Returns Math.abs(total) so the result is always positive.
+//
+// This handles all strategy types uniformly:
+//   Option buying  (all BUY)  → |0 − BUY_sum|       = BUY_sum
+//   Option selling (SELL+BUY) → |SELL_sum − BUY_sum| = net margin
+//   SELL-only                 → |SELL_sum − 0|       = SELL_sum
+//
+// lotSize comes from instrumentConfig per index — never hardcoded.
 function cmComputeBlockMargin(
   legs: any[],
   atmStrike: number,
@@ -319,10 +331,6 @@ function cmComputeBlockMargin(
     if (legType !== "CE" && legType !== "PE" && legType !== "FUT") continue;
 
     const legAction = (leg.action || "SELL").toUpperCase();
-    if (legAction !== "SELL") {
-      console.log(`${MLOG}   ${blockLabel} BUY ${legType} — ₹0 (BUY legs excluded from SPAN)`);
-      continue;
-    }
 
     let targetStrike: number;
     if (legType === "FUT") {
@@ -333,14 +341,18 @@ function cmComputeBlockMargin(
     }
 
     const lots = leg.lots || 1;
-    const legMargin = effectiveSpanRate * targetStrike * lotSize * lotMultiplier * lots;
-    total += legMargin;
-    console.log(
-      `${MLOG}   ${blockLabel} SELL ${legType} strike=${targetStrike} lots=${lots}×${lotMultiplier}×${lotSize} → ₹${legMargin.toFixed(2)}`,
-    );
+    const contribution = effectiveSpanRate * targetStrike * lotSize * lotMultiplier * lots;
+
+    if (legAction === "SELL") {
+      total -= contribution;
+      console.log(`${MLOG}   ${blockLabel} SELL ${legType} strike=${targetStrike} lots=${lots}×${lotMultiplier}×${lotSize} −₹${contribution.toFixed(2)}`);
+    } else {
+      total += contribution;
+      console.log(`${MLOG}   ${blockLabel} BUY  ${legType} strike=${targetStrike} lots=${lots}×${lotMultiplier}×${lotSize} +₹${contribution.toFixed(2)}`);
+    }
   }
 
-  return total;
+  return Math.abs(total);
 }
 
 // ─── calculatePlanMargins ────────────────────────────────────────────────────
