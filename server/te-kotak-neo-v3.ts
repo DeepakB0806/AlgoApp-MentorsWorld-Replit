@@ -988,7 +988,7 @@ async function executeLegBasket(
       }
 
       // FIX 3a: Immediate DB write as "pending_basket" — leg gets a real ID before any rollback can occur
-      const trailingSLCfg = (tradeParams as any)?.trailingSL;
+      const trailingSLCfg = (parseTradeParams(plan) as any)?.trailingSL;
       const tslEnabled = trailingSLCfg?.enabled === true && trailingSLCfg?.tslType !== "none";
       const initialSl: number | null =
         (leg as any).initialSl
@@ -1012,7 +1012,7 @@ async function executeLegBasket(
         localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
         webhookDataId: ctx.data.id || undefined,
         rejectedReason: orderReason || null,
-        ...(initialSl !== null || trailingStepVal !== null ? {
+        ...(productType === "NRML" && (initialSl !== null || tslEnabled) ? {
           initialSlPrice: initialSl !== null ? Number(initialSl) : null,
           trailingStep: trailingStepVal !== null ? Number(trailingStepVal) : null,
           currentSlPrice: initialSl !== null ? Number(initialSl) : null,
