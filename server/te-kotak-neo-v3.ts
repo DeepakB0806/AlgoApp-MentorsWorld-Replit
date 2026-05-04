@@ -1017,6 +1017,8 @@ async function executeLegBasket(
           trailingStep: trailingStepVal !== null ? Number(trailingStepVal) : null,
           currentSlPrice: initialSl !== null ? Number(initialSl) : null,
           highWaterMark: fillPrice,
+        } : {}),
+        ...(productType === "NRML" && tslEnabled ? {
           tslType: tslType || "none",
           tslLockProfit: tslLockProfitVal,
           tslProfitStep: tslProfitStepVal,
