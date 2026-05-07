@@ -14,7 +14,7 @@ const INDEX_DEFAULTS: Record<string, {
   spanRate: string;
   expiryMultiplier: string;
 }> = {
-  NIFTY:      { exchange: "NFO", expiryCycle: "Weekly & Monthly", expiryDay: "Tuesday",      lotSize: 75,  strikeInterval: 50,  spanRate: "10.0", expiryMultiplier: "1.16" },
+  NIFTY:      { exchange: "NFO", expiryCycle: "Weekly & Monthly", expiryDay: "Tuesday",      lotSize: 65,  strikeInterval: 50,  spanRate: "10.0", expiryMultiplier: "1.16" },
   BANKNIFTY:  { exchange: "NFO", expiryCycle: "Monthly ONLY",     expiryDay: "Last Tuesday", lotSize: 30,  strikeInterval: 100, spanRate: "12.0", expiryMultiplier: "1.14" },
   FINNIFTY:   { exchange: "NFO", expiryCycle: "Monthly ONLY",     expiryDay: "Last Tuesday", lotSize: 65,  strikeInterval: 50,  spanRate: "11.0", expiryMultiplier: "1.15" },
   MIDCPNIFTY: { exchange: "NFO", expiryCycle: "Monthly ONLY",     expiryDay: "Last Tuesday", lotSize: 120, strikeInterval: 25,  spanRate: "13.0", expiryMultiplier: "1.13" },
@@ -73,20 +73,21 @@ export function registerIndexMarginRoutes(app: Express, storage: IStorage) {
           });
           marginByName.set(name, row);
           seeded.push(name);
-        } else if (existing.lotSize === 1 || existing.expiryCycle == null) {
-          // Row has placeholder lotSize=1 (never admin-edited) or missing expiryCycle
-          // — correct it with canonical defaults without touching admin rate fields
+        } else if (existing.adminEditedAt == null) {
+          // Row exists but admin has never explicitly saved it — safe to apply
+          // canonical defaults without touching any admin-configured rate fields
           const row = await storage.upsertIndexMarginSetting({
             indexName:        name,
             exchange:         def.exchange,
-            spanRate:         existing.spanRate === "10.0" ? def.spanRate : existing.spanRate,
-            expiryMultiplier: existing.expiryMultiplier === "1.25" ? def.expiryMultiplier : existing.expiryMultiplier,
+            spanRate:         def.spanRate,
+            expiryMultiplier: def.expiryMultiplier,
             exposureRate:     existing.exposureRate,
             lotSize:          def.lotSize,
             expiryDay:        def.expiryDay,
             strikeInterval:   def.strikeInterval,
             expiryCycle:      def.expiryCycle,
             updatedAt:        null,
+            adminEditedAt:    null,
           });
           marginByName.set(name, row);
           corrected.push(name);
@@ -116,11 +117,13 @@ export function registerIndexMarginRoutes(app: Express, storage: IStorage) {
         res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
         return;
       }
+      const now = new Date().toISOString();
       const row = await storage.upsertIndexMarginSetting({
-        indexName: known.indexName,
-        exchange:  known.exchange,
+        indexName:     known.indexName,
+        exchange:      known.exchange,
         ...parsed.data,
-        updatedAt: null,
+        updatedAt:     now,
+        adminEditedAt: now,
       });
       res.json(row);
     } catch (err: any) {

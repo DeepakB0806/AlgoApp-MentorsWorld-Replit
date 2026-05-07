@@ -865,6 +865,7 @@ export const indexMarginSettings = pgTable("index_margin_settings", {
   strikeInterval: integer("strike_interval").default(50),
   expiryCycle: text("expiry_cycle").notNull().default("Monthly ONLY"),
   updatedAt: text("updated_at"),
+  adminEditedAt: text("admin_edited_at"),
 });
 
 export const insertIndexMarginSettingSchema = createInsertSchema(indexMarginSettings).omit({ id: true });
