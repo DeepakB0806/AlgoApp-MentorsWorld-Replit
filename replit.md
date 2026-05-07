@@ -35,3 +35,20 @@ The application adopts a database-centric design with a `universal_fields` table
 - **Super Admin**: `webadmin@mentorsworld.org` / `H2so4#Hcl`
 - Role: `super_admin` — full access to all routes and UI features.
 - Use these credentials in all automated test plans (email/password login flow on `/login`).
+
+## Debug Rules — STRICT
+
+### Log Source by Environment
+**RULE: Never use dev workflow logs to debug a deployed/published issue.**
+
+| App state | Correct log source | Tool |
+|---|---|---|
+| Running in Replit preview (dev) | `Start application` workflow logs | `refresh_all_logs` |
+| Published / deployed to `.replit.app` | Production deployment logs | `fetch_deployment_logs` |
+
+- **Dev logs** (`refresh_all_logs`) reflect only what runs inside the Replit workspace container. They are completely separate from the published app.
+- **Production logs** (`fetch_deployment_logs`) are the only source of truth for a deployed app. Filter by message pattern (e.g. `"MARGIN-CALC|DISTANCE-SPAN"`) or timestamp range to narrow results.
+- If `fetch_deployment_logs` returns empty, the app may not have triggered the relevant code path yet (e.g. scrip sync only fires at 09:10 IST or during intraday intervals). Check timing before assuming a bug.
+
+### Schema Migrations on Publish
+When new tables or columns are added in dev (via `shared/schema.ts`), they are applied to the production database automatically by Replit's Publish flow — NOT by any startup script. Never write startup-time DDL or custom migration scripts. If production is missing a table, the fix is to re-publish the app.

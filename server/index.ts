@@ -11,7 +11,7 @@ import TL from "./tl-kotak-neo-v3";
 import EL from "./el-kotak-neo-v3";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
 import { runScripMasterSync, loadScripMasterFromDisk, runScripMasterSyncPhaseB } from "./smc-kotak-neo-v3";
-import { startCapitalManager } from "./cm-kotak-neo-v3";
+import { startCapitalManager, calculatePlanMargins } from "./cm-kotak-neo-v3";
 import { rescheduleScripMasterSync, scheduleScripSyncRetry, scheduleStartupScripSyncRetry, startIntradayScripRefresh } from "./scrip-sync-scheduler";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
@@ -253,6 +253,9 @@ app.use((req, res, next) => {
         const result = await runScripMasterSync(storage, primaryBroker);
         if (result.success) {
           log(`[STARTUP] Scrip master Phase A: ${result.synced} contracts via ${primaryBroker.ucc || primaryBroker.id}`);
+          calculatePlanMargins(storage, primaryBroker).catch(err =>
+            log(`[STARTUP] Capital margin calc error: ${err}`)
+          );
         } else {
           log(`[STARTUP] Scrip master Phase A warning: ${result.error} — scheduling auto-recovery`);
           scheduleScripSyncRetry(storage, primaryBroker, 1);
@@ -315,8 +318,38 @@ app.use((req, res, next) => {
     if (!existingIntradayCapital) await storage.setSetting("cm_intraday_refresh_mins", "5");
     const existingAutoPauseThreshold = await storage.getSetting("auto_pause_skip_threshold");
     if (!existingAutoPauseThreshold) await storage.setSetting("auto_pause_skip_threshold", "3");
+    const existingExpRate = await storage.getSetting("exposure_rate_percent");
+    if (!existingExpRate) await storage.setSetting("exposure_rate_percent", "2.0");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
+  }
+
+  // Seed index_margin_settings defaults — idempotent, only writes missing rows
+  try {
+    const KNOWN_INDICES = [
+      { indexName: "BANKEX",     exchange: "BFO" },
+      { indexName: "BANKNIFTY",  exchange: "NFO" },
+      { indexName: "FINNIFTY",   exchange: "NFO" },
+      { indexName: "MIDCPNIFTY", exchange: "NFO" },
+      { indexName: "NIFTY",      exchange: "NFO" },
+      { indexName: "SENSEX",     exchange: "BFO" },
+    ];
+    const existingRows = await storage.getAllIndexMarginSettings();
+    const existingNames = new Set(existingRows.map(r => r.indexName));
+    const seededIdx: string[] = [];
+    for (const idx of KNOWN_INDICES) {
+      if (!existingNames.has(idx.indexName)) {
+        await storage.upsertIndexMarginSetting({
+          indexName: idx.indexName, exchange: idx.exchange,
+          exposureRate: "2.0", spanRate: "10.0", expiryMultiplier: "1.25", updatedAt: null,
+        });
+        seededIdx.push(idx.indexName);
+      }
+    }
+    if (seededIdx.length > 0) log(`[STARTUP] Index margin settings seeded: ${seededIdx.join(", ")}`);
+    else log(`[STARTUP] Index margin settings: all ${KNOWN_INDICES.length} indices already present`);
+  } catch (err) {
+    log(`[STARTUP] Index margin settings seed warning: ${err}`);
   }
 
   // Seed default error routing rules — idempotent upsert on every startup
