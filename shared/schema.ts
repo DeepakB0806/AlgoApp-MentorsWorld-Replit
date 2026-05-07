@@ -863,6 +863,7 @@ export const indexMarginSettings = pgTable("index_margin_settings", {
   lotSize: integer("lot_size").default(1),
   expiryDay: text("expiry_day").default("Thursday"),
   strikeInterval: integer("strike_interval").default(50),
+  expiryCycle: text("expiry_cycle").notNull().default("Monthly ONLY"),
   updatedAt: text("updated_at"),
 });
 

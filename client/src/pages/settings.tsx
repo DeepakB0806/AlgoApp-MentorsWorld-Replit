@@ -1773,9 +1773,15 @@ type IndexEditState = {
   lotSize: string;
   expiryDay: string;
   strikeInterval: string;
+  expiryCycle: string;
 };
 
-const EXPIRY_DAY_OPTIONS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+const EXPIRY_DAY_OPTIONS = [
+  "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+  "Last Monday", "Last Tuesday", "Last Wednesday", "Last Thursday", "Last Friday", "Last Saturday",
+] as const;
+
+const EXPIRY_CYCLE_OPTIONS = ["Weekly & Monthly", "Monthly ONLY"] as const;
 
 function IndicesSettings() {
   const { toast } = useToast();
@@ -1794,6 +1800,7 @@ function IndicesSettings() {
       lotSize:          String(row.lotSize ?? 1),
       expiryDay:        row.expiryDay ?? "Thursday",
       strikeInterval:   String(row.strikeInterval ?? 50),
+      expiryCycle:      row.expiryCycle ?? "Monthly ONLY",
     };
   }
 
@@ -1819,6 +1826,7 @@ function IndicesSettings() {
         lotSize:          Number(edit.lotSize),
         expiryDay:        edit.expiryDay,
         strikeInterval:   Number(edit.strikeInterval),
+        expiryCycle:      edit.expiryCycle,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/index-margin-settings"] });
       toast({ title: "Saved", description: `${row.indexName} settings updated.` });
@@ -1861,9 +1869,10 @@ function IndicesSettings() {
                   <TableRow>
                     <TableHead>Index</TableHead>
                     <TableHead>Exchange</TableHead>
+                    <TableHead>Expiry Cycle</TableHead>
                     <TableHead>Expiry Day</TableHead>
                     <TableHead className="text-right">Lot Size</TableHead>
-                    <TableHead className="text-right">Strike Interval</TableHead>
+                    <TableHead className="text-right">Strike Int.</TableHead>
                     <TableHead>Exposure %</TableHead>
                     <TableHead>Span %</TableHead>
                     <TableHead>Expiry X</TableHead>
@@ -1878,6 +1887,21 @@ function IndicesSettings() {
                       <TableRow key={row.indexName} data-testid={`row-index-margin-${row.indexName}`}>
                         <TableCell className="font-mono font-medium">{row.indexName}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{row.exchange}</TableCell>
+                        <TableCell>
+                          <Select
+                            value={edit.expiryCycle}
+                            onValueChange={v => setField(row, "expiryCycle", v)}
+                          >
+                            <SelectTrigger className="w-40 h-8 text-sm" data-testid={`select-expiry-cycle-${row.indexName}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {EXPIRY_CYCLE_OPTIONS.map(c => (
+                                <SelectItem key={c} value={c}>{c}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
                         <TableCell>
                           <Select
                             value={edit.expiryDay}

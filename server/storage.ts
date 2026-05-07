@@ -1749,6 +1749,7 @@ export class DatabaseStorage implements IStorage {
     if (data.lotSize        !== undefined) setFields.lotSize        = data.lotSize;
     if (data.expiryDay      !== undefined) setFields.expiryDay      = data.expiryDay;
     if (data.strikeInterval !== undefined) setFields.strikeInterval = data.strikeInterval;
+    if (data.expiryCycle    !== undefined) setFields.expiryCycle    = data.expiryCycle;
     const [row] = await db
       .insert(indexMarginSettings)
       .values({ ...data, updatedAt: new Date().toISOString() })
