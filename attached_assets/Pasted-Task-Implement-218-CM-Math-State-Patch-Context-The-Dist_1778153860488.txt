@@ -1,0 +1,52 @@
+Task: Implement #218 - CM Math & State Patch
+
+Context:
+The Distance-SPAN engine in cm-kotak-neo-v3.ts is mostly correct, but it has two logical bugs causing incorrect UI margins.
+
+The engine skips non-primary brokers to save API calls, but it currently filters plans by p.brokerConfigId === brokerConfig.id. This means non-primary users never get their plan margins calculated. The primary run must calculate active plans for ALL users.
+
+In cmPairLegs, the hedged pair calculation correctly calculates Max Risk + Exposure, but it drops the actual premium cost of the BUY leg used in the hedge.
+
+Instructions for Replit:
+
+Step 1: Fix the Hedged Buy Premium Leak
+File: server/cm-kotak-neo-v3.ts
+Locate the cmPairLegs function. Replace the hedgeM calculation block (roughly lines 196-199) with this updated math that includes the buyLegPremiumCost:
+
+TypeScript
+  // Hedged pairs: strike distance + exposure buffer + buy leg premium
+  while (si < sortedSells.length && bi < sortedBuys.length) {
+    const sell = sortedSells[si], buy = sortedBuys[bi];
+    const hedgeLots = Math.min(remS[si], remB[bi]);
+    
+    const spreadRiskAndExposure = (Math.abs(sell.strike - buy.strike) * lotSize) + (atmStrike * lotSize * exposureRate);
+    const buyLegPremiumCost = buy.premium * lotSize;
+    
+    const hedgeM = (spreadRiskAndExposure + buyLegPremiumCost) * hedgeLots;
+    total += hedgeM;
+    console.log(`${MLOG} ${blockLabel} HEDGED ${typeLabel} S@${sell.strike}/B@${buy.strike} lots=${hedgeLots} req=₹${hedgeM.toFixed(2)} (inc. Buy Prem)`);
+    
+    remS[si] -= hedgeLots; remB[bi] -= hedgeLots;
+    if (remS[si] <= 0) si++;
+    if (remB[bi] <= 0) bi++;
+  }
+Step 2: Fix the Primary Broker Plan Filter
+File: server/cm-kotak-neo-v3.ts
+Locate the calculatePlanMargins function. Remove the p.brokerConfigId === brokerConfig.id restriction so the primary broker calculates margins for all active plans globally.
+
+Replace this section (roughly lines 284-288):
+
+TypeScript
+    const plansToCalc = allPlans
+      .filter(p =>
+        p.brokerConfigId === brokerConfig.id &&
+        (p.deploymentStatus === "active" || p.deploymentStatus === "deployed"),
+      )
+      .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+With this:
+
+TypeScript
+    // Because this only runs on the primary broker, calculate margins for ALL active/deployed plans across all users
+    const plansToCalc = allPlans
+      .filter(p => p.deploymentStatus === "active" || p.deploymentStatus === "deployed")
+      .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
