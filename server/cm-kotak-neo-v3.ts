@@ -503,16 +503,6 @@ export async function calculatePlanMargins(
       return;
     }
 
-    // Global fallback rates (used when index_margin_settings has no row for this ticker)
-    const spanRateSetting     = await storage.getSetting("span_rate_percent");
-    const expiryMultSetting   = await storage.getSetting("expiry_day_span_multiplier");
-    const expRateSetting      = await storage.getSetting("exposure_rate_percent");
-    const parsedSpanRate      = parseFloat(spanRateSetting?.value   || "");
-    const parsedExpiryMult    = parseFloat(expiryMultSetting?.value || "");
-    const parsedExpRate       = parseFloat(expRateSetting?.value    || "");
-    const globalBaseSpanRate  = (isNaN(parsedSpanRate)   || parsedSpanRate   <= 0) ? 10.0 : parsedSpanRate;
-    const globalExpiryMult    = (isNaN(parsedExpiryMult) || parsedExpiryMult < 1)  ? 1.5  : parsedExpiryMult;
-    const globalExposureRate  = (isNaN(parsedExpRate)    || parsedExpRate    <= 0)  ? 2.0  : parsedExpRate;
 
     const allPlans = await storage.getStrategyPlans();
     const plansToCalc = allPlans
@@ -541,28 +531,26 @@ export async function calculatePlanMargins(
           continue;
         }
 
-        // 2. instrumentConfig
-        const instrumentConfig = await storage.getInstrumentConfig(ticker, exchange);
-        if (!instrumentConfig) {
-          console.warn(`${MLOG} Plan "${plan.name}" — no instrumentConfig for ${ticker}/${exchange}, skipping`);
+        // 2. Per-index config — single source of truth for all index-level fields (Task #220)
+        const idxSetting = await storage.getIndexMarginSetting(ticker);
+        if (!idxSetting) {
+          console.warn(`${MLOG} Plan "${plan.name}" — no index_margin_settings row for ${ticker}, skipping`);
           continue;
         }
-        const strikeInterval = instrumentConfig.strikeInterval ?? 50;
-        const lotSize        = instrumentConfig.lotSize ?? 1;
-        const lotMultiplier  = plan.lotMultiplier || 1;
-        const expiryDay      = instrumentConfig.expiryDay;
-        if (!expiryDay) { console.warn(`${MLOG} Plan "${plan.name}" — expiryDay missing, skipping`); continue; }
+        const strikeInterval   = idxSetting.strikeInterval ?? 50;
+        const lotSize          = idxSetting.lotSize ?? 1;
+        const lotMultiplier    = plan.lotMultiplier || 1;
+        const expiryDay        = idxSetting.expiryDay || "Thursday";
+        const spanPct          = parseFloat(idxSetting.spanRate);
+        const expPct           = parseFloat(idxSetting.exposureRate);
+        const expMultParsed    = parseFloat(idxSetting.expiryMultiplier);
+        const baseSpanRate     = (isNaN(spanPct)       || spanPct       <= 0) ? 0.10  : spanPct  / 100;
+        const exposureRate     = (isNaN(expPct)        || expPct        <= 0) ? 0.02  : expPct   / 100;
+        const expiryMultiplier = (isNaN(expMultParsed) || expMultParsed <  1) ? 1.25  : expMultParsed;
+        console.log(`${MLOG} Plan "${plan.name}" — rates: span=${(baseSpanRate * 100).toFixed(1)}% exp=${(exposureRate * 100).toFixed(1)}% expMult=${expiryMultiplier} [index_margin_settings]`);
 
-        // 2.5. Per-index rates from index_margin_settings (falls back to global app_settings)
-        const idxSetting      = await storage.getIndexMarginSetting(ticker);
-        const spanPct         = idxSetting ? parseFloat(idxSetting.spanRate)         : NaN;
-        const expPct          = idxSetting ? parseFloat(idxSetting.exposureRate)      : NaN;
-        const expMultFromIdx  = idxSetting ? parseFloat(idxSetting.expiryMultiplier)  : NaN;
-        const baseSpanRate     = (!isNaN(spanPct)        && spanPct        > 0) ? spanPct        / 100 : globalBaseSpanRate / 100;
-        const exposureRate     = (!isNaN(expPct)         && expPct         > 0) ? expPct         / 100 : globalExposureRate  / 100;
-        const expiryMultiplier = (!isNaN(expMultFromIdx) && expMultFromIdx >= 1) ? expMultFromIdx       : globalExpiryMult;
-        const rateSource = idxSetting ? "index_margin_settings" : "global_app_settings";
-        console.log(`${MLOG} Plan "${plan.name}" — rates: span=${(baseSpanRate * 100).toFixed(1)}% exp=${(exposureRate * 100).toFixed(1)}% expMult=${expiryMultiplier} (${rateSource})`);
+        // Still read token from instrument_configs for live EL.getQuote call
+        const instrumentConfig = await storage.getInstrumentConfig(ticker, exchange);
 
         // 3. Resolve target expiry (respects expiryWeekOffset)
         const timeLogic        = tradeParams.timeLogic as { expiryType?: string; expiryWeekOffset?: number } | undefined;

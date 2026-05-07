@@ -19,7 +19,7 @@ import {
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
-import type { BrokerConfig, ErrorRouting, ExchangeSetting, IndexExpirySetting, IndexMarginSetting, MarketHoliday, StrategyPlan } from "@shared/schema";
+import type { BrokerConfig, ErrorRouting, ExchangeSetting, IndexMarginSetting, MarketHoliday, StrategyPlan } from "@shared/schema";
 import { PageFooter } from "@/components/page-footer";
 
 function getBrokerInitial(brokerName?: string | null): string {
@@ -540,8 +540,6 @@ function GeneralTradingSettings() {
   const [orderDelayMs, setOrderDelayMs] = useState<string>("");
   const [syncClockValue, setSyncClockValue] = useState<string>("09:10");
   const [intradayIntervalValue, setIntradayIntervalValue] = useState<string>("0");
-  const [spanRateValue, setSpanRateValue] = useState<string>("5.0");
-  const [expiryMultiplierValue, setExpiryMultiplierValue] = useState<string>("1.5");
   const { toast } = useToast();
 
   const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
@@ -574,14 +572,6 @@ function GeneralTradingSettings() {
 
   const { data: intradayIntervalSetting, isLoading: intradayIntervalLoading } = useQuery<{ key: string; value: string | null }>({
     queryKey: ["/api/settings/scrip_master_intraday_interval_mins"],
-  });
-
-  const { data: spanRateSetting, isLoading: spanRateLoading } = useQuery<{ key: string; value: string | null }>({
-    queryKey: ["/api/settings/span_rate_percent"],
-  });
-
-  const { data: expiryMultiplierSetting, isLoading: expiryMultiplierLoading } = useQuery<{ key: string; value: string | null }>({
-    queryKey: ["/api/settings/expiry_day_span_multiplier"],
   });
 
   useEffect(() => {
@@ -645,22 +635,6 @@ function GeneralTradingSettings() {
       setIntradayIntervalValue("0");
     }
   }, [intradayIntervalSetting, intradayIntervalLoading]);
-
-  useEffect(() => {
-    if (spanRateSetting?.value !== undefined && spanRateSetting?.value !== null) {
-      setSpanRateValue(spanRateSetting.value);
-    } else if (!spanRateLoading) {
-      setSpanRateValue("5.0");
-    }
-  }, [spanRateSetting, spanRateLoading]);
-
-  useEffect(() => {
-    if (expiryMultiplierSetting?.value !== undefined && expiryMultiplierSetting?.value !== null) {
-      setExpiryMultiplierValue(expiryMultiplierSetting.value);
-    } else if (!expiryMultiplierLoading) {
-      setExpiryMultiplierValue("1.5");
-    }
-  }, [expiryMultiplierSetting, expiryMultiplierLoading]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -788,38 +762,6 @@ function GeneralTradingSettings() {
     },
   });
 
-  const saveSpanRateMutation = useMutation({
-    mutationFn: async () => {
-      const val = parseFloat(spanRateValue);
-      if (isNaN(val) || val <= 0 || val > 100) throw new Error("Enter a valid percentage between 0 and 100");
-      const res = await apiRequest("POST", "/api/settings/span_rate_percent", { value: String(val) });
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/settings/span_rate_percent"] });
-      toast({ title: "Saved", description: "SPAN rate updated." });
-    },
-    onError: (err: any) => {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    },
-  });
-
-  const saveExpiryMultiplierMutation = useMutation({
-    mutationFn: async () => {
-      const val = parseFloat(expiryMultiplierValue);
-      if (isNaN(val) || val < 1) throw new Error("Enter a multiplier ≥ 1.0");
-      const res = await apiRequest("POST", "/api/settings/expiry_day_span_multiplier", { value: String(val) });
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/settings/expiry_day_span_multiplier"] });
-      toast({ title: "Saved", description: "Expiry day SPAN multiplier updated." });
-    },
-    onError: (err: any) => {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    },
-  });
-
   return (
     <Card data-testid="card-general-trading-settings">
       <CardHeader>
@@ -832,7 +774,7 @@ function GeneralTradingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isLoading || shortfallLoading || rollbackLoading || maxCloseRetryLoading || bufferLoading || orderDelayLoading || syncClockLoading || intradayIntervalLoading || spanRateLoading || expiryMultiplierLoading ? (
+        {isLoading || shortfallLoading || rollbackLoading || maxCloseRetryLoading || bufferLoading || orderDelayLoading || syncClockLoading || intradayIntervalLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
           <>
@@ -1083,68 +1025,6 @@ function GeneralTradingSettings() {
               </Button>
             </div>
 
-            <div className="space-y-3 pt-2 border-t">
-              <Label htmlFor="input-span-rate">
-                SPAN Rate for Margin Calculation (%)
-              </Label>
-              <p className="text-sm text-muted-foreground">
-                Percentage of the strike price used as the SPAN margin estimate per SELL lot. The engine computes UT and DT margins separately and uses the larger of the two as the estimated margin for capital gating. BUY legs are excluded (they reduce net SPAN in a live basket, but are ignored here for a conservative estimate).
-              </p>
-              <div className="flex items-center gap-3 max-w-xs">
-                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
-                <Input
-                  id="input-span-rate"
-                  data-testid="input-span-rate"
-                  type="number"
-                  min="0.1"
-                  max="100"
-                  step="0.1"
-                  value={spanRateValue}
-                  onChange={(e) => setSpanRateValue(e.target.value)}
-                  placeholder="5.0"
-                />
-                <span className="text-sm text-muted-foreground whitespace-nowrap">%</span>
-              </div>
-              <p className="text-xs text-muted-foreground">Default: 5.0%. Formula: rate × strike × lotSize × lotMultiplier × lots (SELL only).</p>
-              <Button
-                data-testid="button-save-span-rate"
-                onClick={() => saveSpanRateMutation.mutate()}
-                disabled={saveSpanRateMutation.isPending}
-              >
-                {saveSpanRateMutation.isPending ? "Saving..." : "Save"}
-              </Button>
-            </div>
-
-            <div className="space-y-3 pt-2 border-t">
-              <Label htmlFor="input-expiry-multiplier">
-                Expiry Day SPAN Multiplier
-              </Label>
-              <p className="text-sm text-muted-foreground">
-                On expiry day the effective SPAN rate is multiplied by this value to account for elevated margin requirements near settlement. Applied automatically when today's IST date matches the plan's target expiry date.
-              </p>
-              <div className="flex items-center gap-3 max-w-xs">
-                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
-                <Input
-                  id="input-expiry-multiplier"
-                  data-testid="input-expiry-multiplier"
-                  type="number"
-                  min="1.0"
-                  step="0.1"
-                  value={expiryMultiplierValue}
-                  onChange={(e) => setExpiryMultiplierValue(e.target.value)}
-                  placeholder="1.5"
-                />
-                <span className="text-sm text-muted-foreground whitespace-nowrap">×</span>
-              </div>
-              <p className="text-xs text-muted-foreground">Default: 1.5×. e.g. at 5% rate, expiry day effective rate = 7.5%.</p>
-              <Button
-                data-testid="button-save-expiry-multiplier"
-                onClick={() => saveExpiryMultiplierMutation.mutate()}
-                disabled={saveExpiryMultiplierMutation.isPending}
-              >
-                {saveExpiryMultiplierMutation.isPending ? "Saving..." : "Save"}
-              </Button>
-            </div>
           </>
         )}
       </CardContent>
@@ -1496,29 +1376,6 @@ function MarketCalendarSettings() {
     });
   }
 
-  // ── Index Expiry state ───────────────────────────────────────────────────
-  const [expiryEdits, setExpiryEdits] = useState<Record<string, number>>({});
-
-  const { data: expiryRows = [], isLoading: expiryLoading } = useQuery<IndexExpirySetting[]>({
-    queryKey: ["/api/market-calendar/index-expiry-settings"],
-  });
-
-  const saveExpiryMutation = useMutation({
-    mutationFn: async ({ indexName, defaultExpiryDay }: { indexName: string; defaultExpiryDay: number }) => {
-      const res = await apiRequest("POST", `/api/market-calendar/index-expiry-settings/${indexName}`, { defaultExpiryDay });
-      return res.json();
-    },
-    onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/market-calendar/index-expiry-settings"] });
-      toast({ title: "Saved", description: `${vars.indexName} expiry day updated.` });
-    },
-    onError: (err: any) => toast({ title: "Save failed", description: err.message, variant: "destructive" }),
-  });
-
-  function getExpiryDay(row: IndexExpirySetting): number {
-    return expiryEdits[row.indexName] ?? row.defaultExpiryDay;
-  }
-
   // ── Holiday Calendar state ───────────────────────────────────────────────
   const [holidayYear, setHolidayYear] = useState<string>(String(currentYear));
   const [holidayExchange, setHolidayExchange] = useState<string>("NSE");
@@ -1725,68 +1582,7 @@ function MarketCalendarSettings() {
         </CardContent>
       </Card>
 
-      {/* Card 2 — Index Expiry Days */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Index Expiry Days</CardTitle>
-          <CardDescription>Default weekly expiry day per index. Used by the plan monitor for exitOnExpiry logic.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {expiryLoading ? (
-            <div className="text-sm text-muted-foreground py-4">Loading...</div>
-          ) : (
-            <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Index</TableHead>
-                  <TableHead>Exchange</TableHead>
-                  <TableHead>Default Expiry Day</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {expiryRows.map((row) => (
-                  <TableRow key={row.indexName}>
-                    <TableCell className="font-mono font-medium">{row.indexName}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{row.exchange}</TableCell>
-                    <TableCell>
-                      <Select
-                        value={String(getExpiryDay(row))}
-                        onValueChange={val => setExpiryEdits(prev => ({ ...prev, [row.indexName]: parseInt(val) }))}
-                      >
-                        <SelectTrigger className="w-40" data-testid={`select-expiry-${row.indexName}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {[1,2,3,4,5].map(d => (
-                            <SelectItem key={d} value={String(d)}>{DAY_NAMES[d]}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={saveExpiryMutation.isPending}
-                        onClick={() => saveExpiryMutation.mutate({ indexName: row.indexName, defaultExpiryDay: getExpiryDay(row) })}
-                        data-testid={`button-save-expiry-${row.indexName}`}
-                      >
-                        <Save className="w-3 h-3 mr-1" />
-                        Save
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Card 3 — Holiday Calendar */}
+      {/* Card 2 — Holiday Calendar */}
       <Card>
         <CardHeader>
           <CardTitle>Holiday Calendar</CardTitle>
@@ -1968,7 +1764,7 @@ function MarketCalendarSettings() {
 }
 
 // ─── Indices Settings ─────────────────────────────────────────────────────────
-type IndexMarginRow = IndexMarginSetting & { expiryDay: string | null; lotSize: number | null };
+type IndexMarginRow = IndexMarginSetting & { expiryDay: string | null; lotSize: number | null; strikeInterval: number | null };
 
 function IndicesSettings() {
   const { toast } = useToast();
@@ -2031,7 +1827,7 @@ function IndicesSettings() {
           </CardTitle>
           <CardDescription>
             Per-index SPAN rate, Exposure rate, and Expiry Day Multiplier used by the Distance-SPAN margin engine.
-            Lot Size and Expiry are read-only — updated by Scrip Master sync and Market Calendar respectively.
+            Lot Size, Expiry Day, and Strike Interval are read-only — populated automatically by the Scrip Master sync.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -2044,8 +1840,9 @@ function IndicesSettings() {
                   <TableRow>
                     <TableHead>Index</TableHead>
                     <TableHead>Exchange</TableHead>
-                    <TableHead>Expiry</TableHead>
+                    <TableHead>Expiry Day</TableHead>
                     <TableHead className="text-right">Lot Size</TableHead>
+                    <TableHead className="text-right">Strike Interval</TableHead>
                     <TableHead>Exposure %</TableHead>
                     <TableHead>Span %</TableHead>
                     <TableHead>Expiry X</TableHead>
@@ -2065,6 +1862,9 @@ function IndicesSettings() {
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm">
                           {row.lotSize != null ? row.lotSize : <span className="text-muted-foreground/40">—</span>}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm" data-testid={`text-strike-interval-${row.indexName}`}>
+                          {row.strikeInterval != null ? row.strikeInterval : <span className="text-muted-foreground/40">—</span>}
                         </TableCell>
                         <TableCell>
                           <Input

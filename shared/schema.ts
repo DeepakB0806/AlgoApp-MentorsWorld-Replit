@@ -850,7 +850,9 @@ export const insertIndexExpirySettingSchema = createInsertSchema(indexExpirySett
 export type InsertIndexExpirySetting = z.infer<typeof insertIndexExpirySettingSchema>;
 export type IndexExpirySetting = typeof indexExpirySettings.$inferSelect;
 
-// Per-index margin parameters used by the Distance-SPAN margin engine (Task #216)
+// Per-index margin parameters — single source of truth for all index-level config (Task #220)
+// Rate fields (spanRate, exposureRate, expiryMultiplier) are admin-editable via Indices Settings UI.
+// Technical fields (lotSize, expiryDay, strikeInterval) are written automatically by Scrip Master sync.
 export const indexMarginSettings = pgTable("index_margin_settings", {
   id: serial("id").primaryKey(),
   indexName: text("index_name").notNull().unique(),
@@ -858,6 +860,9 @@ export const indexMarginSettings = pgTable("index_margin_settings", {
   exposureRate: text("exposure_rate").notNull().default("2.0"),
   spanRate: text("span_rate").notNull().default("10.0"),
   expiryMultiplier: text("expiry_multiplier").notNull().default("1.25"),
+  lotSize: integer("lot_size").default(1),
+  expiryDay: text("expiry_day").default("Thursday"),
+  strikeInterval: integer("strike_interval").default(50),
   updatedAt: text("updated_at"),
 });
 

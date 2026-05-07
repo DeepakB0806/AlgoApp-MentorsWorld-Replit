@@ -318,8 +318,6 @@ app.use((req, res, next) => {
     if (!existingIntradayCapital) await storage.setSetting("cm_intraday_refresh_mins", "5");
     const existingAutoPauseThreshold = await storage.getSetting("auto_pause_skip_threshold");
     if (!existingAutoPauseThreshold) await storage.setSetting("auto_pause_skip_threshold", "3");
-    const existingExpRate = await storage.getSetting("exposure_rate_percent");
-    if (!existingExpRate) await storage.setSetting("exposure_rate_percent", "2.0");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
   }

@@ -1739,19 +1739,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertIndexMarginSetting(data: InsertIndexMarginSetting): Promise<IndexMarginSetting> {
+    // Only include fields in the conflict-update SET that are actually provided.
+    // This allows the scrip sync to write technical fields (lotSize/expiryDay/strikeInterval)
+    // without overwriting admin-configured rate fields, and vice versa.
+    const setFields: Record<string, any> = { exchange: data.exchange, updatedAt: new Date().toISOString() };
+    if (data.exposureRate   !== undefined) setFields.exposureRate   = data.exposureRate;
+    if (data.spanRate       !== undefined) setFields.spanRate       = data.spanRate;
+    if (data.expiryMultiplier !== undefined) setFields.expiryMultiplier = data.expiryMultiplier;
+    if (data.lotSize        !== undefined) setFields.lotSize        = data.lotSize;
+    if (data.expiryDay      !== undefined) setFields.expiryDay      = data.expiryDay;
+    if (data.strikeInterval !== undefined) setFields.strikeInterval = data.strikeInterval;
     const [row] = await db
       .insert(indexMarginSettings)
       .values({ ...data, updatedAt: new Date().toISOString() })
-      .onConflictDoUpdate({
-        target: indexMarginSettings.indexName,
-        set: {
-          exchange: data.exchange,
-          exposureRate: data.exposureRate,
-          spanRate: data.spanRate,
-          expiryMultiplier: data.expiryMultiplier,
-          updatedAt: new Date().toISOString(),
-        },
-      })
+      .onConflictDoUpdate({ target: indexMarginSettings.indexName, set: setFields })
       .returning();
     return row;
   }

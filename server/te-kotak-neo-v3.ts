@@ -10,6 +10,7 @@ import type {
   ActionMapperEntry,
   PlanTradeLeg,
   InstrumentConfig,
+  IndexMarginSetting,
   ErrorRouting,
 } from "@shared/schema";
 import { tradingCache } from "./cache";
@@ -535,12 +536,15 @@ async function executeTradeForPlan(
   console.log(`[PFL] Plan "${plan.name}" — ${legs.length} leg(s) found for ${resolvedBlockType}`);
 
   let instrumentConfig: InstrumentConfig | undefined;
+  let idxMarginSetting: IndexMarginSetting | undefined;
   if (isOptionExchange(exchange)) {
     instrumentConfig = tradingCache.getInstrumentConfig(ticker, exchange);
     if (!instrumentConfig) {
       instrumentConfig = await storage.getInstrumentConfig(ticker, exchange);
       if (instrumentConfig) tradingCache.setInstrumentConfig(ticker, exchange, instrumentConfig);
     }
+    // index_margin_settings is the single source of truth for expiryDay, lotSize, strikeInterval (Task #220)
+    idxMarginSetting = await storage.getIndexMarginSetting(ticker);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -553,9 +557,10 @@ async function executeTradeForPlan(
     const timeLogic = tradeParams?.timeLogic as { expiryType?: string; expiryWeekOffset?: number } | undefined;
     const expiryType = timeLogic?.expiryType || "weekly";
     const weekOffset = timeLogic?.expiryWeekOffset || 0;
-    const expiryDay = instrumentConfig.expiryDay;
+    // Read expiryDay from index_margin_settings (single source of truth); fall back to instrumentConfig
+    const expiryDay = idxMarginSetting?.expiryDay || instrumentConfig.expiryDay;
     if (!expiryDay) {
-      const msg = `CRITICAL: expiryDay missing in instrument_config for ${ticker}. Cannot calculate target expiry.`;
+      const msg = `CRITICAL: expiryDay missing in index_margin_settings for ${ticker}. Cannot calculate target expiry.`;
       console.error(`[TE] ✗ ${msg}`);
       logPFL(plan, broker, data, "error", msg, { resolvedAction, ticker, exchange, price, executionTimeMs: Date.now() - startTime });
       return { success: false, action: "error", broker, planId: plan.id, message: msg, executionTimeMs: Date.now() - startTime };
@@ -574,7 +579,7 @@ async function executeTradeForPlan(
     tradingCache.setOpenTradesByPlanId(plan.id, openTrades);
   }
 
-  const ctx: TradeContext = { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, neutralLegs, blockConfig, instrumentConfig, targetExpiryDate };
+  const ctx: TradeContext = { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, neutralLegs, blockConfig, instrumentConfig, idxMarginSetting, targetExpiryDate };
 
   // ═══════════════════════════════════════════════════════════════════════════
   // POST-EOD ENTRY GATE
@@ -632,7 +637,7 @@ async function executeTradeForPlan(
 // TRADE CONTEXT & ORDER PARAMETER RESOLUTION
 // ═══════════════════════════════════════════════════════════════════════════════
 interface TradeContext {
-  ticker: string; exchange: string; price: number; resolvedBlockType: string; lotMultiplier: number; now: string; today: string; data: WebhookData; openTrades: StrategyTrade[]; signalContext?: SignalContext; startTime: number; legs: PlanTradeLeg[]; neutralLegs: PlanTradeLeg[]; blockConfig: Record<string, any>; instrumentConfig?: InstrumentConfig; targetExpiryDate?: string;
+  ticker: string; exchange: string; price: number; resolvedBlockType: string; lotMultiplier: number; now: string; today: string; data: WebhookData; openTrades: StrategyTrade[]; signalContext?: SignalContext; startTime: number; legs: PlanTradeLeg[]; neutralLegs: PlanTradeLeg[]; blockConfig: Record<string, any>; instrumentConfig?: InstrumentConfig; idxMarginSetting?: IndexMarginSetting; targetExpiryDate?: string;
 }
 
 function getBufferedLimitPrice(currentPrice: number, action: string, bufferPoints: number): string {
@@ -656,8 +661,9 @@ function resolveOrderParams(
     return { error: `Missing instrument_config for ${ctx.ticker}/${ctx.exchange}` };
   }
 
-  const lotSize = ctx.instrumentConfig?.lotSize ?? 1;
-  const strikeInterval = ctx.instrumentConfig!.strikeInterval ?? 50;
+  // Read lotSize/strikeInterval from index_margin_settings (single source of truth, Task #220)
+  const lotSize = ctx.idxMarginSetting?.lotSize ?? ctx.instrumentConfig?.lotSize ?? 1;
+  const strikeInterval = ctx.idxMarginSetting?.strikeInterval ?? ctx.instrumentConfig?.strikeInterval ?? 50;
 
   let tradingSymbol = ctx.ticker;
   if (isOption && isStrikeSpec(leg.strike) && (leg.type === "CE" || leg.type === "PE")) {
