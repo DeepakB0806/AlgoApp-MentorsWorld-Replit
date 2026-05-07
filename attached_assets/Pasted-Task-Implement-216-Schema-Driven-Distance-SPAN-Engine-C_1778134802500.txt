@@ -1,0 +1,174 @@
+Task: Implement #216 - Schema-Driven Distance SPAN Engine
+
+Context:
+We must implement a Distance-Based SPAN Margin Engine for NRML options. CRITICAL ARCHITECTURAL RULE: There must be absolutely NO hardcoded lot sizes (e.g., do not hardcode 65 or 15). The engine must dynamically read the lotSize from the instrumentConfig schema, and the lots per leg from the tradeParams schema.
+The engine will fetch live premiums via EL.getQuote on the primary broker (to save API calls) and calculate margin using Strike Distance heuristics (Max Risk + Exposure).
+
+Instructions for Replit:
+
+Step 1: Update Frontend Auto-Refresh
+File: client/src/components/broker-linking.tsx
+Locate the TanStack query for /api/strategy-plans. Add refetchInterval: 60_000 to the query configuration so the UI auto-refreshes.
+
+TypeScript
+  const { data: strategies, isLoading: strategiesLoading } = useQuery<Strategy[]>({
+    queryKey: ["/api/strategy-plans"],
+    refetchInterval: 60000, 
+  });
+Step 2: Refactor CM Engine (Primary Guard & Schema-Driven Distance Block)
+File: server/cm-kotak-neo-v3.ts
+
+A. Add the Primary Guard:
+At the very top of calculatePlanMargins, add the scalability guard to prevent duplicate API calls for non-primary users:
+
+TypeScript
+export async function calculatePlanMargins(
+  storage: IStorage,
+  brokerConfig: BrokerConfig,
+): Promise<void> {
+  const MLOG = "[MARGIN-CALC]";
+
+  if (!brokerConfig.isPrimary) {
+      console.log(`${MLOG} skipping — not primary broker (${brokerConfig.name})`);
+      return;
+  }
+B. Replace cmApiBlock and cmSpanBlock with Schema-Driven Distance Logic:
+Delete the existing cmApiBlock and cmSpanBlock functions entirely. Insert this new function. Notice how it dynamically uses lotSize (from schema) and leg.lots (from schema) to calculate risks.
+
+TypeScript
+// ─── Schema-Driven Distance-Based SPAN Block ───────────────────────────────────
+async function cmDistanceSpanBlock(
+  legs: any[],
+  atmStrike: number,
+  strikeInterval: number,
+  tokenMap: Map<string, string>,
+  priceMap: Map<number, { CE?: number; PE?: number }>,
+  effectiveSpanRate: number,
+  lotSize: number, // DYNAMICALLY PASSED FROM SCHEMA
+  lotMultiplier: number, // DYNAMICALLY PASSED FROM SCHEMA
+  brokerConfig: BrokerConfig,
+  exchange: string,
+  blockLabel: string,
+): Promise<number> {
+  const MLOG = "[MARGIN-CALC]";
+  let blockMargin = 0;
+  
+  // Base Exposure Rate (~2% for Indices)
+  const exposureRate = 0.02; 
+  const contractValue = atmStrike * lotSize;
+  const nakedSellMarginPerLot = contractValue * (effectiveSpanRate + exposureRate);
+
+  const calls = { sells: [] as any[], buys: [] as any[] };
+  const puts = { sells: [] as any[], buys: [] as any[] };
+
+  for (const leg of legs) {
+    const legType = (leg.type || "").toUpperCase();
+    const action = (leg.action || "SELL").toUpperCase();
+    
+    let resolvedStrike = atmStrike;
+    if (legType !== "FUT") {
+        const spec = parseStrikeSpec(leg.strike || "ATM");
+        resolvedStrike = getOTMStrike(atmStrike, spec, strikeInterval, legType as "CE" | "PE");
+    }
+
+    let token = legType === "FUT" ? tokenMap.get(`0_FUT`) : tokenMap.get(`${resolvedStrike}_${legType}`);
+    
+    let premium = 0;
+    let priceSource = "CSV-fallback";
+    if (token && brokerConfig.isConnected && brokerConfig.accessToken) {
+        try {
+            const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(exchange), token);
+            if (quoteRes.success && quoteRes.ltp && quoteRes.ltp > 0) {
+                premium = quoteRes.ltp;
+                priceSource = "LIVE-API";
+                await new Promise(r => setTimeout(r, 50)); 
+            }
+        } catch (err) {}
+    }
+    if (premium === 0) {
+        const priceEntry = priceMap.get(resolvedStrike);
+        premium = legType === "FUT" ? resolvedStrike : ((legType === "CE" ? priceEntry?.CE : priceEntry?.PE) ?? 150);
+        if (premium === 150) priceSource = "DEFAULT-150";
+    }
+
+    const processedLeg = { ...leg, resolvedStrike, premium, priceSource };
+
+    if (legType === "CE") {
+        action === "SELL" ? calls.sells.push(processedLeg) : calls.buys.push(processedLeg);
+    } else if (legType === "PE") {
+        action === "SELL" ? puts.sells.push(processedLeg) : puts.buys.push(processedLeg);
+    } else if (legType === "FUT") {
+        blockMargin += action === "SELL" ? nakedSellMarginPerLot : (premium * lotSize);
+    }
+  }
+
+  const processPairs = (sells: any[], buys: any[], typeLabel: string) => {
+      let margin = 0;
+      sells.sort((a, b) => (a.strikeOffset || 0) - (b.strikeOffset || 0));
+      buys.sort((a, b) => (a.strikeOffset || 0) - (b.strikeOffset || 0));
+
+      let buyIdx = 0;
+      for (const sell of sells) {
+          // SCHEMA FETCH: read lots directly from the leg schema
+          let sellLots = (sell.lots || 1) * lotMultiplier; 
+          
+          while (sellLots > 0) {
+              if (buyIdx < buys.length) {
+                  const buy = buys[buyIdx];
+                  // SCHEMA FETCH: read lots directly from the leg schema
+                  let buyLots = (buy.lots || 1) * lotMultiplier;
+                  
+                  const strikeDiff = Math.abs((sell.resolvedStrike || 0) - (buy.resolvedStrike || 0));
+                  const spreadMarginPerLot = (strikeDiff * lotSize) + (contractValue * exposureRate);
+                  
+                  const pairs = Math.min(sellLots, buyLots);
+                  margin += (spreadMarginPerLot * pairs);
+                  console.log(`${MLOG}   ${blockLabel} SPAN: HEDGED ${typeLabel} S@${sell.resolvedStrike}/B@${buy.resolvedStrike} req=₹${(spreadMarginPerLot * pairs).toFixed(2)}`);
+
+                  sellLots -= pairs;
+                  buyLots -= pairs;
+                  if (buyLots <= 0) buyIdx++;
+              } else {
+                  margin += (nakedSellMarginPerLot * sellLots);
+                  console.log(`${MLOG}   ${blockLabel} SPAN: NAKED SELL ${typeLabel} @${sell.resolvedStrike} req=₹${(nakedSellMarginPerLot * sellLots).toFixed(2)}`);
+                  sellLots = 0;
+              }
+          }
+      }
+
+      while (buyIdx < buys.length) {
+           const buy = buys[buyIdx];
+           const leftoverLots = (buy.lots || 1) * lotMultiplier;
+           const buyReq = buy.premium * lotSize * leftoverLots;
+           margin += buyReq;
+           console.log(`${MLOG}   ${blockLabel} SPAN: NAKED BUY ${typeLabel} @${buy.resolvedStrike} prem=₹${buy.premium.toFixed(2)} req=₹${buyReq.toFixed(2)}`);
+           buyIdx++;
+      }
+      return margin;
+  };
+
+  blockMargin += processPairs(calls.sells, calls.buys, "CE");
+  blockMargin += processPairs(puts.sells, puts.buys, "PE");
+
+  return blockMargin;
+}
+C. Update the Execution Block:
+Inside calculatePlanMargins, make sure the DB is queried for the instrumentConfig schema to dynamically pass lotSize, and replace the old calculation logic with the new function:
+
+TypeScript
+        // Schema Fetch: Ensure lotSize is dynamically pulled from the DB
+        const instrumentConfig = await storage.getInstrumentConfig(ticker, exchange);
+        const lotSize = instrumentConfig?.lotSize ?? 1; // Never hardcoded
+        
+        // Execute Schema-Driven Distance SPAN Engine
+        let utMargin = await cmDistanceSpanBlock(utLegs, atmStrike, strikeInterval, tokenMap, priceMap, effectiveSpanRate, lotSize, lotMultiplier, brokerConfig, exchange, "UT");
+        let dtMargin = await cmDistanceSpanBlock(dtLegs, atmStrike, strikeInterval, tokenMap, priceMap, effectiveSpanRate, lotSize, lotMultiplier, brokerConfig, exchange, "DT");
+
+        const totalMargin = Math.max(utMargin, dtMargin);
+        console.log(`${MLOG} Plan "${plan.name}" [DISTANCE-SPAN] → estimatedMargin=₹${totalMargin.toFixed(2)}`);
+
+        // Persist
+        await storage.updateStrategyPlan(plan.id, {
+          estimatedMargin: String(totalMargin.toFixed(2)),
+          marginCalculatedAt: new Date().toISOString(),
+        });
