@@ -5,7 +5,7 @@ import {
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
   brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades, strategyDailyPnl,
   broker_field_mappings, universal_fields, instrumentConfigs, broker_exchange_maps, processFlowLogs, errorRouting,
-  exchangeSettings, indexExpirySettings, marketHolidays, brokerCapitalSnapshots,
+  exchangeSettings, indexExpirySettings, indexMarginSettings, marketHolidays, brokerCapitalSnapshots,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -27,6 +27,7 @@ import {
   type ErrorRouting, type InsertErrorRouting,
   type ExchangeSetting, type InsertExchangeSetting,
   type IndexExpirySetting, type InsertIndexExpirySetting,
+  type IndexMarginSetting, type InsertIndexMarginSetting,
   type MarketHoliday, type InsertMarketHoliday,
   type BrokerCapitalSnapshot, type InsertBrokerCapitalSnapshot,
   type Position, type Order, type Holding, type PortfolioSummary
@@ -209,6 +210,11 @@ export interface IStorage {
   // Market Calendar — Index Expiry Settings
   getIndexExpirySettings(): Promise<IndexExpirySetting[]>;
   upsertIndexExpirySetting(indexName: string, data: Partial<InsertIndexExpirySetting>): Promise<IndexExpirySetting>;
+
+  // Index Margin Settings — per-index SPAN/Exposure/Multiplier for Distance-SPAN engine
+  getAllIndexMarginSettings(): Promise<IndexMarginSetting[]>;
+  getIndexMarginSetting(indexName: string): Promise<IndexMarginSetting | undefined>;
+  upsertIndexMarginSetting(data: InsertIndexMarginSetting): Promise<IndexMarginSetting>;
 
   // Market Calendar — Holidays
   getMarketHolidays(year?: number, exchange?: string): Promise<MarketHoliday[]>;
@@ -1720,6 +1726,34 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return inserted;
     }
+  }
+
+  // ── Index Margin Settings ────────────────────────────────────────────────────
+  async getAllIndexMarginSettings(): Promise<IndexMarginSetting[]> {
+    return db.select().from(indexMarginSettings).orderBy(indexMarginSettings.indexName);
+  }
+
+  async getIndexMarginSetting(indexName: string): Promise<IndexMarginSetting | undefined> {
+    const [row] = await db.select().from(indexMarginSettings).where(eq(indexMarginSettings.indexName, indexName));
+    return row ?? undefined;
+  }
+
+  async upsertIndexMarginSetting(data: InsertIndexMarginSetting): Promise<IndexMarginSetting> {
+    const [row] = await db
+      .insert(indexMarginSettings)
+      .values({ ...data, updatedAt: new Date().toISOString() })
+      .onConflictDoUpdate({
+        target: indexMarginSettings.indexName,
+        set: {
+          exchange: data.exchange,
+          exposureRate: data.exposureRate,
+          spanRate: data.spanRate,
+          expiryMultiplier: data.expiryMultiplier,
+          updatedAt: new Date().toISOString(),
+        },
+      })
+      .returning();
+    return row;
   }
 
   async getMarketHolidays(year?: number, exchange?: string): Promise<MarketHoliday[]> {

@@ -850,6 +850,21 @@ export const insertIndexExpirySettingSchema = createInsertSchema(indexExpirySett
 export type InsertIndexExpirySetting = z.infer<typeof insertIndexExpirySettingSchema>;
 export type IndexExpirySetting = typeof indexExpirySettings.$inferSelect;
 
+// Per-index margin parameters used by the Distance-SPAN margin engine (Task #216)
+export const indexMarginSettings = pgTable("index_margin_settings", {
+  id: serial("id").primaryKey(),
+  indexName: text("index_name").notNull().unique(),
+  exchange: text("exchange").notNull(),
+  exposureRate: text("exposure_rate").notNull().default("2.0"),
+  spanRate: text("span_rate").notNull().default("10.0"),
+  expiryMultiplier: text("expiry_multiplier").notNull().default("1.25"),
+  updatedAt: text("updated_at"),
+});
+
+export const insertIndexMarginSettingSchema = createInsertSchema(indexMarginSettings).omit({ id: true });
+export type InsertIndexMarginSetting = z.infer<typeof insertIndexMarginSettingSchema>;
+export type IndexMarginSetting = typeof indexMarginSettings.$inferSelect;
+
 export const marketHolidays = pgTable("market_holidays", {
   id: serial("id").primaryKey(),
   date: text("date").notNull(),

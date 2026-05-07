@@ -14,12 +14,12 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
   ArrowLeft, Mail, Key, CheckCircle, XCircle, 
   Eye, EyeOff, AlertTriangle, FileText, Settings as SettingsIcon, Database,
-  ShieldAlert, Trash2, Plus, ToggleLeft, ToggleRight, CalendarDays, Upload, Save, RefreshCw, Loader2, CalendarCheck
+  ShieldAlert, Trash2, Plus, ToggleLeft, ToggleRight, CalendarDays, Upload, Save, RefreshCw, Loader2, CalendarCheck, BarChart2
 } from "lucide-react";
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
-import type { BrokerConfig, ErrorRouting, ExchangeSetting, IndexExpirySetting, MarketHoliday, StrategyPlan } from "@shared/schema";
+import type { BrokerConfig, ErrorRouting, ExchangeSetting, IndexExpirySetting, IndexMarginSetting, MarketHoliday, StrategyPlan } from "@shared/schema";
 import { PageFooter } from "@/components/page-footer";
 
 function getBrokerInitial(brokerName?: string | null): string {
@@ -37,7 +37,7 @@ interface MailSettings {
   fromName: string;
 }
 
-type SettingsSection = "general" | "mail" | "templates" | "retention" | "error-routing" | "market-calendar";
+type SettingsSection = "general" | "mail" | "templates" | "retention" | "error-routing" | "market-calendar" | "indices-settings";
 
 function MailApiSettings() {
   const [showApiKey, setShowApiKey] = useState(false);
@@ -1967,6 +1967,164 @@ function MarketCalendarSettings() {
   );
 }
 
+// ─── Indices Settings ─────────────────────────────────────────────────────────
+type IndexMarginRow = IndexMarginSetting & { expiryDay: string | null; lotSize: number | null };
+
+function IndicesSettings() {
+  const { toast } = useToast();
+  const [edits, setEdits] = useState<Record<string, { exposureRate: string; spanRate: string; expiryMultiplier: string }>>({});
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+
+  const { data: rows = [], isLoading, refetch } = useQuery<IndexMarginRow[]>({
+    queryKey: ["/api/index-margin-settings"],
+  });
+
+  function getEdit(row: IndexMarginRow) {
+    return edits[row.indexName] ?? {
+      exposureRate:     row.exposureRate,
+      spanRate:         row.spanRate,
+      expiryMultiplier: row.expiryMultiplier,
+    };
+  }
+
+  function setField(indexName: string, field: "exposureRate" | "spanRate" | "expiryMultiplier", value: string) {
+    setEdits(prev => ({
+      ...prev,
+      [indexName]: { ...(prev[indexName] ?? {}), [field]: value },
+    }));
+  }
+
+  async function handleSave(row: IndexMarginRow) {
+    const edit = getEdit(row);
+    setSaving(prev => ({ ...prev, [row.indexName]: true }));
+    try {
+      await apiRequest("PUT", `/api/index-margin-settings/${row.indexName}`, edit);
+      queryClient.invalidateQueries({ queryKey: ["/api/index-margin-settings"] });
+      toast({ title: "Saved", description: `${row.indexName} margin settings updated.` });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(prev => ({ ...prev, [row.indexName]: false }));
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex gap-2 border-b border-border pb-0">
+        <button
+          className="px-4 py-2 text-sm font-medium text-primary border-b-2 border-primary -mb-px"
+          data-testid="tab-india"
+        >
+          India
+        </button>
+      </div>
+
+      <Card data-testid="card-indices-settings">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BarChart2 className="w-5 h-5" />
+            Index Margin Parameters
+          </CardTitle>
+          <CardDescription>
+            Per-index SPAN rate, Exposure rate, and Expiry Day Multiplier used by the Distance-SPAN margin engine.
+            Lot Size and Expiry are read-only — updated by Scrip Master sync and Market Calendar respectively.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="text-sm text-muted-foreground py-4">Loading...</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Index</TableHead>
+                    <TableHead>Exchange</TableHead>
+                    <TableHead>Expiry</TableHead>
+                    <TableHead className="text-right">Lot Size</TableHead>
+                    <TableHead>Exposure %</TableHead>
+                    <TableHead>Span %</TableHead>
+                    <TableHead>Expiry X</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map(row => {
+                    const edit = getEdit(row);
+                    const isSaving = saving[row.indexName] ?? false;
+                    return (
+                      <TableRow key={row.indexName} data-testid={`row-index-margin-${row.indexName}`}>
+                        <TableCell className="font-mono font-medium">{row.indexName}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{row.exchange}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {row.expiryDay ?? <span className="text-muted-foreground/40">—</span>}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm">
+                          {row.lotSize != null ? row.lotSize : <span className="text-muted-foreground/40">—</span>}
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            className="w-24 h-8 text-sm"
+                            value={edit.exposureRate}
+                            onChange={e => setField(row.indexName, "exposureRate", e.target.value)}
+                            data-testid={`input-exposure-${row.indexName}`}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            className="w-24 h-8 text-sm"
+                            value={edit.spanRate}
+                            onChange={e => setField(row.indexName, "spanRate", e.target.value)}
+                            data-testid={`input-span-${row.indexName}`}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            step="0.05"
+                            min="1"
+                            className="w-24 h-8 text-sm"
+                            value={edit.expiryMultiplier}
+                            onChange={e => setField(row.indexName, "expiryMultiplier", e.target.value)}
+                            data-testid={`input-expiry-mult-${row.indexName}`}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isSaving}
+                            onClick={() => handleSave(row)}
+                            data-testid={`button-save-index-margin-${row.indexName}`}
+                          >
+                            {isSaving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Save className="w-3 h-3 mr-1" />}
+                            Save
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground mt-4">
+            Formula: Naked SELL = (Spot × Lot Size) × (Span% + Exposure%) &nbsp;|&nbsp;
+            Hedged SELL = (Strike Distance × Lot Size) + (Spot × Lot Size × Exposure%) &nbsp;|&nbsp;
+            Expiry Day: margin × Expiry X multiplier
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function Settings() {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
 
@@ -2000,6 +2158,11 @@ export default function Settings() {
       id: "market-calendar" as const,
       label: "Market Calendar India",
       icon: CalendarDays,
+    },
+    {
+      id: "indices-settings" as const,
+      label: "Indices Settings",
+      icon: BarChart2,
     },
   ];
 
@@ -2060,6 +2223,7 @@ export default function Settings() {
             {activeSection === "retention" && <DataRetentionSettings />}
             {activeSection === "error-routing" && <ErrorRoutingSettings />}
             {activeSection === "market-calendar" && <MarketCalendarSettings />}
+            {activeSection === "indices-settings" && <IndicesSettings />}
           </div>
         </main>
       </div>
