@@ -34,7 +34,8 @@ export function registerIndexMarginRoutes(app: Express, storage: IStorage) {
 
       const marginByName = new Map(marginRows.map(r => [r.indexName, r]));
       const expiryByName = new Map(expiryRows.map(r => [r.indexName, r]));
-      const lotByName    = new Map(instrumentRows.map(r => [r.ticker, r.lotSize]));
+      // Key by "TICKER|EXCHANGE" for deterministic lookup — avoids cross-exchange collisions
+      const lotByKey     = new Map(instrumentRows.map(r => [`${r.ticker}|${r.exchange ?? ""}`, r.lotSize]));
 
       const seeded: string[] = [];
       for (const idx of KNOWN_INDICES) {
@@ -59,7 +60,7 @@ export function registerIndexMarginRoutes(app: Express, storage: IStorage) {
         const m = marginByName.get(idx.indexName)!;
         const e = expiryByName.get(idx.indexName);
         const expiryDayName = e ? (DAY_NAMES[e.defaultExpiryDay] ?? String(e.defaultExpiryDay)) : null;
-        const lotSize       = lotByName.get(idx.indexName) ?? null;
+        const lotSize       = lotByKey.get(`${idx.indexName}|${idx.exchange}`) ?? null;
         return {
           ...m,
           expiryDay: expiryDayName,
