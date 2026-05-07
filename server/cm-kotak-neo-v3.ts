@@ -398,13 +398,15 @@ function cmPairLegs(
   const remB = sortedBuys .map(b => b.effectiveLots);
   let total = 0, si = 0, bi = 0;
 
-  // Hedged pairs: strike distance + exposure buffer
+  // Hedged pairs: strike distance + exposure buffer + buy leg premium
   while (si < sortedSells.length && bi < sortedBuys.length) {
     const sell = sortedSells[si], buy = sortedBuys[bi];
     const hedgeLots = Math.min(remS[si], remB[bi]);
-    const hedgeM = (Math.abs(sell.strike - buy.strike) * lotSize + atmStrike * lotSize * exposureRate) * hedgeLots;
+    const spreadRiskAndExposure = Math.abs(sell.strike - buy.strike) * lotSize + atmStrike * lotSize * exposureRate;
+    const buyLegPremiumCost = buy.premium * lotSize;
+    const hedgeM = (spreadRiskAndExposure + buyLegPremiumCost) * hedgeLots;
     total += hedgeM;
-    console.log(`${MLOG} ${blockLabel} HEDGED ${typeLabel} S@${sell.strike}/B@${buy.strike} lots=${hedgeLots} req=₹${hedgeM.toFixed(2)}`);
+    console.log(`${MLOG} ${blockLabel} HEDGED ${typeLabel} S@${sell.strike}/B@${buy.strike} lots=${hedgeLots} req=₹${hedgeM.toFixed(2)} (inc. Buy Prem)`);
     remS[si] -= hedgeLots; remB[bi] -= hedgeLots;
     if (remS[si] <= 0) si++;
     if (remB[bi] <= 0) bi++;
@@ -505,18 +507,17 @@ export async function calculatePlanMargins(
 
 
     const allPlans = await storage.getStrategyPlans();
+    // Primary broker calculates margins for ALL active/deployed plans across all users —
+    // not just plans belonging to its own brokerConfigId.
     const plansToCalc = allPlans
-      .filter(p =>
-        p.brokerConfigId === brokerConfig.id &&
-        (p.deploymentStatus === "active" || p.deploymentStatus === "deployed"),
-      )
+      .filter(p => p.deploymentStatus === "active" || p.deploymentStatus === "deployed")
       .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
 
     if (plansToCalc.length === 0) {
       console.log(`${MLOG} No active/deployed plans for broker ${brokerConfig.name}`);
       return;
     }
-    console.log(`${MLOG} Calculating margins for ${plansToCalc.length} plan(s) — broker ${brokerConfig.name} [DISTANCE-SPAN]`);
+    console.log(`${MLOG} Calculating margins for ${plansToCalc.length} plan(s) — primary broker [all users] [DISTANCE-SPAN]`);
 
     for (const plan of plansToCalc) {
       try {
