@@ -524,6 +524,7 @@ export function BrokerLinking() {
 
   const { data: plans = [], isLoading } = useQuery<StrategyPlan[]>({
     queryKey: ["/api/strategy-plans"],
+    refetchInterval: 60_000,
   });
 
   const { data: brokerConfigs = [] } = useQuery<BrokerConfig[]>({

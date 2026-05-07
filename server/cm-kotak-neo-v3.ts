@@ -4,9 +4,12 @@
 // snapshots to broker_capital_snapshots. TE reads these instead of calling
 // getLimits live.
 //
-// calculatePlanMargins — Dual-Mode margin engine. Fully autonomous; no SMC import.
-//   Mode 1 (API):  EL.getQuote → LTP → ATM; per-leg EL.checkMargin → sum ordMrgn.
-//   Mode 2 (SPAN): CSV put-call parity ATM; csvPremium × spanRate per leg.
+// calculatePlanMargins — Distance-SPAN margin engine. Primary-broker only.
+//   Reads per-index spanRate + exposureRate from index_margin_settings.
+//   Long BUY : premium × lotSize × lots (no SPAN/Exposure charge).
+//   Naked SELL: (atmStrike × lotSize) × (spanRate + exposureRate) × lots.
+//   Hedged SELL+BUY: (|sellStrike−buyStrike| × lotSize + atmStrike × lotSize × exposureRate) × lots.
+//   Expiry day: effectiveSpanRate = spanRate × expiryMultiplier (SEBI ELM).
 //   UT = uptrendLegs + neutralLegs combined; DT = downtrendLegs + neutralLegs.
 //   estimatedMargin = max(UT, DT).
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -257,10 +260,10 @@ export async function startCapitalManager(storage: IStorage): Promise<void> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CAPITAL MANAGER — calculatePlanMargins  (Dual-Mode: API primary, SPAN fallback)
-// Autonomous — no SMC/TE imports. CSV is the sole data source.
-// Mode 1 API: EL.getQuote LTP → ATM; per-leg EL.checkMargin; sum ordMrgn.
-// Mode 2 SPAN: CSV put-call parity ATM; csvPremium × spanRate; SELL−, BUY+.
+// CAPITAL MANAGER — calculatePlanMargins  (Distance-SPAN Engine)
+// Primary-only: returns immediately for non-primary broker configs.
+// Rates (spanRate, exposureRate, expiryMultiplier) read per-index from
+// index_margin_settings; falls back to app_settings global values.
 // UT = uptrendLegs+neutralLegs; DT = downtrendLegs+neutralLegs; max(UT,DT).
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -296,21 +299,6 @@ function cmParseExpiryEpoch(raw: string): string | null {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// Returns the numeric margin when the field is found (including 0), or null when absent.
-function cmExtractOrdMrgn(data: unknown): number | null {
-  if (!data || typeof data !== "object") return null;
-  const search = (obj: Record<string, unknown>, depth = 0): number | null => {
-    if (depth > 5) return null;
-    for (const k of ["ordMrgn", "ord_mrgn", "orderMargin", "ordMargin"]) {
-      if (obj[k] !== undefined) { const v = Number(obj[k]); if (!isNaN(v)) return v; }
-    }
-    for (const v of Object.values(obj)) {
-      if (v && typeof v === "object") { const f = search(v as Record<string, unknown>, depth + 1); if (f !== null) return f; }
-    }
-    return null;
-  };
-  return search(data as Record<string, unknown>);
-}
 
 // Single CSV pass (cols 1,5,7,18,21,58) → tokenMap + priceMap + ATM via put-call parity.
 function cmBuildTokenAndPriceMap(
@@ -389,120 +377,117 @@ function cmBuildTokenAndPriceMap(
   return { atmStrike, tokenMap, priceMap };
 }
 
-// ─── Mode 1: API block ────────────────────────────────────────────────────────
-async function cmApiBlock(
+// ─── Distance-SPAN: pair SELL legs with BUY legs, compute block margin ────────
+interface LegR { strike: number; effectiveLots: number; premium: number }
+
+function cmPairLegs(
+  sells: LegR[],
+  buys:  LegR[],
+  atmStrike: number,
+  lotSize: number,
+  effectiveSpanRate: number,
+  exposureRate: number,
+  typeLabel: string,
+  blockLabel: string,
+): number {
+  const MLOG = "[DISTANCE-SPAN]";
+  // Sort ascending by |strike − ATM| — closest-to-ATM sell paired with closest-to-ATM buy first
+  const sortedSells = [...sells].sort((a, b) => Math.abs(a.strike - atmStrike) - Math.abs(b.strike - atmStrike));
+  const sortedBuys  = [...buys ].sort((a, b) => Math.abs(a.strike - atmStrike) - Math.abs(b.strike - atmStrike));
+  const remS = sortedSells.map(s => s.effectiveLots);
+  const remB = sortedBuys .map(b => b.effectiveLots);
+  let total = 0, si = 0, bi = 0;
+
+  // Hedged pairs: strike distance + exposure buffer
+  while (si < sortedSells.length && bi < sortedBuys.length) {
+    const sell = sortedSells[si], buy = sortedBuys[bi];
+    const hedgeLots = Math.min(remS[si], remB[bi]);
+    const hedgeM = (Math.abs(sell.strike - buy.strike) * lotSize + atmStrike * lotSize * exposureRate) * hedgeLots;
+    total += hedgeM;
+    console.log(`${MLOG} ${blockLabel} HEDGED ${typeLabel} S@${sell.strike}/B@${buy.strike} lots=${hedgeLots} req=₹${hedgeM.toFixed(2)}`);
+    remS[si] -= hedgeLots; remB[bi] -= hedgeLots;
+    if (remS[si] <= 0) si++;
+    if (remB[bi] <= 0) bi++;
+  }
+
+  // Leftover naked sells: full SPAN + Exposure on atmStrike
+  while (si < sortedSells.length) {
+    const nakedM = atmStrike * lotSize * (effectiveSpanRate + exposureRate) * remS[si];
+    total += nakedM;
+    console.log(`${MLOG} ${blockLabel} NAKED SELL ${typeLabel} @${sortedSells[si].strike} lots=${remS[si]} req=₹${nakedM.toFixed(2)}`);
+    si++;
+  }
+
+  // Leftover long buys: premium cost only (no SPAN/Exposure)
+  while (bi < sortedBuys.length) {
+    const buyM = sortedBuys[bi].premium * lotSize * remB[bi];
+    total += buyM;
+    console.log(`${MLOG} ${blockLabel} LONG ${typeLabel} @${sortedBuys[bi].strike} prem=₹${sortedBuys[bi].premium.toFixed(2)} lots=${remB[bi]} req=₹${buyM.toFixed(2)}`);
+    bi++;
+  }
+
+  return total;
+}
+
+// ─── Distance-SPAN block ───────────────────────────────────────────────────────
+// Live LTP (EL.getQuote, 50ms gap between calls) → CSV priceMap → DEFAULT 150.
+// effectiveSpanRate must already encode the expiry multiplier (applied once before calling).
+async function cmDistanceSpanBlock(
   legs: any[],
   atmStrike: number,
   strikeInterval: number,
   tokenMap: Map<string, string>,
+  priceMap: Map<number, { CE?: number; PE?: number }>,
+  effectiveSpanRate: number,
+  exposureRate: number,
   lotSize: number,
   lotMultiplier: number,
   brokerConfig: BrokerConfig,
   exchange: string,
-  productMode: string,
   blockLabel: string,
-): Promise<{ total: number; anyFailed: boolean }> {
-  const MLOG = "[MARGIN-CALC]";
-  let total = 0;
-  let anyFailed = false;
+): Promise<number> {
+  const MLOG = "[DISTANCE-SPAN]";
+  const mappedEx = EL.mapExchange(exchange);
+  const ceSells: LegR[] = [], ceBuys: LegR[] = [], peSells: LegR[] = [], peBuys: LegR[] = [];
 
   for (const leg of legs) {
-    const legType = (leg.type || "").toUpperCase() as "CE" | "PE" | "FUT";
-    if (legType !== "CE" && legType !== "PE" && legType !== "FUT") continue;
+    const legType = (leg.type || "").toUpperCase();
+    if (legType !== "CE" && legType !== "PE") continue; // FUT not supported by Distance-SPAN
+    const legAction     = (leg.action || "SELL").toUpperCase();
+    const effectiveLots = (leg.lots || 1) * lotMultiplier;
+    const spec          = parseStrikeSpec(leg.strike || "ATM");
+    const resolvedStrike = getOTMStrike(atmStrike, spec, strikeInterval, legType as "CE" | "PE");
 
-    const legAction = (leg.action || "SELL").toUpperCase();
-    const qty = (leg.lots || 1) * lotMultiplier * lotSize;
-
-    let token: string | undefined;
-    if (legType === "FUT") {
-      token = tokenMap.get(`0_FUT`);
-    } else {
-      const spec = parseStrikeSpec(leg.strike || "ATM");
-      const resolvedStrike = getOTMStrike(atmStrike, spec, strikeInterval, legType as "CE" | "PE");
-      token = tokenMap.get(`${resolvedStrike}_${legType}`);
-      if (!token) {
-        console.warn(`${MLOG}   ${blockLabel} API: no token for ${legType} strike=${resolvedStrike}`);
-        anyFailed = true;
-        continue;
+    // Premium: live LTP (50ms gap) → CSV priceMap → DEFAULT 150
+    let premium = 150;
+    const csvEntry = priceMap.get(resolvedStrike);
+    if (csvEntry) {
+      const csvP = legType === "CE" ? csvEntry.CE : csvEntry.PE;
+      if (csvP !== undefined && csvP > 0) premium = csvP;
+    }
+    if (brokerConfig.isConnected && brokerConfig.accessToken) {
+      const token = tokenMap.get(`${resolvedStrike}_${legType}`);
+      if (token) {
+        try {
+          await new Promise(r => setTimeout(r, 50));
+          const qRes = await EL.getQuote(brokerConfig, mappedEx, token);
+          if (qRes.success && qRes.ltp && qRes.ltp > 0 && qRes.ltp < strikeInterval * 200) {
+            premium = qRes.ltp;
+          }
+        } catch { /* non-fatal — use CSV/DEFAULT */ }
       }
     }
-    if (!token) { anyFailed = true; continue; }
 
-    const marginRes = await EL.checkMargin(brokerConfig, {
-      exSeg: EL.mapExchange(exchange),
-      prc: "0", prcTp: "MKT", prod: productMode,
-      qty: String(qty), tok: token,
-      trnsTp: legAction === "BUY" ? "B" : "S",
-      brkName: "KOTAK", brnchId: "ONLINE",
-    }, true);
-
-    if (!marginRes.success) {
-      console.warn(`${MLOG}   ${blockLabel} API: checkMargin failed (${(marginRes as { error?: string }).error ?? "unknown"})`);
-      anyFailed = true;
-    } else {
-      const mrgn = cmExtractOrdMrgn(marginRes.data);
-      if (mrgn === null) {
-        console.warn(`${MLOG}   ${blockLabel} API: ordMrgn field absent in response — treating as failure`);
-        anyFailed = true;
-      } else {
-        total += mrgn;
-        console.log(`${MLOG}   ${blockLabel} API: ${legAction} ${legType} ordMrgn=₹${mrgn.toFixed(2)}`);
-      }
-    }
-    await new Promise(r => setTimeout(r, 100));
+    const resolved: LegR = { strike: resolvedStrike, effectiveLots, premium };
+    if (legType === "CE") { if (legAction === "SELL") ceSells.push(resolved); else ceBuys.push(resolved); }
+    else                   { if (legAction === "SELL") peSells.push(resolved); else peBuys.push(resolved); }
   }
-  return { total, anyFailed };
-}
 
-// ─── Mode 2: SPAN fallback block ─────────────────────────────────────────────
-// csvPremium × spanRate × lotSize × lotMult × lots; SELL−, BUY+; |total|
-function cmSpanBlock(
-  legs: any[],
-  atmStrike: number,
-  strikeInterval: number,
-  priceMap: Map<number, { CE?: number; PE?: number }>,
-  effectiveSpanRate: number,
-  lotSize: number,
-  lotMultiplier: number,
-  blockLabel: string,
-): number {
-  const MLOG = "[MARGIN-CALC]";
-  let total = 0;
-
-  for (const leg of legs) {
-    const legType = (leg.type || "").toUpperCase() as "CE" | "PE" | "FUT";
-    if (legType !== "CE" && legType !== "PE" && legType !== "FUT") continue;
-
-    const legAction = (leg.action || "SELL").toUpperCase();
-    const lots = leg.lots || 1;
-
-    let resolvedStrike: number;
-    if (legType === "FUT") {
-      resolvedStrike = atmStrike;
-    } else {
-      const spec = parseStrikeSpec(leg.strike || "ATM");
-      resolvedStrike = getOTMStrike(atmStrike, spec, strikeInterval, legType as "CE" | "PE");
-    }
-
-    const priceEntry = priceMap.get(resolvedStrike);
-    const csvPremium = legType === "FUT"
-      ? resolvedStrike
-      : ((legType === "CE" ? priceEntry?.CE : priceEntry?.PE) ?? 0);
-
-    if (csvPremium <= 0) {
-      console.warn(`${MLOG}   ${blockLabel} SPAN: no price for ${legType} strike=${resolvedStrike} — ₹0`);
-    }
-
-    const contribution = csvPremium * effectiveSpanRate * lotSize * lotMultiplier * lots;
-    if (legAction === "SELL") {
-      total -= contribution;
-      console.log(`${MLOG}   ${blockLabel} SPAN: SELL ${legType} @${resolvedStrike} prem=₹${csvPremium} −₹${contribution.toFixed(2)}`);
-    } else {
-      total += contribution;
-      console.log(`${MLOG}   ${blockLabel} SPAN: BUY  ${legType} @${resolvedStrike} prem=₹${csvPremium} +₹${contribution.toFixed(2)}`);
-    }
-  }
-  return Math.abs(total);
+  const ceTotal = cmPairLegs(ceSells, ceBuys, atmStrike, lotSize, effectiveSpanRate, exposureRate, "CE", blockLabel);
+  const peTotal = cmPairLegs(peSells, peBuys, atmStrike, lotSize, effectiveSpanRate, exposureRate, "PE", blockLabel);
+  const blockTotal = ceTotal + peTotal;
+  console.log(`${MLOG} ${blockLabel} CE=₹${ceTotal.toFixed(2)} PE=₹${peTotal.toFixed(2)} total=₹${blockTotal.toFixed(2)}`);
+  return blockTotal;
 }
 
 // ─── calculatePlanMargins ────────────────────────────────────────────────────
@@ -512,12 +497,19 @@ export async function calculatePlanMargins(
 ): Promise<void> {
   const MLOG = "[MARGIN-CALC]";
   try {
-    const spanRateSetting   = await storage.getSetting("span_rate_percent");
-    const expiryMultSetting = await storage.getSetting("expiry_day_span_multiplier");
-    const parsedSpanRate    = parseFloat(spanRateSetting?.value || "");
-    const parsedExpiryMult  = parseFloat(expiryMultSetting?.value || "");
-    const baseSpanRate      = (isNaN(parsedSpanRate)   || parsedSpanRate   <= 0) ? 0.05 : parsedSpanRate / 100;
-    const expiryMultiplier  = (isNaN(parsedExpiryMult) || parsedExpiryMult < 1)  ? 1.5  : parsedExpiryMult;
+    // 0. Primary-only guard — one calculation per cycle regardless of connected user count
+    if (!brokerConfig.isPrimary) {
+      console.log(`${MLOG} Skipping — not primary broker (${brokerConfig.name})`);
+      return;
+    }
+
+    // Global fallback rates (used when index_margin_settings has no row for this ticker)
+    const spanRateSetting    = await storage.getSetting("span_rate_percent");
+    const expiryMultSetting  = await storage.getSetting("expiry_day_span_multiplier");
+    const parsedSpanRate     = parseFloat(spanRateSetting?.value   || "");
+    const parsedExpiryMult   = parseFloat(expiryMultSetting?.value || "");
+    const globalBaseSpanRate = (isNaN(parsedSpanRate)   || parsedSpanRate   <= 0) ? 10.0 : parsedSpanRate;
+    const globalExpiryMult   = (isNaN(parsedExpiryMult) || parsedExpiryMult < 1)  ? 1.5  : parsedExpiryMult;
 
     const allPlans = await storage.getStrategyPlans();
     const plansToCalc = allPlans
@@ -531,7 +523,7 @@ export async function calculatePlanMargins(
       console.log(`${MLOG} No active/deployed plans for broker ${brokerConfig.name}`);
       return;
     }
-    console.log(`${MLOG} Calculating margins for ${plansToCalc.length} plan(s) — broker ${brokerConfig.name} (SPAN rate: ${(baseSpanRate * 100).toFixed(1)}%)`);
+    console.log(`${MLOG} Calculating margins for ${plansToCalc.length} plan(s) — broker ${brokerConfig.name} [DISTANCE-SPAN]`);
 
     for (const plan of plansToCalc) {
       try {
@@ -558,6 +550,17 @@ export async function calculatePlanMargins(
         const expiryDay      = instrumentConfig.expiryDay;
         if (!expiryDay) { console.warn(`${MLOG} Plan "${plan.name}" — expiryDay missing, skipping`); continue; }
 
+        // 2.5. Per-index rates from index_margin_settings (falls back to global app_settings)
+        const idxSetting      = await storage.getIndexMarginSetting(ticker);
+        const spanPct         = idxSetting ? parseFloat(idxSetting.spanRate)         : NaN;
+        const expPct          = idxSetting ? parseFloat(idxSetting.exposureRate)      : NaN;
+        const expMultFromIdx  = idxSetting ? parseFloat(idxSetting.expiryMultiplier)  : NaN;
+        const baseSpanRate    = (!isNaN(spanPct)        && spanPct        > 0) ? spanPct        / 100 : globalBaseSpanRate / 100;
+        const exposureRate    = (!isNaN(expPct)         && expPct         > 0) ? expPct         / 100 : 0.02;
+        const expiryMultiplier = (!isNaN(expMultFromIdx) && expMultFromIdx >= 1) ? expMultFromIdx       : globalExpiryMult;
+        const rateSource = idxSetting ? "index_margin_settings" : "global_fallback";
+        console.log(`${MLOG} Plan "${plan.name}" — rates: span=${(baseSpanRate * 100).toFixed(1)}% exp=${(exposureRate * 100).toFixed(1)}% expMult=${expiryMultiplier} (${rateSource})`);
+
         // 3. Resolve target expiry (respects expiryWeekOffset)
         const timeLogic        = tradeParams.timeLogic as { expiryType?: string; expiryWeekOffset?: number } | undefined;
         const expiryType       = timeLogic?.expiryType || "weekly";
@@ -566,7 +569,7 @@ export async function calculatePlanMargins(
         const targetExpiryDate = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, "0")}-${String(targetDate.getDate()).padStart(2, "0")}`;
         console.log(`${MLOG} Plan "${plan.name}" — expiry: ${expiryDay} ${expiryType} offset=${weekOffset} → ${targetExpiryDate}`);
 
-        // 4. Expiry-day SPAN multiplier
+        // 4. Expiry-day multiplier applied once before calling the block (SEBI ELM)
         const isExpiry          = cmIsExpiryDay(targetExpiryDate);
         const effectiveSpanRate = baseSpanRate * (isExpiry ? expiryMultiplier : 1);
         if (isExpiry) console.log(`${MLOG} Plan "${plan.name}" — EXPIRY DAY: spanRate ×${expiryMultiplier} → ${(effectiveSpanRate * 100).toFixed(2)}%`);
@@ -584,65 +587,25 @@ export async function calculatePlanMargins(
         const utLegs = [...cmSelectLegs(tradeParams, "uptrendLegs"),   ...cmSelectLegs(tradeParams, "neutralLegs")];
         const dtLegs = [...cmSelectLegs(tradeParams, "downtrendLegs"), ...cmSelectLegs(tradeParams, "neutralLegs")];
 
-        // 7. productMode per block — resolved from each block's config, falling back to legsConfig then "MIS".
-        type BlockCfg = { productMode?: string };
-        const sharedFallback = (tradeParams.legsConfig as BlockCfg | undefined)?.productMode ?? "MIS";
-        const utProductMode = (tradeParams.uptrendConfig  as BlockCfg | undefined)?.productMode
-          ?? (tradeParams.neutralConfig as BlockCfg | undefined)?.productMode
-          ?? sharedFallback;
-        const dtProductMode = (tradeParams.downtrendConfig as BlockCfg | undefined)?.productMode
-          ?? (tradeParams.neutralConfig as BlockCfg | undefined)?.productMode
-          ?? sharedFallback;
-
-        // 8. Try Mode 1: API (only when broker session is live)
-        let utMargin = 0;
-        let dtMargin = 0;
-        let usedMode = "SPAN";
-
-        if (brokerConfig.isConnected && brokerConfig.accessToken) {
-          // Attempt live ATM refinement using EL.getQuote with instrumentConfig.token.
-          // instrumentConfig.token is set during scrip master sync from the first OPT/FUT
-          // row for the ticker; it may be a futures or option token. We validate the LTP:
-          // index/futures prices are in thousands, option premiums are < strikeInterval×200.
-          // Only accept if ltp > strikeInterval × 200 (e.g. >10000 for NIFTY/50).
-          let apiAtmStrike = atmStrike;
+        // 7. Optional live ATM refinement via EL.getQuote on instrument token
+        let liveAtmStrike = atmStrike;
+        if (brokerConfig.isConnected && brokerConfig.accessToken && instrumentConfig.token) {
           try {
-            const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(exchange), instrumentConfig.token ?? "");
+            const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(exchange), instrumentConfig.token);
             if (quoteRes.success && quoteRes.ltp && quoteRes.ltp > strikeInterval * 200) {
-              apiAtmStrike = getATMStrike(quoteRes.ltp, strikeInterval);
-              console.log(`${MLOG} Plan "${plan.name}" — LTP=${quoteRes.ltp} → live ATM=${apiAtmStrike}`);
-            } else if (quoteRes.success && quoteRes.ltp) {
-              console.log(`${MLOG} Plan "${plan.name}" — LTP=${quoteRes.ltp} below index threshold; using CSV parity ATM=${atmStrike}`);
+              liveAtmStrike = getATMStrike(quoteRes.ltp, strikeInterval);
+              console.log(`${MLOG} Plan "${plan.name}" — LTP=${quoteRes.ltp} → live ATM=${liveAtmStrike}`);
             }
           } catch { /* non-fatal — keep CSV parity ATM */ }
-
-          console.log(`${MLOG} Plan "${plan.name}" — trying API mode (ATM=${apiAtmStrike})`);
-          const [utRes, dtRes] = await Promise.all([
-            cmApiBlock(utLegs, apiAtmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, utProductMode, "UT"),
-            cmApiBlock(dtLegs, apiAtmStrike, strikeInterval, tokenMap, lotSize, lotMultiplier, brokerConfig, exchange, dtProductMode, "DT"),
-          ]);
-
-          if (!utRes.anyFailed && !dtRes.anyFailed && (utRes.total > 0 || dtRes.total > 0)) {
-            utMargin = utRes.total;
-            dtMargin = dtRes.total;
-            usedMode = "API";
-            console.log(`${MLOG} Plan "${plan.name}" — API: UT=₹${utMargin.toFixed(2)} DT=₹${dtMargin.toFixed(2)}`);
-          } else {
-            console.log(`${MLOG} Plan "${plan.name}" — API partial/failed; using SPAN fallback`);
-          }
         }
 
-        // 9. Mode 2: SPAN fallback
-        if (usedMode === "SPAN") {
-          utMargin = cmSpanBlock(utLegs, atmStrike, strikeInterval, priceMap, effectiveSpanRate, lotSize, lotMultiplier, "UT");
-          dtMargin = cmSpanBlock(dtLegs, atmStrike, strikeInterval, priceMap, effectiveSpanRate, lotSize, lotMultiplier, "DT");
-          console.log(`${MLOG} Plan "${plan.name}" — SPAN: UT=₹${utMargin.toFixed(2)} DT=₹${dtMargin.toFixed(2)}`);
-        }
-
+        // 8. Distance-SPAN engine (UT then DT, sequential to respect 50ms/call API rate)
+        const utMargin = await cmDistanceSpanBlock(utLegs, liveAtmStrike, strikeInterval, tokenMap, priceMap, effectiveSpanRate, exposureRate, lotSize, lotMultiplier, brokerConfig, exchange, "UT");
+        const dtMargin = await cmDistanceSpanBlock(dtLegs, liveAtmStrike, strikeInterval, tokenMap, priceMap, effectiveSpanRate, exposureRate, lotSize, lotMultiplier, brokerConfig, exchange, "DT");
         const totalMargin = Math.max(utMargin, dtMargin);
-        console.log(`${MLOG} Plan "${plan.name}" [${usedMode}] → estimatedMargin=₹${totalMargin.toFixed(2)}`);
+        console.log(`${MLOG} Plan "${plan.name}" [DISTANCE-SPAN] UT=₹${utMargin.toFixed(2)} DT=₹${dtMargin.toFixed(2)} → estimatedMargin=₹${totalMargin.toFixed(2)}`);
 
-        // 10. Persist
+        // 9. Persist
         await storage.updateStrategyPlan(plan.id, {
           estimatedMargin: String(totalMargin.toFixed(2)),
           marginCalculatedAt: new Date().toISOString(),
