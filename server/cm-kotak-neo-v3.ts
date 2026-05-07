@@ -389,46 +389,46 @@ function cmPairLegs(
   exposureRate: number,
   typeLabel: string,
   blockLabel: string,
-): number {
+): { riskMargin: number; buyPremium: number } {
   const MLOG = "[DISTANCE-SPAN]";
   // Sort ascending by |strike − ATM| — closest-to-ATM sell paired with closest-to-ATM buy first
   const sortedSells = [...sells].sort((a, b) => Math.abs(a.strike - atmStrike) - Math.abs(b.strike - atmStrike));
   const sortedBuys  = [...buys ].sort((a, b) => Math.abs(a.strike - atmStrike) - Math.abs(b.strike - atmStrike));
   const remS = sortedSells.map(s => s.effectiveLots);
   const remB = sortedBuys .map(b => b.effectiveLots);
-  let total = 0, si = 0, bi = 0;
+  let riskMargin = 0, buyPremium = 0, si = 0, bi = 0;
 
-  // Hedged pairs: strike distance + exposure buffer + buy leg premium
+  // Hedged pairs: risk = strike distance + exposure buffer. Premium tracked separately for SPAN netting.
   while (si < sortedSells.length && bi < sortedBuys.length) {
     const sell = sortedSells[si], buy = sortedBuys[bi];
     const hedgeLots = Math.min(remS[si], remB[bi]);
     const spreadRiskAndExposure = Math.abs(sell.strike - buy.strike) * lotSize + atmStrike * lotSize * exposureRate;
     const buyLegPremiumCost = buy.premium * lotSize;
-    const hedgeM = (spreadRiskAndExposure + buyLegPremiumCost) * hedgeLots;
-    total += hedgeM;
-    console.log(`${MLOG} ${blockLabel} HEDGED ${typeLabel} S@${sell.strike}/B@${buy.strike} lots=${hedgeLots} req=₹${hedgeM.toFixed(2)} (inc. Buy Prem)`);
+    riskMargin += spreadRiskAndExposure * hedgeLots;
+    buyPremium += buyLegPremiumCost * hedgeLots;
+    console.log(`${MLOG} ${blockLabel} HEDGED ${typeLabel} S@${sell.strike}/B@${buy.strike} lots=${hedgeLots} risk=₹${(spreadRiskAndExposure * hedgeLots).toFixed(2)} prem=₹${(buyLegPremiumCost * hedgeLots).toFixed(2)}`);
     remS[si] -= hedgeLots; remB[bi] -= hedgeLots;
     if (remS[si] <= 0) si++;
     if (remB[bi] <= 0) bi++;
   }
 
-  // Leftover naked sells: full SPAN + Exposure on atmStrike
+  // Leftover naked sells: full SPAN + Exposure on atmStrike (pure risk, no premium)
   while (si < sortedSells.length) {
-    const nakedM = atmStrike * lotSize * (effectiveSpanRate + exposureRate) * remS[si];
-    total += nakedM;
-    console.log(`${MLOG} ${blockLabel} NAKED SELL ${typeLabel} @${sortedSells[si].strike} lots=${remS[si]} req=₹${nakedM.toFixed(2)}`);
+    const nakedM = atmStrike * lotSize * (effectiveSpanRate + exposureRate);
+    riskMargin += nakedM * remS[si];
+    console.log(`${MLOG} ${blockLabel} NAKED SELL ${typeLabel} @${sortedSells[si].strike} lots=${remS[si]} risk=₹${(nakedM * remS[si]).toFixed(2)}`);
     si++;
   }
 
-  // Leftover long buys: premium cost only (no SPAN/Exposure)
+  // Leftover long buys: premium cost only (no SPAN/Exposure, pure premium)
   while (bi < sortedBuys.length) {
-    const buyM = sortedBuys[bi].premium * lotSize * remB[bi];
-    total += buyM;
-    console.log(`${MLOG} ${blockLabel} LONG ${typeLabel} @${sortedBuys[bi].strike} prem=₹${sortedBuys[bi].premium.toFixed(2)} lots=${remB[bi]} req=₹${buyM.toFixed(2)}`);
+    const buyM = sortedBuys[bi].premium * lotSize;
+    buyPremium += buyM * remB[bi];
+    console.log(`${MLOG} ${blockLabel} LONG ${typeLabel} @${sortedBuys[bi].strike} prem=₹${sortedBuys[bi].premium.toFixed(2)} lots=${remB[bi]} prem=₹${(buyM * remB[bi]).toFixed(2)}`);
     bi++;
   }
 
-  return total;
+  return { riskMargin, buyPremium };
 }
 
 // ─── Distance-SPAN block ───────────────────────────────────────────────────────
@@ -485,10 +485,17 @@ async function cmDistanceSpanBlock(
     else                   { if (legAction === "SELL") peSells.push(resolved); else peBuys.push(resolved); }
   }
 
-  const ceTotal = cmPairLegs(ceSells, ceBuys, atmStrike, lotSize, effectiveSpanRate, exposureRate, "CE", blockLabel);
-  const peTotal = cmPairLegs(peSells, peBuys, atmStrike, lotSize, effectiveSpanRate, exposureRate, "PE", blockLabel);
-  const blockTotal = ceTotal + peTotal;
-  console.log(`${MLOG} ${blockLabel} CE=₹${ceTotal.toFixed(2)} PE=₹${peTotal.toFixed(2)} total=₹${blockTotal.toFixed(2)}`);
+  const ce = cmPairLegs(ceSells, ceBuys, atmStrike, lotSize, effectiveSpanRate, exposureRate, "CE", blockLabel);
+  const pe = cmPairLegs(peSells, peBuys, atmStrike, lotSize, effectiveSpanRate, exposureRate, "PE", blockLabel);
+
+  // SPAN netting: index cannot move enough to cause max loss on both CE and PE simultaneously.
+  // Risk = MAX(CE risk, PE risk). Buy premiums are always additive (already paid out of pocket).
+  const maxRisk      = Math.max(ce.riskMargin, pe.riskMargin);
+  const totalPremium = ce.buyPremium + pe.buyPremium;
+  const blockTotal   = maxRisk + totalPremium;
+
+  console.log(`${MLOG} ${blockLabel} CE(risk=₹${ce.riskMargin.toFixed(2)} prem=₹${ce.buyPremium.toFixed(2)}) PE(risk=₹${pe.riskMargin.toFixed(2)} prem=₹${pe.buyPremium.toFixed(2)})`);
+  console.log(`${MLOG} ${blockLabel} NETTED → maxRisk=₹${maxRisk.toFixed(2)} + totalPrem=₹${totalPremium.toFixed(2)} = ₹${blockTotal.toFixed(2)}`);
   return blockTotal;
 }
 
