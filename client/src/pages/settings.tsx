@@ -1987,11 +1987,15 @@ function IndicesSettings() {
     };
   }
 
-  function setField(indexName: string, field: "exposureRate" | "spanRate" | "expiryMultiplier", value: string) {
-    setEdits(prev => ({
-      ...prev,
-      [indexName]: { ...(prev[indexName] ?? {}), [field]: value },
-    }));
+  function setField(row: IndexMarginRow, field: "exposureRate" | "spanRate" | "expiryMultiplier", value: string) {
+    setEdits(prev => {
+      const current = prev[row.indexName] ?? {
+        exposureRate:     row.exposureRate,
+        spanRate:         row.spanRate,
+        expiryMultiplier: row.expiryMultiplier,
+      };
+      return { ...prev, [row.indexName]: { ...current, [field]: value } };
+    });
   }
 
   async function handleSave(row: IndexMarginRow) {
@@ -2069,7 +2073,7 @@ function IndicesSettings() {
                             min="0"
                             className="w-24 h-8 text-sm"
                             value={edit.exposureRate}
-                            onChange={e => setField(row.indexName, "exposureRate", e.target.value)}
+                            onChange={e => setField(row, "exposureRate", e.target.value)}
                             data-testid={`input-exposure-${row.indexName}`}
                           />
                         </TableCell>
@@ -2080,7 +2084,7 @@ function IndicesSettings() {
                             min="0"
                             className="w-24 h-8 text-sm"
                             value={edit.spanRate}
-                            onChange={e => setField(row.indexName, "spanRate", e.target.value)}
+                            onChange={e => setField(row, "spanRate", e.target.value)}
                             data-testid={`input-span-${row.indexName}`}
                           />
                         </TableCell>
@@ -2091,7 +2095,7 @@ function IndicesSettings() {
                             min="1"
                             className="w-24 h-8 text-sm"
                             value={edit.expiryMultiplier}
-                            onChange={e => setField(row.indexName, "expiryMultiplier", e.target.value)}
+                            onChange={e => setField(row, "expiryMultiplier", e.target.value)}
                             data-testid={`input-expiry-mult-${row.indexName}`}
                           />
                         </TableCell>
