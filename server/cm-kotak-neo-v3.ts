@@ -504,12 +504,15 @@ export async function calculatePlanMargins(
     }
 
     // Global fallback rates (used when index_margin_settings has no row for this ticker)
-    const spanRateSetting    = await storage.getSetting("span_rate_percent");
-    const expiryMultSetting  = await storage.getSetting("expiry_day_span_multiplier");
-    const parsedSpanRate     = parseFloat(spanRateSetting?.value   || "");
-    const parsedExpiryMult   = parseFloat(expiryMultSetting?.value || "");
-    const globalBaseSpanRate = (isNaN(parsedSpanRate)   || parsedSpanRate   <= 0) ? 10.0 : parsedSpanRate;
-    const globalExpiryMult   = (isNaN(parsedExpiryMult) || parsedExpiryMult < 1)  ? 1.5  : parsedExpiryMult;
+    const spanRateSetting     = await storage.getSetting("span_rate_percent");
+    const expiryMultSetting   = await storage.getSetting("expiry_day_span_multiplier");
+    const expRateSetting      = await storage.getSetting("exposure_rate_percent");
+    const parsedSpanRate      = parseFloat(spanRateSetting?.value   || "");
+    const parsedExpiryMult    = parseFloat(expiryMultSetting?.value || "");
+    const parsedExpRate       = parseFloat(expRateSetting?.value    || "");
+    const globalBaseSpanRate  = (isNaN(parsedSpanRate)   || parsedSpanRate   <= 0) ? 10.0 : parsedSpanRate;
+    const globalExpiryMult    = (isNaN(parsedExpiryMult) || parsedExpiryMult < 1)  ? 1.5  : parsedExpiryMult;
+    const globalExposureRate  = (isNaN(parsedExpRate)    || parsedExpRate    <= 0)  ? 2.0  : parsedExpRate;
 
     const allPlans = await storage.getStrategyPlans();
     const plansToCalc = allPlans
@@ -555,10 +558,10 @@ export async function calculatePlanMargins(
         const spanPct         = idxSetting ? parseFloat(idxSetting.spanRate)         : NaN;
         const expPct          = idxSetting ? parseFloat(idxSetting.exposureRate)      : NaN;
         const expMultFromIdx  = idxSetting ? parseFloat(idxSetting.expiryMultiplier)  : NaN;
-        const baseSpanRate    = (!isNaN(spanPct)        && spanPct        > 0) ? spanPct        / 100 : globalBaseSpanRate / 100;
-        const exposureRate    = (!isNaN(expPct)         && expPct         > 0) ? expPct         / 100 : 0.02;
+        const baseSpanRate     = (!isNaN(spanPct)        && spanPct        > 0) ? spanPct        / 100 : globalBaseSpanRate / 100;
+        const exposureRate     = (!isNaN(expPct)         && expPct         > 0) ? expPct         / 100 : globalExposureRate  / 100;
         const expiryMultiplier = (!isNaN(expMultFromIdx) && expMultFromIdx >= 1) ? expMultFromIdx       : globalExpiryMult;
-        const rateSource = idxSetting ? "index_margin_settings" : "global_fallback";
+        const rateSource = idxSetting ? "index_margin_settings" : "global_app_settings";
         console.log(`${MLOG} Plan "${plan.name}" — rates: span=${(baseSpanRate * 100).toFixed(1)}% exp=${(exposureRate * 100).toFixed(1)}% expMult=${expiryMultiplier} (${rateSource})`);
 
         // 3. Resolve target expiry (respects expiryWeekOffset)
