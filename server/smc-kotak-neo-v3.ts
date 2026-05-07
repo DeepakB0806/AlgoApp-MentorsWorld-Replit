@@ -370,11 +370,6 @@ export async function loadScripMasterFromDisk(storage: IStorage): Promise<{ succ
         strikeInterval: inst.strikeInterval, instrumentType: inst.instrumentType,
         token: inst.token, source: "scrip_master", expiryDay: inst.expiryDay, expiryType: "weekly",
       });
-      // Mirror technical fields into index_margin_settings — single source of truth (Task #220)
-      await storage.upsertIndexMarginSetting({
-        indexName: inst.ticker, exchange: inst.exchange,
-        lotSize: inst.lotSize, expiryDay: inst.expiryDay, strikeInterval: inst.strikeInterval,
-      });
       synced++;
     }
     tradingCache.invalidateInstrumentConfigs();
@@ -557,11 +552,6 @@ export async function runScripMasterSync(storage: IStorage, brokerConfig: Broker
         ticker: inst.ticker, exchange: inst.exchange, lotSize: inst.lotSize,
         strikeInterval: inst.strikeInterval, instrumentType: inst.instrumentType,
         token: inst.token, source: "scrip_master", expiryDay: inst.expiryDay, expiryType: "weekly",
-      });
-      // Mirror technical fields into index_margin_settings — single source of truth (Task #220)
-      await storage.upsertIndexMarginSetting({
-        indexName: inst.ticker, exchange: inst.exchange,
-        lotSize: inst.lotSize, expiryDay: inst.expiryDay, strikeInterval: inst.strikeInterval,
       });
       synced++;
     }

@@ -11,31 +11,23 @@ const KNOWN_INDICES = [
   { indexName: "SENSEX",     exchange: "BFO" },
 ];
 
-const DAY_NAMES: Record<number, string> = {
-  0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday",
-  4: "Thursday", 5: "Friday", 6: "Saturday",
-};
+const VALID_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
 
 const updateSchema = z.object({
   exposureRate:     z.string().regex(/^\d+(\.\d+)?$/, "Must be a positive number"),
   spanRate:         z.string().regex(/^\d+(\.\d+)?$/, "Must be a positive number"),
   expiryMultiplier: z.string().regex(/^\d+(\.\d+)?$/, "Must be a positive number"),
+  lotSize:          z.coerce.number().int().positive("Must be a positive integer"),
+  expiryDay:        z.enum(VALID_DAYS, { errorMap: () => ({ message: "Must be a valid weekday (Mon–Sat)" }) }),
+  strikeInterval:   z.coerce.number().int().positive("Must be a positive integer"),
 });
 
 export function registerIndexMarginRoutes(app: Express, storage: IStorage) {
 
   app.get("/api/index-margin-settings", async (_req, res) => {
     try {
-      const [marginRows, expiryRows, instrumentRows] = await Promise.all([
-        storage.getAllIndexMarginSettings(),
-        storage.getIndexExpirySettings(),
-        storage.getInstrumentConfigs(),
-      ]);
-
+      const marginRows = await storage.getAllIndexMarginSettings();
       const marginByName = new Map(marginRows.map(r => [r.indexName, r]));
-      const expiryByName = new Map(expiryRows.map(r => [r.indexName, r]));
-      // Key by "TICKER|EXCHANGE" for deterministic lookup — avoids cross-exchange collisions
-      const lotByKey     = new Map(instrumentRows.map(r => [`${r.ticker}|${r.exchange ?? ""}`, r.lotSize]));
 
       const seeded: string[] = [];
       for (const idx of KNOWN_INDICES) {
@@ -46,6 +38,9 @@ export function registerIndexMarginRoutes(app: Express, storage: IStorage) {
             exposureRate:     "2.0",
             spanRate:         "10.0",
             expiryMultiplier: "1.25",
+            lotSize:          1,
+            expiryDay:        "Thursday",
+            strikeInterval:   50,
             updatedAt:        null,
           });
           marginByName.set(idx.indexName, row);
@@ -56,18 +51,7 @@ export function registerIndexMarginRoutes(app: Express, storage: IStorage) {
         console.log(`[INDEX-MARGIN] Seeded defaults for: ${seeded.join(", ")}`);
       }
 
-      const result = KNOWN_INDICES.map(idx => {
-        const m = marginByName.get(idx.indexName)!;
-        const e = expiryByName.get(idx.indexName);
-        const expiryDayName = e ? (DAY_NAMES[e.defaultExpiryDay] ?? String(e.defaultExpiryDay)) : null;
-        const lotSize       = lotByKey.get(`${idx.indexName}|${idx.exchange}`) ?? null;
-        return {
-          ...m,
-          expiryDay: expiryDayName,
-          lotSize,
-        };
-      });
-
+      const result = KNOWN_INDICES.map(idx => marginByName.get(idx.indexName)!);
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

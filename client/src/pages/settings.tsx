@@ -1766,30 +1766,44 @@ function MarketCalendarSettings() {
 // ─── Indices Settings ─────────────────────────────────────────────────────────
 type IndexMarginRow = IndexMarginSetting & { expiryDay: string | null; lotSize: number | null; strikeInterval: number | null };
 
+type IndexEditState = {
+  exposureRate: string;
+  spanRate: string;
+  expiryMultiplier: string;
+  lotSize: string;
+  expiryDay: string;
+  strikeInterval: string;
+};
+
+const EXPIRY_DAY_OPTIONS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
 function IndicesSettings() {
   const { toast } = useToast();
-  const [edits, setEdits] = useState<Record<string, { exposureRate: string; spanRate: string; expiryMultiplier: string }>>({});
+  const [edits, setEdits] = useState<Record<string, IndexEditState>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
   const { data: rows = [], isLoading, refetch } = useQuery<IndexMarginRow[]>({
     queryKey: ["/api/index-margin-settings"],
   });
 
-  function getEdit(row: IndexMarginRow) {
-    return edits[row.indexName] ?? {
+  function rowDefaults(row: IndexMarginRow): IndexEditState {
+    return {
       exposureRate:     row.exposureRate,
       spanRate:         row.spanRate,
       expiryMultiplier: row.expiryMultiplier,
+      lotSize:          String(row.lotSize ?? 1),
+      expiryDay:        row.expiryDay ?? "Thursday",
+      strikeInterval:   String(row.strikeInterval ?? 50),
     };
   }
 
-  function setField(row: IndexMarginRow, field: "exposureRate" | "spanRate" | "expiryMultiplier", value: string) {
+  function getEdit(row: IndexMarginRow): IndexEditState {
+    return edits[row.indexName] ?? rowDefaults(row);
+  }
+
+  function setField(row: IndexMarginRow, field: keyof IndexEditState, value: string) {
     setEdits(prev => {
-      const current = prev[row.indexName] ?? {
-        exposureRate:     row.exposureRate,
-        spanRate:         row.spanRate,
-        expiryMultiplier: row.expiryMultiplier,
-      };
+      const current = prev[row.indexName] ?? rowDefaults(row);
       return { ...prev, [row.indexName]: { ...current, [field]: value } };
     });
   }
@@ -1798,9 +1812,16 @@ function IndicesSettings() {
     const edit = getEdit(row);
     setSaving(prev => ({ ...prev, [row.indexName]: true }));
     try {
-      await apiRequest("PUT", `/api/index-margin-settings/${row.indexName}`, edit);
+      await apiRequest("PUT", `/api/index-margin-settings/${row.indexName}`, {
+        exposureRate:     edit.exposureRate,
+        spanRate:         edit.spanRate,
+        expiryMultiplier: edit.expiryMultiplier,
+        lotSize:          Number(edit.lotSize),
+        expiryDay:        edit.expiryDay,
+        strikeInterval:   Number(edit.strikeInterval),
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/index-margin-settings"] });
-      toast({ title: "Saved", description: `${row.indexName} margin settings updated.` });
+      toast({ title: "Saved", description: `${row.indexName} settings updated.` });
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
@@ -1826,8 +1847,8 @@ function IndicesSettings() {
             Index Margin Parameters
           </CardTitle>
           <CardDescription>
-            Per-index SPAN rate, Exposure rate, and Expiry Day Multiplier used by the Distance-SPAN margin engine.
-            Lot Size, Expiry Day, and Strike Interval are read-only — populated automatically by the Scrip Master sync.
+            All six fields are admin-configurable. Update when SEBI changes lot sizes, expiry schedules, or strike intervals.
+            Scrip Master sync no longer writes these values — this table is the sole source of truth.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1857,14 +1878,42 @@ function IndicesSettings() {
                       <TableRow key={row.indexName} data-testid={`row-index-margin-${row.indexName}`}>
                         <TableCell className="font-mono font-medium">{row.indexName}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{row.exchange}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {row.expiryDay ?? <span className="text-muted-foreground/40">—</span>}
+                        <TableCell>
+                          <Select
+                            value={edit.expiryDay}
+                            onValueChange={v => setField(row, "expiryDay", v)}
+                          >
+                            <SelectTrigger className="w-32 h-8 text-sm" data-testid={`select-expiry-day-${row.indexName}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {EXPIRY_DAY_OPTIONS.map(d => (
+                                <SelectItem key={d} value={d}>{d}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </TableCell>
-                        <TableCell className="text-right font-mono text-sm">
-                          {row.lotSize != null ? row.lotSize : <span className="text-muted-foreground/40">—</span>}
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min="1"
+                            step="1"
+                            className="w-20 h-8 text-sm"
+                            value={edit.lotSize}
+                            onChange={e => setField(row, "lotSize", e.target.value)}
+                            data-testid={`input-lot-size-${row.indexName}`}
+                          />
                         </TableCell>
-                        <TableCell className="text-right font-mono text-sm" data-testid={`text-strike-interval-${row.indexName}`}>
-                          {row.strikeInterval != null ? row.strikeInterval : <span className="text-muted-foreground/40">—</span>}
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min="1"
+                            step="1"
+                            className="w-20 h-8 text-sm"
+                            value={edit.strikeInterval}
+                            onChange={e => setField(row, "strikeInterval", e.target.value)}
+                            data-testid={`input-strike-interval-${row.indexName}`}
+                          />
                         </TableCell>
                         <TableCell>
                           <Input
