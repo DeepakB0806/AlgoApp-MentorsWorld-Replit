@@ -998,8 +998,8 @@ export function BrokerLinking() {
               ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400", productMode: tp.neutralConfig?.productMode || "MIS", priceMode: (tp.neutralConfig?.priceMode || "LMT") as "LMT" | "MKT" }] : [],
               ...((tp.legs || []).length > 0 && !((tp.uptrendLegs || []).length > 0) ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground", productMode: "MIS" as const, priceMode: "LMT" as const }] : []),
             ];
-            const effectiveSL = plan.deployStoploss ?? (tp.stoploss?.enabled ? tp.stoploss.value : null);
-            const effectivePT = plan.deployProfitTarget ?? (tp.profitTarget?.enabled ? tp.profitTarget.value : null);
+            const effectiveSL = tp.stoploss?.enabled ? (plan.deployStoploss ?? tp.stoploss.value ?? null) : null;
+            const effectivePT = tp.profitTarget?.enabled ? (plan.deployProfitTarget ?? tp.profitTarget.value ?? null) : null;
             const effectiveMultiplier = plan.lotMultiplier || 1;
             const borderCls = ({ active: "border-l-emerald-500", paused: "border-l-amber-400", squared_off: "border-l-red-400", deployed: "border-l-blue-500" } as Record<string, string>)[depStatus] ?? "border-l-border/30";
             const badgeCls = ({ active: "bg-emerald-500 text-white border-transparent", paused: "bg-amber-400 text-black border-transparent", squared_off: "bg-red-500 text-white border-transparent", deployed: "bg-blue-500 text-white border-transparent" } as Record<string, string>)[depStatus] ?? "";
