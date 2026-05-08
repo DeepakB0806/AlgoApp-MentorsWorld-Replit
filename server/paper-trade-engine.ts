@@ -13,6 +13,7 @@ export interface SignalContext {
   blockType?: string;
   parentExchange?: string | null;
   parentTicker?: string | null;
+  isLegInterchange?: boolean;
 }
 
 export function resolveSignalFromActionMapper(

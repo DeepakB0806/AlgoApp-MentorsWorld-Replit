@@ -350,6 +350,8 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
 
         const signalDataForTrade = { ...savedSignal, ...configParsedData, signalType: primarySignal.signalType };
 
+        const isLegInterchange = allSignals.some(s => s.resolvedAction === "EXIT") && allSignals.some(s => s.resolvedAction === "ENTRY");
+
         for (const signal of allSignals) {
           if (signal.signalType !== "buy" && signal.signalType !== "sell") continue;
           try {
@@ -358,6 +360,7 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
               resolvedAction: signal.resolvedAction,
               parentExchange: linkedConfig.exchange,
               parentTicker: linkedConfig.ticker,
+              isLegInterchange,
             });
             tradeResults.push(...results);
           } catch (ptError) {
@@ -601,6 +604,7 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
         const allResolvedSignals = resolveAllSignalsFromActionMapper(signal, strategyConfig.actionMapper);
         const tradableSignals = allResolvedSignals.filter(s => s.signalType === "buy" || s.signalType === "sell");
         if (tradableSignals.length === 0) continue;
+        const isLegInterchangeR = allResolvedSignals.some(s => s.resolvedAction === "EXIT") && allResolvedSignals.some(s => s.resolvedAction === "ENTRY");
 
         let enrichedPayload = signal.rawPayload || "{}";
         if (signal.id) {
@@ -642,7 +646,7 @@ export function registerWebhookRoutes(app: Express, storage: IStorage) {
           });
 
           try {
-            const tradeResults = await processTradeSignal(storage, localEntry, strategyConfig.id, { blockType: resolvedSignal.blockType, resolvedAction: resolvedSignal.resolvedAction, parentExchange: strategyConfig.exchange, parentTicker: strategyConfig.ticker });
+            const tradeResults = await processTradeSignal(storage, localEntry, strategyConfig.id, { blockType: resolvedSignal.blockType, resolvedAction: resolvedSignal.resolvedAction, parentExchange: strategyConfig.exchange, parentTicker: strategyConfig.ticker, isLegInterchange: isLegInterchangeR });
             results.push({ signal: resolvedSignal.signalType, blockType: resolvedSignal.blockType, price: signal.price, time: signal.localTime, trades: tradeResults });
           } catch (ptErr) {
             console.error(`Trade execution error for ${resolvedSignal.resolvedAction}@${resolvedSignal.blockType}:`, ptErr);

@@ -10,7 +10,6 @@ import type {
   ActionMapperEntry,
   PlanTradeLeg,
   InstrumentConfig,
-  IndexMarginSetting,
   ErrorRouting,
 } from "@shared/schema";
 import { tradingCache } from "./cache";
@@ -128,7 +127,6 @@ export interface SignalContext {
   resolvedAction?: "ENTRY" | "EXIT" | "HOLD";
   parentExchange?: string | null;
   parentTicker?: string | null;
-  isLegInterchange?: boolean;
 }
 
 export interface TradeResult {
@@ -265,147 +263,22 @@ export async function processTradeSignal(
     if (bc) brokerConfigs.set(bcId, bc);
   }
 
-  const isEntry = signalContext?.resolvedAction === "ENTRY";
-
-  // EXIT / HOLD signals: all plans fire in parallel — no capital gating
-  if (!isEntry) {
-    const tradePromises = plans.map((plan) => {
-      const bc = brokerConfigs.get(plan.brokerConfigId!);
-      if (!bc) return Promise.resolve<TradeResult>({ success: false, action: "error", broker: "unknown", planId: plan.id, message: "Broker config not found" });
-      return executeTradeForPlan(storage, plan, bc, webhookData, signalContext);
-    });
-    const settled = await Promise.allSettled(tradePromises);
-    for (const r of settled) {
-      if (r.status === "fulfilled") results.push(r.value);
-      else results.push({ success: false, action: "error", broker: "unknown", planId: "", message: r.reason?.message || "Trade execution failed" });
+  const tradePromises = plans.map((plan) => {
+    const brokerConfig = brokerConfigs.get(plan.brokerConfigId!);
+    if (!brokerConfig) {
+      return Promise.resolve<TradeResult>({ success: false, action: "error", broker: "unknown", planId: plan.id, message: "Broker config not found" });
     }
-    return results.length > 0 ? results : [{ success: false, action: "hold", broker: "none", planId: "", message: "No broker plans matched" }];
-  }
-
-  // ENTRY path ────────────────────────────────────────────────────────────────
-  // autoResume=false: skip entirely
-  const autoResumeOff = plans.filter(p => p.autoResume === false);
-  for (const plan of autoResumeOff) {
-    const bc = brokerConfigs.get(plan.brokerConfigId!);
-    const msg = `Plan "${plan.name}" skipped — Auto Resume is OFF`;
-    console.log(`[PFL] ↷ ${msg}`);
-    logPFL(plan, bc?.brokerName || "unknown", webhookData, "skipped", msg, { resolvedAction: signalContext?.resolvedAction });
-    results.push({ success: false, action: "hold", broker: bc?.brokerName || "unknown", planId: plan.id, message: msg });
-  }
-
-  const gateablePlans = plans.filter(p => p.autoResume !== false);
-
-  // #183: Read available capital from DB snapshots (refreshed by Capital Manager at 09:00 IST)
-  // E10+E20: missing/zero snapshot → Infinity = no gate
-  const brokerAvailableCapital = new Map<string, number>();
-  const uniqueBrokerIds = Array.from(new Set(gateablePlans.map(p => p.brokerConfigId!)));
-  const capitalSnapshots = await storage.getAllCapitalSnapshots();
-  const snapshotByUcc = new Map(capitalSnapshots.map(s => [s.ucc, s]));
-  for (const bcId of uniqueBrokerIds) {
-    const bc = brokerConfigs.get(bcId);
-    if (!bc) { brokerAvailableCapital.set(bcId, Infinity); continue; }
-    const snap = bc.ucc ? snapshotByUcc.get(bc.ucc) : undefined;
-    const cash = snap?.availableCapital ? Number(snap.availableCapital) : 0;
-    brokerAvailableCapital.set(bcId, cash === 0 ? Infinity : cash);
-    console.log(`[PFL] Capital ${bc.name} (snapshot): ₹${cash === 0 ? "∞ (no snapshot)" : cash.toFixed(0)}`);
-  }
-
-  // Sort by rank ascending (null/undefined → 999 = lowest priority)
-  const rankedPlans = [...gateablePlans].sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
-
-  // Expiry day IST name for uplift check
-  const nowIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  const todayDayName = dayNames[nowIST.getDay()];
-
-  // #185: Group plans by brokerConfigId (= UCC) and execute groups concurrently
-  const concurrencySettingRaw = await storage.getSetting("te_ucc_concurrency");
-  const uccConcurrency = Math.max(1, parseInt(concurrencySettingRaw?.value || "50", 10) || 50);
-
-  // #209 Auto-pause threshold (consecutive capital-skips before plan auto-pauses)
-  const autoPauseSettingRaw = await storage.getSetting("auto_pause_skip_threshold");
-  const autoPauseThreshold = Math.max(1, parseInt(autoPauseSettingRaw?.value || "3", 10) || 3);
-
-  const plansByBcId = new Map<string, typeof rankedPlans>();
-  for (const plan of rankedPlans) {
-    const bcId = plan.brokerConfigId!;
-    if (!plansByBcId.has(bcId)) plansByBcId.set(bcId, []);
-    plansByBcId.get(bcId)!.push(plan);
-  }
-
-  // Each UCC group processes plans sequentially (rank order) to honour per-UCC capital
-  const uccTasks = Array.from(plansByBcId.entries()).map(([bcId, groupPlans]) => {
-    return async (): Promise<TradeResult[]> => {
-      const bc = brokerConfigs.get(bcId);
-      if (!bc) {
-        return groupPlans.map(plan => ({
-          success: false as const, action: "error" as const,
-          broker: "unknown", planId: plan.id, message: "Broker config not found",
-        }));
-      }
-      const groupResults: TradeResult[] = [];
-      let remaining = brokerAvailableCapital.get(bcId) ?? Infinity;
-
-      for (const plan of groupPlans) {
-        const estimatedMargin = plan.estimatedMargin ? Number(plan.estimatedMargin) : null;
-        if (estimatedMargin === null || estimatedMargin <= 0) {
-          console.log(`[PFL] Plan "${plan.name}" — no margin estimate, firing ungated`);
-          groupResults.push(await executeTradeForPlan(storage, plan, bc, webhookData, signalContext));
-          continue;
-        }
-
-        // Leg interchange (EXIT+ENTRY same signal e.g. SELL_UT+BUY_DT / SELL_DT+BUY_UT):
-        // new legs replace old legs at approx same margin — CM gate bypassed unconditionally.
-        if (signalContext?.isLegInterchange) {
-          const msg = `Plan "${plan.name}" — leg interchange (EXIT+ENTRY same signal), CM gate bypassed`;
-          console.log(`[PFL] ↔ ${msg}`);
-          logPFL(plan, bc.brokerName, webhookData, "info", msg, { resolvedAction: signalContext?.resolvedAction, ticker: plan.ticker || "", exchange: plan.exchange || "" });
-          groupResults.push(await executeTradeForPlan(storage, plan, bc, webhookData, signalContext));
-          continue;
-        }
-
-        // E9: expiry day 1.5x uplift (applied only at comparison, stored value unchanged)
-        const instrConf = tradingCache.getInstrumentConfig(plan.ticker || "", plan.exchange || "");
-        const isExpiryDay = !!(instrConf?.expiryDay && instrConf.expiryDay === todayDayName);
-        const gatingMargin = isExpiryDay ? estimatedMargin * 1.5 : estimatedMargin;
-
-        if (gatingMargin > remaining) {
-          const msg = `Plan "${plan.name}" (rank=${plan.rank ?? "unranked"}) SKIPPED — margin ₹${gatingMargin.toFixed(0)}${isExpiryDay ? " (1.5x expiry)" : ""} > available ₹${remaining.toFixed(0)}`;
-          console.log(`[PFL] ⛔ ${msg}`);
-          logPFL(plan, bc.brokerName, webhookData, "skipped", msg, { resolvedAction: signalContext?.resolvedAction, ticker: plan.ticker || "", exchange: plan.exchange || "" });
-          groupResults.push({ success: false, action: "hold", broker: bc.brokerName, planId: plan.id, message: msg });
-
-          // #209 Auto-pause guardrail: increment skip counter, auto-pause if threshold hit
-          try {
-            const newCount = await storage.incrementConsecutiveCapitalSkips(plan.id);
-            if (newCount >= autoPauseThreshold) {
-              const paused = await storage.autoPausePlan(plan.id, "insufficient_funds");
-              if (paused) {
-                const pauseMsg = `AUTO-PAUSED after ${newCount} consecutive capital skips — top up funds or re-rank to resume`;
-                console.log(`[PFL] 🛑 ${pauseMsg}`);
-                logPFL(plan, bc.brokerName, webhookData, "info", pauseMsg, { resolvedAction: signalContext?.resolvedAction, ticker: plan.ticker || "", exchange: plan.exchange || "" });
-                tradingCache.invalidatePlans(plan.configId);
-              }
-            }
-          } catch (err) {
-            console.warn(`[PFL] Auto-pause increment failed for plan ${plan.id}: ${err}`);
-          }
-        } else {
-          remaining -= gatingMargin;
-          const tradeRes = await executeTradeForPlan(storage, plan, bc, webhookData, signalContext);
-          groupResults.push(tradeRes);
-          // #209 Reset skip counter on successful order placement (fire-and-forget)
-          if (tradeRes.success) {
-            void storage.resetConsecutiveCapitalSkips(plan.id).catch(() => {});
-          }
-        }
-      }
-      return groupResults;
-    };
+    return executeTradeForPlan(storage, plan, brokerConfig, webhookData, signalContext);
   });
 
-  const groupResultArrays = await runWithConcurrency(uccTasks, uccConcurrency);
-  for (const groupResults of groupResultArrays) results.push(...groupResults);
+  const settledResults = await Promise.allSettled(tradePromises);
+  for (const result of settledResults) {
+    if (result.status === "fulfilled") {
+      results.push(result.value);
+    } else {
+      results.push({ success: false, action: "error", broker: "unknown", planId: "", message: result.reason?.message || "Trade execution failed" });
+    }
+  }
 
   return results.length > 0 ? results : [{ success: false, action: "hold", broker: "none", planId: "", message: "No broker plans matched" }];
 }
@@ -413,7 +286,7 @@ export async function processTradeSignal(
 // ═══════════════════════════════════════════════════════════════════════════════
 // PLAN HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
-export function parseTradeParams(plan: StrategyPlan): Record<string, any> | null {
+function parseTradeParams(plan: StrategyPlan): Record<string, any> | null {
   if (!plan.tradeParams) return null;
   try { return typeof plan.tradeParams === "string" ? JSON.parse(plan.tradeParams) : plan.tradeParams; } 
   catch { return null; }
@@ -431,20 +304,6 @@ function getBlockConfig(tradeParams: Record<string, any> | null, blockType: stri
   if (!tradeParams) return {};
   const configKey = blockType.replace("Legs", "Config");
   return tradeParams[configKey] || {};
-}
-
-// #185: Run an array of async tasks with bounded concurrency
-async function runWithConcurrency<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
-  const results: T[] = new Array(tasks.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
-    while (next < tasks.length) {
-      const idx = next++;
-      results[idx] = await tasks[idx]();
-    }
-  });
-  await Promise.all(workers);
-  return results;
 }
 
 function logPFL(plan: StrategyPlan, broker: string, data: WebhookData, actionTaken: string, message: string, extra?: Partial<{ resolvedAction: string; blockType: string; ticker: string; exchange: string; price: number; orderId: string; executionTimeMs: number }>) {
@@ -547,15 +406,12 @@ async function executeTradeForPlan(
   console.log(`[PFL] Plan "${plan.name}" — ${legs.length} leg(s) found for ${resolvedBlockType}`);
 
   let instrumentConfig: InstrumentConfig | undefined;
-  let idxMarginSetting: IndexMarginSetting | undefined;
   if (isOptionExchange(exchange)) {
     instrumentConfig = tradingCache.getInstrumentConfig(ticker, exchange);
     if (!instrumentConfig) {
       instrumentConfig = await storage.getInstrumentConfig(ticker, exchange);
       if (instrumentConfig) tradingCache.setInstrumentConfig(ticker, exchange, instrumentConfig);
     }
-    // index_margin_settings is the single source of truth for expiryDay, lotSize, strikeInterval (Task #220)
-    idxMarginSetting = await storage.getIndexMarginSetting(ticker);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -568,10 +424,9 @@ async function executeTradeForPlan(
     const timeLogic = tradeParams?.timeLogic as { expiryType?: string; expiryWeekOffset?: number } | undefined;
     const expiryType = timeLogic?.expiryType || "weekly";
     const weekOffset = timeLogic?.expiryWeekOffset || 0;
-    // Read expiryDay from index_margin_settings (single source of truth); fall back to instrumentConfig
-    const expiryDay = idxMarginSetting?.expiryDay || instrumentConfig.expiryDay;
+    const expiryDay = instrumentConfig.expiryDay;
     if (!expiryDay) {
-      const msg = `CRITICAL: expiryDay missing in index_margin_settings for ${ticker}. Cannot calculate target expiry.`;
+      const msg = `CRITICAL: expiryDay missing in instrument_config for ${ticker}. Cannot calculate target expiry.`;
       console.error(`[TE] ✗ ${msg}`);
       logPFL(plan, broker, data, "error", msg, { resolvedAction, ticker, exchange, price, executionTimeMs: Date.now() - startTime });
       return { success: false, action: "error", broker, planId: plan.id, message: msg, executionTimeMs: Date.now() - startTime };
@@ -590,7 +445,7 @@ async function executeTradeForPlan(
     tradingCache.setOpenTradesByPlanId(plan.id, openTrades);
   }
 
-  const ctx: TradeContext = { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, neutralLegs, blockConfig, instrumentConfig, idxMarginSetting, targetExpiryDate };
+  const ctx: TradeContext = { ticker, exchange, price, resolvedBlockType, lotMultiplier, now, today, data, openTrades, signalContext, startTime, legs, neutralLegs, blockConfig, instrumentConfig, targetExpiryDate };
 
   // ═══════════════════════════════════════════════════════════════════════════
   // POST-EOD ENTRY GATE
@@ -648,7 +503,7 @@ async function executeTradeForPlan(
 // TRADE CONTEXT & ORDER PARAMETER RESOLUTION
 // ═══════════════════════════════════════════════════════════════════════════════
 interface TradeContext {
-  ticker: string; exchange: string; price: number; resolvedBlockType: string; lotMultiplier: number; now: string; today: string; data: WebhookData; openTrades: StrategyTrade[]; signalContext?: SignalContext; startTime: number; legs: PlanTradeLeg[]; neutralLegs: PlanTradeLeg[]; blockConfig: Record<string, any>; instrumentConfig?: InstrumentConfig; idxMarginSetting?: IndexMarginSetting; targetExpiryDate?: string;
+  ticker: string; exchange: string; price: number; resolvedBlockType: string; lotMultiplier: number; now: string; today: string; data: WebhookData; openTrades: StrategyTrade[]; signalContext?: SignalContext; startTime: number; legs: PlanTradeLeg[]; neutralLegs: PlanTradeLeg[]; blockConfig: Record<string, any>; instrumentConfig?: InstrumentConfig; targetExpiryDate?: string;
 }
 
 function getBufferedLimitPrice(currentPrice: number, action: string, bufferPoints: number): string {
@@ -672,9 +527,8 @@ function resolveOrderParams(
     return { error: `Missing instrument_config for ${ctx.ticker}/${ctx.exchange}` };
   }
 
-  // Read lotSize/strikeInterval from index_margin_settings (single source of truth, Task #220)
-  const lotSize = ctx.idxMarginSetting?.lotSize ?? ctx.instrumentConfig?.lotSize ?? 1;
-  const strikeInterval = ctx.idxMarginSetting?.strikeInterval ?? ctx.instrumentConfig?.strikeInterval ?? 50;
+  const lotSize = ctx.instrumentConfig?.lotSize ?? 1;
+  const strikeInterval = ctx.instrumentConfig!.strikeInterval ?? 50;
 
   let tradingSymbol = ctx.ticker;
   if (isOption && isStrikeSpec(leg.strike) && (leg.type === "CE" || leg.type === "PE")) {
@@ -1005,19 +859,8 @@ async function executeLegBasket(
       }
 
       // FIX 3a: Immediate DB write as "pending_basket" — leg gets a real ID before any rollback can occur
-      const trailingSLCfg = (parseTradeParams(plan) as any)?.trailingSL;
-      const tslEnabled = trailingSLCfg?.enabled === true && trailingSLCfg?.tslType !== "none";
-      const initialSl: number | null =
-        (leg as any).initialSl
-        ?? (ctx.blockConfig as any)?.initialSl
-        ?? (tslEnabled ? (Number(trailingSLCfg.activateAt) || null) : null);
-      const trailingStepVal: number | null =
-        (leg as any).trailingStep
-        ?? (ctx.blockConfig as any)?.trailingStep
-        ?? (tslEnabled ? (Number(trailingSLCfg.increaseTslBy) || null) : null);
-      const tslType: string = trailingSLCfg?.tslType ?? "none";
-      const tslLockProfitVal: number | null = tslEnabled ? (Number(trailingSLCfg.lockProfitAt) || null) : null;
-      const tslProfitStepVal: number | null = tslEnabled ? (Number(trailingSLCfg.whenProfitIncreaseBy) || null) : null;
+      const initialSl = (leg as any).initialSl ?? (ctx.blockConfig as any)?.initialSl ?? null;
+      const trailingStepVal = (leg as any).trailingStep ?? (ctx.blockConfig as any)?.trailingStep ?? null;
       const stagedTrade = {
         planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${legIndex}`,
         tradingSymbol: resolved.tradingSymbol, exchange: ctx.exchange, quantity: actualFilledQty,
@@ -1029,16 +872,11 @@ async function executeLegBasket(
         localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
         webhookDataId: ctx.data.id || undefined,
         rejectedReason: orderReason || null,
-        ...(productType === "NRML" && (initialSl !== null || tslEnabled) ? {
-          initialSlPrice: initialSl !== null ? Number(initialSl) : null,
+        ...(productType === "NRML" && initialSl !== null ? {
+          initialSlPrice: Number(initialSl),
           trailingStep: trailingStepVal !== null ? Number(trailingStepVal) : null,
-          currentSlPrice: initialSl !== null ? Number(initialSl) : null,
+          currentSlPrice: Number(initialSl),
           highWaterMark: fillPrice,
-        } : {}),
-        ...(productType === "NRML" && tslEnabled ? {
-          tslType: tslType || "none",
-          tslLockProfit: tslLockProfitVal,
-          tslProfitStep: tslProfitStepVal,
         } : {}),
       };
 
