@@ -768,8 +768,8 @@ export function BrokerLinking() {
 
   const initDeployConfig = (plan: StrategyPlan) => {
     const tp = plan.tradeParams ? parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] }) : { legs: [] };
-    const baseSL = tp.stoploss?.value || 0;
-    const basePT = tp.profitTarget?.value || 0;
+    const baseSL = tp.stoploss?.enabled ? (tp.stoploss?.value || 0) : 0;
+    const basePT = tp.profitTarget?.enabled ? (tp.profitTarget?.value || 0) : 0;
     const tsl = (tp as TradeParams).trailingSL;
     const baseAct  = tsl?.activateAt            || 0;
     const baseLock = tsl?.lockProfitAt          || 0;
@@ -1587,8 +1587,8 @@ export function BrokerLinking() {
                                 <span className="text-muted-foreground">Broker: <span className="font-mono font-semibold text-foreground">{(() => { const bc = brokerConfigs.find((b) => b.id === deployConfig[plan.id].brokerConfigId); return bc ? (bc.name || bc.brokerName) : "—"; })()}</span></span>
                               )}
                               <span className="text-muted-foreground">Multiplier: <span className="font-mono font-semibold text-foreground">{deployConfig[plan.id].lotMultiplier}x</span></span>
-                              <span className="text-muted-foreground">SL: <span className="font-mono font-semibold text-red-400">{deployConfig[plan.id].stoploss}</span></span>
-                              <span className="text-muted-foreground">Target: <span className="font-mono font-semibold text-emerald-400">{deployConfig[plan.id].profitTarget}</span></span>
+                              {deployConfig[plan.id].stoploss > 0 && <span className="text-muted-foreground">SL: <span className="font-mono font-semibold text-red-400">{deployConfig[plan.id].stoploss}</span></span>}
+                              {deployConfig[plan.id].profitTarget > 0 && <span className="text-muted-foreground">Target: <span className="font-mono font-semibold text-emerald-400">{deployConfig[plan.id].profitTarget}</span></span>}
                               {deployConfig[plan.id].tslEnabled && deployConfig[plan.id].tslActivateAt > 0 && (
                                 <span className="text-muted-foreground">TSL: <span className="font-mono font-semibold text-blue-400">{deployConfig[plan.id].tslActivateAt} act{deployConfig[plan.id].tslLockProfitAt > 0 ? ` · ${deployConfig[plan.id].tslLockProfitAt} lock` : ""}</span></span>
                               )}
