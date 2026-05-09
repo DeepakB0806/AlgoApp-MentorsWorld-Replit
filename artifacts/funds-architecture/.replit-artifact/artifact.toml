@@ -1,0 +1,31 @@
+kind = "slides"
+previewPath = "/funds-architecture/"
+title = "Funds Architecture"
+version = "1.0.0"
+id = "artifacts/funds-architecture"
+router = "path"
+
+[[integratedSkills]]
+name = "slides"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/funds-architecture/" ]
+localPort = 24049
+
+[services.development]
+run = "pnpm --filter @workspace/funds-architecture run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/funds-architecture", "run", "build" ]
+publicDir = "artifacts/funds-architecture/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24049"
+BASE_PATH = "/funds-architecture/"
