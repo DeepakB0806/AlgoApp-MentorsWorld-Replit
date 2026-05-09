@@ -1007,17 +1007,21 @@ async function executeLegBasket(
       // FIX 3a: Immediate DB write as "pending_basket" — leg gets a real ID before any rollback can occur
       const trailingSLCfg = (parseTradeParams(plan) as any)?.trailingSL;
       const tslEnabled = trailingSLCfg?.enabled === true && trailingSLCfg?.tslType !== "none";
+      const tslType: string = trailingSLCfg?.tslType ?? "none";
+      const lotMult = (plan as any).lotMultiplier || 1;
+      const isAmtTsl = tslType === "amount";
+      const resolvedActivateAt: number | null = tslEnabled ? (Number(trailingSLCfg.activateAt) * (isAmtTsl ? lotMult : 1) || null) : null;
+      const resolvedLockProfit: number | null = tslEnabled ? (Number(trailingSLCfg.lockProfitAt) * (isAmtTsl ? lotMult : 1) || null) : null;
+      const resolvedProfitStep: number | null = tslEnabled ? (Number(trailingSLCfg.whenProfitIncreaseBy) * (isAmtTsl ? lotMult : 1) || null) : null;
+      const resolvedTrailingStep: number | null = tslEnabled ? (Number(trailingSLCfg.increaseTslBy) * (isAmtTsl ? lotMult : 1) || null) : null;
       const initialSl: number | null =
         (leg as any).initialSl
         ?? (ctx.blockConfig as any)?.initialSl
-        ?? (tslEnabled ? (Number(trailingSLCfg.activateAt) || null) : null);
+        ?? null;
       const trailingStepVal: number | null =
         (leg as any).trailingStep
         ?? (ctx.blockConfig as any)?.trailingStep
-        ?? (tslEnabled ? (Number(trailingSLCfg.increaseTslBy) || null) : null);
-      const tslType: string = trailingSLCfg?.tslType ?? "none";
-      const tslLockProfitVal: number | null = tslEnabled ? (Number(trailingSLCfg.lockProfitAt) || null) : null;
-      const tslProfitStepVal: number | null = tslEnabled ? (Number(trailingSLCfg.whenProfitIncreaseBy) || null) : null;
+        ?? resolvedTrailingStep;
       const stagedTrade = {
         planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${legIndex}`,
         tradingSymbol: resolved.tradingSymbol, exchange: ctx.exchange, quantity: actualFilledQty,
@@ -1037,8 +1041,9 @@ async function executeLegBasket(
         } : {}),
         ...(productType === "NRML" && tslEnabled ? {
           tslType: tslType || "none",
-          tslLockProfit: tslLockProfitVal,
-          tslProfitStep: tslProfitStepVal,
+          tslLockProfit: resolvedLockProfit,
+          tslProfitStep: resolvedProfitStep,
+          tslActivateAt: resolvedActivateAt,
         } : {}),
       };
 

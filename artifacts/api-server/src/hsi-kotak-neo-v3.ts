@@ -2,6 +2,7 @@ import WebSocket from "ws";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@workspace/db";
 import { runProbe, getProbeThreshold } from "./kotak-probe";
+import { processTick, updateLastWsTick } from "./tsl-kotak-neo-v3";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -195,6 +196,12 @@ function connect(config: BrokerConfig): void {
       const d = msg.data || msg;
       if (type === "trade" || type === "position") {
         console.log(`${LOG_PREFIX} ${type} event: ${d.nOrdNo || d.trdSym || ""}`);
+        const trdLtp = d.ltp ?? d.lp;
+        const trdSym = d.trdSym || d.ts;
+        if (trdSym && trdLtp != null) {
+          processTick(trdSym, Number(trdLtp));
+          updateLastWsTick();
+        }
         return;
       }
       if (type === "order") {

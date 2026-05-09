@@ -4,6 +4,7 @@ import { brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@workspace/db";
 import { runProbe, getProbeThreshold } from "./kotak-probe";
+import { processTick, updateLastWsTick } from "./tsl-kotak-neo-v3";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -205,6 +206,8 @@ function connect(config: BrokerConfig): void {
       const ltp: number | undefined = data.ltp ?? data.lp;
       if (symbol && ltp !== undefined) {
         marketData.updatePrice(symbol, Number(ltp));
+        processTick(symbol, Number(ltp));
+        updateLastWsTick();
       }
     } catch {
     }

@@ -6,7 +6,9 @@ import type { StrategyTrade } from "@workspace/db";
 //
 // 📋 TSL PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
 //   [TSL-1] processTick has separate BUY/SELL direction branches — never unify. BUY trails high, SELL trails low.
+//          Uses O(1) symbol index (trailsBySymbol) for lookup. Activation gate: trailing only begins after tslActivateAt profit threshold.
 //   [TSL-2] registerNewTrail initializes highWaterMark from trade.highWaterMark ?? (trade.ltp || trade.price || 0) — not just trade.price.
+//          Allows null initialSlPrice (no explicit SL needed). Reads tslActivateAt from trade record. Updates trailsBySymbol index.
 //   [TSL-3] flushDirtyTrails persists only dirty states. WS stale detection log must remain.
 
 const LOG_PREFIX = "[TSL]";
@@ -27,9 +29,12 @@ interface TslState {
   tslProfitStep: number | null;
   entryPrice: number;
   lockAchieved: boolean;
+  tslActivateAt: number | null;
+  tslActivated: boolean;
 }
 
 const trails = new Map<string, TslState>();
+const trailsBySymbol = new Map<string, Set<string>>();
 let lastWsTickAt: number = 0;
 let _storage: IStorage | null = null;
 let _closeTradeById: ((storage: IStorage, tradeId: string) => Promise<void>) | null = null;
@@ -40,8 +45,26 @@ export function updateLastWsTick(): void {
 
 // 🔒 LOCKED BLOCK START — TSL processTick: BUY/SELL direction branches must remain separate; BUY trails high, SELL trails low [TSL-1]
 export function processTick(symbol: string, ltp: number): void {
-  for (const [tradeId, state] of trails) {
-    if (state.symbol !== symbol) continue;
+  const ids = trailsBySymbol.get(symbol);
+  if (!ids || ids.size === 0) return;
+
+  for (const tradeId of ids) {
+    const state = trails.get(tradeId);
+    if (!state) continue;
+
+    if (!state.tslActivated) {
+      const profit = state.action === "BUY"
+        ? ltp - state.entryPrice
+        : state.entryPrice - ltp;
+      if (state.tslActivateAt && profit >= state.tslActivateAt) {
+        state.tslActivated = true;
+        state.highWaterMark = ltp;
+        state.dirty = true;
+        console.log(`${LOG_PREFIX} Trail activated tradeId=${tradeId} at ltp=${ltp} profit=${profit.toFixed(2)}`);
+      } else {
+        continue;
+      }
+    }
 
     const isBuy = state.action === "BUY";
 
@@ -78,6 +101,7 @@ export function processTick(symbol: string, ltp: number): void {
       if (ltp <= state.currentSlPrice) {
         console.log(`${LOG_PREFIX} SL breach BUY trade ${tradeId}: ltp=${ltp} sl=${state.currentSlPrice}`);
         trails.delete(tradeId);
+        trailsBySymbol.get(state.symbol)?.delete(tradeId);
         if (_storage && _closeTradeById) {
           _closeTradeById(_storage, tradeId).catch(err =>
             console.error(`${LOG_PREFIX} closeTradeById error for ${tradeId}:`, err)
@@ -117,6 +141,7 @@ export function processTick(symbol: string, ltp: number): void {
       if (ltp >= state.currentSlPrice) {
         console.log(`${LOG_PREFIX} SL breach SELL trade ${tradeId}: ltp=${ltp} sl=${state.currentSlPrice}`);
         trails.delete(tradeId);
+        trailsBySymbol.get(state.symbol)?.delete(tradeId);
         if (_storage && _closeTradeById) {
           _closeTradeById(_storage, tradeId).catch(err =>
             console.error(`${LOG_PREFIX} closeTradeById error for ${tradeId}:`, err)
@@ -130,24 +155,34 @@ export function processTick(symbol: string, ltp: number): void {
 
 // 🔒 LOCKED BLOCK START — TSL registerNewTrail: highWaterMark must init from trade.highWaterMark ?? (ltp || price || 0), not just price [TSL-2]
 export function registerNewTrail(trade: StrategyTrade): void {
-  if (!trade.initialSlPrice || !trade.trailingStep) return;
+  if (!trade.trailingStep) return;
   const isBuy = trade.action === "BUY";
-  trails.set(trade.id, {
+  const tslActivateAt = (trade as any).tslActivateAt ?? null;
+  const tslActivated = !tslActivateAt || tslActivateAt <= 0;
+  const hwm = trade.highWaterMark ?? (trade.ltp || trade.price || 0);
+  const state: TslState = {
     tradeId: trade.id,
     symbol: trade.tradingSymbol,
     action: trade.action,
-    currentSlPrice: trade.currentSlPrice ?? trade.initialSlPrice,
-    highWaterMark: trade.highWaterMark ?? (trade.ltp || trade.price || 0),
+    currentSlPrice: trade.currentSlPrice ?? trade.initialSlPrice ?? (isBuy ? 0 : Infinity),
+    highWaterMark: hwm,
     trailingStep: trade.trailingStep,
     planId: trade.planId,
     dirty: false,
     tslType: trade.tslType ?? "none",
     tslLockProfit: trade.tslLockProfit ?? null,
     tslProfitStep: trade.tslProfitStep ?? null,
-    entryPrice: trade.highWaterMark ?? (trade.ltp || trade.price || 0),
+    entryPrice: hwm,
     lockAchieved: false,
-  });
-  console.log(`${LOG_PREFIX} Registered trail for ${trade.tradingSymbol} [${isBuy ? "BUY" : "SELL"}] sl=${trade.currentSlPrice}`);
+    tslActivateAt,
+    tslActivated,
+  };
+  trails.set(trade.id, state);
+  if (!trailsBySymbol.has(trade.tradingSymbol)) {
+    trailsBySymbol.set(trade.tradingSymbol, new Set());
+  }
+  trailsBySymbol.get(trade.tradingSymbol)!.add(trade.id);
+  console.log(`${LOG_PREFIX} Registered trail for ${trade.tradingSymbol} [${isBuy ? "BUY" : "SELL"}] sl=${trade.currentSlPrice ?? "null"} activateAt=${tslActivateAt ?? "immediate"}`);
 }
 // 🔒 LOCKED BLOCK END
 

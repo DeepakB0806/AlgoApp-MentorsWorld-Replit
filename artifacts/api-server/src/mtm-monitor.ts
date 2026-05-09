@@ -2,7 +2,6 @@ import type { IStorage } from "./storage";
 import type { StrategyPlan, StrategyTrade } from "@workspace/db";
 import { getPrice } from "./md-kotak-neo-v3";
 import { startPersistentSquareOff, persistentSquareOffActive, parseTradeParams } from "./te-kotak-neo-v3";
-import { processTick } from "./tsl-kotak-neo-v3";
 import { brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 import { addProcessFlowLog } from "./process-flow-log";
 import EL from "./el-kotak-neo-v3";
@@ -50,37 +49,6 @@ async function computePlanMTM(
 
 async function runMtmCycle(storage: IStorage): Promise<void> {
   const { time: istTime, date: istDate } = getISTDatetimeNow();
-
-  // ── Part A: Drive TSL ticks at 5s cadence ─────────────────────────────────
-  try {
-    const tslTrades = await storage.getOpenTradesWithTsl();
-    if (tslTrades.length > 0) {
-      const planConfigCache = new Map<string, Awaited<ReturnType<IStorage["getBrokerConfig"]>>>();
-      const marketHoursCache = new Map<string, boolean>();
-      for (const trade of tslTrades) {
-        const tradeExchange = trade.exchange || "NFO";
-        if (!marketHoursCache.has(tradeExchange)) {
-          marketHoursCache.set(tradeExchange, await isWithinMarketHours(storage, tradeExchange, istTime, istDate));
-        }
-        if (!marketHoursCache.get(tradeExchange)) continue;
-
-        if (!planConfigCache.has(trade.planId)) {
-          const plan = await storage.getStrategyPlan(trade.planId);
-          const bc = plan?.brokerConfigId ? await storage.getBrokerConfig(plan.brokerConfigId) : undefined;
-          planConfigCache.set(trade.planId, bc);
-        }
-        const bc = planConfigCache.get(trade.planId);
-        if (!bc) continue;
-        const token = brokerSymbolToTokenMap.get(trade.tradingSymbol);
-        const ltp = await getPrice(trade.tradingSymbol, bc, EL.mapExchange(trade.exchange ?? "NFO"), token);
-        if (ltp !== null) {
-          processTick(trade.tradingSymbol, ltp);
-        }
-      }
-    }
-  } catch (err: any) {
-    console.error(`${LOG_PREFIX} TSL tick error:`, err?.message || err);
-  }
 
   // ── Part B: Plan-level MTM stoploss + profit target check ─────────────────
   try {

@@ -232,6 +232,7 @@ export const strategyTrades = pgTable("strategy_trades", {
   tslType: text("tsl_type"),
   tslLockProfit: real("tsl_lock_profit"),
   tslProfitStep: real("tsl_profit_step"),
+  tslActivateAt: real("tsl_activate_at"),
 }, (table) => [
   index("idx_strategy_trades_plan_id").on(table.planId),
   index("idx_strategy_trades_status").on(table.status),
