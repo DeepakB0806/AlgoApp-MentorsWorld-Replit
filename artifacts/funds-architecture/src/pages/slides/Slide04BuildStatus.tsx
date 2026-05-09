@@ -85,35 +85,26 @@ export default function Slide04BuildStatus() {
             </div>
           </div>
 
-          <div className="mb-[2vh]">
-            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.4vh]">
+          <div className="mb-[2.5vh]">
+            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.5vh]">
               Intraday scheduler (cm-kotak-neo-v3.ts)
             </div>
             <div className="text-[2vw] font-body text-text leading-snug">
-              setInterval · 10 min · gated to 09:15–15:30 IST market hours
+              setInterval · 5 min (cm_intraday_refresh_mins setting) · gated to 09:15–15:30 IST market hours
             </div>
           </div>
 
-          <div className="mb-[2vh]">
-            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.4vh]">
-              Post-fill hook from TE per UCC
-            </div>
-            <div className="text-[2vw] font-body text-text leading-snug">
-              te-kotak-neo-v3.ts triggers refreshCapitalForUcc after each fill
-            </div>
-          </div>
-
-          <div className="mb-[2vh]">
-            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.4vh]">
+          <div className="mb-[2.5vh]">
+            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.5vh]">
               Single-UCC refresh helper
             </div>
             <div className="text-[2vw] font-body text-text leading-snug">
-              refreshCapitalForUcc(ucc) — reuses existing EL pipeline
+              refreshCapitalForUcc(ucc) — reuses existing EL.getLimits → upsertCapitalSnapshot pipeline
             </div>
           </div>
 
-          <div className="mb-[2vh]">
-            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.4vh]">
+          <div className="mb-[2.5vh]">
+            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.5vh]">
               GET + POST snapshot endpoints
             </div>
             <div className="text-[2vw] font-body text-text leading-snug">
@@ -122,7 +113,7 @@ export default function Slide04BuildStatus() {
           </div>
 
           <div>
-            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.4vh]">
+            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.5vh]">
               Frontend gating mirror
             </div>
             <div className="text-[2vw] font-body text-text leading-snug">

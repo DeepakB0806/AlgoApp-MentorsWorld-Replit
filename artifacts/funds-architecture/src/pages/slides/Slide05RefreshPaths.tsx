@@ -14,52 +14,58 @@ export default function Slide05RefreshPaths() {
         </div>
       </div>
 
-      <div className="absolute top-[8vh] left-[5vw] z-10">
-        <div className="text-[3.2vw] font-display font-bold text-text leading-none tracking-tight mb-[0.3vh]">
+      <div className="absolute top-[9vh] left-[5vw] z-10">
+        <div className="text-[3.5vw] font-display font-bold text-text leading-none tracking-tight mb-[0.4vh]">
           Refresh Paths — Write Side
         </div>
-        <div className="text-[1.7vw] font-body text-muted mb-[0.8vh]">Four triggers, one pipeline, one destination</div>
+        <div className="text-[1.8vw] font-body text-muted mb-[0.8vh]">Three triggers · one shared pipeline · one destination</div>
         <div className="w-[8vw] h-[0.3vh] bg-accent" />
       </div>
 
-      <div className="absolute top-[17vh] left-[5vw] right-[5vw] z-10 flex gap-[2vw] items-stretch">
+      <div className="absolute top-[19vh] left-[5vw] right-[5vw] z-10 flex gap-[2vw] items-stretch">
 
-        <div className="flex flex-col gap-[1vh]" style={{ width: "33vw" }}>
-          <div className="bp-label mb-[0.2vh]">TRIGGERS</div>
+        <div className="flex flex-col gap-[1.5vh]" style={{ width: "33vw" }}>
+          <div className="bp-label mb-[0.3vh]">TRIGGERS</div>
 
-          <div className="bp-node-amber" style={{ padding: "1.2vh 1.5vw" }}>
-            <div className="text-[1.25vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.25vh]">
+          <div className="bp-node-amber" style={{ padding: "1.4vh 1.5vw" }}>
+            <div className="text-[1.3vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.3vh]">
               (A) Daily 09:00 IST Sweep
             </div>
-            <div className="text-[1.7vw] font-body text-text leading-snug">
+            <div className="text-[1.8vw] font-body text-text leading-snug">
               scheduleNextCapitalRefresh → refreshAllCapital · all active UCCs at market open
             </div>
           </div>
 
-          <div className="bp-node-amber" style={{ padding: "1.2vh 1.5vw" }}>
-            <div className="text-[1.25vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.25vh]">
-              (B) Intraday Every 10 Min
+          <div className="bp-node-amber" style={{ padding: "1.4vh 1.5vw" }}>
+            <div className="text-[1.3vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.3vh]">
+              (B) Intraday Every 5 Min — NEW
             </div>
-            <div className="text-[1.7vw] font-body text-text leading-snug">
+            <div className="text-[1.8vw] font-body text-text leading-snug">
               setInterval · gated to 09:15–15:30 IST · batched pipeline · ≤6 s at 1000 UCCs
             </div>
-          </div>
-
-          <div className="bp-node-amber" style={{ padding: "1.2vh 1.5vw" }}>
-            <div className="text-[1.25vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.25vh]">
-              (C) Post-Fill Hook from TE per UCC
-            </div>
-            <div className="text-[1.7vw] font-body text-text leading-snug">
-              te-kotak-neo-v3.ts calls refreshCapitalForUcc(ucc) immediately after each order fill
+            <div className="text-[1.4vw] font-body text-muted mt-[0.4vh]">
+              Tightened from 10 min to compensate for no post-fill hook · TE frozen
             </div>
           </div>
 
-          <div className="bp-node-amber" style={{ padding: "1.2vh 1.5vw" }}>
-            <div className="text-[1.25vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.25vh]">
-              (D) On-Demand Refresh Button
+          <div className="bp-node-amber" style={{ padding: "1.4vh 1.5vw" }}>
+            <div className="text-[1.3vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.3vh]">
+              (C) On-Demand Refresh Button — NEW
             </div>
-            <div className="text-[1.7vw] font-body text-text leading-snug">
+            <div className="text-[1.8vw] font-body text-text leading-snug">
               POST /api/broker-capital-snapshots/:id/refresh · 30 s server debounce per UCC
+            </div>
+            <div className="text-[1.4vw] font-body text-muted mt-[0.4vh]">
+              User-triggered instant update · prevents Kotak spam at 1000 users
+            </div>
+          </div>
+
+          <div className="bp-node" style={{ padding: "1.2vh 1.5vw" }}>
+            <div className="text-[1.3vw] font-body text-muted font-semibold uppercase tracking-wider mb-[0.2vh]">
+              Post-fill hook — DROPPED
+            </div>
+            <div className="text-[1.6vw] font-body text-muted leading-snug">
+              Originally proposed but removed to keep te-kotak-neo-v3.ts frozen · staleness ≤5 min
             </div>
           </div>
         </div>
@@ -67,7 +73,7 @@ export default function Slide05RefreshPaths() {
         <div className="flex items-center justify-center px-[1vw]">
           <div className="flex flex-col items-center gap-[1vh]">
             <div className="bp-arrow text-[3vw]">→</div>
-            <div className="text-[1.5vw] font-body text-muted text-center" style={{ maxWidth: "12vw" }}>
+            <div className="text-[1.5vw] font-body text-muted text-center" style={{ maxWidth: "10vw" }}>
               all reuse same pipeline
             </div>
           </div>
