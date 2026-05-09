@@ -1,0 +1,143 @@
+# ==============================================================
+# MWV_ALGOSTRAT V1.2.7 - IST Synchronized Configurator
+# Date: 2026-02-18 | Time: 19:15:00 IST
+# Description: Server-side IST timestamp integration
+# ==============================================================
+
+import ipywidgets as widgets
+from IPython.display import display
+import datetime
+import pandas as pd
+import re
+import pytz  # For IST time synchronization
+
+# --- IST TIME CONFIGURATION ---
+IST = pytz.timezone('Asia/Kolkata')
+
+def get_ist_now():
+    """Returns the current server time in IST format."""
+    return datetime.datetime.now(IST).strftime('%Y-%m-%d | %H:%M:%S IST')
+
+# --- BACKEND ---
+class Backend:
+    @staticmethod
+    def fetch_unique_alerts(url):
+        if not url: return []
+        try:
+            match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
+            if not match: return []
+            sheet_id = match.group(1)
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+            df = pd.read_csv(csv_url)
+            if 'ALERT' in df.columns:
+                return [str(x) for x in df['ALERT'].unique() if str(x) != 'nan']
+            return []
+        except: return []
+
+# --- UI COMPONENTS ---
+class MapperRow:
+    def __init__(self, alert_val):
+        self.alert_val = alert_val
+        self.alert_label = widgets.Label(value=alert_val, layout=widgets.Layout(width='180px'))
+        self.ut_act = widgets.Dropdown(options=["--", "ENTRY", "EXIT", "HOLD"], layout=widgets.Layout(width='100px'))
+        self.dt_act = widgets.Dropdown(options=["--", "ENTRY", "EXIT", "HOLD"], layout=widgets.Layout(width='100px'))
+        self.nt_act = widgets.Dropdown(options=["--", "ENTRY", "EXIT", "HOLD"], layout=widgets.Layout(width='100px'))
+        self.ui = widgets.HBox([self.alert_label, self.ut_act, self.dt_act, self.nt_act])
+
+class TradeLegRow:
+    def __init__(self, parent, index):
+        self.parent = parent
+        self.label = widgets.Label(value=f"Leg {index}:", layout=widgets.Layout(width='50px'))
+        self.type = widgets.Dropdown(options=["CE", "PE", "FUT"], layout=widgets.Layout(width='60px'))
+        self.action = widgets.Dropdown(options=["BUY", "SELL"], layout=widgets.Layout(width='70px'))
+        strike_options = [f"ITM {i}" for i in range(14, 0, -1)] + ["ATM"] + [f"OTM {i}" for i in range(1, 15)]
+        self.strike = widgets.Dropdown(options=strike_options, value="ATM", layout=widgets.Layout(width='100px'))
+        self.lots = widgets.IntText(value=1, layout=widgets.Layout(width='50px'))
+        self.del_btn = widgets.Button(description="X", button_style='danger', layout=widgets.Layout(width='30px'))
+        self.del_btn.on_click(self.delete_me)
+        self.ui = widgets.HBox([self.label, self.type, self.action, self.strike, self.lots, self.del_btn])
+
+    def delete_me(self, b): self.parent.remove_row(self)
+
+class ExecutionBlock:
+    def __init__(self, title, color):
+        self.rows = []
+        self.container = widgets.VBox([])
+        self.add_btn = widgets.Button(description=f"+ Add {title} Leg", button_style='info')
+        self.add_btn.on_click(self.add_row)
+        self.ui = widgets.VBox([widgets.HTML(f"<b style='color:{color};'>{title.upper()} BLOCK</b>"), self.container, self.add_btn],
+                               layout=widgets.Layout(border=f'2px solid {color}', padding='10px', margin='5px'))
+
+    def add_row(self, b):
+        self.rows.append(TradeLegRow(self, len(self.rows) + 1))
+        self.refresh_ui()
+
+    def remove_row(self, row_obj):
+        self.rows.remove(row_obj)
+        self.refresh_ui()
+
+    def refresh_ui(self):
+        for i, row in enumerate(self.rows): row.label.value = f"Leg {i+1}:"
+        self.container.children = tuple([r.ui for r in self.rows])
+
+# --- MAIN APP ---
+gsheet_input = widgets.Text(placeholder="Paste GSheet URL here...", description="Data Link:", layout=widgets.Layout(width='450px'))
+fetch_btn = widgets.Button(description="Fetch Signals", button_style='primary')
+mapper_rows = []
+mapper_container = widgets.VBox([])
+save_log = widgets.Output(layout={'border': '1px solid #ccc', 'margin': '10px 0', 'padding': '5px'})
+
+def on_fetch(b):
+    global mapper_rows
+    alerts = Backend.fetch_unique_alerts(gsheet_input.value)
+    mapper_rows = [MapperRow(a) for a in alerts]
+    mapper_container.children = tuple([m.ui for m in mapper_rows])
+    fetch_btn.description = "✔ Signals Loaded" if alerts else "⚠ No Signals Found"
+fetch_btn.on_click(on_fetch)
+
+mapper_header = widgets.HBox([
+    widgets.HTML("<b>Signal Name</b>", layout=widgets.Layout(width='180px')),
+    widgets.HTML("<b style='color:#27ae60;'>Uptrend Action</b>", layout=widgets.Layout(width='100px')),
+    widgets.HTML("<b style='color:#e74c3c;'>Downtrend Action</b>", layout=widgets.Layout(width='100px')),
+    widgets.HTML("<b style='color:#3498db;'>Neutral Action</b>", layout=widgets.Layout(width='100px'))
+])
+
+ut_panel = ExecutionBlock("Uptrend", "#27ae60")
+dt_panel = ExecutionBlock("Downtrend", "#e74c3c")
+nt_panel = ExecutionBlock("Neutral", "#3498db")
+
+save_btn = widgets.Button(description="💾 SAVE STRATEGY CONFIGURATION", button_style='success', layout=widgets.Layout(width='100%'))
+
+def on_save(b):
+    save_log.clear_output()
+    config = {
+        "timestamp": get_ist_now(),
+        "data_link": gsheet_input.value,
+        "action_mapper": {m.alert_val: {"Uptrend": m.ut_act.value, "Downtrend": m.dt_act.value, "Neutral": m.nt_act.value} for m in mapper_rows},
+        "uptrend_legs": [{"type": r.type.value, "action": r.action.value, "strike": r.strike.value, "lots": r.lots.value} for r in ut_panel.rows],
+        "downtrend_legs": [{"type": r.type.value, "action": r.action.value, "strike": r.strike.value, "lots": r.lots.value} for r in dt_panel.rows],
+        "neutral_legs": [{"type": r.type.value, "action": r.action.value, "strike": r.strike.value, "lots": r.lots.value} for r in nt_panel.rows]
+    }
+    with save_log:
+        import json
+        print(f"✅ SUCCESS: Strategy configuration saved at {get_ist_now()}.")
+        print(json.dumps(config, indent=4))
+
+save_btn.on_click(on_save)
+
+final_ui = widgets.VBox([
+    widgets.HTML("<h2 style='color:#2c3e50;'>MWV_ALGOSTRAT V1.2.7</h2>"),
+    widgets.Label(value=f"System Time: {get_ist_now()}"),
+    widgets.HBox([gsheet_input, fetch_btn]),
+    widgets.HTML("<hr><h3>🎯 STRATEGY ACTION MAPPER</h3>"),
+    mapper_header,
+    mapper_container,
+    widgets.HTML("<hr>"),
+    widgets.HBox([ut_panel.ui, dt_panel.ui, nt_panel.ui]),
+    widgets.HTML("<hr>"),
+    save_btn,
+    widgets.HTML("<b>Configuration Output Log:</b>"),
+    save_log
+])
+
+display(final_ui)

@@ -1,0 +1,318 @@
+import WebSocket from "ws";
+import type { IStorage } from "./storage";
+import type { BrokerConfig } from "@workspace/db";
+import { runProbe, getProbeThreshold } from "./kotak-probe";
+
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
+//
+// 📋 HSI PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [HSI-1] connect mirrors HSM relay→direct auto-fallback with identical relayFailed logic.
+//   [HSI-2] scheduleReconnect: exponential backoff; reconnectTimer tracked for cancellation.
+//   [HSI-3] startHsiHeartbeat: 30 s hb heartbeat, interval tracked in heartbeatInterval.
+//   [HSI-4] resolveHsiUrl: maps config.dataCenter to specific Kotak datacenter endpoints.
+
+const LOG_PREFIX = "[HSI]";
+const MAX_RECONNECT_DELAY_MS = 30_000;
+
+let HSI_URL = "wss://mis.kotaksecurities.com/realtime";
+let ws: WebSocket | null = null;
+let reconnectDelay = 1_000;
+let activeStorage: IStorage | null = null;
+let activeConfig: BrokerConfig | null = null;
+let relayFailed = false;
+let reconnectTimer: NodeJS.Timeout | null = null;
+let heartbeatInterval: NodeJS.Timeout | null = null;
+let zombieCount = 0;
+
+// ── HSI Probe auto-trigger (Build #164, outside locked blocks) ────────────────
+let hsiConsecutiveFailures = 0;
+let hsiAuthOkInSession = false;
+function checkHsiAutoProbe(): void {
+  const threshold = getProbeThreshold();
+  if (hsiConsecutiveFailures >= threshold && activeConfig) {
+    console.log(`[HSI] ${hsiConsecutiveFailures} consecutive reconnects without auth_ok — auto-running probe`);
+    runProbe(activeConfig, "hsi").catch(() => {});
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── HSI Status tracking (outside locked blocks) ──────────────────────────────
+let hsiLastConnectedAt: Date | null = null;
+let hsiLastHeartbeatAt: Date | null = null;
+let hsiLastDisconnectedAt: Date | null = null;
+let hsiStatusInterval: NodeJS.Timeout | null = null;
+let _hsiPrevOpen = false;
+
+interface ConnectionEvent { type: "connected" | "disconnected"; timestamp: string; }
+const MAX_HISTORY = 20;
+const hsiConnectionHistory: ConnectionEvent[] = [];
+function pushHsiEvent(type: "connected" | "disconnected"): void {
+  hsiConnectionHistory.push({ type, timestamp: new Date().toISOString() });
+  if (hsiConnectionHistory.length > MAX_HISTORY) hsiConnectionHistory.shift();
+}
+
+function startHsiStatusTracking(): void {
+  if (hsiStatusInterval) clearInterval(hsiStatusInterval);
+  _hsiPrevOpen = false;
+  hsiStatusInterval = setInterval(() => {
+    const nowOpen = ws !== null && ws.readyState === WebSocket.OPEN;
+    if (nowOpen && !_hsiPrevOpen) pushHsiEvent("connected");
+    if (!nowOpen && _hsiPrevOpen) pushHsiEvent("disconnected");
+    if (nowOpen) hsiLastHeartbeatAt = new Date();
+    _hsiPrevOpen = nowOpen;
+  }, 20_000);
+}
+
+export function getHsiStatus() {
+  const isConnected = ws !== null && ws.readyState === WebSocket.OPEN;
+  const isReconnecting = !isConnected && reconnectTimer !== null;
+  const reconnectAttempts = reconnectDelay > 1_000
+    ? Math.round(Math.log2(reconnectDelay / 1_000))
+    : 0;
+  const usingRelay = !relayFailed && !!(process.env.RELAY_TARGET_URL && process.env.RELAY_SECRET_KEY);
+  return {
+    connected: isConnected,
+    reconnecting: isReconnecting,
+    connectionMode: usingRelay ? "relay" : "direct",
+    reconnectAttempts,
+    reconnectDelayMs: reconnectDelay,
+    lastConnectedAt: hsiLastConnectedAt?.toISOString() ?? null,
+    lastHeartbeatAt: hsiLastHeartbeatAt?.toISOString() ?? null,
+    lastDisconnectedAt: hsiLastDisconnectedAt?.toISOString() ?? null,
+    hsiUrl: HSI_URL,
+    zombieCount,
+  };
+}
+
+export function getHsiHistory(): ConnectionEvent[] {
+  return [...hsiConnectionHistory].reverse();
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildAuthMessage(config: BrokerConfig): object {
+  return {
+    type: "cn",
+    Authorization: config.accessToken,
+    Sid: config.sessionId,
+    src: "WEB",
+  };
+}
+
+// 🔒 LOCKED BLOCK START — resolveHsiUrl: maps config.dataCenter to specific Kotak datacenter endpoints [HSI-4]
+function resolveHsiUrl(config: BrokerConfig): string {
+  const dc = (config.dataCenter || "").toLowerCase().trim();
+  if (dc === "adc") return "wss://cis.kotaksecurities.com/realtime";
+  if (dc === "e21") return "wss://e21.kotaksecurities.com/realtime";
+  if (dc === "e22") return "wss://e22.kotaksecurities.com/realtime";
+  if (dc === "e41") return "wss://e41.kotaksecurities.com/realtime";
+  if (dc === "e43") return "wss://e43.kotaksecurities.com/realtime";
+  return "wss://mis.kotaksecurities.com/realtime";
+}
+// 🔒 LOCKED BLOCK END
+
+// 🔒 LOCKED BLOCK START — HSI connect: mirrors HSM relay→direct auto-fallback with identical relayFailed logic; never weaken [HSI-1]
+// HSI-1 amended by Build #151 (2026-04-27): zombie-state detection added to message handler — additive only, no existing logic changed.
+// HSI-1 amended by Build #153 (2026-04-27): zombieCount relay-bypass counter added — additive only.
+// HSI-1 amended by Build #155 (2026-04-27): removed duplicate scheduleReconnect() from zombie handler — ws.terminate() already fires ws.on("close") which calls scheduleReconnect; having both created two concurrent timers and two simultaneous WS connections.
+// HSI-1 amended by Build #163 (2026-05-01): exact connection/disconnection timestamps recorded in ws.on("open") and ws.on("close") — additive only, no existing logic changed.
+// HSI-1 amended by Build #164 (2026-05-02): hsiAuthOkInSession reset on open, set on cn:ok; hsiConsecutiveFailures incremented on close-without-auth; probe auto-triggered at threshold — additive only.
+function connect(config: BrokerConfig): void {
+  if (!config.accessToken || !config.sessionId) {
+    console.error(`${LOG_PREFIX} Missing accessToken/sessionId. Cannot connect HSI.`);
+    return;
+  }
+
+  const RELAY_URL = process.env.RELAY_TARGET_URL;
+  const RELAY_SECRET = process.env.RELAY_SECRET_KEY;
+
+  let opened = false;
+  let usingRelay = false;
+
+  try {
+    if (RELAY_URL && RELAY_SECRET && !relayFailed) {
+      usingRelay = true;
+      const wsRelayUrl = RELAY_URL.replace("http://", "ws://").replace("https://", "wss://");
+      const wsRelayUrlWithPath = `${wsRelayUrl}/realtime`;
+      console.log(`${LOG_PREFIX} Routing via Bangalore relay ${wsRelayUrlWithPath} → ${HSI_URL}`);
+      ws = new WebSocket(wsRelayUrlWithPath, {
+        headers: { "x-target-url": HSI_URL, "x-relay-secret": RELAY_SECRET },
+      });
+    } else {
+      if (relayFailed) {
+        console.log(`${LOG_PREFIX} Connecting directly to Kotak (relay previously failed)`);
+      }
+      ws = new WebSocket(HSI_URL);
+    }
+  } catch (err) {
+    console.error(`${LOG_PREFIX} WebSocket construction error:`, err);
+    scheduleReconnect(config);
+    return;
+  }
+
+  ws.on("open", () => {
+    opened = true;
+    hsiAuthOkInSession = false; // HSI-1 Build #164: reset per-session auth flag
+    hsiLastConnectedAt = new Date(); // HSI-1 Build #163: exact connect timestamp
+    console.log(usingRelay ? `${LOG_PREFIX} Connected via relay. Sending Kotak auth...` : `${LOG_PREFIX} Connected directly to Kotak HSI. Sending auth...`);
+    reconnectDelay = 1_000;
+    try {
+      const authPayload = JSON.stringify(buildAuthMessage(config)).replace(/"/g, '');
+      console.log(`${LOG_PREFIX} Auth payload: ${authPayload}`);
+      ws!.send(authPayload);
+    } catch (err) {
+      console.error(`${LOG_PREFIX} Auth send error:`, err);
+    }
+  });
+
+  ws.on("message", (raw: WebSocket.RawData) => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      if (usingRelay && msg.msg === "session message format incorrect") {
+        relayFailed = true;
+        console.log(`${LOG_PREFIX} Relay path error confirmed — relay does not forward /realtime path; switching to direct E41 connection on next reconnect`);
+      }
+      const type: string = msg.type || "";
+      if (type === "failed to process request") {
+        if (usingRelay) zombieCount++;
+        if (usingRelay && zombieCount >= 3) {
+          relayFailed = true;
+          console.warn(`${LOG_PREFIX} ${zombieCount} consecutive zombie detections via relay — marking relay failed, switching to direct E41`);
+        } else {
+          console.warn(`${LOG_PREFIX} Session rejected by Kotak (failed to process request) — zombie state detected, forcing reconnect`);
+        }
+        try { ws!.terminate(); } catch {}
+        ws = null;
+        return;
+      }
+      if (type === "cn" && msg.ak === "ok") {
+        zombieCount = 0;
+        hsiAuthOkInSession = true; // HSI-1 Build #164: mark auth ok, reset failure counter
+        hsiConsecutiveFailures = 0;
+        console.log(`${LOG_PREFIX} Auth confirmed (cn ok) — relay healthy, zombie counter reset`);
+        return;
+      }
+      const d = msg.data || msg;
+      if (type === "trade" || type === "position") {
+        console.log(`${LOG_PREFIX} ${type} event: ${d.nOrdNo || d.trdSym || ""}`);
+        return;
+      }
+      if (type === "order") {
+        const ordSt: string = (d.ordSt || "").toLowerCase();
+        const nOrdNo: string = d.nOrdNo || "";
+        if (ordSt === "complete") {
+          console.log(`${LOG_PREFIX} Order COMPLETE: ${nOrdNo} avgPrc=${d.avgPrc || ""} qty=${d.fldQty || ""}`);
+        } else if (ordSt === "rejected" || ordSt === "cancelled") {
+          const rejRsn: string = (d.rejRsn || "").toLowerCase();
+          console.warn(`${LOG_PREFIX} Order ${ordSt.toUpperCase()}: ${nOrdNo} reason="${rejRsn}"`);
+          if (rejRsn && rejRsn !== "--" && activeStorage) {
+            activeStorage.getActiveErrorRoutes().then((routes) => {
+              for (const route of routes) {
+                if (rejRsn.includes(route.errorPattern.toLowerCase())) {
+                  console.warn(`${LOG_PREFIX} Matched errorRoute id=${route.id} pattern="${route.errorPattern}" action=${route.actionType}`);
+                  break;
+                }
+              }
+            }).catch(() => {});
+          }
+        }
+        return;
+      }
+      console.log(`${LOG_PREFIX} [DEBUG] msg type="${type}" raw=${raw.toString().slice(0, 300)}`);
+    } catch {
+      console.log(`${LOG_PREFIX} [DEBUG] non-JSON raw=${raw.toString().slice(0, 300)}`);
+    }
+  });
+
+  ws.on("close", (code: number, reason: Buffer) => {
+    const reasonStr = reason ? reason.toString() : "";
+    hsiLastDisconnectedAt = new Date(); // HSI-1 Build #163: exact disconnect timestamp
+    if (!hsiAuthOkInSession) { hsiConsecutiveFailures++; checkHsiAutoProbe(); } // HSI-1 Build #164: probe auto-trigger
+    console.log(`${LOG_PREFIX} Disconnected code=${code} reason="${reasonStr}" — reconnecting in ${reconnectDelay}ms`);
+    ws = null;
+    scheduleReconnect(config);
+  });
+
+  ws.on("error", (err) => {
+    console.error(`${LOG_PREFIX} WS error:`, err.message);
+    if (!opened && usingRelay && !relayFailed) {
+      relayFailed = true;
+      console.log(`${LOG_PREFIX} Relay unreachable — falling back to direct connection`);
+    }
+  });
+}
+// 🔒 LOCKED BLOCK END
+
+// 🔒 LOCKED BLOCK START — HSI scheduleReconnect: same exponential backoff as HSM [HSI-2]
+function scheduleReconnect(config: BrokerConfig): void {
+  reconnectTimer = setTimeout(() => connect(config), reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+}
+// 🔒 LOCKED BLOCK END
+
+// 🔒 LOCKED BLOCK START — HSI heartbeat: dual heartbeat (protocol ping + application hb) every 20 s while WS is OPEN [HSI-3]
+// HSI-3 amended by Build #157 (2026-04-28): replaced invalid {type:hb} application message with ws.ping().
+// Kotak's server does not recognise quote-stripped {type:hb} and responds with "failed to process request".
+// Browsers keep sessions alive via native WS protocol pings; ws.ping() replicates this. Interval reduced 30s→20s.
+// HSI-3 amended by Build #160 (2026-05-01): added application-level {"type":"hb"} alongside ws.ping() (belt-and-suspenders).
+// Kotak's official demo.js sends JSON.stringify({type:"hb"}) — quotes intact. The old bug was quote-stripping, not the
+// message type. Both heartbeats fire every 20s: ws.ping() handles protocol-aware servers; {"type":"hb"} handles servers
+// that expect the application message. This eliminates 1006 abnormal closures observed after Task #157.
+function startHsiHeartbeat(): void {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  heartbeatInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.ping(); } catch {}
+      try { ws.send('{"type":"hb"}'); } catch {}
+    }
+  }, 20_000);
+}
+// 🔒 LOCKED BLOCK END
+
+export function refreshConfig(config: BrokerConfig): void {
+  if (ws) {
+    ws.removeAllListeners();
+    try { ws.terminate(); } catch {}
+    ws = null;
+  }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  relayFailed = false;
+  zombieCount = 0;
+  reconnectDelay = 1_000;
+  hsiLastConnectedAt = null;
+  hsiLastHeartbeatAt = null;
+  hsiLastDisconnectedAt = null;
+  activeConfig = config;
+  HSI_URL = resolveHsiUrl(config);
+  connect(config);
+  startHsiHeartbeat();
+  startHsiStatusTracking();
+}
+
+export function forceReconnect(): { ok: boolean; message: string } {
+  if (!activeConfig) {
+    return { ok: false, message: "No active broker config — HSI was never started" };
+  }
+  refreshConfig(activeConfig);
+  return { ok: true, message: "HSI reconnect triggered" };
+}
+
+export async function startHsiGateway(storage: IStorage): Promise<void> {
+  try {
+    const configs = await storage.getBrokerConfigs();
+    const config = configs.find(c => c.brokerName === "kotak_neo" && c.isConnected);
+    if (!config) {
+      console.log(`${LOG_PREFIX} No connected Kotak Neo config — HSI Gateway not started`);
+      return;
+    }
+    activeConfig = config;
+    activeStorage = storage;
+    HSI_URL = resolveHsiUrl(config);
+    console.log(`${LOG_PREFIX} HSI URL resolved to ${HSI_URL} (dataCenter=${config.dataCenter ?? "default"})`);
+    connect(config);
+    startHsiHeartbeat();
+    startHsiStatusTracking();
+  } catch (err) {
+    console.error(`${LOG_PREFIX} startHsiGateway error (non-fatal):`, err);
+  }
+}

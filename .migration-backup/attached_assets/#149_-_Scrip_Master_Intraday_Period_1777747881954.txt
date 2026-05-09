@@ -1,0 +1,35 @@
+#149 - Scrip Master Intraday Periodic Refresh
+
+What & Why
+The scrip master currently has two problems:
+
+The readiness endpoint (/api/te/readiness) auto-triggers a full scrip download whenever it detects stale or missing data — meaning every page refresh can silently kick off a heavy download. This is user-discretion hostile (a user who refreshes frequently hammers the broker API for no reason) and confusing (the "last synced" time jumps to the present on every page load).
+There is no intraday refresh mechanism. After the daily 09:10 sync, contracts that roll over mid-session are not picked up until tomorrow or a manual resync.
+This task fixes both: remove page-refresh-triggered syncs from the readiness endpoint, and add a configurable intraday refresh interval that the scheduler owns.
+
+Legitimate syncs that must be preserved:
+
+Boot/republish: runScripMasterSync called in server/index.ts at startup
+Post-login: sync triggered after successful TOTP login in broker-routes
+Auto-recovery: scheduleScripSyncRetry loop already handles failures from boot or daily clock
+Done looks like
+Refreshing the Broker API page never triggers a scrip master download. The readiness endpoint is read-only — it reports status, it does not trigger downloads.
+General Settings has a new "Intraday Refresh Interval (min)" number input below the existing Sync Clock field. Setting 0 disables intraday refresh. Saving takes effect immediately without a server restart.
+After the daily sync clock fires at the configured time, the server re-syncs scrip master every X minutes automatically. Each refresh is logged clearly.
+The Broker API Scrip Master card always shows the last sync timestamp live (polling every 30–60 s, regardless of trade-ready state). It also shows the daily sync start time and the intraday interval from settings, e.g. "Daily 09:10 IST · every 30 min · Last sync: 13:09 IST". No page refresh needed to see this update.
+Out of scope
+Time-window restriction for intraday refresh (e.g. stop at 15:30). Interval runs after daily clock fires until next day's clock.
+Per-broker interval configuration (single global setting applies to all Kotak Neo brokers).
+Push/SSE for live updates (polling is sufficient).
+Steps
+Remove auto-sync from readiness endpoint — In broker-routes.ts, delete the two setImmediate blocks that trigger runScripMasterSync when data is missing or stale (the no-data block around line 943 and the stale-data block around line 988). The endpoint becomes purely read-only: it reports ready, lastUpdated, stale, syncing, isRecovering but never triggers a download. The existing scripSyncInProgress set can still be used to reflect syncs kicked off by the manual Resync button.
+New setting saved to DB — Add scrip_master_refresh_interval_mins to app_settings via the existing generic settings POST endpoint. In admin-routes.ts, extend the reschedule trigger condition to also call rescheduleScripMasterSync when this key is saved (same pattern already used for scrip_master_sync_time), so changes take effect immediately.
+Scheduler intraday interval — In rescheduleScripMasterSync (scrip-sync-scheduler.ts), after the daily sync runs, read scrip_master_refresh_interval_mins from DB. If > 0, start a setInterval at that interval in minutes (replacing the current hardcoded 24-hour interval). Cancel and replace both handles on every call to rescheduleScripMasterSync. Log each intraday tick clearly.
+Settings UI field — In the General Settings trading card (settings.tsx), add a number input "Intraday Refresh Interval (min)" with a description explaining that it controls how often scrip master re-syncs after the daily clock fires, and that 0 disables it. Wire its own save button/mutation to POST /api/settings/scrip_master_refresh_interval_mins.
+Broker API card live sync display — In broker-api.tsx, remove the isTradeReady ? false : 20000 stop condition on the teReadiness query so it always polls at a fixed interval (30 s). Fetch scrip_master_sync_time and scrip_master_refresh_interval_mins settings and display them alongside lastUpdated on the Scrip Master card — "Daily 09:10 IST · every 30 min · Last: 13:09 IST". This updates automatically without a page reload.
+Relevant files
+server/routes/broker-routes.ts:928-1015
+server/routes/admin-routes.ts:78-91
+server/scrip-sync-scheduler.ts
+client/src/pages/settings.tsx:382-810
+client/src/pages/broker-api.tsx:2080-2475

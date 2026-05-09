@@ -1,0 +1,76 @@
+Task #97: Error Handling Command Centre (Terminal Routing & UI Failsafes)
+
+What & Why
+A blanket, infinite retry loop for all failed orders is a dangerous anti-pattern. The system must differentiate between Transient Errors (like Kotak code 1005: Internal Error or 424: Dependency failure which should be retried) and Terminal Errors (like 1007: Invalid Symbol or expired contracts which are mathematically impossible to retry).
+Currently, terminal rejections during exits result in an infinite close_failed zombie retry loop. We need to expose exact Kotak rejection reasons to the UI, implement a strict Terminal Decision Matrix to instantly kill dead loops, and provide a manual UI override.
+
+Done looks like
+
+Accurate UI Data: The Rejection Reason and Time columns in the Order Panel show the actual Kotak rejRsn and ordDtTm fields.
+
+Terminal Routing: When closeTrade() receives a terminal Kotak error code (1006, 1007, 1009) or a known RMS terminal string ("instrument has been expired", "order type is invalid"), it bypasses all retry loops and marks the trade as closed (pnl=0, exitPrice=ltp).
+
+Manual Kill Switch: The UI features a "Force Close" button for close_failed trades, allowing the operator to manually terminate the loop without touching the database.
+
+Tasks:
+
+Task 1 — Expose Kotak Rejection Reasons & Timestamps
+File: server/routes/broker-routes.ts (inside the /api/orders GET handler's normalization mapping)
+Kotak hides its actual error reason in rejRsn and its timestamp in ordDtTm or ordEntTm. Update the normalization mapping to prioritize these exact Kotak fields:
+
+TypeScript
+// Replace existing mappings with this exact priority chain:
+rejection_reason: o.rejRsn || o.rejReason || o.rej_reason || o.rjBy || o.reason || "",
+timestamp: o.ordDtTm || o.ordEntTm || o.timestamp || o.plDate || o.time || o.ordTm || "",
+Task 2 — The Terminal Decision Matrix in closeTrade()
+File: server/te-kotak-neo-v3.ts (inside the failure handler for closeTrade after !orderResult.success)
+Replace the existing basic "insufficient holdings" check with a comprehensive Terminal Routing Matrix based on official Kotak API V3 documentation.
+
+TypeScript
+// Exact Kotak RMS strings and API V3 Terminal Codes
+const TERMINAL_CLOSE_PATTERNS = [
+  "instrument has been expired", // Exact RMS dead contract string
+  "order type is invalid",       // Exact RMS invalid contract string
+  "1007", "invalid symbol", "scrip not found",
+  "1009", "invalid quantity", "wrong lot",
+  "1006", "invalid exchange",
+  "insufficient holding", "insufficient balance", 
+  "no open position", "position not found", "no position",
+  "delisted", "suspended", "not available"
+];
+
+const errStr = String(orderResult.error || "").toLowerCase();
+const isTerminal = TERMINAL_CLOSE_PATTERNS.some(p => errStr.includes(p));
+
+if (isTerminal) {
+  const terminalMsg = `[TE] Terminal rejection for ${trade.tradingSymbol}: "${orderResult.error}". Marking as closed to prevent zombie retries.`;
+  console.warn(terminalMsg);
+  await logPFL(plan.id, trade.entryLegId || "N/A", "force_closed", terminalMsg);
+  
+  const closedUpdate = await storage.updateStrategyTrade(trade.id, {
+    status: "closed", 
+    pnl: 0, 
+    exitedAt: new Date(), 
+    updatedAt: new Date(), 
+    exitPrice: trade.ltp || trade.price || 0, 
+    exitAction: plan.exitAction || "SELL"
+  });
+  
+  tradingCache.invalidateOpenTrades(trade.planId);
+  return closedUpdate || trade;
+}
+Task 3 — Manual Force-Close Endpoint & UI Button
+
+Backend (server/routes/broker-routes.ts): Add a POST /api/trades/:tradeId/force-close endpoint. It must update the trade status to closed, set pnl=0, and exitedAt=now. Log a PFL entry stating: Manual operator force-close executed.
+
+Frontend (Trades Panel UI):
+Where close_failed trades are displayed, render a red "Force Close" button next to the status badge (visible ONLY when status === "close_failed"). Clicking it triggers a confirmation dialog ("Are you sure you want to force close this trade? This will stop all automated retries.") and calls the new endpoint.
+
+The Impact of this Upgrade
+By feeding Replit this exact task, you are doing three things:
+
+Translating the API Docs into Code: You are taking the official 1007, 1009, and 1006 Kotak definitions and making your engine enforce them automatically.
+
+Killing the Ghost: The exact string "instrument has been expired" is now a terminal trigger. The moment Kotak says that, your engine will drop the trade instantly.
+
+Taking Back Control: The Force-Close button gives you absolute authority over the engine's state from the UI.

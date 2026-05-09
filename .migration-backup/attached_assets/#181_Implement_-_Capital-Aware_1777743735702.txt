@@ -1,0 +1,156 @@
+Task #181 : Implement - Capital-Aware Auto-Deployment & Margin UI
+
+Context:
+We are implementing a capital-aware portfolio management system. The Trade Engine must calculate the estimated margin required for each active strategy after the daily Scrip Master sync. Strategies are ranked by user priority. When a webhook fires, the system checks the available capital; if there isn't enough margin for the strategy's rank, it is skipped. The UI must also be updated to display the margin and allow users to configure rank and auto-resume status.
+
+Instructions for Replit:
+
+Step 1: Database Schema Upgrade
+File: shared/schema.ts
+Locate the strategyPlans table definition. Add the new ranking, toggle, and margin fields.
+
+TypeScript
+  // Add to strategyPlans:
+  rank: integer("rank"),
+  autoResume: boolean("auto_resume").default(true).notNull(),
+  estimatedMargin: numeric("estimated_margin"),
+  marginCalculatedAt: timestamp("margin_calculated_at"),
+Note for AI: Run npm run db:push immediately after saving.
+
+Step 2: API Route Updates
+File: server/routes/broker-routes.ts (or the file containing the Strategy Plan PATCH route, likely admin-routes.ts or routes.ts).
+Ensure the route handling PATCH /api/strategy-plans/:id accepts and updates rank and autoResume.
+
+Step 3: Frontend UI Implementation
+File: client/src/pages/broker-api.tsx (or the component rendering deployed Strategy Cards)
+Update the Active/Deployed Strategy Card layout to match the provided specifications.
+
+Add Margin Display: Render this above the action buttons, ONLY if deploymentStatus is 'active' or 'deployed'.
+
+JavaScript
+{(plan.deploymentStatus === 'active' || plan.deploymentStatus === 'deployed') && (
+  <div className="w-full flex justify-end mb-2">
+    <span className="text-xs font-medium text-green-500">
+      Date: {plan.marginCalculatedAt ? new Date(plan.marginCalculatedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'Pending'} | Margin Amt: {plan.estimatedMargin ? `₹${parseFloat(plan.estimatedMargin).toFixed(2)}` : 'Calculating...'} | Margin Validity: 60 mins
+    </span>
+  </div>
+)}
+Add Rank & Auto-Resume Controls: Prepend these to the existing action button row.
+
+JavaScript
+{(plan.deploymentStatus === 'active' || plan.deploymentStatus === 'deployed') && (
+  <>
+    <div className="flex items-center gap-2 mr-4 bg-background px-2 py-1 rounded-md border">
+      <span className="text-xs font-semibold whitespace-nowrap">Strategy Rank:</span>
+      <Select 
+        value={plan.rank?.toString() || ""} 
+        onValueChange={(val) => updatePlan(plan.id, { rank: parseInt(val) })}
+      >
+        <SelectTrigger className="w-16 h-7 text-xs"><SelectValue placeholder="-" /></SelectTrigger>
+        <SelectContent>
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(num => (
+            <SelectItem key={num} value={num.toString()}>{num}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+    <Button 
+      variant={plan.autoResume ? "default" : "outline"} 
+      size="sm" 
+      className="mr-2 h-8 text-xs font-semibold"
+      onClick={() => updatePlan(plan.id, { autoResume: !plan.autoResume })}
+    >
+      Auto Resume<br/>({plan.autoResume ? 'ON' : 'OFF'})
+    </Button>
+  </>
+)}
+Step 4: Heuristic Margin Calculation on Sync
+File: server/scrip-master-sync.ts (or smc-kotak-neo-v3.ts depending on where runScripMasterSync lives)
+Create a new function calculatePlanMargins(storage: IStorage) and call it at the very end of runScripMasterSync, just before returning { success: true, synced }.
+
+TypeScript
+async function calculatePlanMargins(storage: IStorage) {
+  try {
+    const plans = await storage.getAllStrategyPlans();
+    
+    // Default heuristic values (these can be moved to settings later)
+    const BASE_SELL_MARGIN = 100000;
+    const HEDGE_DISCOUNT = 60000;
+    const SAFE_BUY_MARGIN = 4000; // Rough estimate for buying 1 lot
+    
+    for (const plan of plans) {
+       if (plan.deploymentStatus !== 'active' && plan.deploymentStatus !== 'deployed') continue;
+       
+       let totalMargin = 0;
+       let sellLots = 0;
+       let buyLots = 0;
+       
+       try {
+           const params = typeof plan.tradeParams === 'string' ? JSON.parse(plan.tradeParams) : plan.tradeParams;
+           if (!params) continue;
+           
+           const allLegs = [
+               ...(params.uptrendLegs || []),
+               ...(params.downtrendLegs || []),
+               ...(params.neutralLegs || [])
+           ];
+           
+           const lotMultiplier = plan.lotMultiplier || 1;
+           
+           for (const leg of allLegs) {
+               const qty = (leg.lots || 1) * lotMultiplier;
+               if (leg.action === 'BUY') {
+                   totalMargin += (SAFE_BUY_MARGIN * qty); 
+                   buyLots += qty;
+               } else if (leg.action === 'SELL') {
+                   totalMargin += (BASE_SELL_MARGIN * qty);
+                   sellLots += qty;
+               }
+           }
+           
+           // Apply Heuristic Hedge Discount for paired lots
+           const hedgedPairs = Math.min(sellLots, buyLots);
+           totalMargin -= (hedgedPairs * HEDGE_DISCOUNT);
+           totalMargin = Math.max(totalMargin, 0);
+           
+           await storage.updateStrategyPlan(plan.id, {
+               estimatedMargin: totalMargin.toString(),
+               marginCalculatedAt: new Date().toISOString()
+           });
+           
+       } catch (e) {
+           console.error(`[SMC] Error calculating margin for plan ${plan.id}:`, e);
+       }
+    }
+  } catch (err) {
+    console.error("[SMC] Failed to execute calculatePlanMargins:", err);
+  }
+}
+Step 5: Capital Gating in Trade Engine
+File: server/te-kotak-neo-v3.ts
+Locate processTradeSignal. Just after fetching plans from the database/cache, insert the logic to filter by autoResume, sort by rank, and filter out plans that exceed available capital.
+
+TypeScript
+  // Find where `plans` is fetched:
+  // if (!plans) { ... }
+  
+  // INJECT THIS CAPITAL GATING LOGIC:
+  const activePlans = plans.filter(p => p.autoResume !== false);
+  activePlans.sort((a, b) => (a.rank || 999) - (b.rank || 999));
+  
+  // Determine available capital (can pull from settings, defaulting to 10L)
+  const maxCapSetting = await storage.getSetting("maximum_allocated_capital");
+  let availableCapital = maxCapSetting?.value ? parseFloat(maxCapSetting.value) : 1000000;
+  
+  const fundedPlans = [];
+  for (const plan of activePlans) {
+      const requiredMargin = plan.estimatedMargin ? parseFloat(plan.estimatedMargin as string) : 0;
+      if (availableCapital >= requiredMargin) {
+          fundedPlans.push(plan);
+          availableCapital -= requiredMargin;
+      } else {
+          console.warn(`[TE] Skipping Plan ${plan.name} (Rank ${plan.rank}) due to insufficient margin. Req: ${requiredMargin}, Avail: ${availableCapital}`);
+          logPFL(plan, "system", webhookData, "skipped", `Insufficient margin (Req: ₹${requiredMargin}, Avail: ₹${availableCapital})`);
+      }
+  }
+  plans = fundedPlans; // Replace the original array with only funded plans

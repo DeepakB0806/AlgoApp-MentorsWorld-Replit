@@ -1,0 +1,33 @@
+🚩 Critical Loopholes Remaining in the Draft
+1. Fix 3: The "RAM Loop" Trap (Still Exists)
+The draft still uses an inline loop for the rollback: for (let rbAttempt = 0; rbAttempt <= rbMaxRetries; rbAttempt++).
+
+The Risk: This loop lives purely in your server's memory. If Kotak’s API is slow and your Replit server restarts or crashes during these retries, the process is killed.
+
+The Consequence: Because the draft never writes the failure to the database, the engine will restart and completely forget that a ghost trade is still active in your Kotak account.
+
+2. Fix 4b: The "Half-Baked" Recovery (Still Exists)
+The proposed "Boot-up Catcher" only looks for status = 'close_failed'.
+
+The Risk: It completely ignores the rollback_failed state we built the foundation for in Task #84.
+
+The Consequence: If a margin rollback fails and the server restarts, the system will not automatically resume the reversal. You will be left with an unmanaged, naked position.
+
+3. Fix 3: The "Ghost ID" Crash (Still Exists)
+The draft still attempts to update the trade status before ensuring the trade is actually in the database.
+
+The Risk: In executeLegBasket, the trades are currently held in a temporary array until the whole basket is finished. If a rollback is triggered, the code will try to update a record that has no ID yet, causing a crash.
+
+🛡️ How to Force the Enterprise Fix
+To close these loopholes once and for all, you must tell Replit to follow the "State Machine" protocol. Use this exact feedback:
+
+Feedback for Replit on Task #85:
+Your draft is still using in-memory loops for Fix 3, which fails the "Enterprise Approach" we established. Please update the draft with these three structural changes:
+
+Persistent State Writes: In executeLegBasket, save every successful leg to the database immediately as status: "pending_basket". This gives each leg a permanent ID.
+
+DB-Driven Rollback: If a rollback is needed, update the trade to status: "rolling_back". If it fails, set it to status: "rollback_failed".
+
+The Persistent Rollback Engine: Remove the inline for loop. Instead, create a startPersistentRollback function (similar to startPersistentExit) that survives reboots by reading rollback_failed trades from the DB and retrying them based on the rollback_api_retry_count setting.
+
+Full Recovery: Update Fix 4b to ensure the Boot-up Catcher queries for both close_failed and rollback_failed statuses.

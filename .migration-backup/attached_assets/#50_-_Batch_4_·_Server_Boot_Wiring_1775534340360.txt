@@ -1,0 +1,23 @@
+#50 - Batch 4 · Server Boot Wiring
+
+What & Why
+Registers the Settlement Engine, both WebSocket gateways, and TSL Engine at application startup using the live broker credentials already loaded from the database. Gracefully skips if broker config is not yet configured.
+
+Done looks like
+server/index.ts imports and calls startSettlementEngine(storage), startHsmSocket(...), startHsiSocket(..., storage), startTslEngine(storage, brokerConfig) after the broker config load block
+Boot order: SE first (no deps), then HSM + HSI sockets together, then TSL engine
+Server starts cleanly when broker credentials are missing (console.warn, no crash)
+No changes to any engine or socket file — wiring only in index.ts
+Out of scope
+Any logic changes to engines or sockets
+UI changes
+Tasks
+In server/index.ts, import and call all four services after broker config load. Boot order: startSettlementEngine → startHsmSocket + startHsiSocket (parallel) → startTslEngine. Wrap in null-guard for missing broker config.
+Relevant files
+server/index.ts:230-245
+server/se-kotak-neo-v3.ts
+server/hsm-kotak-neo-v3.ts
+server/hsi-kotak-neo-v3.ts
+server/tsl-kotak-neo-v3.ts
+Dependencies
+Batch 4 · TSL Engine (tsl-kotak-neo-v3.ts)

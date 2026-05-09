@@ -1,0 +1,108 @@
+However, I have forensically reviewed the draft code Replit gave you (Relay server code in droplet+websocket-2.txt), and it contains a fatal flaw that will cause your WebSockets to fail instantly.
+
+🚨 The Fatal Flaw in Replit's Code
+In Replit's draft, inside the server.on('upgrade') block, they connect to Kotak like this:
+
+JavaScript
+const targetWs = new WebSocket(targetUrl, { rejectUnauthorized: false });
+The Problem: Kotak's WebSockets (HSM and HSI) strictly require an Authorization: Bearer <token> and a Sid: <session_id> header to connect. Replit's code completely forgot to extract these headers from the incoming request and pass them to Kotak! Without them, Kotak will immediately reject the connection with a 401 Unauthorized.
+
+📋 The Corrected Relay Code
+Here is the bulletproof, corrected version of the Relay Server code. I have added the logic to capture the Authorization and Sid headers and inject them into the Kotak connection.
+
+Step 1: Put this code on your Bangalore Droplet
+SSH into your droplet, open nano relay.js, clear the old code, and paste this exact block:
+
+JavaScript
+const express = require('express');
+const axios = require('axios');
+const WebSocket = require('ws');
+const http = require('http');
+
+const app = express();
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+const RELAY_SECRET = "mentorsworld_algo_secure_2026";
+const PORT = process.env.PORT || 8080;
+
+// --- 1. REST API PROXY ---
+app.use(async (req, res) => {
+    if (req.headers['x-relay-secret'] !== RELAY_SECRET) {
+        return res.status(403).send("Unauthorized Relay Access");
+    }
+    const targetUrl = req.headers['x-target-url'];
+    if (!targetUrl) return res.status(400).send("Missing target URL");
+    
+    try {
+        const forwardHeaders = { ...req.headers };
+        delete forwardHeaders['host'];
+        delete forwardHeaders['x-relay-secret'];
+        delete forwardHeaders['x-target-url'];
+        
+        const response = await axios({
+            method: req.method, 
+            url: targetUrl,
+            headers: forwardHeaders,
+            data: req.method === 'GET' ? undefined : req.body
+        });
+        res.status(response.status).json(response.data);
+    } catch (error) {
+        if (error.response) res.status(error.response.status).json(error.response.data);
+        else res.status(500).json({ error: error.message });
+    }
+});
+
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ noServer: true });
+
+// --- 2. WEBSOCKET PROXY ---
+server.on('upgrade', (req, socket, head) => {
+    const secret = req.headers['x-relay-secret'];
+    if (secret !== RELAY_SECRET) {
+        socket.write('HTTP/1.1 401 Unauthorized\\r\\n\\r\\n');
+        socket.destroy();
+        return;
+    }
+
+    const targetUrl = req.headers['x-target-url'] || 'wss://hstream.kotaksecurities.com/wstreamer';
+    console.log(`[RELAY] Proxying WS to: ${targetUrl}`);
+
+    // CRITICAL FIX: Extract Kotak Auth Headers
+    const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+    const sidHeader = req.headers['sid'] || req.headers['Sid'];
+
+    const wsOptions = { rejectUnauthorized: false, headers: {} };
+    if (authHeader) wsOptions.headers['Authorization'] = authHeader;
+    if (sidHeader) wsOptions.headers['Sid'] = sidHeader;
+
+    // Connect to Kotak using the captured headers
+    const targetWs = new WebSocket(targetUrl, wsOptions);
+
+    targetWs.on('error', (err) => {
+        console.error(`[RELAY] Target WS Error: ${err.message}`);
+    });
+
+    wss.handleUpgrade(req, socket, head, (clientWs) => {
+        targetWs.on('open', () => {
+            console.log(`[RELAY] Connected to Kotak!`);
+            clientWs.on('message', (data, isBinary) => {
+                if (targetWs.readyState === WebSocket.OPEN) targetWs.send(data, { binary: isBinary });
+            });
+            targetWs.on('message', (data, isBinary) => {
+                if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data, { binary: isBinary });
+            });
+            targetWs.on('close', (code, reason) => clientWs.close(code, reason));
+            clientWs.on('close', (code, reason) => targetWs.close(code, reason));
+        });
+
+        targetWs.on('unexpected-response', (request, response) => {
+            console.error(`[RELAY] Kotak rejected WS upgrade. Status: ${response.statusCode}`);
+            clientWs.close();
+        });
+    });
+});
+
+server.listen(PORT, () => {
+    console.log(`[RELAY] Server listening on port ${PORT}`);
+});

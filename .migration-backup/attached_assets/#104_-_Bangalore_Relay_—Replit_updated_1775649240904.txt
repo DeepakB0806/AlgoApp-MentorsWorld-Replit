@@ -1,0 +1,62 @@
+#104 - Task #104: Bangalore Relay — Route All Kotak API Calls Through Indian Server
+Why
+SEBI's data localisation requirement under the IT Act restricts financial API calls to Indian servers. Replit runs on US-based GCP infrastructure. Even after whitelisting the Replit outbound IP (34.111.179.208) in Kotak's API panel, orders were still rejected ("unauthorized") because Kotak/SEBI blocks non-Indian origin IPs at the regulatory layer — not just the IP whitelist layer.
+
+A Node.js relay is deployed and confirmed running on DigitalOcean Bangalore (168.144.0.191:8080). All Kotak API calls must be routed through this relay so the outbound IP Kotak sees is the Bangalore server's IP (Indian jurisdiction).
+
+Gemini Input — Authenticated
+Rejected from Gemini's proposal (already implemented):
+formatV3Body — EXISTS at lines 303–323 as formatBody("jdata_urlencoded"). Adding a duplicate would create two conflicting body formatters. DO NOT add this.
+Bearer stripping — The DB header templates set Authorization directly from config_field: consumerKey with no "Bearer " prefix. There is nothing to strip.
+Accepted from Gemini's proposal (with corrections):
+executeRelayFetch private method using process.env.RELAY_TARGET_URL and process.env.RELAY_SECRET_KEY — correct approach. Env vars, not hardcoded values.
+Replacing all fetch calls with this.executeRelayFetch — correct scope.
+Throw on missing env vars — hard fail is correct. A misconfigured relay is worse than no relay (silent pass-through would not fix the IP issue).
+Scope
+Single file: server/el-kotak-neo-v3.ts Two env vars to set: RELAY_TARGET_URL, RELAY_SECRET_KEY
+
+Implementation
+Step 1 — Set Environment Variables
+Use the environment secrets tool to set:
+
+RELAY_TARGET_URL = http://168.144.0.191:8080
+RELAY_SECRET_KEY = (the relay secret as provided by the user — ask if not provided)
+Step 2 — Add executeRelayFetch private method to ExecutionLayer
+Add this immediately after the existing formatBody method (after line 323):
+
+private async executeRelayFetch(targetUrl: string, options: RequestInit): Promise<Response> {
+  const RELAY_URL = process.env.RELAY_TARGET_URL;
+  const RELAY_SECRET = process.env.RELAY_SECRET_KEY;
+  if (!RELAY_URL || !RELAY_SECRET) {
+    throw new Error("CRITICAL: RELAY_TARGET_URL or RELAY_SECRET_KEY missing from environment.");
+  }
+  const relayOptions: RequestInit = {
+    ...options,
+    headers: {
+      ...(options.headers as Record<string, string>),
+      "x-target-url": targetUrl,
+      "x-relay-secret": RELAY_SECRET,
+    },
+  };
+  return fetch(RELAY_URL, relayOptions);
+}
+Step 3 — Replace all 5 direct fetch calls
+Line	Method	Change
+346	executeRequest (covers ALL orders)	fetch(url, fetchOptions) → this.executeRelayFetch(url, fetchOptions)
+642	getQuote (single LTP)	fetch(url, { method: "GET", headers }) → this.executeRelayFetch(url, { method: "GET", headers })
+791	getQuotes (bulk quotes)	fetch(url, { method: "GET", headers }) → this.executeRelayFetch(url, { method: "GET", headers })
+820	getScripMasterFilePaths	fetch(url, { method: "GET", headers }) → this.executeRelayFetch(url, { method: "GET", headers })
+843	testConnectivity	fetch(url, { method, headers, body }) → this.executeRelayFetch(url, { method, headers, body })
+No other changes. Do not touch formatBody, buildHeaders, buildHeadersForEndpoint, executeRequest logic, or any other method.
+
+Done Looks Like
+Server starts without throwing on missing env vars (env vars are set)
+getQuote LTP fetch routes through relay — visible in relay server logs
+placeOrder goes through executeRequest → relay — Kotak sees 168.144.0.191 as source
+testConnectivity routes through relay and returns reachable (tests relay → Kotak path)
+No "unauthorized" rejection in next webhook signal
+Security Note
+The relay runs on plain http:// (port 8080). Session tokens travel unencrypted between Replit and the Bangalore relay. This is a known limitation to be addressed after the relay is validated working. The immediate priority is regulatory compliance (Indian server IP). TLS upgrade is a follow-on task.
+
+Relevant Files
+server/el-kotak-neo-v3.ts — lines 303–348, 642, 791, 820, 843

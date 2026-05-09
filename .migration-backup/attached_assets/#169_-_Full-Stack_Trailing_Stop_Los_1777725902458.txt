@@ -1,0 +1,278 @@
+#169 - Full-Stack Trailing Stop Loss (TSL) — Schema + Engine + UI
+What & Why
+The Trailing Stop Loss engine already exists for NRML trades but has critical gaps:
+
+Product type restriction: TSL fields only save for NRML. BO and MIS trades (Bracket Orders) never get TSL data written to the DB.
+Wiring mismatch: The frontend already sends trailingSL config in the payload, but the backend reads from blockConfig.initialSl / blockConfig.trailingStep — not from trailingSL. If a user configures TSL in the "Trailing Stoploss" UI section, the backend silently ignores it.
+UI restriction: The TSL panel is gated behind hasMISLegs — so it only appears when productMode is MIS, despite NRML needing it most.
+Missing schema columns: tsl_type, tsl_lock_profit, tsl_profit_step don't exist in the DB.
+Engine logic gaps: The TSL engine does simple continuous trailing. The new fields require step-based trailing and lock-profit logic.
+TSL Type — exact values (user-specified)
+The Type dropdown has exactly 3 options:
+
+UI Label	DB value	Meaning
+None	"none"	TSL disabled even if switch is on
+% of Capital	"percentage_of_capital"	activateAt and trailingStep are % of entry price × quantity
+Amount	"amount"	activateAt and trailingStep are absolute INR amounts (same as points)
+When tslType = "none": TSL switch appears but no trailing is applied — exit is only on the fixed initialSlPrice. When tslType = "percentage_of_capital": engine converts % values to INR points using entryPrice as base before each SL calculation. When tslType = "amount": values are used directly as price-point distances.
+
+Done looks like
+TSL panel in "Exit & Risk Settings" shows for ALL product types (NRML, BO, MIS) — not just MIS
+TSL panel has 5 fields in a row: Type (None / % of Capital / Amount) | Activate At | Lock Profit At | When Profit Increases By | Increase TSL By
+Type dropdown is the first field, defaulting to "None"
+When Type = None, the 4 numeric fields are disabled/greyed out
+DB has 3 new columns: tsl_type, tsl_lock_profit, tsl_profit_step — migration applied via db:push
+Trade placement (any product type) writes all 7 TSL fields to the DB row when TSL is configured
+TSL engine monitors BO and MIS trades in addition to NRML
+Step-based trailing: SL only moves when profit increases by tslProfitStep, then moves by trailingStep
+Lock profit logic: once profit ≥ tslLockProfit, SL is moved to at least breakeven before step trailing begins
+Out of scope
+Per-leg TSL overrides (TSL is plan-level)
+UI display of live TSL state on the dashboard (Task #138)
+Any changes to locked HSI/HSM blocks
+Key file facts (verified by code analysis)
+Frontend component: client/src/components/trade-planning.tsx (NOT pages/)
+TSL UI state: trailingSL (type TrailingStoplossConfig) at line 75. Already has activateAt, lockProfitAt, whenProfitIncreaseBy, increaseTslBy. Missing: tslType
+TSL UI gate: hasMISLegs at line 97, TSL section conditional at line 720 — must be removed
+Payload (line 240): trailingSL IS already in tradeParams JSON. Payload assembly unchanged.
+Backend reads (te-kotak-neo-v3.ts ~862-863): ctx.blockConfig.initialSl and ctx.blockConfig.trailingStep — does NOT read tradeParams.trailingSL. Critical wiring gap.
+NRML restriction (te-kotak-neo-v3.ts ~875): productType === "NRML" && initialSl !== null — must remove
+Storage method called in 2 places: getOpenNrmlTradesWithTsl → rename to getOpenTradesWithTsl in 4 locations (IStorage interface, DatabaseStorage class, tsl engine, plan-monitor)
+Existing schema columns (confirmed): initialSlPrice, trailingStep, currentSlPrice, highWaterMark — all present. New columns needed: tslType, tslLockProfit, tslProfitStep
+Steps
+Step 1: Schema — add 3 new columns + run migration
+In shared/schema.ts, inside the strategyTrades pgTable definition, add these 3 lines immediately after the existing highWaterMark: real("high_water_mark") column (~line 224):
+
+tslType: text("tsl_type"),                    // "none" | "percentage_of_capital" | "amount"
+tslLockProfit: real("tsl_lock_profit"),        // lock-in SL once profit >= this (in INR)
+tslProfitStep: real("tsl_profit_step"),        // advance SL every time profit increases by this (in INR)
+
+The insertStrategyTradeSchema and StrategyTrade type are auto-derived via createInsertSchema and $inferSelect — no manual type changes needed for them.
+
+After editing shared/schema.ts, run:
+
+npm run db:push
+
+Confirm the 3 new columns appear in the DB before proceeding to any other step.
+
+Step 2: Update TrailingStoplossConfig type
+In shared/schema.ts, update TrailingStoplossConfig (~line 86) to add tslType:
+
+export type TrailingStoplossConfig = {
+  enabled: boolean;
+  tslType?: "none" | "percentage_of_capital" | "amount";  // NEW
+  activateAt: number;
+  lockProfitAt: number;
+  whenProfitIncreaseBy: number;
+  increaseTslBy: number;
+};
+
+Step 3: Storage — rename method and update query
+In server/storage.ts:
+
+IStorage interface (~line 150): rename getOpenNrmlTradesWithTsl(): Promise<StrategyTrade[]> → getOpenTradesWithTsl(): Promise<StrategyTrade[]>
+DatabaseStorage class (~line 963): rename and update the query body:
+async getOpenTradesWithTsl(): Promise<StrategyTrade[]> {
+  return await db.select().from(strategyTrades)
+    .where(and(
+      inArray(strategyTrades.status, ["open", "partially_closed"]),
+      isNotNull(strategyTrades.trailingStep),
+      gt(strategyTrades.trailingStep, 0)
+    ));
+}
+
+Note: inArray for status (supports partially_closed), gated on trailingStep only (not initialSlPrice).
+
+Step 4: Update all callers of the renamed method
+server/tsl-kotak-neo-v3.ts line 128: storage.getOpenNrmlTradesWithTsl() → storage.getOpenTradesWithTsl()
+server/plan-monitor.ts line 155: storage.getOpenNrmlTradesWithTsl() → storage.getOpenTradesWithTsl()
+Step 5: Trade engine — fix wiring gap and remove NRML restriction
+In server/te-kotak-neo-v3.ts, inside executeLegBasket (~lines 862-880):
+
+Replace the 2 existing TSL extraction lines with a 3-tier fallback:
+
+const trailingSLCfg = (tradeParams as any)?.trailingSL;
+const tslEnabled = trailingSLCfg?.enabled === true && trailingSLCfg?.tslType !== "none";
+const initialSl: number | null =
+  (leg as any).initialSl
+  ?? (ctx.blockConfig as any)?.initialSl
+  ?? (tslEnabled ? (Number(trailingSLCfg.activateAt) || null) : null);
+const trailingStepVal: number | null =
+  (leg as any).trailingStep
+  ?? (ctx.blockConfig as any)?.trailingStep
+  ?? (tslEnabled ? (Number(trailingSLCfg.increaseTslBy) || null) : null);
+const tslType: string = trailingSLCfg?.tslType ?? "none";
+const tslLockProfitVal: number | null = tslEnabled ? (Number(trailingSLCfg.lockProfitAt) || null) : null;
+const tslProfitStepVal: number | null = tslEnabled ? (Number(trailingSLCfg.whenProfitIncreaseBy) || null) : null;
+
+Replace the stagedTrade TSL conditional spread (remove NRML restriction, add new fields):
+
+// Was: ...(productType === "NRML" && initialSl !== null ? { initialSlPrice, trailingStep, currentSlPrice, highWaterMark } : {})
+// Now: all product types, all 7 TSL fields:
+...(initialSl !== null || trailingStepVal !== null ? {
+  initialSlPrice: initialSl !== null ? Number(initialSl) : null,
+  trailingStep: trailingStepVal !== null ? Number(trailingStepVal) : null,
+  currentSlPrice: initialSl !== null ? Number(initialSl) : null,
+  highWaterMark: fillPrice,
+  tslType: tslType || "none",
+  tslLockProfit: tslLockProfitVal,
+  tslProfitStep: tslProfitStepVal,
+} : {}),
+
+Step 6: TSL engine — update TslState and logic
+In server/tsl-kotak-neo-v3.ts:
+
+A. Update TslState interface:
+
+interface TslState {
+  tradeId: string; symbol: string; action: string; planId: string | null;
+  trailingStep: number; currentSlPrice: number; highWaterMark: number; dirty: boolean; // existing
+  tslType: string;              // NEW: "none" | "percentage_of_capital" | "amount"
+  tslLockProfit: number | null; // NEW
+  tslProfitStep: number | null; // NEW
+  entryPrice: number;           // NEW: initial fill price for % calculations
+  lockAchieved: boolean;        // NEW: set true once lock-profit threshold crossed
+}
+
+B. Update registerNewTrail to populate new fields from trade row:
+
+tslType: trade.tslType ?? "none",
+tslLockProfit: trade.tslLockProfit ?? null,
+tslProfitStep: trade.tslProfitStep ?? null,
+entryPrice: trade.highWaterMark ?? trade.ltp ?? trade.price ?? 0,
+lockAchieved: false,
+
+C. Update processTick — for each matching trail state:
+
+Resolve effectiveStep (convert % of capital to INR points):
+
+if tslType === "percentage_of_capital":
+  effectiveStep = state.entryPrice * (state.trailingStep / 100)
+else: (amount or none)
+  effectiveStep = state.trailingStep
+
+Lock-profit check (run once, before trailing):
+
+if !state.lockAchieved && state.tslLockProfit !== null && state.tslLockProfit > 0:
+  currentProfit = (BUY ? ltp - entryPrice : entryPrice - ltp)
+  if currentProfit >= state.tslLockProfit:
+    state.currentSlPrice = MAX(state.currentSlPrice, state.entryPrice)  // at least breakeven
+    state.lockAchieved = true
+    state.dirty = true
+
+Step-based trailing (replace the current continuous update):
+
+if state.tslProfitStep !== null && state.tslProfitStep > 0:
+  // Only advance HWM when price moved by tslProfitStep from current HWM
+  BUY: if ltp >= state.highWaterMark + state.tslProfitStep:
+    state.highWaterMark = ltp
+    state.currentSlPrice = ltp - effectiveStep
+    state.dirty = true
+  SELL: if ltp <= state.highWaterMark - state.tslProfitStep:
+    state.highWaterMark = ltp
+    state.currentSlPrice = ltp + effectiveStep
+    state.dirty = true
+else:
+  // Continuous trailing (existing behaviour — no tslProfitStep set)
+  BUY: if ltp > highWaterMark: update HWM and SL as before
+  SELL: if ltp < highWaterMark: update HWM and SL as before
+
+Exit trigger: unchanged — ltp <= currentSlPrice (BUY) or ltp >= currentSlPrice (SELL)
+
+Guard for tslType="none": if state.tslType === "none", skip all trailing logic — only monitor for exit at the fixed initialSlPrice.
+
+Step 7: Frontend — split "Exit & Risk Settings" into two sections + add TSL Type
+Context — current structure (line 640–782 in trade-planning.tsx)
+The existing {configId && (...)} block has one section labelled "Exit & Risk Settings" containing four cards in order:
+
+Stoploss MTM (switch + amount/percentage)
+Profit MTM Target (switch + amount/percentage)
+Trailing Stoploss (switch + 4 inputs) — currently gated by hasMISLegs
+Time Logic & Expiry (expiry type, entry/exit times)
+New structure — two separate section labels
+Replace the single <Label>Exit & Risk Settings</Label> heading with two distinct labelled groups, restructuring the four cards into:
+
+Risk Settings (Shield icon — red tint):
+
+Stoploss MTM (unchanged)
+Trailing Stoploss (TSL) — moved here, gate removed, Type dropdown added
+Profit MTM Target (unchanged) — a risk boundary, not just an exit trigger
+Exit Settings (LogOut icon or DoorOpen icon — emerald tint):
+
+Time Logic & Expiry (unchanged) — pure time-based exit mechanic, not risk-driven
+The two group labels should match the visual style of the existing <Label className="flex items-center gap-2"> pattern already used in the file. No new component files — all changes stay inside trade-planning.tsx.
+
+Sub-steps
+A. Initial state (line 75) — add tslType:
+
+const [trailingSL, setTrailingSL] = useState<TrailingStoplossConfig>({
+  enabled: false, tslType: "none", activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0,
+});
+
+B. Plan-load restore (line 221):
+
+setTrailingSL(tp.trailingSL || { enabled: false, tslType: "none", activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 });
+
+C. Replace the single section label at line 642:
+
+// Remove:
+<Label className="flex items-center gap-2"><Shield className="w-4 h-4" /> Exit & Risk Settings</Label>
+// Replace with two labelled groups wrapping the relevant cards:
+// --- Group 1 ---
+<Label className="flex items-center gap-2"><Shield className="w-4 h-4 text-red-400" /> Risk Settings</Label>
+  {/* Stoploss MTM card — unchanged */}
+  {/* Trailing Stoploss card — updated (see D below) */}
+  {/* Profit MTM Target card — unchanged, moved here from old group */}
+// --- Group 2 ---
+<Label className="flex items-center gap-2"><LogOut className="w-4 h-4 text-emerald-400" /> Exit Settings</Label>
+  {/* Time Logic & Expiry card — unchanged, sole card in this group */}
+
+Import LogOut from lucide-react if not already imported.
+
+D. Trailing Stoploss card — remove hasMISLegs gate, update title, add Type dropdown:
+
+Remove {hasMISLegs && (...)} wrapper — TSL card always renders inside Risk Settings
+Change title from "Trailing Stoploss (MIS Only)" → "Trailing Stoploss"
+Add Type Select as the FIRST field in the grid (before activateAt):
+<div className="col-span-2">
+  <Label className="text-xs text-muted-foreground">Type</Label>
+  <Select
+    value={trailingSL.tslType ?? "none"}
+    onValueChange={(val) => setTrailingSL(s => ({ ...s, tslType: val as TrailingStoplossConfig["tslType"] }))}
+  >
+    <SelectTrigger data-testid="select-tsl-type"><SelectValue placeholder="Select type" /></SelectTrigger>
+    <SelectContent>
+      <SelectItem value="none">None</SelectItem>
+      <SelectItem value="percentage_of_capital">% of Capital</SelectItem>
+      <SelectItem value="amount">Amount</SelectItem>
+    </SelectContent>
+  </Select>
+</div>
+
+Add disabled={trailingSL.tslType === "none" || !trailingSL.tslType} to all 4 numeric inputs (activateAt, lockProfitAt, whenProfitIncreaseBy, increaseTslBy)
+Grid layout: Type is col-span-2 on the first row; the 4 numeric fields follow in 2-column pairs
+E. Final label set inside TSL grid:
+
+"Type" (Select: None / % of Capital / Amount) — full width row
+"Activate At" | "Lock Profit At"
+"When Profit Increase By" | "Increase TSL By"
+F. Verify no regressions:
+
+hasMISLegs variable stays defined — it is still used for the Bracket Order fields higher up in the card. Only the TSL gate is removed.
+Run a search for all other hasMISLegs usages and confirm none depend on the TSL section.
+Step 8: End-to-end verification trace
+After all changes, manually verify the data flow:
+
+User sets Type = "% of Capital", Activate At = 2, Lock Profit At = 5000, When Profit Increases By = 1000, Increase TSL By = 0.5
+Saved plan: trailingSL = {enabled:true, tslType:"percentage_of_capital", activateAt:2, lockProfitAt:5000, whenProfitIncreaseBy:1000, increaseTslBy:0.5}
+Webhook fires, executeLegBasket reads trailingSLCfg, tslEnabled=true, initialSl=2, trailingStepVal=0.5, tslType="percentage_of_capital", tslLockProfitVal=5000, tslProfitStepVal=1000
+DB row: initialSlPrice=2, trailingStep=0.5, currentSlPrice=2, highWaterMark=fillPrice, tslType="percentage_of_capital", tslLockProfit=5000, tslProfitStep=1000
+TSL engine rehydrates: entryPrice=fillPrice, effectiveStep = entryPrice × 0.5% per tick
+On each tick: lock check → step check → exit check
+Relevant files
+shared/schema.ts:86-92 — TrailingStoplossConfig type; strategyTrades pgTable ~line 224 (add 3 columns)
+server/storage.ts:150 — IStorage interface; server/storage.ts:963-970 — implementation
+server/te-kotak-neo-v3.ts:862-880 — TSL extraction + stagedTrade construction
+server/tsl-kotak-neo-v3.ts — full file (TslState, registerNewTrail, processTick, startTslEngine)
+server/plan-monitor.ts:155 — rename only
+client/src/components/trade-planning.tsx:75,97,221,720-780 — state, gate, loader, UI

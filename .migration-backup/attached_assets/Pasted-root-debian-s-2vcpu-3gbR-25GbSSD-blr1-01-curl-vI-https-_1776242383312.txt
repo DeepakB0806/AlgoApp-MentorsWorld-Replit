@@ -1,0 +1,150 @@
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# curl -vI https://mlhsm.kotaksecurities.com
+*   Trying 137.174.202.16:443...
+* Connected to mlhsm.kotaksecurities.com (137.174.202.16) port 443 (#0)
+* ALPN: offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+*  CAfile: /etc/ssl/certs/ca-certificates.crt
+*  CApath: /etc/ssl/certs
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted http/1.1
+* Server certificate:
+*  subject: C=IN; ST=Mah\U0101r\U0101shtra; O=Kotak Securities Ltd.; CN=*.kotaksecurities.com
+*  start date: Jan 23 00:00:00 2026 GMT
+*  expire date: Feb 10 23:59:59 2027 GMT
+*  subjectAltName: host "mlhsm.kotaksecurities.com" matched cert's "*.kotaksecurities.com"
+*  issuer: C=GB; O=Sectigo Limited; CN=Sectigo Public Server Authentication CA OV R36
+*  SSL certificate verify ok.
+* using HTTP/1.1
+> HEAD / HTTP/1.1
+> Host: mlhsm.kotaksecurities.com
+> User-Agent: curl/7.88.1
+> Accept: */*
+> 
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* old SSL session ID is stale, removing
+< HTTP/1.1 404 WebSocket Upgrade Failure
+HTTP/1.1 404 WebSocket Upgrade Failure
+< Strict-Transport-Security: max-age=15768000; includeSubDomains
+Strict-Transport-Security: max-age=15768000; includeSubDomains
+< Content-Type: text/html
+Content-Type: text/html
+< Server: TooTallNate Java-WebSocket
+Server: TooTallNate Java-WebSocket
+< Content-Length: 77
+Content-Length: 77
+
+< 
+* Connection #0 to host mlhsm.kotaksecurities.com left intact
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# curl -vI https://e41.kotaksecurities.com
+*   Trying 176.100.162.191:443...
+* Connected to e41.kotaksecurities.com (176.100.162.191) port 443 (#0)
+* ALPN: offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+*  CAfile: /etc/ssl/certs/ca-certificates.crt
+*  CApath: /etc/ssl/certs
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: C=IN; ST=Mah\U0101r\U0101shtra; O=Kotak Securities Ltd.; CN=*.kotaksecurities.com
+*  start date: Jan 23 00:00:00 2026 GMT
+*  expire date: Feb 10 23:59:59 2027 GMT
+*  subjectAltName: host "e41.kotaksecurities.com" matched cert's "*.kotaksecurities.com"
+*  issuer: C=GB; O=Sectigo Limited; CN=Sectigo Public Server Authentication CA OV R36
+*  SSL certificate verify ok.
+* using HTTP/2
+* h2h3 [:method: HEAD]
+* h2h3 [:path: /]
+* h2h3 [:scheme: https]
+* h2h3 [:authority: e41.kotaksecurities.com]
+* h2h3 [user-agent: curl/7.88.1]
+* h2h3 [accept: */*]
+* Using Stream ID: 1 (easy handle 0x5633c96022b0)
+> HEAD / HTTP/2
+> Host: e41.kotaksecurities.com
+> user-agent: curl/7.88.1
+> accept: */*
+> 
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* old SSL session ID is stale, removing
+< HTTP/2 503 
+HTTP/2 503 
+< content-type: text/html
+content-type: text/html
+< content-length: 0
+content-length: 0
+< rdwr_response: allowed
+rdwr_response: allowed
+< strict-transport-security: max-age=31536000
+strict-transport-security: max-age=31536000
+
+< 
+* Connection #0 to host e41.kotaksecurities.com left intact
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# pm2 log
+[TAILING] Tailing last 15 lines for [all] processes (change the value with --lines option)
+/root/.pm2/pm2.log last 15 lines:
+PM2        | 2026-04-15T07:05:54: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T07:05:54: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T07:05:54: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T08:20:38: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T08:20:38: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T08:20:38: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T09:02:14: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T09:02:14: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T09:02:14: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T10:52:02: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T10:52:02: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T10:52:02: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T12:40:32: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T12:40:32: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T12:40:32: PM2 log: App [kotak-relay:0] online
+
+/root/.pm2/logs/kotak-relay-error.log last 15 lines:
+0|kotak-re |   code: 'ECONNRESET',
+0|kotak-re |   syscall: 'read'
+0|kotak-re | }
+0|kotak-re | Error: read ECONNRESET
+0|kotak-re |     at TCP.onStreamRead (node:internal/stream_base_commons:218:20) {
+0|kotak-re |   errno: -104,
+0|kotak-re |   code: 'ECONNRESET',
+0|kotak-re |   syscall: 'read'
+0|kotak-re | }
+0|kotak-re | Error: read ECONNRESET
+0|kotak-re |     at TCP.onStreamRead (node:internal/stream_base_commons:218:20) {
+0|kotak-re |   errno: -104,
+0|kotak-re |   code: 'ECONNRESET',
+0|kotak-re |   syscall: 'read'
+0|kotak-re | }
+
+/root/.pm2/logs/kotak-relay-out.log last 15 lines:
+0|kotak-re | [RELAY] Proxying WS to: wss://e41.kotaksecurities.com/realtime
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://e41.kotaksecurities.com/realtime
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+

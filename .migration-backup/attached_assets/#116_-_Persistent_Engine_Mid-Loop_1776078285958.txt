@@ -1,0 +1,98 @@
+#116 - Persistent Engine Mid-Loop Concurrency Guard (V2)
+What & Why
+A race condition exists between startPersistentEntry and startPersistentSquareOff. When Square Off closes an open leg, it briefly frees Kotak margin. Background retry loops (Entry, Exit, Rollback) that are sleeping in their setTimeout cycles wake up, see the freed margin, and blindly execute their next leg — creating ghost trades.
+
+Three independent loops are vulnerable:
+
+startPersistentEntry — retries failed entry legs
+startPersistentExit — retries failed exit legs per blockType
+startPersistentRollback — reverses margin-shortfall legs
+All three must be killed the instant startPersistentSquareOff is triggered, and all three attempt() functions must verify their active status immediately upon waking up — before any DB call.
+
+Done looks like
+Square Off kills Entry, Exit, and Rollback loops on its first tick
+Each loop's attempt() returns immediately on wake-up if its flag was cleared
+Zero ghost legs placed after any manual Square Off
+Only server/te-kotak-neo-v3.ts is touched — no EL, UI, DB schema, or storage.ts changes
+Tasks
+Task 1 — Kill all conflicting loops from startPersistentSquareOff
+File: server/te-kotak-neo-v3.ts Location: startPersistentSquareOff → attempt(), at the very top before any other statement (~line 1432)
+
+Add:
+
+// --- TASK #116: KILL ALL CONFLICTING LOOPS ON SQUARE-OFF ---
+persistentEntryActive.delete(planId);
+persistentRollbackActive.delete(planId);
+for (const k of persistentExitActive.keys()) {
+  if (k.startsWith(`${planId}:`)) persistentExitActive.delete(k);
+}
+// -----------------------------------------------------------
+
+Why:
+
+persistentEntryActive uses plain planId as key — direct delete is correct.
+persistentRollbackActive uses plain planId — direct delete is correct.
+persistentExitActive uses composite keys ${planId}:${blockType} (confirmed at line 1476). delete(planId) would silently miss every key. The startsWith loop is required.
+Task 2 — Wake-up guard at top of startPersistentEntry.attempt()
+File: server/te-kotak-neo-v3.ts Location: startPersistentEntry → attempt() function, absolute first line (~line 1670, before the getStrategyTradesByPlan call)
+
+Add:
+
+// --- TASK #116: WAKE-UP GUARD ---
+if (!persistentEntryActive.has(planId)) return;
+// ---------------------------------
+
+Why: setTimeout(attempt, intervalMs) at line 1688 schedules the next wake-up. If Task 1 deletes planId during the sleep, the next attempt() will execute without this guard — proceeding through two DB reads before reaching any check. The guard must fire before any work is done.
+
+Task 3 — Wake-up guard at top of startPersistentExit.attempt()
+File: server/te-kotak-neo-v3.ts Location: startPersistentExit → attempt() function, absolute first line (~line 1483, before the getUnclosedTradesByPlan call)
+
+The composite key key is already in scope (captured from the outer function at line 1476).
+
+Add:
+
+// --- TASK #116: WAKE-UP GUARD ---
+if (!persistentExitActive.has(key)) return;
+// ---------------------------------
+
+Why: setTimeout(attempt, intervalMs) at line 1506. If Task 1 deletes the composite key ${planId}:${blockType} during the sleep, the next attempt() must self-terminate before doing any work.
+
+Task 4 — Wake-up guard at top of startPersistentRollback.attempt()
+File: server/te-kotak-neo-v3.ts Location: startPersistentRollback → attempt() function, absolute first line of the try block (~line 1532, before the getStrategyTradesByPlan call)
+
+Add:
+
+// --- TASK #116: WAKE-UP GUARD ---
+if (!persistentRollbackActive.has(planId)) return;
+// ---------------------------------
+
+Why: setTimeout(attempt, intervalMs) at line 1642. startPersistentRollback had no protection whatsoever in the original task. Task 1 now deletes persistentRollbackActive at Square Off; this guard makes the sleeping rollback loop honour that deletion on wake-up.
+
+Task 5 — Mid-loop abort guard inside executeLegBasket for-loop
+File: server/te-kotak-neo-v3.ts Location: executeLegBasket → inner for (const { leg, blockType, legIndex } of items) loop body, very first line (~line 599)
+
+Add:
+
+// --- TASK #116: MID-LOOP ABORT GUARD ---
+if (persistentSquareOffActive.has(plan.id)) {
+  console.log(`[TE] executeLegBasket aborted mid-loop for plan ${plan.id} (Square Off detected)`);
+  return { trades: [], orderIds: [], error: "Aborted due to manual square-off" };
+}
+// ----------------------------------------
+
+Why: executeLegBasket places legs one at a time with an order_execution_delay_ms pause between each (line 687: await new Promise(r => setTimeout(r, delayMs))). If Square Off fires during that inter-leg delay, the remaining legs in the basket will still execute without this guard. The check is read-only against persistentSquareOffActive — it does not alter retry logic, delay handling, or rollback transitions.
+
+Locked block status: executeLegBasket is inside 🔒 Invariant [5] (lines 571–846). User has granted explicit permission to open this block for this single additive guard only. No other lines within Invariant [5] are to be modified.
+
+Critical constraints
+Only server/te-kotak-neo-v3.ts is touched
+All five tasks are additive only — no existing lines removed or restructured
+Task 5 opens 🔒 Invariant [5] under explicit user authorisation (granted). The change is a single read-only guard check; nothing else inside the locked block is touched
+persistentSquareOffActive is NOT checked inside startPersistentSquareOff.attempt() itself — it is always true while that function is running; no self-guard needed
+Relevant file
+server/te-kotak-neo-v3.ts
+startPersistentSquareOff.attempt(): line ~1431
+startPersistentEntry.attempt(): line ~1670
+startPersistentExit.attempt(): line ~1483
+startPersistentRollback.attempt(): line ~1531
+executeLegBasket for-loop: line ~598 (inside 🔒 Invariant [5])

@@ -1,0 +1,44 @@
+Task #94: STRICT FIX - The Explicit Config Mandate (No Seeds, Strict Aborts)
+
+What & Why
+In algorithmic trading, silent fallbacks and default database seeds are dangerous. A system should never "guess" execution parameters like buffer points or retry delays. All execution fields must be explicitly configured by the user via the UI. If a critical execution parameter is missing from the database, the Trade Engine must Hard ABORT rather than falling back to a hardcoded default (e.g., silently defaulting to 200ms or 2000ms).
+
+Done looks like
+
+No New Seeds: The startup process in server/index.ts does not seed limit_order_buffer_points, squareoff_retry_interval_ms, margin_shortfall_retry_count, or order_execution_delay_ms.
+
+UI Completeness: A new UI field for order_execution_delay_ms is added to the "Trading Execution" section in General Settings so the user can control it.
+
+Strict Aborts in TE: The Trade Engine no longer uses silent fallbacks (like || 200 or || 2000). If any of the 4 critical execution variables are missing from the database, the engine throws a clear [ABORT] error, preventing the trade.
+
+Tasks
+
+1. Add missing UI field for order_execution_delay_ms
+File: client/src/pages/settings.tsx
+Add a new input field in the "Trading Execution" card for order_execution_delay_ms.
+
+Label: "Inter-Leg Execution Delay (ms)"
+
+Type: Number
+
+Description text: "Delay between sequenced leg executions. Required. No default."
+Ensure it reads from and writes to the DB exactly like the other dynamic fields.
+
+2. Enforce Hard Aborts in the Trade Engine
+File: server/te-kotak-neo-v3.ts (and any other file reading these DB settings)
+Locate where the engine reads squareoff_retry_interval_ms, margin_shortfall_retry_count, and order_execution_delay_ms.
+
+Remove the hardcoded fallbacks (e.g., removing ?? 2000 or || 200).
+
+Add explicit abort guards identical to the one currently used for the buffer points.
+
+Example format:
+
+TypeScript
+if (delaySetting === undefined || delaySetting === null) {
+  logPFL(plan.id, leg.id, "ABORT", "ABORT: order_execution_delay_ms is missing from settings");
+  return; // Or throw error, depending on the exact function scope
+}
+3. Ensure NO Startup Seeds for Execution Variables
+File: server/index.ts
+Review the startup seeding block. Ensure that limit_order_buffer_points, squareoff_retry_interval_ms, margin_shortfall_retry_count, and order_execution_delay_ms are completely omitted from the automatic database seeding process.

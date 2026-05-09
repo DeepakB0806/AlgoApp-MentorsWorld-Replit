@@ -1,0 +1,95 @@
+// ── Step 3: Fetch all available scrip master file paths (WITH TIMEOUT) ─────
+    console.log(`${LOG_PREFIX} Requesting file paths from broker...`);
+    
+    // Task 2: Add timeout to getScripMasterFilePaths
+    const filePathsPromise = EL.getScripMasterFilePaths(brokerConfig);
+    const timeoutPromise = new Promise<{success: boolean, error: string}>((resolve) => {
+      setTimeout(() => resolve({ success: false, error: "Timed out waiting for Kotak scrip master file paths (30s)" }), 30000);
+    });
+    
+    const filePathsResult = await Promise.race([filePathsPromise, timeoutPromise]) as any;
+    
+    if (!filePathsResult.success) {
+      return { success: false, synced: 0, error: filePathsResult.error };
+    }
+
+    const data: any = filePathsResult.data;
+    
+    // Task 1: Log raw Kotak response (truncated)
+    const rawResponseStr = JSON.stringify(data || {});
+    console.log(`${LOG_PREFIX} Raw broker response: ${rawResponseStr.slice(0, 1000)}${rawResponseStr.length > 1000 ? "..." : ""}`);
+
+    const flatItems: any[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.filesPaths) ? data.filesPaths
+      : Array.isArray(data?.data?.filesPaths) ? data.data.filesPaths
+      : [];
+
+    const findUrl = (keywords: string[], isNFO: boolean = false): string | null => {
+      let firstAvailablePath: string | null = null;
+      
+      for (const item of flatItems) {
+        const path = typeof item === 'string' ? item : (item?.filePath || item?.path || item?.url || item?.fileUrl || "");
+        if (path) {
+          if (!firstAvailablePath) firstAvailablePath = path; // Save the first one we see
+          if (keywords.some(kw => path.toLowerCase().includes(kw))) {
+             return path; // Exact match found
+          }
+        }
+      }
+      
+      // Task 4: Add fallback in findUrl
+      console.warn(`${LOG_PREFIX} No exact keyword match found for keywords: [${keywords.join(", ")}]. Available paths: ${JSON.stringify(flatItems).slice(0, 300)}`);
+      
+      if (isNFO && firstAvailablePath) {
+        console.warn(`${LOG_PREFIX} [WARN] Using first available path as last resort for NFO: ${firstAvailablePath}`);
+        return firstAvailablePath;
+      }
+      
+      return null;
+    };
+
+    // ── Step 4: For each configured exchange, download & parse its CSV ─────────
+    const allRawContracts: RawContract[] = [];
+    const allInstruments: ParsedInstrument[] = [];
+    let atLeastOneRequired = false;
+
+    for (const [exchange, tickers] of tickersByExchange.entries()) {
+      const brokerCode = brokerCodeByExchange.get(exchange);
+      const keywords = brokerCode ? [brokerCode, exchange.toLowerCase()] : [exchange.toLowerCase()];
+      const csvUrl = findUrl(keywords, exchange === "NFO");
+
+      if (!csvUrl) {
+        if (exchange === "NFO") {
+          return { success: false, synced: 0, error: `Could not find scrip master CSV for ${exchange} — required for configured strategies` };
+        }
+        console.warn(`${LOG_PREFIX} No scrip master CSV found for ${exchange} (tickers: ${tickers.join(",")}) — skipping`);
+        continue;
+      }
+
+      try {
+        console.log(`${LOG_PREFIX} Downloading CSV for ${exchange} from ${csvUrl}...`);
+        
+        // Task 3: Add AbortSignal timeout to CSV fetch
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
+        
+        const response = await fetch(csvUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+           throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        }
+        
+        const csvText = await response.text();
+        const parsed = parseScripMasterCSV(csvText, exchange, tickers);
+        console.log(`${LOG_PREFIX} ${exchange}: ${parsed.instruments.length} tickers, ${parsed.rawContracts.length} contracts`);
+        allRawContracts.push(...parsed.rawContracts);
+        allInstruments.push(...parsed.instruments);
+        atLeastOneRequired = true;
+      } catch (fetchErr: any) {
+        const errMsg = fetchErr.name === 'AbortError' ? 'Download timed out after 120s' : fetchErr.message;
+        if (exchange === "NFO") return { success: false, synced: 0, error: `Failed to download ${exchange} CSV: ${errMsg}` };
+        console.warn(`${LOG_PREFIX} ${exchange} CSV download failed (non-fatal): ${errMsg}`);
+      }
+    }

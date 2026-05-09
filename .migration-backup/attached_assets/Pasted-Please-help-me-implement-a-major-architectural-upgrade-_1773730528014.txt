@@ -1,0 +1,32 @@
+Please help me implement a major architectural upgrade to decouple our Trade Engine from post-trade accounting, and implement an Event-Driven Trailing Stop Loss (TSL) Engine for NRML orders. We are doing this to prepare for a multi-tenant WebSocket architecture.
+
+Create a step-by-step plan with the following tasks. Do not write the code yet, just confirm the plan and tasks first.
+
+**Task 1: Database Schema Updates (shared/schema.ts)**
+* Update the `strategyTrades` table definition.
+* Add one boolean field for the Settlement Engine: `pnlCalculated: boolean("pnl_calculated").default(false)`
+* Add four numeric fields for the TSL Engine: `initialSlPrice`, `trailingStep`, `currentSlPrice`, and `highWaterMark`.
+
+**Task 2: Create the Settlement Engine (server/se-kotak.ts)**
+* Create a new file: `server/se-kotak.ts`.
+* It needs a `startSettlementEngine()` function running a `setInterval` every 10 seconds.
+* It should sweep `strategyTrades` for `status === "closed"` AND `pnlCalculated === false`.
+* It calculates the total P&L for those trades, updates the `strategyDailyPnl` table, and marks the trades as `pnlCalculated = true`.
+
+**Task 3: Clean up the Trade Engine (server/te-kotak-neo-v3.ts)**
+* Remove the `deferDailyPnlUpdate` function completely from `te-kotak-neo-v3.ts`.
+* Remove all calls to `deferDailyPnlUpdate` inside `executeSellSignal` and `squareOffPlan`.
+* When an NRML entry order is placed (inside the Buy/Sell execution loops), map the `initialSl` and `trailingStep` from the `tradeParams` into the `createStrategyTrade` database call to seed the TSL state.
+
+**Task 4: Create the Event-Driven TSL Engine (server/tsl-engine.ts)**
+* Create a new file: `server/tsl-engine.ts`.
+* It must NOT use `setInterval` for price polling. It should hold active TSL states in a Node.js `Map` (RAM).
+* Create an exported function `processTick(tradingSymbol: string, liveLTP: number)` that calculates if a trail moves up/down or breaches the `currentSl`.
+* If breached, it calls `closeTrade` from the Trade Engine.
+* Include a `setInterval` (e.g., 15 seconds) strictly to lazily flush dirty RAM states (`currentSlPrice`, `highWaterMark`) to the database to minimize I/O.
+* Create a `registerNewTrail(trade)` helper so the Trade Engine can push new entries directly into the RAM cache.
+
+**Task 5: Server Initialization (server/routes.ts or similar)**
+* Import and call `startSettlementEngine()` and `startTslEngine()` during server boot so the background processes run.
+
+Please review these requirements and generate the task list. Once confirmed, I will provide the exact code blocks for `se-kotak.ts` and `tsl-engine.ts` to implement.

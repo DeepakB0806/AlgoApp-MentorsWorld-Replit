@@ -1,0 +1,48 @@
+# Task #83: Schema & UI Foundation (Enterprise Rollback State Machine)
+
+What & Why:
+We are upgrading the Trade Engine to handle Kotak API crashes during margin rollbacks. To do this safely, the database must act as a State Machine. This task prepares the database schema and the UI dashboard to support these new persistence features before we wire the actual trading engine.
+
+Step-by-Step Instructions for the Agent:
+
+1. Update Database Schema (shared/schema.ts)
+
+Locate the strategy_trades table definition.
+
+Find the status column.
+
+If it uses a strict Zod enum, add the following new valid states: "pending_basket", "rolling_back", "rolled_back", and "rollback_failed".
+
+If it is just a string type, add a clear comment above the column documenting all valid states, ensuring the new ones are listed so future AI agents know what is permitted.
+
+2. Add the Setting to the Database Defaults (server/storage.ts or similar)
+
+Locate where default system settings are defined or seeded (where margin_shortfall_retry_count is set).
+
+Add a new setting to the system:
+
+Key: rollback_api_retry_count
+
+Default Value: "5"
+
+Description: "Number of times to persistently retry market-selling a ghost leg if the broker API crashes during an Atomic Margin Rollback."
+
+3. Add the UI Control (Frontend Dashboard/Settings)
+
+Locate the React component responsible for rendering the Trading Engine settings (the same file that renders the UI for margin_shortfall_retry_count).
+
+Add a new Number Input field directly below the "Retry in case Margin Shortfall" setting.
+
+Label: Retry API Crashes During ATOMIC ROLLBACK
+
+Description/Subtext: Number of times to persistently retry market-selling a ghost leg if the broker API crashes during an Atomic Margin Rollback. Set to 0 to disable automatic retry.
+
+Binding: Ensure this input reads from and saves to the rollback_api_retry_count key in the settings database, mirroring how the margin shortfall setting works.
+
+Done Looks Like:
+
+The database schema officially supports the new transaction states.
+
+The backend correctly initializes the new setting to "5".
+
+The user can see and modify the Retry API Crashes During ATOMIC ROLLBACK setting from the UI dashboard.

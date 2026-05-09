@@ -1,0 +1,41 @@
+// ═══════════════════════════════════════════════════════════════════════════
+  // POST-EOD ENTRY GATE
+  // Blocks new ENTRY signals after the plan's configured exitTime.
+  // MIS: Blocked every day after exitTime.
+  // NRML: Blocked ONLY on the target expiry day after exitTime.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const resolvedAction2 = signalContext?.resolvedAction || (signalType === "buy" ? "ENTRY" : signalType === "sell" ? "EXIT" : "HOLD");
+  
+  if (resolvedAction2 === "ENTRY") {
+    const timeLogic = tradeParams?.timeLogic as { exitTime?: string } | undefined;
+    const exitTimeStr = timeLogic?.exitTime;
+    
+    if (exitTimeStr) {
+      const [exitHour, exitMinute] = exitTimeStr.split(":").map(Number);
+      
+      // Enforce IST Timezone math
+      const istDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const currentHour = istDate.getHours();
+      const currentMinute = istDate.getMinutes();
+      
+      const isPastExitTime = (currentHour > exitHour) || (currentHour === exitHour && currentMinute >= exitMinute);
+      
+      const productMode = ctx.blockConfig.productMode || "MIS";
+      let shouldBlock = false;
+
+      // MIS blocks every day after the exit time
+      if (productMode === "MIS" && isPastExitTime) {
+        shouldBlock = true;
+      // NRML only blocks on the actual expiry day after the exit time
+      } else if (productMode === "NRML" && isPastExitTime && ctx.targetExpiryDate === ctx.today) {
+        shouldBlock = true;
+      }
+
+      if (shouldBlock) {
+        const msg = `Signal held — entry blocked after EOD (exitTime ${exitTimeStr} IST, current ${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')} IST)`;
+        console.log(`[TE] ${msg}`);
+        logPFL(plan, broker, data, "held", msg, { resolvedAction: "ENTRY", ticker, exchange, price, executionTimeMs: Date.now() - startTime });
+        return { success: true, action: "hold", broker, planId: plan.id, message: msg, executionTimeMs: Date.now() - startTime };
+      }
+    }
+  }

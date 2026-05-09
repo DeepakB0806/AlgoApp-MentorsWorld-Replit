@@ -1,0 +1,68 @@
+#116 - Persistent Engine Mid-Loop Concurrency Guard
+What & Why
+A critical race condition exists between the Trade Engine's asynchronous background retry loops (startPersistentEntry, startPersistentSquareOff, startPersistentExit) and manual user interventions (like clicking "Square Off").
+
+Currently, the persistent engines only check if they should stop at the beginning of a retry attempt. If an engine is iterating through a multi-leg basket and is paused during its mandatory Kotak margin-delay (the "breathing room"), a user clicking "Square Off" will free up account margin. When the background loop wakes up milliseconds later, it blindly executes the next pending leg using the newly freed margin, resulting in "Ghost Trades" that appear after a manual square-off.
+
+We must introduce a "Mid-Loop Abort Guard" to ensure the engines check their active status immediately before executing every single leg, safely self-destructing if the user has cancelled the operation mid-flight.
+
+Done looks like
+
+When a user clicks "Square Off" or the system triggers an emergency halt, all persistent background loops die instantly, even if they are in the middle of iterating through a basket of trades.
+
+Zero ghost legs are placed after a manual square-off, regardless of margin availability.
+
+Out of scope
+
+Changes to the Kotak API execution logic (EL.placeOrder).
+
+Changes to the UI or frontend components.
+
+Modifications to the database schema or storage.ts.
+
+Tasks
+
+Task 1: Add Mid-Loop Guard to startPersistentEntry
+File: server/te-kotak-neo-v3.ts
+Locate the for (let i = 0; i < pendingBasket.length; i++) loop inside the attempt function of startPersistentEntry. Add the Task #116 guard at the very top of the loop:
+
+TypeScript
+    let allSuccess = true;
+    for (let i = 0; i < pendingBasket.length; i++) {
+      // --- TASK #116: MID-LOOP ABORT GUARD ---
+      if (!persistentEntryActive.has(planId)) {
+        console.log(`[TE] PersistentEntry aborted mid-basket for plan ${planId} (Square Off detected)`);
+        return; 
+      }
+      // ---------------------------------------
+
+      const item = pendingBasket[i];
+      if (item.status === "success") continue;
+Task 2: Add Mid-Loop Guard to startPersistentSquareOff
+File: server/te-kotak-neo-v3.ts
+Locate the for (const trade of tradesToClose) loop inside the attempt function of startPersistentSquareOff. Add the Task #116 guard at the very top of the loop:
+
+TypeScript
+    for (const trade of tradesToClose) {
+      // --- TASK #116: MID-LOOP ABORT GUARD ---
+      if (!persistentSquareOffActive.has(planId)) {
+        console.log(`[TE] PersistentSquareOff aborted mid-loop for plan ${planId}`);
+        return; 
+      }
+      // ---------------------------------------
+
+      if (trade.status !== "open" && trade.status !== "close_failed") continue;
+Task 3: Add Mid-Loop Guard to startPersistentExit
+File: server/te-kotak-neo-v3.ts
+Locate the for (const trade of tradesToClose) loop inside the attempt function of startPersistentExit. Add the Task #116 guard at the very top of the loop:
+
+TypeScript
+    for (const trade of tradesToClose) {
+      // --- TASK #116: MID-LOOP ABORT GUARD ---
+      if (!persistentExitActive.has(planId)) {
+        console.log(`[TE] PersistentExit aborted mid-loop for plan ${planId}`);
+        return; 
+      }
+      // ---------------------------------------
+
+      if (trade.status !== "open" && trade.status !== "close_failed") continue;

@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "MentorsWorld Algo Trading"
+version = "1.0.0"
+id = "artifacts/mentors-world"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18772
+
+[services.development]
+run = "pnpm --filter @workspace/mentors-world run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/mentors-world", "run", "build" ]
+publicDir = "artifacts/mentors-world/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18772"
+BASE_PATH = "/"

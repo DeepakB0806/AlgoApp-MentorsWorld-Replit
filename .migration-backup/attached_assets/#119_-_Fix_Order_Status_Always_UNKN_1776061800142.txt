@@ -1,0 +1,86 @@
+#119 - Fix Order Status Always UNKNOWN
+What & Why
+Every order placed by the trading engine resolves to → UNKNOWN in the PFL and trade records. This has been consistent across all dates (Apr 2, 6, 8, 9, 10, 13). getFillPrice reads ordSt || stText from the Kotak order history response, but neither field resolves — either the actual Kotak field names differ, the response array is returned newest-first (meaning the code reads the wrong element), or getOrderHistory returns success: false silently.
+
+Correct resolution allows: PnL tracking to work correctly, rollback/retry state machine to operate on accurate status, and the PFL to show COMPLETE/REJECTED rather than UNKNOWN.
+
+Done looks like
+Orders placed during a TradingView signal resolve to COMPLETE (or REJECTED/CANCELLED) in the PFL, not UNKNOWN
+The trade record in the DB reflects the correct status after placement
+A raw-response log line (debug-level) is visible when getOrderHistory is called, showing the fields Kotak actually returns
+Out of scope
+Retry loops for pending orders (existing persistent engines handle that)
+Changes to the order placement flow itself
+Tasks
+Add raw-response logging to getFillPrice — Log the raw histResult (success flag, array length, and first/last element keys) at debug level so the actual Kotak field names are visible in production logs on next trade.
+
+Fix field name mapping — Based on the logged response, correct ordSt || stText to the actual field Kotak returns for order status. Also verify whether the history array is oldest-first or newest-first and correct the index accordingly (data[0] vs data[data.length - 1]).
+
+Add a fallback for empty history — If getOrderHistory returns an empty array immediately after placement (race condition), add a single 1-second retry before falling back to UNKNOWN.
+
+Relevant files
+server/te-kotak-neo-v3.ts:45-68
+server/el-kotak-neo-v3.ts:699-733
+
+Task #119 - Fix Order Status Always UNKNOWN
+File to modify: server/te-kotak-neo-v3.ts
+
+Instruction: Find the async function getFillPrice (around line 45) and completely replace the entire function with the code block below.
+
+What this code does: It adds a 1-second retry if the history array is empty (solving the race condition), logs the raw Kotak JSON fields at debug level, safely checks index [0] (Kotak's newest-first standard), and maps all known Kotak V3 status variations (ordSts, ordSt, pwntc, status) to standard nomenclature.
+
+TypeScript
+async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallback: number, isRetry = false): Promise<{ fillPrice: number; status: string; reason: string; filledQty: number }> {
+  try {
+    const histResult = await EL.getOrderHistory(brokerConfig, orderId);
+
+    // TASK #119: Fallback for empty history (race condition immediately after placement)
+    if ((!histResult.success || !Array.isArray(histResult.data) || histResult.data.length === 0) && !isRetry) {
+      console.log(`[TE] getOrderHistory empty for ${orderId}. Retrying in 1s...`);
+      await new Promise(r => setTimeout(r, 1000));
+      return getFillPrice(brokerConfig, orderId, fallback, true);
+    }
+
+    if (histResult.success && Array.isArray(histResult.data) && histResult.data.length > 0) {
+      // TASK #119: Raw response logging to uncover exact Kotak field names in production
+      const firstElem = histResult.data[0];
+      const lastElem = histResult.data[histResult.data.length - 1];
+      console.debug(`[TE] RAW HISTORY DEBUG [${orderId}]: length=${histResult.data.length} | index[0] keys=${Object.keys(firstElem || {}).join(',')} | ordSt[0]=${firstElem?.ordSt || firstElem?.ordSts || firstElem?.status || firstElem?.stText} | ordSt[last]=${lastElem?.ordSt || lastElem?.ordSts || lastElem?.status || lastElem?.stText}`);
+
+      // Kotak Neo V3 returns history newest-first (index 0)
+      const latest = histResult.data[0] as any;
+
+      const fill = Number(
+        latest?.avgPrc || latest?.avgPrice || latest?.avg_prc ||
+        latest?.flprc  || latest?.fillPrice || latest?.fill_price ||
+        latest?.prc    || latest?.pr || 0
+      );
+
+      // TASK #119: Expanded field name mapping for status
+      const rawStatus = latest?.ordSts || latest?.ordSt || latest?.status || latest?.stText || latest?.pwntc || "UNKNOWN";
+      let normalizedStatus = "UNKNOWN";
+
+      if (typeof rawStatus === 'string') {
+          const s = rawStatus.toUpperCase();
+          if (s === "COMPLETED" || s === "TRADED" || s === "COMPLETE" || s === "C" || s.includes("COMP")) normalizedStatus = "COMPLETED";
+          else if (s === "REJECTED" || s.includes("REJ") || s === "R") normalizedStatus = "REJECTED";
+          else if (s === "CANCELLED" || s.includes("CAN") || s === "X") normalizedStatus = "CANCELLED";
+          else if (s === "OPEN" || s === "PENDING" || s === "O") normalizedStatus = "OPEN";
+          else normalizedStatus = rawStatus; // Pass through unknown string so it shows in PFL
+      }
+
+      const reason = latest?.rejReason || latest?.rejRsn || latest?.rjBy || latest?.reason || "";
+      const filledQty = Number(latest?.filledShares || latest?.fldQty || latest?.fil_qty || 0);
+
+      if (fill > 0) {
+        console.log(`[TE] Fill price from order history (${orderId.slice(0,8)}): ${fill} (fallback was ${fallback}) | status: ${normalizedStatus}`);
+        return { fillPrice: fill, status: normalizedStatus, reason, filledQty };
+      }
+      return { fillPrice: fallback, status: normalizedStatus, reason, filledQty };
+    }
+    return { fillPrice: fallback, status: "UNKNOWN", reason: "History empty", filledQty: 0 };
+  } catch (err: any) {
+    console.error(`[TE] Error in getFillPrice for ${orderId}:`, err);
+    return { fillPrice: fallback, status: "UNKNOWN", reason: err.message, filledQty: 0 };
+  }
+}

@@ -1,0 +1,179 @@
+Orders (Postman: urlencoded, jData body)
+
+curl -X POST "<baseUrl>/quick/order/rule/ms/place" \
+  -H "Auth: <session_token>" \
+  -H "Sid: <session_sid>" \
+  -H "neo-fin-key: neotradeapi" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode 'jData={
+    "am": "NO",
+    "dq": "0",
+    "es": "nse_cm",
+    "mp": "0",
+    "pc": "CNC",
+    "pf": "N",
+    "pr": "0",
+    "pt": "MKT",
+    "qt": "1",
+    "rt": "DAY",
+    "tp": "0",
+    "ts": "ITBEES-EQ",
+    "tt": "B"
+  }'
+
+
+Modify Order
+curl -X POST "<baseUrl>/quick/order/vr/modify" \
+  -H "Auth: <session_token>" \
+  -H "Sid: <session_sid>" \
+  -H "neo-fin-key: neotradeapi" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode 'jData={
+    "am": "NO",
+    "dq": "0",
+    "es": "nse_cm",
+    "mp": "0",
+    "pc": "NRML",
+    "pf": "N",
+    "pr": "0",
+    "pt": "MKT",
+    "qt": "1",
+    "rt": "DAY",
+    "tp": "0",
+    "ts": "TATAPOWER-EQ",
+    "tt": "B",
+    "no": "<orderNo>"
+  }'
+
+
+Cancel / Exit (Cover / Bracket)
+# Cancel
+curl -X POST "<baseUrl>/quick/order/cancel" \
+  -H "Auth: <session_token>" \
+  -H "Sid: <session_sid>" \
+  -H "neo-fin-key: neotradeapi" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode 'jData={"on":"<orderNo>","am":"NO"}'
+
+# Exit Cover
+curl -X POST "<baseUrl>/quick/order/co/exit" \
+  -H "Auth: <session_token>" \
+  -H "Sid: <session_sid>" \
+  -H "neo-fin-key: neotradeapi" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode 'jData={"on":"<orderNo>","am":"NO"}'
+
+# Exit Bracket
+curl -X POST "<baseUrl>/quick/order/bo/exit" \
+  -H "Auth: <session_token>" \
+  -H "Sid: <session_sid>" \
+  -H "neo-fin-key: neotradeapi" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode 'jData={"on":"<orderNo>","am":"NO"}'
+
+
+Order Book (GET)
+curl -X GET "<baseUrl>/quick/user/orders" \
+  -H "Auth: <session_token>" \
+  -H "Sid: <session_sid>" \
+  -H "neo-fin-key: neotradeapi"
+
+
+Order History (POST, urlencoded)
+curl -X POST "<baseUrl>/quick/order/history" \
+  -H "Auth: <session_token>" \
+  -H "Sid: <session_sid>" \
+  -H "neo-fin-key: neotradeapi" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode 'jData={"nOrdNo":"250720000007242"}'
+  }'
+
+Trade Book / Positions / Holdings (GET)
+# Trade Book
+curl -X GET "<baseUrl>/quick/user/trades" \
+  -H "Auth: <session_token>" \
+  -H "Sid: <session_sid>" \
+  -H "neo-fin-key: neotradeapi"
+
+# Position Book
+curl -X GET "<baseUrl>/quick/user/positions" \
+  -H "Auth: <session_token>" \
+  -H "Sid: <session_sid>" \
+  -H "neo-fin-key: neotradeapi"
+
+# Portfolio Holdings (new response shape)
+curl -X GET "<baseUrl>/portfolio/v1/holdings" \
+  -H "Auth: <session_token>" \
+  -H "Sid: <session_sid>" \
+  -H "neo-fin-key: neotradeapi"
+
+Quotes (GET; no neo-fin-key, no Auth/Sid)
+curl -X GET "<baseUrl>/script-details/1.0/quotes/neosymbol/nse_cm|26000/all" \
+  -H "Authorization: <access_token>"
+
+Scripmaster Files (GET; no neo-fin-key, no Auth/Sid)
+curl -X GET "<baseUrl>/script-details/1.0/masterscrip/file-paths" \
+  -H "Authorization: <access_token>"
+
+
+Example Success Response
+{
+    "data": [
+        {
+            "instrumentType": "Equity",
+            "sector": "Others",
+            "instrumentToken": 18974,
+            "commonScripCode": "NIPPON_ETF_NIFTYIT",
+            "instrumentName": "Nippon India ETF Nifty IT",
+            "quantity": 45,
+            "averagePrice": 38.7162,
+            "holdingCost": 1742.2293,
+            "closingPrice": 39.36,
+            "mktValue": 1771.2,
+            "scripId": "",
+            "isAlternateScrip": "",
+            "unrealisedGainLoss": 28.9707,
+            "sqGainLoss": -5.6,
+            "delGainLoss": -7.074,
+            "subTotal": 0,
+            "prevDayLtp": 0,
+            "subType": "ETF",
+            "instrumentStatus": "ACTV",
+            "marketLot": 1,
+            "expiryDate": "",
+            "optType": "",
+            "strikePrice": "0.00",
+            "symbol": "ITBEES",
+            "displaySymbol": "ITBEES",
+            "exchangeSegment": "nse_cm",
+            "series": "EQ",
+            "exchangeIdentifier": "19084",
+            "sellableQuantity": 45,
+            "securityType": "ETF",
+            "securitySubType": "ETF",
+            "logoUrl": "https://www.kotaksecurities.com/stockit/stock_logos/74813.png",
+            "cmotCode": "74813"
+        },
+    ]
+}
+
+
+Headers
+Name	Type	Description
+accept	string	Should always be application/json
+Sid	string	session sid generated on login
+Auth	string	session token generated on login
+neo-fin-key	string	static value: neotradeapi
+Content-Type	string	Always application/x-www-form-urlencoded
+
+
+
+
+
+Notes :
+Headers:
+Post-login APIs (Orders/Reports/Portfolio/etc.) use Auth (session token) + Sid (session sid).
+
+neo-fin-key: neotradeapi is required except for Quotes and Scripmaster (per your instruction).
+
+Bodies for Orders and some Reports are application/x-www-form-urlencoded with a jData parameter containing JSON (exactly as in your collection).

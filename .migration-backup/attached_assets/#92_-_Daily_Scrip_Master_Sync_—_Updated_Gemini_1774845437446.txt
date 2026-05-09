@@ -1,0 +1,70 @@
+Task #92: STRICT FIX - Scrip Master Sync Tracking & UI Alert
+
+CRITICAL MANDATE: We must track exactly when the Scrip Master was last successfully downloaded to prevent stale contract errors at 09:00 AM.
+
+Step 1: Add Sync Timestamp to SMC
+File: server/smc-kotak-neo-v3.ts
+
+Add these imports at the top of the file:
+
+TypeScript
+import { format } from "date-fns";
+import { toZonedTime } from "date-fns-tz";
+Export a new status tracker right below the rawCsvCache declaration:
+
+TypeScript
+export const scripMasterSyncStatus = {
+  lastSyncDateIST: "1970-01-01",
+  lastSyncTimeIST: "00:00:00"
+};
+Inside the downloadScripMaster function, right at the very end before return true;, insert this logic to update the timestamp on success:
+
+TypeScript
+const nowIST = toZonedTime(new Date(), "Asia/Kolkata");
+scripMasterSyncStatus.lastSyncDateIST = format(nowIST, "yyyy-MM-dd");
+scripMasterSyncStatus.lastSyncTimeIST = format(nowIST, "HH:mm:ss");
+console.log(`${LOG_PREFIX} Scrip Master Sync Timestamp Updated to: ${scripMasterSyncStatus.lastSyncDateIST} ${scripMasterSyncStatus.lastSyncTimeIST}`);
+Step 2: Expose Status Endpoint
+File: server/routes.ts
+
+Add these imports at the top:
+
+TypeScript
+import { format } from "date-fns";
+import { toZonedTime } from "date-fns-tz";
+Scroll down to your // BROKER API ROUTES section. Right below your existing scrip-master-download route, add this new GET route:
+
+TypeScript
+app.get("/api/broker/kotak/scrip-status", (req, res) => {
+  const todayStr = format(toZonedTime(new Date(), "Asia/Kolkata"), "yyyy-MM-dd");
+  const isStale = SMC.scripMasterSyncStatus.lastSyncDateIST !== todayStr;
+  res.json({ ...SMC.scripMasterSyncStatus, isStale, todayIST: todayStr });
+});
+Step 3: Frontend Warning Badge & Force Sync
+File: client/src/components/broker-linking.tsx (or your Dashboard file where broker status is shown)
+
+Fetch /api/broker/kotak/scrip-status on component mount or interval.
+
+If isStale is true, render this warning badge. When clicked, it should hit your existing POST /api/broker/kotak/scrip-master-download endpoint:
+
+TypeScript
+{status?.isStale && (
+  <div className="flex items-center gap-4 bg-red-500/10 text-red-500 p-3 rounded-md border border-red-500/20 my-4 shadow-sm">
+    <AlertTriangle className="w-5 h-5" />
+    <span className="text-sm font-bold">STALE SCRIP DATA: Last synced {status.lastSyncDateIST}. You will not be able to trade today's contracts!</span>
+    <Button 
+      size="sm" 
+      variant="destructive" 
+      className="ml-auto"
+      onClick={async () => {
+        // Call your existing download route
+        await apiRequest("POST", "/api/broker/kotak/scrip-master-download");
+        // Re-fetch status here to clear the badge
+      }}
+    >
+      Force Sync Now
+    </Button>
+  </div>
+)}
+Why this is perfectly safe:
+We are utilizing your existing /api/broker/kotak/scrip-master-download logic to do the heavy lifting. We are simply wrapping a "safety timestamp" around it so the system—and you—always know exactly how fresh the data is.

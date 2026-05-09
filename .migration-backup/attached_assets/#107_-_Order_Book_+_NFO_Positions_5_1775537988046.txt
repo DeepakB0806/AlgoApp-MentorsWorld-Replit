@@ -1,0 +1,96 @@
+Task: Implement Task #107 (Order Book & NFO Positions Dashboard Fixes)
+
+Context for Replit:
+We need to surgically fix the normalized payload and UI sorting for the Order Book and NFO Positions table. Apply these exact diffs to the specific files listed below. Do not rewrite surrounding table layouts or other API endpoints.
+
+File 1: shared/schema.ts
+Locate the Order and Position interface definitions (not the Zod schemas, but the TS interfaces, usually near the top). Update them to include the missing fields:
+
+TypeScript
+export interface Order {
+  // ... [Keep existing fields] ...
+  product?: string;
+  timestamp?: string; // Ensure this exists
+}
+
+export interface Position {
+  // ... [Keep existing fields] ...
+  timestamp?: string;
+}
+File 2: server/routes/broker-routes.ts
+Locate router.get('/orders') and router.get('/positions'). Update the normalized .map() loops to extract Kotak's V3 specific timestamp and product fields.
+
+Inside router.get('/orders') mapping block:
+
+TypeScript
+        // Modify the returned map block to extract these exactly:
+        return orders.map((o: any) => ({
+          ...o,
+          // Extract timestamp prioritizing Kotak's HyperSync/Execution time
+          timestamp: o.hsUpTm || o.exCfmTm || o.time || o.orderTimestamp || "",
+          // Extract product type (NRML/MIS/CNC)
+          product: o.prd || o.prod || o.productType || o.product || "",
+          // Force uppercase for exact match with UI badge components
+          status: (o.status || o.stat || o.ordSt || "").toUpperCase()
+        }));
+Inside router.get('/positions') mapping block:
+
+TypeScript
+        // Modify the returned map block to extract the timestamp:
+        return positions.map((p: any) => ({
+          ...p,
+          // Extract Kotak's 'HS Last update time'
+          timestamp: p.hsUpTm || p.updatedAt || p.lastUpdatedTime || ""
+        }));
+File 3: client/src/pages/dashboard.tsx
+We must apply two specific UI changes here.
+
+Part A: The Order Book Sort & Display
+Locate the orders rendering block. Before the map, sort the orders oldest-to-newest.
+
+TypeScript
+// 1. Create a sorted copy of orders BEFORE rendering
+const sortedOrders = [...orders].sort((a, b) => {
+  if (!a.timestamp) return 1; // Empty/invalid timestamps drop to bottom
+  if (!b.timestamp) return -1;
+  return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+});
+
+// 2. Update your TableBody to map over sortedOrders, not orders
+<TableBody>
+  {sortedOrders.map((order: any, i: number) => (
+    <TableRow key={i}>
+      <TableCell>{order.timestamp || "—"}</TableCell>
+      <TableCell className="font-medium">{order.symbol || order.trading_symbol}</TableCell>
+      <TableCell>{order.transaction_type || order.action}</TableCell>
+      <TableCell>{order.quantity}</TableCell>
+      <TableCell>₹{order.price || order.average_price}</TableCell>
+      
+      {/* Replace old product/type cell with the new mapped product field */}
+      <TableCell>{order.product || order.order_type || "—"}</TableCell>
+      
+      <TableCell>
+        <Badge variant={
+          order.status === 'COMPLETE' ? 'success' :
+          ['REJECTED', 'CANCELLED'].includes(order.status) ? 'destructive' :
+          'secondary'
+        }>
+          {order.status}
+        </Badge>
+      </TableCell>
+    </TableRow>
+  ))}
+</TableBody>
+Part B: NFO Positions Timestamp Column
+Locate the NFO Positions <Table> block. Add the new Time header and cell.
+
+TypeScript
+// Inside the <TableHeader> add:
+<TableHead>P&L URealz</TableHead>
+<TableHead>Time</TableHead> {/* NEW HEADER */}
+
+// Inside the row mapping loop <TableBody> add the cell:
+<TableCell className={position.unrealized_pnl >= 0 ? "text-green-500" : "text-red-500"}>
+  ₹{position.unrealized_pnl}
+</TableCell>
+<TableCell>{position.timestamp || "—"}</TableCell> {/* NEW CELL */}

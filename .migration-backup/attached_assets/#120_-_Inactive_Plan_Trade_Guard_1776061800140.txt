@@ -1,0 +1,132 @@
+#120 - Inactive Plan Trade Guard
+
+What & Why
+When a signal fires, processTradeSignal checks the activePlansByConfigId cache first. If it hits, the deployment status is not re-verified against the database — meaning a plan that was deactivated within the 2-minute cache window could still execute a trade. Additionally, there is no log line at signal time showing which plans were matched and what their deployment status is, making it impossible to audit after the fact whether a plan was genuinely active or stale.
+
+Two protective measures are missing:
+
+Signal-time audit log — at the moment a plan list is resolved (cache hit or DB query), log each plan's ID, name, and deployment status so the PFL captures the exact state that allowed the trade.
+Point-of-execution re-validation — immediately before dispatching executeTradeForPlan, perform a lightweight DB read of the plan's current deploymentStatus and abort if it is no longer active or deployed. This closes the cache staleness window.
+Done looks like
+Every PFL entry for a trade includes a preceding info line: "Plan XXXX deploymentStatus=deployed (cache hit)" or "Plan XXXX deploymentStatus=deployed (DB query)"
+If a plan's status has changed to non-active between cache population and trade dispatch, the trade is blocked and a PFL warning line is written: "Plan XXXX skipped — deploymentStatus changed to 'closed' between cache and execution"
+The scenario "inactive plan fires a trade within 2-minute cache window" is eliminated
+Out of scope
+Changing the cache TTL or removing the cache
+Changes to the squareoff or persistent exit flows
+Any change to the locked blocks in te-kotak-neo-v3.ts
+Tasks
+Add signal-time deployment status log — In processTradeSignal, after resolving the plans list (cache or DB), log each matched plan's name, ID, and deploymentStatus to the console and to the PFL as an info entry.
+
+Add point-of-execution re-validation — In executeTradeForPlan (or just before its call in processTradeSignal), fetch the plan's current deploymentStatus from the DB. If it differs from active/deployed, skip the trade and write a PFL warning entry. This read is lightweight (single row by primary key).
+
+Relevant files
+server/te-kotak-neo-v3.ts:181-207
+server/te-kotak-neo-v3.ts:220-226
+server/cache.ts:63-70
+server/cache.ts:119-121
+
+This is the perfect approach. Replit’s AI agent thrives on "Deterministic Substitution" (exact copy-paste replacements) rather than abstract logical instructions, which often cause it to hallucinate or exhaust its token limits while trying to "think" about where the code belongs.
+
+I have written the complete, fully coded Task Documents for Task #119 and Task #120. They are formatted exactly for the Replit Agent to read, locate the functions, and blindly replace the code with the highly hardened versions.
+
+Copy and paste the text below directly into your Replit chat:
+
+Agent Instruction: Please execute Task #119 and Task #120 by applying the exact code substitutions provided below. Do not refactor surrounding logic.
+Task #119 - Fix Order Status Always UNKNOWN
+File to modify: server/te-kotak-neo-v3.ts
+
+Instruction: Find the async function getFillPrice (around line 45) and completely replace the entire function with the code block below.
+
+What this code does: It adds a 1-second retry if the history array is empty (solving the race condition), logs the raw Kotak JSON fields at debug level, safely checks index [0] (Kotak's newest-first standard), and maps all known Kotak V3 status variations (ordSts, ordSt, pwntc, status) to standard nomenclature.
+
+TypeScript
+async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallback: number, isRetry = false): Promise<{ fillPrice: number; status: string; reason: string; filledQty: number }> {
+  try {
+    const histResult = await EL.getOrderHistory(brokerConfig, orderId);
+
+    // TASK #119: Fallback for empty history (race condition immediately after placement)
+    if ((!histResult.success || !Array.isArray(histResult.data) || histResult.data.length === 0) && !isRetry) {
+      console.log(`[TE] getOrderHistory empty for ${orderId}. Retrying in 1s...`);
+      await new Promise(r => setTimeout(r, 1000));
+      return getFillPrice(brokerConfig, orderId, fallback, true);
+    }
+
+    if (histResult.success && Array.isArray(histResult.data) && histResult.data.length > 0) {
+      // TASK #119: Raw response logging to uncover exact Kotak field names in production
+      const firstElem = histResult.data[0];
+      const lastElem = histResult.data[histResult.data.length - 1];
+      console.debug(`[TE] RAW HISTORY DEBUG [${orderId}]: length=${histResult.data.length} | index[0] keys=${Object.keys(firstElem || {}).join(',')} | ordSt[0]=${firstElem?.ordSt || firstElem?.ordSts || firstElem?.status || firstElem?.stText} | ordSt[last]=${lastElem?.ordSt || lastElem?.ordSts || lastElem?.status || lastElem?.stText}`);
+
+      // Kotak Neo V3 returns history newest-first (index 0)
+      const latest = histResult.data[0] as any;
+
+      const fill = Number(
+        latest?.avgPrc || latest?.avgPrice || latest?.avg_prc ||
+        latest?.flprc  || latest?.fillPrice || latest?.fill_price ||
+        latest?.prc    || latest?.pr || 0
+      );
+
+      // TASK #119: Expanded field name mapping for status
+      const rawStatus = latest?.ordSts || latest?.ordSt || latest?.status || latest?.stText || latest?.pwntc || "UNKNOWN";
+      let normalizedStatus = "UNKNOWN";
+
+      if (typeof rawStatus === 'string') {
+          const s = rawStatus.toUpperCase();
+          if (s === "COMPLETED" || s === "TRADED" || s === "COMPLETE" || s === "C" || s.includes("COMP")) normalizedStatus = "COMPLETED";
+          else if (s === "REJECTED" || s.includes("REJ") || s === "R") normalizedStatus = "REJECTED";
+          else if (s === "CANCELLED" || s.includes("CAN") || s === "X") normalizedStatus = "CANCELLED";
+          else if (s === "OPEN" || s === "PENDING" || s === "O") normalizedStatus = "OPEN";
+          else normalizedStatus = rawStatus; // Pass through unknown string so it shows in PFL
+      }
+
+      const reason = latest?.rejReason || latest?.rejRsn || latest?.rjBy || latest?.reason || "";
+      const filledQty = Number(latest?.filledShares || latest?.fldQty || latest?.fil_qty || 0);
+
+      if (fill > 0) {
+        console.log(`[TE] Fill price from order history (${orderId.slice(0,8)}): ${fill} (fallback was ${fallback}) | status: ${normalizedStatus}`);
+        return { fillPrice: fill, status: normalizedStatus, reason, filledQty };
+      }
+      return { fillPrice: fallback, status: normalizedStatus, reason, filledQty };
+    }
+    return { fillPrice: fallback, status: "UNKNOWN", reason: "History empty", filledQty: 0 };
+  } catch (err: any) {
+    console.error(`[TE] Error in getFillPrice for ${orderId}:`, err);
+    return { fillPrice: fallback, status: "UNKNOWN", reason: err.message, filledQty: 0 };
+  }
+}
+Task #120 - Inactive Plan Trade Guard
+File to modify: server/te-kotak-neo-v3.ts
+
+Instruction 1: Find async function processTradeSignal (around line 181). Inside this function, locate the if (plans.length === 0) check. Directly ABOVE that if statement, paste this new Signal-Time Audit Log block:
+
+TypeScript
+  // --- TASK #120: Signal-Time Audit Log ---
+  if (plans.length > 0) {
+    const planAudit = plans.map(p => `${p.name} [${p.id.slice(0,4)}]=${p.deploymentStatus}`).join(" | ");
+    const source = tradingCache.getActivePlansByConfigId(strategyConfigId) ? "cache hit" : "DB query";
+    const auditMsg = `Active Plans Resolved (${source}): ${planAudit}`;
+    console.log(`[PFL] ℹ ${auditMsg}`);
+    addProcessFlowLog({
+      planId: plans[0].id, planName: plans[0].name, signalType: webhookData.signalType || "unknown",
+      alert: webhookData.alert || "", resolvedAction: "N/A", blockType: "",
+      actionTaken: "info", message: auditMsg, broker: "none",
+    });
+  }
+  // ----------------------------------------
+Instruction 2: Find async function executeTradeForPlan (around line 220). At the very beginning of the function, immediately after const startTime = Date.now();, paste this DB Point-of-Execution Re-validation block:
+
+TypeScript
+  // --- TASK #120: Point-of-Execution Re-validation ---
+  try {
+    const livePlan = await storage.getStrategyPlan(plan.id);
+    if (!livePlan || (livePlan.deploymentStatus !== "active" && livePlan.deploymentStatus !== "deployed")) {
+      const warnMsg = `Plan "${plan.name}" skipped — deploymentStatus changed to '${livePlan?.deploymentStatus}' between cache and execution`;
+      console.warn(`[PFL] ⚠ ${warnMsg}`);
+      logPFL(plan, brokerConfig.brokerName, data, "skipped", warnMsg, { resolvedAction: signalContext?.resolvedAction });
+      return { success: false, action: "hold", broker: brokerConfig.brokerName, planId: plan.id, message: warnMsg };
+    }
+  } catch (e) {
+    console.error(`[TE] DB read failed during plan re-validation for ${plan.id}`, e);
+  }
+  // ---------------------------------------------------

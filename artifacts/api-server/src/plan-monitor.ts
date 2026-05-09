@@ -1,0 +1,161 @@
+import type { IStorage } from "./storage";
+import type { TimeLogicConfig, TradeParams, IndexMarginSetting } from "@workspace/db";
+import { startPersistentSquareOff, persistentSquareOffActive } from "./te-kotak-neo-v3";
+import { addProcessFlowLog } from "./process-flow-log";
+import { isWithinMarketHours } from "./market-calendar";
+
+const LOG_PREFIX = "[PLAN-MONITOR]";
+const CHECK_INTERVAL_MS = 60 * 1000;
+
+function getISTDatetime(): { date: string; time: string; dayName: string } {
+  const istDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const dayName = days[istDate.getDay()];
+  const yy = istDate.getFullYear();
+  const mm = String(istDate.getMonth() + 1).padStart(2, "0");
+  const dd = String(istDate.getDate()).padStart(2, "0");
+  const hh = String(istDate.getHours()).padStart(2, "0");
+  const min = String(istDate.getMinutes()).padStart(2, "0");
+  return {
+    date: `${yy}-${mm}-${dd}`,
+    time: `${hh}:${min}`,
+    dayName,
+  };
+}
+
+function parseTimeLogic(tradeParamsJson: string | null | undefined): TimeLogicConfig | null {
+  if (!tradeParamsJson) return null;
+  try {
+    const tp: TradeParams = JSON.parse(tradeParamsJson);
+    return tp.timeLogic || null;
+  } catch {
+    return null;
+  }
+}
+
+export function startPlanMonitor(storage: IStorage): void {
+  console.log(`${LOG_PREFIX} Plan monitor started — checking every 60 seconds`);
+  setInterval(async () => {
+    try {
+      await checkPlans(storage);
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} Tick error:`, err?.message || err);
+    }
+  }, CHECK_INTERVAL_MS);
+}
+
+async function checkPlans(storage: IStorage): Promise<void> {
+  const { date: istDate, time: istTime, dayName: istDayName } = getISTDatetime();
+
+  const allPlans = await storage.getStrategyPlans();
+  const deployedPlans = allPlans.filter(
+    (p) => (p.deploymentStatus === "active" || p.deploymentStatus === "deployed") && p.brokerConfigId
+  );
+
+  // Load index_margin_settings once for the whole tick — single source of truth for expiryDay (Task #220)
+  let indexMarginMap: Map<string, IndexMarginSetting> = new Map();
+  try {
+    const rows = await storage.getAllIndexMarginSettings();
+    for (const row of rows) indexMarginMap.set(row.indexName.toUpperCase(), row);
+  } catch (err: any) {
+    console.warn(`${LOG_PREFIX} Could not load indexMarginSettings — expiryDay will default to Thursday:`, err?.message);
+  }
+
+  // Loop is a no-op when empty; TSL poll still runs regardless of deployed plan count
+  for (const plan of deployedPlans) {
+    try {
+      if (persistentSquareOffActive.has(plan.id)) continue;
+
+      const planExchange = plan.exchange || "NFO";
+      const withinHours = await isWithinMarketHours(storage, planExchange, istTime, istDate);
+      if (!withinHours) continue;
+
+      const timeLogic = parseTimeLogic(plan.tradeParams);
+      if (!timeLogic) continue;
+
+      const { exitTime, exitOnExpiry } = timeLogic;
+
+      // Fetch unclosed trades first — productType from DB drives the gate logic,
+      // not the plan config JSON. Each trade stores what was actually placed.
+      const unclosedTrades = await storage.getUnclosedTradesByPlan(plan.id);
+      if (unclosedTrades.length === 0) continue;
+
+      const hasMIS  = unclosedTrades.some(t => t.productType?.toUpperCase() === "MIS");
+      const hasNRML = unclosedTrades.some(t => ["NRML", "CNC"].includes(t.productType?.toUpperCase() ?? ""));
+
+      let shouldSquareOff = false;
+      let reason = "";
+
+      // exitTime applies ONLY to MIS positions — broker forces intraday close anyway
+      if (exitTime && hasMIS && istTime >= exitTime) {
+        shouldSquareOff = true;
+        reason = `exitTime reached for MIS position(s) (configured ${exitTime} IST, current ${istTime} IST)`;
+      }
+
+      // exitOnExpiry applies ONLY to NRML/CNC positions, and only on expiry day.
+      // Expiry day resolution: index_margin_settings (single source of truth, Task #220), default "Thursday"
+      if (!shouldSquareOff && exitOnExpiry && hasNRML) {
+        const ticker = plan.ticker;
+        if (ticker) {
+          const idxMarginSetting = indexMarginMap.get(ticker.toUpperCase());
+          const expiryDay = idxMarginSetting?.expiryDay || "Thursday";
+          if (idxMarginSetting) {
+            console.log(`${LOG_PREFIX} Expiry day for ${ticker} from index_margin_settings: ${expiryDay}`);
+          }
+          if (istDayName === expiryDay) {
+            const squareOffTime = exitTime || "15:20";
+            if (istTime >= squareOffTime) {
+              shouldSquareOff = true;
+              reason = `exitOnExpiry — today is ${expiryDay} (expiry day for ${ticker}), time ${istTime} >= ${squareOffTime} IST`;
+            }
+          }
+        }
+      }
+
+      if (!shouldSquareOff) continue;
+
+      const brokerConfig = await storage.getBrokerConfig(plan.brokerConfigId!);
+      if (!brokerConfig) {
+        console.warn(
+          `${LOG_PREFIX} Plan "${plan.name}" — broker config ${plan.brokerConfigId} not found, skipping`
+        );
+        addProcessFlowLog({
+          planId: plan.id,
+          planName: plan.name,
+          signalType: "square_off",
+          alert: "Auto square-off",
+          resolvedAction: "CLOSE",
+          blockType: "plan_monitor",
+          actionTaken: "error",
+          message: `Auto square-off skipped — broker config not found (${plan.brokerConfigId})`,
+          broker: "unknown",
+        });
+        continue;
+      }
+
+      console.log(
+        `${LOG_PREFIX} Plan "${plan.name}" (${plan.id}) — ${reason} — starting persistent exit for ${unclosedTrades.length} unclosed trade(s)`
+      );
+
+      addProcessFlowLog({
+        planId: plan.id,
+        planName: plan.name,
+        signalType: "square_off",
+        alert: "Auto square-off triggered",
+        resolvedAction: "CLOSE",
+        blockType: "plan_monitor",
+        actionTaken: "auto_square_off",
+        message: `Reason: ${reason}. Persistent exit started for ${unclosedTrades.length} unclosed trade(s).`,
+        broker: brokerConfig.brokerName,
+      });
+
+      startPersistentSquareOff(storage, plan.id, brokerConfig);
+    } catch (err: any) {
+      console.error(
+        `${LOG_PREFIX} Error checking plan "${plan.name}" (${plan.id}):`,
+        err?.message || err
+      );
+    }
+  }
+
+}

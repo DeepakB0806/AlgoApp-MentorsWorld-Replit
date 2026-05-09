@@ -1,0 +1,94 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// KOTAK NEO - SYNTHETIC BASKET ORDER EXECUTOR
+// ═══════════════════════════════════════════════════════════════════════════════
+import EL from "./el-kotak-neo-v3";
+import type { BrokerConfig } from "@shared/schema";
+
+export interface BasketLeg {
+  tradingSymbol: string;
+  exchange: string;
+  transactionType: "BUY" | "SELL";
+  quantity: number;
+  productType: "MIS" | "NRML" | "CNC";
+  priceType: "MKT" | "LMT" | "SL";
+  limitPrice?: number;
+}
+
+export interface BasketResult {
+  leg: string;
+  success: boolean;
+  orderId?: string;
+  error?: string;
+}
+
+export async function executeBasketOrder(
+  brokerConfig: BrokerConfig, 
+  basketLegs: BasketLeg[]
+): Promise<BasketResult[]> {
+  
+  const results: BasketResult[] = [];
+
+  // 🛡️ MARGIN SAFETY NET: Sort legs so BUY orders execute BEFORE SELL orders.
+  // This ensures you get hedge margin benefits and prevents outright rejections.
+  const sortedLegs = [...basketLegs].sort((a, b) => {
+    if (a.transactionType === "BUY" && b.transactionType === "SELL") return -1;
+    if (a.transactionType === "SELL" && b.transactionType === "BUY") return 1;
+    return 0;
+  });
+
+  console.log(`[BASKET] Executing ${sortedLegs.length} legs. Buy orders prioritized.`);
+
+  // Execute sequentially to ensure Kotak registers the margin from the BUY legs
+  for (const leg of sortedLegs) {
+    const actualPrice = leg.priceType === "LMT" && leg.limitPrice ? String(leg.limitPrice) : "0";
+
+    // Build the payload exactly as mapped in our previous Starvation Fix
+    const universalPayload: Record<string, any> = {
+      tradingSymbol: leg.tradingSymbol,
+      exchange: EL.mapExchange(leg.exchange),
+      transactionType: leg.transactionType,
+      quantity: String(leg.quantity),
+      productType: leg.productType,
+      priceType: leg.priceType,
+      price: actualPrice,
+      validity: "DAY",
+      afterMarket: "NO"
+    };
+
+    try {
+      console.log(`[BASKET] Placing leg: ${leg.transactionType} ${leg.quantity}x ${leg.tradingSymbol}`);
+      
+      // Call your existing Execution Layer
+      const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
+      
+      if (orderResult.success && orderResult.data?.orderNo) {
+        results.push({
+          leg: leg.tradingSymbol,
+          success: true,
+          orderId: orderResult.data.orderNo
+        });
+        console.log(`[BASKET] ✅ Leg Success: ${orderResult.data.orderNo}`);
+      } else {
+        results.push({
+          leg: leg.tradingSymbol,
+          success: false,
+          error: orderResult.error || "Unknown Kotak API rejection"
+        });
+        console.error(`[BASKET] ❌ Leg Failed: ${orderResult.error}`);
+      }
+      
+      // Optional: Add a 100ms delay between legs to respect Kotak's rate limits
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+    } catch (err: any) {
+      results.push({
+        leg: leg.tradingSymbol,
+        success: false,
+        error: err.message || "Internal Execution Error"
+      });
+      console.error(`[BASKET] ❌ Exception on ${leg.tradingSymbol}: ${err.message}`);
+    }
+  }
+
+  return results;
+}

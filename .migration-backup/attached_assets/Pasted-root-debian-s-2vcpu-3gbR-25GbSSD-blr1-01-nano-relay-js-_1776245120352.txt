@@ -1,0 +1,143 @@
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# nano relay.js
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# pm2 restart relay.js
+Use --update-env to update environment variables
+[PM2] Applying action restartProcessId on app [relay.js](ids: [ 0 ])
+[PM2] [kotak-relay](0) ✓
+┌────┬────────────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name           │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+├────┼────────────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┼──────────┤
+│ 0  │ kotak-relay    │ default     │ 1.0.0   │ fork    │ 640279   │ 0s     │ 60   │ online    │ 0%       │ 7.5mb    │ root     │ disabled │
+└────┴────────────────┴─────────────┴─────────┴─────────┴──────────┴──���─────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# pm2 log
+[TAILING] Tailing last 15 lines for [all] processes (change the value with --lines option)
+/root/.pm2/pm2.log last 15 lines:
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T14:43:34: PM2 log: Script /root/relay.js had too many unstable restarts (16). Stopped. "errored"
+
+/root/.pm2/logs/kotak-relay-out.log last 15 lines:
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+
+/root/.pm2/logs/kotak-relay-error.log last 15 lines:
+0|kotak-re | Require stack:
+0|kotak-re | - /root/relay.js
+0|kotak-re |     at Module._resolveFilename (node:internal/modules/cjs/loader:1207:15)
+0|kotak-re |     at Hook._require.Module.require (/usr/lib/node_modules/pm2/node_modules/require-in-the-middle/index.js:81:25)
+0|kotak-re |     at require (node:internal/modules/helpers:182:18)
+0|kotak-re |     at Object.<anonymous> (/root/relay.js:3:19)
+0|kotak-re |     at Module._compile (node:internal/modules/cjs/loader:1521:14)
+0|kotak-re |     at Module._extensions..js (node:internal/modules/cjs/loader:1623:10)
+0|kotak-re |     at Module.load (node:internal/modules/cjs/loader:1266:32)
+0|kotak-re |     at Module._load (node:internal/modules/cjs/loader:1091:12)
+0|kotak-re |     at Object.<anonymous> (/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js:33:23)
+0|kotak-re |     at Module._compile (node:internal/modules/cjs/loader:1521:14) {
+0|kotak-re |   code: 'MODULE_NOT_FOUND',
+0|kotak-re |   requireStack: [ '/root/relay.js' ]
+0|kotak-re | }
+
+^[[A^C
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# npm install ws
+
+added 1 package, and audited 83 packages in 1s
+
+25 packages are looking for funding
+  run `npm fund` for details
+
+2 vulnerabilities (1 moderate, 1 critical)
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+npm notice
+npm notice New major version of npm available! 10.8.2 -> 11.12.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.12.1
+npm notice To update run: npm install -g npm@11.12.1
+npm notice
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# pm2 status
+┌────┬────────────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name           │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+├────┼────────────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┼──────────┤
+│ 0  │ kotak-relay    │ default     │ 1.0.0   │ fork    │ 0        │ 0      │ 75   │ errored   │ 0%       │ 0b       │ root     │ disabled │
+└────┴────────────────┴─────────────┴─────────┴─────────┴──────────┴──���─────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# pm2 log
+[TAILING] Tailing last 15 lines for [all] processes (change the value with --lines option)
+/root/.pm2/pm2.log last 15 lines:
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T14:43:33: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T14:43:34: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T14:43:34: PM2 log: Script /root/relay.js had too many unstable restarts (16). Stopped. "errored"
+
+/root/.pm2/logs/kotak-relay-out.log last 15 lines:
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+
+/root/.pm2/logs/kotak-relay-error.log last 15 lines:
+0|kotak-re | Require stack:
+0|kotak-re | - /root/relay.js
+0|kotak-re |     at Module._resolveFilename (node:internal/modules/cjs/loader:1207:15)
+0|kotak-re |     at Hook._require.Module.require (/usr/lib/node_modules/pm2/node_modules/require-in-the-middle/index.js:81:25)
+0|kotak-re |     at require (node:internal/modules/helpers:182:18)
+0|kotak-re |     at Object.<anonymous> (/root/relay.js:3:19)
+0|kotak-re |     at Module._compile (node:internal/modules/cjs/loader:1521:14)
+0|kotak-re |     at Module._extensions..js (node:internal/modules/cjs/loader:1623:10)
+0|kotak-re |     at Module.load (node:internal/modules/cjs/loader:1266:32)
+0|kotak-re |     at Module._load (node:internal/modules/cjs/loader:1091:12)
+0|kotak-re |     at Object.<anonymous> (/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js:33:23)
+0|kotak-re |     at Module._compile (node:internal/modules/cjs/loader:1521:14) {
+0|kotak-re |   code: 'MODULE_NOT_FOUND',
+0|kotak-re |   requireStack: [ '/root/relay.js' ]
+0|kotak-re | }
+
+^C
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# 

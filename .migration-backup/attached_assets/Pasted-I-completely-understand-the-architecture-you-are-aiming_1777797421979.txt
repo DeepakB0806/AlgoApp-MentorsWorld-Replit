@@ -1,0 +1,187 @@
+I completely understand the architecture you are aiming for now. You are building for massive multi-tenant scale (1000+ users).
+
+If you tie the Margin Calculator directly to the SMC memory cache, you risk bottlenecking the server during the morning sync, especially if 1000+ strategies are trying to read a single memory map simultaneously while the CSV is still parsing.
+
+You want cm-kotak-neo-v3.ts to be completely autonomous:
+
+Independent Token Resolution: It should figure out the ATM strike and grab the exact token on its own (likely by querying your database's instrumentConfigs or using the broker API directly).
+
+Independent Margin Check: It pings the Kotak REST API.
+
+Independent Capital Check: It pings Kotak's getLimits REST API to compare required margin vs. actual funds available.
+
+Because we are decoupling this, the CM file will act as a standalone Risk Management Daemon.
+
+Here is the exact Replit prompt to build this autonomous, highly scalable CM file.
+
+Copy & Paste this command to Replit:
+Task: Build Autonomous Capital Management (CM) Engine
+
+Context:
+The user is scaling the system for 1000+ user accounts. The Capital Management (cm-kotak-neo-v3.ts) engine must be completely decoupled from the Scrip Master (smc-kotak-neo-v3.ts) memory cache to prevent morning bottlenecks. The CM engine must autonomously resolve tokens, fetch live margins via the REST API (checkMargin), and cross-check against actual available funds (getLimits) for every deployed strategy.
+
+Instructions for Replit:
+Completely rewrite server/cm-kotak-neo-v3.ts to operate independently. Do NOT import liveContractCache from SMC.
+
+File: server/cm-kotak-neo-v3.ts
+
+TypeScript
+import type { IStorage } from "./storage";
+import type { BrokerConfig, StrategyPlan } from "@shared/schema";
+import EL from "./el-kotak-neo-v3";
+import { getInstrumentConfig } from "./cache";
+
+const LOG_PREFIX = "[CAPITAL-MGMT]";
+
+/**
+ * Autonomous Token Resolver
+ * Queries the database directly to find the matching contract token.
+ */
+async function resolveTokenAutonomous(storage: IStorage, ticker: string, strike: number, optType: string): Promise<string | null> {
+  try {
+     // Search the database for the instrument token (assuming SMC upserts daily contracts to DB)
+     // Or, if you use a specific token lookup endpoint in EL, use that here.
+     // For this implementation, we will fetch from instrument configs or a dedicated DB query.
+     const query = `SELECT token FROM instrument_configs WHERE ticker LIKE '${ticker}%' AND instrument_type LIKE '%OPT%' AND strike_price = ${strike} AND option_type = '${optType}' ORDER BY expiry_date ASC LIMIT 1`;
+     
+     // NOTE TO REPLIT DEVELOPER: Implement the exact DB query needed based on how your SMC saves parsed contracts to the Postgres DB.
+     // If contracts are NOT saved to the DB, use EL.searchInstrument() if available.
+     
+     // Placeholder for DB retrieval logic:
+     const result = await storage.findInstrumentToken(ticker, strike, optType); 
+     return result || null;
+  } catch (err) {
+     console.error(`${LOG_PREFIX} Failed to resolve token autonomously:`, err);
+     return null;
+  }
+}
+
+export async function processCapitalRequirements(storage: IStorage) {
+  console.log(`${LOG_PREFIX} Starting autonomous capital management sweep for all users...`);
+  
+  try {
+    const plans = await storage.getStrategyPlans();
+    const brokerConfigsList = await storage.getBrokerConfigs();
+    const brokerMap = new Map(brokerConfigsList.map(bc => [bc.id, bc]));
+
+    // Base fallback heuristics in case API fails
+    const baseSellMargin = 100000;
+    const hedgeDiscount = 60000;
+    const safeBuyMargin = 4000;
+
+    for (const plan of plans) {
+      if (plan.deploymentStatus !== 'active' && plan.deploymentStatus !== 'deployed') continue;
+      
+      const brokerConfig = brokerMap.get(plan.brokerConfigId);
+      if (!brokerConfig || !brokerConfig.isConnected) continue;
+
+      try {
+        // 1. Fetch Live Available Funds
+        const limitsRes = await EL.getLimits(brokerConfig);
+        const availableFunds = limitsRes.success && limitsRes.data ? parseFloat(limitsRes.data.avlCash || limitsRes.data.avlMrgn || "0") : 0;
+
+        // 2. Calculate Required Margin
+        const params = typeof plan.tradeParams === 'string' ? JSON.parse(plan.tradeParams) : plan.tradeParams;
+        if (!params) continue;
+
+        const allLegs = [
+          ...(params.uptrendLegs || []),
+          ...(params.downtrendLegs || []),
+          ...(params.neutralLegs || [])
+        ];
+
+        const lotMultiplier = plan.lotMultiplier || 1;
+        const instrConfig = getInstrumentConfig(plan.ticker, plan.exchange || "NFO");
+        const lotSize = instrConfig?.lotSize || 25;
+        const strikeInterval = instrConfig?.strikeInterval || 50;
+
+        const quoteRes = await EL.getQuote(brokerConfig, EL.mapExchange(plan.exchange || "NFO"), plan.ticker);
+        const ltp = quoteRes.success && quoteRes.ltp ? quoteRes.ltp : null;
+
+        let totalMarginAPI = 0;
+        let apiSuccess = true;
+        let sellLots = 0;
+        let buyLots = 0;
+        let totalMarginInternal = 0;
+
+        const atmStrike = ltp ? Math.round(ltp / strikeInterval) * strikeInterval : 0;
+
+        for (const leg of allLegs) {
+          const qty = (leg.lots || 1) * lotMultiplier;
+          const totalLegQty = qty * lotSize;
+            
+          if (leg.action === 'BUY') {
+              totalMarginInternal += (safeBuyMargin * qty); 
+              buyLots += qty;
+          } else if (leg.action === 'SELL') {
+              totalMarginInternal += (baseSellMargin * qty);
+              sellLots += qty;
+          }
+
+          if (atmStrike > 0 && apiSuccess) {
+              const offset = leg.strikeOffset || 0;
+              const targetStrike = leg.optionType === "CE" ? atmStrike + (offset * strikeInterval) : atmStrike - (offset * strikeInterval);
+
+              // AUTONOMOUS TOKEN RESOLUTION
+              const token = await resolveTokenAutonomous(storage, plan.ticker, targetStrike, leg.optionType);
+
+              if (token) {
+                  const marginRes = await EL.checkMargin(brokerConfig, {
+                    exSeg: EL.mapExchange(plan.exchange || "NFO"),
+                    prc: "0",
+                    prcTp: "MKT",
+                    prod: params.blockConfig?.productMode || "MIS",
+                    qty: String(totalLegQty),
+                    tok: token,
+                    trnsTp: leg.action === "BUY" ? "B" : "S",
+                    brkName: "KOTAK",
+                    brnchId: "ONLINE"
+                  });
+
+                  if (marginRes.success && marginRes.data && marginRes.data.ordMrgn) {
+                    totalMarginAPI += parseFloat(marginRes.data.ordMrgn);
+                  } else {
+                    apiSuccess = false; 
+                  }
+              } else {
+                  apiSuccess = false;
+              }
+          } else {
+              apiSuccess = false;
+          }
+        }
+
+        // 3. Final Margin Determination
+        let finalMargin = 0;
+        if (apiSuccess && totalMarginAPI > 0) {
+            finalMargin = totalMarginAPI;
+        } else {
+            const hedgedPairs = Math.min(sellLots, buyLots);
+            totalMarginInternal -= (hedgedPairs * hedgeDiscount);
+            finalMargin = Math.max(totalMarginInternal, 0);
+        }
+
+        // 4. Update Database
+        if (finalMargin > 0) {
+          await storage.updateStrategyPlan(plan.id, {
+            estimatedMargin: finalMargin.toFixed(2),
+            marginCalculatedAt: new Date().toISOString()
+          });
+          
+          // Cross-Check Log (Simulating the 1000+ user requirement)
+          if (availableFunds < finalMargin) {
+              console.warn(`${LOG_PREFIX} CAUTION: User ${brokerConfig.id} has insufficient funds for Plan ${plan.name}. Required: ₹${finalMargin}, Available: ₹${availableFunds}`);
+          }
+        }
+      } catch (err) {
+        console.error(`${LOG_PREFIX} Error processing plan ${plan.id}:`, err);
+      }
+    }
+  } catch (globalErr) {
+    console.error(`${LOG_PREFIX} Critical failure in CM Engine:`, globalErr);
+  }
+}
+Developer Note:
+The resolveTokenAutonomous function currently has a placeholder query. You must implement findInstrumentToken in storage.ts to query your database for the correct token based on ticker, strike, and optType. Because the SMC cache is decoupled, CM must read this from the database or via a direct EL broker call.
+
+This ensures your Capital Management engine is an entirely self-contained daemon that handles both the math and the fund cross-checking for 1000+ users!

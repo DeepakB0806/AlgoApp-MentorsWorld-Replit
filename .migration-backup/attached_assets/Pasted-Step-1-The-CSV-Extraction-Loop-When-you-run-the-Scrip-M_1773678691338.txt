@@ -1,0 +1,55 @@
+Step 1: The CSV Extraction Loop
+When you run the Scrip Master Sync, the code loops through all 100,000+ rows of the Kotak NFO CSV.
+For every single options contract it finds (e.g., a specific FINNIFTY Call or Put), it extracts the expiry date and pushes it into a massive array specific to that ticker:
+
+TypeScript
+if (!tickerData.has(baseTicker)) tickerData.set(baseTicker, { /*...*/ expiryDates: [] });
+const td = tickerData.get(baseTicker)!;
+
+// Extracts the date from the CSV row and pushes it into the array
+if (expiryDate) td.expiryDates.push(expiryDate); 
+By the end of the loop, the FINNIFTY bucket contains an array of thousands of dates.
+
+Step 2: The inferExpiryDay Function
+Once the CSV is fully read, it passes that massive array of dates into the inferExpiryDay function. Here is exactly what that function does:
+
+TypeScript
+function inferExpiryDay(expiryDates: Date[]): string {
+  if (expiryDates.length === 0) return "Thursday"; // Fallback if CSV is empty
+  const now = new Date();
+  
+  // 1. Filters out expired contracts, 2. Sorts the remaining dates chronologically
+  const sorted = expiryDates.filter(d => d >= now).sort((a, b) => a.getTime() - b.getTime());
+  
+  if (sorted.length === 0) return "Thursday";
+  
+  // 3. Grabs the VERY FIRST date (the nearest upcoming expiry) and gets the Day of the Week!
+  return DAY_NAMES[sorted[0].getDay()]; 
+}
+The Result: Total Automation
+Because of this logic, the platform automatically detects the standard expiry days based on whatever the NSE/Kotak publishes as the nearest expiry:
+
+For FINNIFTY, sorted[0] will naturally be a Tuesday. It returns "Tuesday" and saves it to the database.
+
+For BANKNIFTY, sorted[0] will be a Wednesday. It saves "Wednesday".
+
+For NIFTY, sorted[0] will be a Thursday. It saves "Thursday".
+
+When the Trade Engine runs, it pulls instrumentConfig.expiryDay from the database. It sees "Tuesday" for FINNIFTY, and uses Tuesday for its target math. The "Thursday" in the Trade Engine code is literally just an emergency fallback in case the database somehow gets wiped.
+
+Wait... Why is Replit's Holiday Fix (#39) Still Needed Then?
+You might be thinking: "If the system dynamically detects that NIFTY shifted to Wednesday this week because of a holiday, won't it just update the database to 'Wednesday' and work perfectly?"
+
+For the current week, yes. But think about what happens if you trade Next Week's Expiry (expiryWeekOffset = 1):
+
+It's Diwali week. NIFTY is shifted to Wednesday.
+
+The Sync runs. inferExpiryDay sees the nearest NIFTY expiry is Wednesday. Database updates: expiryDay = "Wednesday".
+
+Your strategy fires a trade for Next Week's Expiry.
+
+The Trade Engine calculates "Next Wednesday".
+
+THE ERROR: Next week is a normal week. The NIFTY expiry is actually on Thursday.
+
+The exact cache lookup fails, and the trade drops!

@@ -1,0 +1,1284 @@
+//@version=6
+// Indicator: SUN 11.0.108
+// Date: 2026-02-26 14:17 IST
+// Status: 🔴 FROZEN MASTER BUILD. ALL 10 PILLARS AND DATA PIPELINES ARE STRICTLY LOCKED.
+// Updates: UI Tooltips injected into Sections 2, 12, and 14. Zero logic distorted. Pillar 8 unlocked and updated to map visual plotting to execution variables (Buy and Sell signals fully synchronized with Lock System).
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+indicator("SUN 11.0.108", shorttitle="SUN 11.0.108", overlay=false, max_labels_count=500, max_lines_count=500)
+
+//=================================================
+// 1. GLOBAL PERSISTENT VARIABLES
+//=================================================
+varip log_version_name = "SUN 11.0.108"
+
+//=================================================
+// 2. CUSTOM TYPE DEFINITIONS
+//=================================================
+type TR 
+    float h
+    float l
+    float b
+    string pivot
+
+// SMART MODE DEFINITION
+type ModeReq
+    int id
+    int r3L     
+    int rST     
+    int rHT     
+    int rRSI    
+    int r3CTL   
+
+//==================================================
+//	===== INPUTS =====
+//==================================================
+
+group1a = "1a. START SYSTEM" 
+start_time = input.time(timestamp("05 Feb 2026 00:00 +0530"), "Start Time", group=group1a, inline="st", tooltip="Master toggle. The script will ignore all signals and locks prior to this exact date and time.")
+startLineColor = input.color(color.aqua, "Start Line Color", group=group1a, inline="start_style")
+startLineWidth = input.int(3, "Width", minval=1, maxval=5, group=group1a, inline="start_style")
+
+group1b = "1b. RESET SYSTEM" 
+enableReset = input.bool(true, "Enable Reset System", group=group1b, inline="reset", tooltip="When triggered, forcefully closes all active trades, disables alerts, and resets the entire Daisy Chain Lock System back to zero.")
+resetDateTime = input.time(timestamp("10 Feb 2026 00:00 +0530"), "Reset Time", group=group1b, inline="reset1")
+resetLineColor = input.color(color.red, "Reset Line Color", group=group1b, inline="reset_style")
+resetLineWidth = input.int(3, "Width", minval=1, maxval=5, group=group1b, inline="reset_style")
+
+// ========================================================================================
+// 	===== GRAPHIC OBJECTS & CONFIGURATORS =====
+// ========================================================================================
+
+G_2A = "2A. 3-LINES SYSTEM (VNSM,VNIM,VNLM)"
+show3Lines = input.bool(true, "3-Lines", group=G_2A, inline="2A", tooltip="Toggles the visibility of the 3-Lines moving averages.")
+c_fast     = input.color(color.blue,   "Fast Line", group=G_2A, inline="2A", tooltip="Color for the fast moving average line.")
+c_mid      = input.color(color.orange, "Mid Line", group=G_2A, inline="2A", tooltip="Color for the mid moving average line.")
+c_slow     = input.color(color.purple, "Slow Line", group=G_2A, inline="2A", tooltip="Color for the slow moving average line.")
+
+group3 = "2A.1. TIME FRAME (3-LINES)"
+fastLen = input.int(1, "Fast", minval=1, group=group3, inline="3", tooltip="Base lookback length for the fast line.")
+midLen = input.int(3, "Mid", minval=1, group=group3, inline="3", tooltip="Base lookback length for the mid line.")
+slowLen = input.int(4, "Slow", minval=1, group=group3, inline="3", tooltip="Base lookback length for the slow line.")
+
+group4 = "2A.2. ATR PERIODS (3-LINES)"
+fastATRLen = input.int(6, "Fast", minval=1, group=group4, inline="4", tooltip="ATR lookback period used for the fast line slope calculation.")
+midATRLen = input.int(6, "Mid", minval=1, group=group4, inline="4", tooltip="ATR lookback period used for the mid line slope calculation.")
+slowATRLen = input.int(6, "Slow", minval=1, group=group4, inline="4", tooltip="ATR lookback period used for the slow line slope calculation.")
+
+group5 = "2A.3. SMOOTH STRENGTH (3-LINES)"
+fastSmooth = input.int(2, "Fast", minval=1, group=group5, inline="5", tooltip="Smoothing factor applied to the fast line.")
+midSmooth = input.int(2, "Mid", minval=1, group=group5, inline="5", tooltip="Smoothing factor applied to the mid line.")
+slowSmooth = input.int(2, "Slow", minval=1, group=group5, inline="5", tooltip="Smoothing factor applied to the slow line.")
+
+G_2B = "2B. SUPERTREND (ST) SYSTEM"
+showSuperTrend = input.bool(true, "SuperTrend", group=G_2B, inline="2B", tooltip="Toggles the visibility of the SuperTrend line.")
+c_st_up        = input.color(color.green,  "ST Bull", group=G_2B, inline="2B", tooltip="Color when SuperTrend is in a bullish state.")
+c_st_dn        = input.color(color.red,    "ST Bear", group=G_2B, inline="2B", tooltip="Color when SuperTrend is in a bearish state.")
+
+group7 = "2B.1. SUPERTREND CONFIGURATOR"
+stAtrLen = input.int(10, "ST Length", minval=1, group=group7, inline="7", tooltip="ATR length used for SuperTrend calculation.")
+stMult = input.float(3.0, "ST Multiplier", minval=0.1, group=group7, inline="7", tooltip="Multiplier applied to the ATR for SuperTrend offset.")
+
+G_2C = "2C. HALF TREND (HT) SYSTEM"
+showHalfTrend = input.bool(true, "Half Trend", group=G_2C, inline="2C", tooltip="Toggles the visibility of the Half Trend line.")
+c_ht_up       = input.color(color.lime,   "HT Bull", group=G_2C, inline="2C", tooltip="Color when Half Trend is bullish.")
+c_ht_dn       = input.color(color.maroon, "HT Bear", group=G_2C, inline="2C", tooltip="Color when Half Trend is bearish.")
+
+group8 = "2C.1. HALF TREND CONFIGURATOR"
+halfTrendAtr = input.int(50, "HT Period", minval=1, group=group8, inline="8", tooltip="Lookback period for highest high / lowest low in Half Trend.")
+halfTrendAmplitude = input.float(10.0, "HT Amplitude", minval=0.1, group=group8, inline="8", tooltip="Amplitude scaling factor for the Half Trend.")
+
+G_2D = "2D. RSI SCALED"
+showRSI = input.bool(true, "RSI", group=G_2D, inline="2D", tooltip="Toggles the visibility of the scaled RSI line.")
+c_rsi   = input.color(color.aqua,   "Line", group=G_2D, inline="2D", tooltip="Color of the RSI line.")
+
+G_2E = "2E. ADX TREND SYSTEM (GLOBAL)"
+showADX = input.bool(true, "Show Scaled ADX", group=G_2E, inline="2E_Color", tooltip="Toggles the visibility of the scaled ADX line.")
+c_di_plus = input.color(color.green, "DI+ Color", group=G_2E, inline="2E_Color", tooltip="Color when DI+ is greater than DI- (Bullish).")
+c_di_minus = input.color(color.red, "DI- Color", group=G_2E, inline="2E_Color", tooltip="Color when DI- is greater than DI+ (Bearish).")
+
+adxLen = input.int(14, "Length", minval=1, group=G_2E, inline="2E_Config", tooltip="Lookback length for the ADX calculation.")
+adxSmooth = input.int(14, "Smooth", minval=1, group=G_2E, inline="2E_Config", tooltip="Smoothing length applied to the ADX.")
+adxThreshold = input.float(25, "Thold", minval=1, group=G_2E, inline="2E_Config", tooltip="The minimum ADX strength required. If ADX is below this number, the 'ADX Safety Gate' will block entries.")
+
+G_2F_OSC = "2F. 3CTL OSCILLATOR"
+show3CTL   = input.bool(true, "3CTL", group=G_2F_OSC, inline="2F", tooltip="Toggles the visibility of the 3CTL Accumulation line.")
+c_3ctl_up  = input.color(color.green,  "Bull", group=G_2F_OSC, inline="2F", tooltip="Color when 3CTL hits absolute +100 (Max Bullish).")
+c_3ctl_dn  = input.color(color.red,    "Bear", group=G_2F_OSC, inline="2F", tooltip="Color when 3CTL hits absolute -100 (Max Bearish).")
+c_3ctl_nt  = input.color(color.gray,   "Neutral", group=G_2F_OSC, inline="2F", tooltip="Color when 3CTL is transitioning or neutral.")
+
+G_2G = "2G. REFERENCE LINES"
+c_ref_100  = input.color(color.green,  "Max Ref.+100",     group=G_2G, inline="2G", tooltip="Color for the +100 upper boundary line.")
+c_ref_n100 = input.color(color.red,    "Min Ref.-100",     group=G_2G, inline="2G", tooltip="Color for the -100 lower boundary line.")
+c_ref_0    = input.color(color.gray,   "Neutral Ref.0", group=G_2G, inline="2G", tooltip="Color for the 0 neutral zero-line.")
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: STRATEGY LABELS PLOTTING & SETTINGS (Pillar #8)
+// =====================================================================
+G_2G1_UT = "2H-1. CHART SIGNALS (UP & DOWN)"
+c_buy_up_c  = input.color(color.green,  "Chart UT: Buy", group=G_2G1_UT, inline="2G1U", tooltip="Color of the UI marker plotted on the chart for an Uptrend Buy/Reversal.")
+c_hold_up_c = input.color(color.green,  "Hold", group=G_2G1_UT, inline="2G1U", tooltip="Color of the UI marker plotted on the chart for an Uptrend Hold.")
+c_sell_up_c = input.color(color.red,    "Sell", group=G_2G1_UT, inline="2G1U", tooltip="Color of the UI marker plotted on the chart for an Uptrend Sell.")
+c_buy_dn_c  = input.color(color.red,    "Chart DT: Buy", group=G_2G1_UT, inline="2G1D", tooltip="Color of the UI marker plotted on the chart for a Downtrend Buy/Reversal.")
+c_hold_dn_c = input.color(color.red,    "Hold", group=G_2G1_UT, inline="2G1D", tooltip="Color of the UI marker plotted on the chart for a Downtrend Hold.")
+c_sell_dn_c = input.color(color.green,  "Sell", group=G_2G1_UT, inline="2G1D", tooltip="Color of the UI marker plotted on the chart for a Downtrend Sell.")
+
+G_2G2_UT = "2H-2. PANE SIGNALS (UP & DOWN)"
+c_buy_up_i  = input.color(color.green,  "Pane UT: Buy", group=G_2G2_UT, inline="2G2U", tooltip="Color of the UI marker plotted in the indicator pane for an Uptrend Buy.")
+c_hold_up_i = input.color(color.green,  "Hold", group=G_2G2_UT, inline="2G2U", tooltip="Color of the UI marker plotted in the indicator pane for an Uptrend Hold.")
+c_sell_up_i = input.color(color.red,    "Sell", group=G_2G2_UT, inline="2G2U", tooltip="Color of the UI marker plotted in the indicator pane for an Uptrend Sell.")
+c_buy_dn_i  = input.color(color.red,    "Pane DT: Buy", group=G_2G2_UT, inline="2G2D", tooltip="Color of the UI marker plotted in the indicator pane for a Downtrend Buy.")
+c_hold_dn_i = input.color(color.red,    "Hold", group=G_2G2_UT, inline="2G2D", tooltip="Color of the UI marker plotted in the indicator pane for a Downtrend Hold.")
+c_sell_dn_i = input.color(color.green,  "Sell", group=G_2G2_UT, inline="2G2D", tooltip="Color of the UI marker plotted in the indicator pane for a Downtrend Sell.")
+
+group6 = "6. OTHER INPUT"
+mergeThresh = input.float(4.0, " All Line Merge Threshold", minval=0.1, maxval=7.0, group=group6, inline="6", tooltip="Tolerance level. Determines how closely the Fast, Mid, and Slow lines must align to register a valid +100 or -100 signal.")
+greenMix = input.float(0.9, "SMA Wt.", minval=0.0, maxval=3.0, group=group6, inline="6", tooltip="Blends the weighting between SMA and RMA calculation for the Slow Line to smooth out chop.")
+
+group_lock_seq = "8. LOCK SYSTEM WHOLE SEQUENCE"
+enableLockSystem = input.bool(true, "Enable Lock System (Sec 9 & 10 & 11)?", group=group_lock_seq, tooltip="Master toggle for the entire Daisy Chain logic. Unchecking this turns off all Ba1, LU, and LO memory states.")
+
+// =============================================================================
+//      SMART TOOLTIPS
+// =============================================================================
+tooltip_rsi   = "LR = Lower Range\nUR = Upper Range\nThese thresholds define the Overbought/Oversold zones."
+
+tooltip_UT_BUY = "UPTREND MODES (BUY & HOLD):\n(1) 3L=+100\n(2) ST=+100\n(3) 3L+ST=+100\n(4) HT=+100\n(5) 3L+HT=+100\n(6) 3L+ST+HT=+100\n(7) HT+ST=+100\n(8) 3CTL=+100\n(9) 3CTL+3L=+100\n(10) 3CTL+ST=+100\n(11) 3CTL+HT=+100\n(12) 3CTL+3L+ST=+100\n(13) 3CTL+3L+ST+HT=+100"
+
+tooltip_UT_SELL = "UPTREND MODES (SELL):\n(1) 3L=-100\n(2) ST=-100\n(3) 3L+ST=-100\n(4) HT=-100\n(5) 3L+HT=-100\n(6) 3L+ST+HT=-100\n(7) 3L+ST+RSI=+100\n(8) 3L+HT+RSI=+100\n(9) 3L+ST+HT+RSI=+100\n(10) RSI=+100\n(11) 3CTL=-100\n(12) 3L+3CTL=-100\n(13) ST+3CTL=-100\n(14) 3L+ST+3CTL=-100\n(15) HT+3CTL=-100\n(16) 3L+HT+3CTL=-100\n(17) 3L+ST+HT+3CTL=-100\n(18) 3CTL+RSI=+100\n(19) 3L+ST+3CTL+RSI=+100\n(20) 3L+HT+3CTL+RSI=+100\n(21) 3L+ST+HT+3CTL+RSI=+100\n(22) 3CTL+3L+RSI=+100"
+
+tooltip_DT_BUY = "DOWNTREND MODES (BUY & HOLD):\n(1) 3L=-100\n(2) ST=-100\n(3) 3L+ST=-100\n(4) HT=-100\n(5) 3L+HT=-100\n(6) 3L+ST+HT=-100\n(7) HT+ST=-100\n(8) 3CTL=-100\n(9) 3CTL+3L=-100\n(10) 3CTL+ST=-100\n(11) 3CTL+HT=-100\n(12) 3CTL+3L+ST=-100\n(13) 3CTL+3L+ST+HT=-100"
+
+tooltip_DT_SELL = "DOWNTREND MODES (SELL):\n(1) 3L=+100\n(2) ST=+100\n(3) 3L+ST=+100\n(4) HT=+100\n(5) 3L+HT=+100\n(6) 3L+ST+HT=+100\n(7) 3L+ST+RSI=-100\n(8) 3L+HT+RSI=-100\n(9) 3L+ST+HT+RSI=-100\n(10) RSI=-100\n(11) 3CTL=+100\n(12) 3L+3CTL=+100\n(13) ST+3CTL=+100\n(14) 3L+ST+3CTL=+100\n(15) HT+3CTL=+100\n(16) 3L+HT+3CTL=+100\n(17) 3L+ST+HT+3CTL=+100\n(18) 3CTL+RSI=-100\n(19) 3L+ST+3CTL+RSI=-100\n(20) 3L+HT+3CTL+RSI=-100\n(21) 3L+ST+HT+3CTL+RSI=-100\n(22) 3CTL+3L+RSI=-100"
+
+
+// =============================================================================
+//      9. ALERT SYSTEM
+// =============================================================================
+group9 = "9. ALERT SYSTEM - SECTION 9"
+alertEnabled9 = input.bool(true, "Enable Section 9", group=group9)
+clockStartHour9 = input.int(0, "Start Hr", minval=0, maxval=23, group=group9, inline="Time9A")
+clockStartMin9  = input.int(1, "Start Min", minval=0, maxval=59, group=group9, inline="Time9A")
+clockEndHour9   = input.int(8, "End Hr", minval=0, maxval=23, group=group9, inline="Time9B")
+clockEndMin9    = input.int(0, "End Min", minval=0, maxval=59, group=group9, inline="Time9B")
+c_bg_9_in = input.color(color.new(color.red, 80), "Section 9 BG Color", group=group9)
+
+group9s = "9S. SAFETY GATES - SECTION 9"
+gate9_rsi = input.bool(false, "Block Entry at RSI Extremes", group=group9s, tooltip="If checked, prevents new Buy/Sell alerts if the RSI is currently in the Overbought or Oversold zones (defined below).")
+gate9_adx = input.bool(false, "Block Entry if ADX < Threshold", group=group9s, tooltip="If checked, prevents new Buy/Sell alerts in sideways/choppy markets where ADX is weak.")
+
+group9lock = "9L. FRESH LOCK LOGIC - SECTION 9"
+enableFreshLock9 = input.bool(true, "Enable Fresh Lock Logic (Section 9)?", group=group9lock, tooltip="Controls the 'B2/C2' self-locking mechanism. Once a Sell occurs, it locks out further signals until a reset or opposite section clears it.")
+
+group9a = "9A. RSI CONFIGURATION - SECTION 9"
+rsiPeriod9 = input.int(14, "RSI: Period", minval=1, group=group9a, inline="9RSI")
+rsiLowerRange9 = input.float(40, "LR", minval=0, maxval=50, group=group9a, inline="9RSI")
+rsiUpperRange9 = input.float(60, "UR", minval=50, maxval=100, group=group9a, inline="9RSI")
+
+group9b = "9B. UPTREND (UT) MODES - SECTION 9"
+buyUptrendMode9   = input.int(8, "Buy", minval=1, maxval=13, group=group9b, inline="9UT1", tooltip=tooltip_UT_BUY)
+holdUptrendMode9  = input.int(9, "Hold", minval=1, maxval=13, group=group9b, inline="9UT1")
+sellUptrendMode9  = input.int(22, "Sell", minval=1, maxval=22, group=group9b, inline="9UT2", tooltip=tooltip_UT_SELL)
+revDowntrendMode9 = input.int(8, "Rev DT", minval=1, maxval=13, group=group9b, inline="9UT3", tooltip="Flip L>S\n\n" + tooltip_DT_BUY)
+
+group9c = "9C. DOWNTREND (DT) MODES - SECTION 9"
+buyDowntrendMode9   = input.int(8, "Buy", minval=1, maxval=13, group=group9c, inline="9DT1", tooltip=tooltip_DT_BUY)
+holdDowntrendMode9  = input.int(9, "Hold", minval=1, maxval=13, group=group9c, inline="9DT1")
+sellDowntrendMode9  = input.int(22, "Sell", minval=1, maxval=22, group=group9c, inline="9DT2", tooltip=tooltip_DT_SELL)
+revUptrendMode9     = input.int(8, "Rev UT", minval=1, maxval=13, group=group9c, inline="9DT3", tooltip="Flip S>L\n\n" + tooltip_UT_BUY)
+
+// =============================================================================
+//      10. ALERT SYSTEM
+// =============================================================================
+group10 = "10. ALERT SYSTEM - SECTION 10"
+alertEnabled10 = input.bool(true, "Enable Section 10", group=group10)
+clockStartHour10 = input.int(8, "Start Hr", minval=0, maxval=23, group=group10, inline="Time10A")
+clockStartMin10  = input.int(0, "Start Min", minval=0, maxval=59, group=group10, inline="Time10A")
+clockEndHour10   = input.int(16, "End Hr", minval=0, maxval=23, group=group10, inline="Time10B")
+clockEndMin10    = input.int(0, "End Min", minval=0, maxval=59, group=group10, inline="Time10B")
+c_bg_10_in = input.color(color.new(color.green, 80), "Section 10 BG Color", group=group10)
+
+group10s = "10S. SAFETY GATES - SECTION 10"
+gate10_rsi = input.bool(false, "Block Entry at RSI Extremes", group=group10s, tooltip="If checked, prevents new Buy/Sell alerts if the RSI is currently in the Overbought or Oversold zones (defined below).")
+gate10_adx = input.bool(false, "Block Entry if ADX < Threshold", group=group10s, tooltip="If checked, prevents new Buy/Sell alerts in sideways/choppy markets where ADX is weak.")
+
+group10lock = "10L. FRESH LOCK LOGIC - SECTION 10"
+enableFreshLock10 = input.bool(true, "Enable Fresh Lock Logic (Section 10)?", group=group10lock, tooltip="Controls the 'B2/C2' self-locking mechanism. Once a Sell occurs, it locks out further signals until a reset or opposite section clears it.")
+
+group10a = "10A. RSI CONFIGURATION - SECTION 10"
+rsiPeriod10 = input.int(14, "RSI: Period", minval=1, group=group10a, inline="10RSI")
+rsiLowerRange10 = input.float(40, "LR", minval=0, maxval=50, group=group10a, inline="10RSI")
+rsiUpperRange10 = input.float(60, "UR", minval=50, maxval=100, group=group10a, inline="10RSI")
+
+group10b = "10B. UPTREND (UT) MODES - SECTION 10"
+buyUptrendMode10   = input.int(8, "Buy", minval=1, maxval=13, group=group10b, inline="10UT1", tooltip=tooltip_UT_BUY)
+holdUptrendMode10  = input.int(9, "Hold", minval=1, maxval=13, group=group10b, inline="10UT1")
+sellUptrendMode10  = input.int(22, "Sell", minval=1, maxval=22, group=group10b, inline="10UT2", tooltip=tooltip_UT_SELL)
+revDowntrendMode10 = input.int(8, "Rev DT", minval=1, maxval=13, group=group10b, inline="10UT3", tooltip="Flip L>S\n\n" + tooltip_DT_BUY)
+
+group10c = "10C. DOWNTREND (DT) MODES - SECTION 10"
+buyDowntrendMode10   = input.int(8, "Buy", minval=1, maxval=13, group=group10c, inline="10DT1", tooltip=tooltip_DT_BUY)
+holdDowntrendMode10  = input.int(9, "Hold", minval=1, maxval=13, group=group10c, inline="10DT1")
+sellDowntrendMode10  = input.int(22, "Sell", minval=1, maxval=22, group=group10c, inline="10DT2", tooltip=tooltip_DT_SELL)
+revUptrendMode10     = input.int(8, "Rev UT", minval=1, maxval=13, group=group10c, inline="10DT3", tooltip="Flip S>L\n\n" + tooltip_UT_BUY)
+
+
+// =============================================================================
+//      11. ALERT SYSTEM
+// =============================================================================
+group11 = "11. ALERT SYSTEM - SECTION 11"
+alertEnabled11 = input.bool(true, "Enable Section 11", group=group11)
+clockStartHour11 = input.int(16, "Start Hr", minval=0, maxval=23, group=group11, inline="Time11A")
+clockStartMin11  = input.int(0, "Start Min", minval=0, maxval=59, group=group11, inline="Time11A")
+clockEndHour11   = input.int(23, "End Hr", minval=0, maxval=23, group=group11, inline="Time11B")
+clockEndMin11    = input.int(59, "End Min", minval=0, maxval=59, group=group11, inline="Time11B")
+c_bg_11_in = input.color(color.new(color.purple, 80), "Section 11 BG Color", group=group11)
+
+group11s = "11S. SAFETY GATES - SECTION 11"
+gate11_rsi = input.bool(false, "Block Entry at RSI Extremes", group=group11s, tooltip="If checked, prevents new Buy/Sell alerts if the RSI is currently in the Overbought or Oversold zones (defined below).")
+gate11_adx = input.bool(false, "Block Entry if ADX < Threshold", group=group11s, tooltip="If checked, prevents new Buy/Sell alerts in sideways/choppy markets where ADX is weak.")
+
+group11lock = "11L. FRESH LOCK LOGIC - SECTION 11"
+enableFreshLock11 = input.bool(true, "Enable Fresh Lock Logic (Section 11)?", group=group11lock, tooltip="Controls the 'B2/C2' self-locking mechanism. Once a Sell occurs, it locks out further signals until a reset or opposite section clears it.")
+
+group11a = "11A. RSI CONFIGURATION - SECTION 11"
+rsiPeriod11 = input.int(14, "RSI: Period", minval=1, group=group11a, inline="11RSI")
+rsiLowerRange11 = input.float(40, "LR", minval=0, maxval=50, group=group11a, inline="11RSI")
+rsiUpperRange11 = input.float(60, "UR", minval=50, maxval=100, group=group11a, inline="11RSI")
+
+group11b = "11B. UPTREND (UT) MODES - SECTION 11"
+buyUptrendMode11   = input.int(8, "Buy", minval=1, maxval=13, group=group11b, inline="11UT1", tooltip=tooltip_UT_BUY)
+holdUptrendMode11  = input.int(9, "Hold", minval=1, maxval=13, group=group11b, inline="11UT1")
+sellUptrendMode11  = input.int(22, "Sell", minval=1, maxval=22, group=group11b, inline="11UT2", tooltip=tooltip_UT_SELL)
+revDowntrendMode11 = input.int(8, "Rev DT", minval=1, maxval=13, group=group11b, inline="11UT3", tooltip="Flip L>S\n\n" + tooltip_DT_BUY)
+
+group11c = "11C. DOWNTREND (DT) MODES - SECTION 11"
+buyDowntrendMode11   = input.int(8, "Buy", minval=1, maxval=13, group=group11c, inline="11DT1", tooltip=tooltip_DT_BUY)
+holdDowntrendMode11  = input.int(9, "Hold", minval=1, maxval=13, group=group11c, inline="11DT1")
+sellDowntrendMode11  = input.int(22, "Sell", minval=1, maxval=22, group=group11c, inline="11DT2", tooltip=tooltip_DT_SELL)
+revUptrendMode11     = input.int(8, "Rev UT", minval=1, maxval=13, group=group11c, inline="11DT3", tooltip="Flip S>L\n\n" + tooltip_UT_BUY)
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: LOCK TABLE SETTINGS
+// =====================================================================
+group_lockA = "12 A. LOCK TABLE SETTINGS"
+show_lock_table = input.bool(true, "Show", group=group_lockA, inline="12A1", tooltip="Toggles the visibility of the Lock System Status Table.")
+table_size = input.string("Small","Size",options=["Auto", "Tiny", "Small", "Normal", "Large", "Huge"],group = group_lockA,inline = "12A1", tooltip="Size of the text inside the Lock Table.")
+tablePosInput = input.string("Bottom Left", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left", "Top Center", "Bottom Center", "Middle Left", "Middle Center", "Middle Right"], group = group_lockA, inline = "12A1", tooltip="Screen position where the Lock Table will be anchored.")
+
+table_pos = switch tablePosInput
+    "Top Left"      => position.top_left
+    "Top Center"    => position.top_center
+    "Top Right"     => position.top_right
+    "Middle Left"   => position.middle_left
+    "Middle Center" => position.middle_center
+    "Middle Right"  => position.middle_right
+    "Bottom Left"   => position.bottom_left
+    "Bottom Center" => position.bottom_center
+    => position.bottom_right
+
+secLabelColor = input.color(color.new(color.navy, 20), "HDR BG", group=group_lockA, inline="12A2", tooltip="Background color of the table headers.")
+tableTextColor = input.color(color.new(color.white,0), "HDR Txt", group=group_lockA, inline="12A2", tooltip="Text color of the table headers.")
+tableVariableColColor = input.color(color.new(color.silver,10), "COL BG", group=group_lockA, inline="12A2", tooltip="Background color of the variable column cells.")
+tableVariableColTextColor = input.color(color.new(color.black,0), "COL Txt", group=group_lockA, inline="12A2", tooltip="Text color of the variable column cells.")
+c_txt_sr = input.color(color.white, "S/R TXT", group=group_lockA, inline="12A2", tooltip="Color for Start/Reset time text.")
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: LOCK LABEL SETTINGS 
+// =====================================================================
+group_lockB = "12 B. LOCK LABEL SETTINGS - BACKGROUND (BG), TEXT (Txt)"
+show_lock_labels = input.bool(true, "Show", group=group_lockB, inline="12B1", tooltip="Toggles the visibility of text labels (BUY/SELL/HOLD + Lock State) on the chart.")
+pa_bs_off        = input.float(1.0, "B/S Txt Label Offset", minval=0.1, step=0.1, group=group_lockB, inline="12B1", tooltip="Vertical offset multiplier for Buy/Sell text labels.")
+pa_hold_bs_off   = input.float(1.5, "Hold B/S Txt Label Offset", minval=0.1, step=0.1, group=group_lockB, inline="12B1", tooltip="Vertical offset multiplier for Hold text labels.")
+label_size       = input.string("Small","Size",options=["Auto", "Tiny", "Small", "Normal", "Large", "Huge"],display = display.none,group = group_lockB,inline = "12B1", tooltip="Size of the text labels.")
+
+c_lbl_buy_ut  = input.color(color.new(color.navy,20), "Buy UT", group=group_lockB, inline="12B2", tooltip="Background color for Uptrend Buy text labels.")
+c_lbl_sell_ut = input.color(color.new(color.maroon,20), "Sell UT", group=group_lockB, inline="12B2", tooltip="Background color for Uptrend Sell text labels.")
+c_lbl_buy_dt  = input.color(color.new(color.maroon,20), "Buy DT", group=group_lockB, inline="12B2", tooltip="Background color for Downtrend Buy text labels.")
+c_lbl_sell_dt = input.color(color.new(color.navy,20), "Sell DT", group=group_lockB, inline="12B2", tooltip="Background color for Downtrend Sell text labels.")
+label_text    = input.color(color.new(color.white,0), "Txt Color", group=group_lockB, inline="12B2", tooltip="Text color for the generated action labels.")
+enable_debugging = show_lock_labels
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: TREND TABLE CALCULATION & SETTINGS (Pillar #7)
+// =====================================================================
+G_PA2A1 = "14 A1. TREND TABLE SETTINGS"
+show_trend_table = input.bool(true, "Show Trend Table?", group=G_PA2A1, tooltip="Toggles the visibility of the Multi-Timeframe Trend Table.")
+pa_pos  = input.string("Bottom Right", "Trend Table Position", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left", "Middle Right", "Middle Left", "Middle Center"], group=G_PA2A1, tooltip="Screen position where the Trend Table will be anchored.")
+pa_trp  = input.int(30, "Transparency", minval=0, maxval=100, group=G_PA2A1, inline="color", tooltip="Transparency level for the table background colors (0 = solid, 100 = invisible).")
+pa_fSz  = input.string("Small", "Fonts", options=["Auto", "Tiny", "Small", "Normal", "Large", "Huge"], group=G_PA2A1, inline="font", tooltip="Font size for the main table data.")
+pa_sSz  = input.string("Small", "Status", options=["Auto", "Tiny", "Small", "Normal", "Large", "Huge"], group=G_PA2A1, inline="font", tooltip="Font size for the footer/status text.")
+pa_tz   = input.string("Asia/Kolkata", "Timezone", options=["Asia/Kolkata", "America/New_York", "Europe/London", "Asia/Tokyo", "UTC", "Exchange"], group=G_PA2A1, inline="font", tooltip="Timezone format used for the table timestamp.")
+pa_sBg  = input.color(color.gray, "Row Last BG", group=G_PA2A1, inline="color", tooltip="Background color for the status/footer row.")
+pa_sTx  = input.color(color.white, "Row Last Txt", group=G_PA2A1, inline="color", tooltip="Text color for the status/footer row.")
+pa_lBg  = input.color(color.new(#00bcd4,0), "COL BG", group=G_PA2A1, inline="color2", tooltip="Background color for standard data columns.")
+pa_lTx  = input.color(color.new(#37474f,0), "COL Txt", group=G_PA2A1, inline="color2", tooltip="Text color for standard data columns.")
+pa_cTx  = input.color(color.white, "Cell Txt", group=G_PA2A1, inline="color2", tooltip="Text color for dynamically colored cells (Bullish/Bearish).")
+
+G_PA2A2 = "14 A2. TREND SETTINGS"
+pa_sTF  = input.string("5", "Trend Signal Correlation TF", options=["5", "10", "15", "30", "60", "D", "W", "M"], group=G_PA2A2, tooltip="The timeframe used to plot the Reversal (L/S) visual labels on the chart.")
+pa_sMod = input.string("Confirmed (Wait for Close)", " Trend Signal Calculation", options=["Real-Time (Zero Lag)", "Confirmed (Wait for Close)"], group=G_PA2A2, tooltip="Real-Time (Zero Lag) calculates on the live blinking candle. Confirmed waits for the candle to close.")
+pa_rMod = input.int(3, "Trend Reversal Strength", minval=1, maxval=3, group=G_PA2A2, tooltip="Defines the strictness of the V-Reversal. 1 = 1-Bar, 2 = 2-Bar, 3 = V-Surge (Nuke), 4 = V-Seq.")
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: TREND LABELS PLOTTING & SETTINGS
+// =====================================================================
+G_PA2B = "14 B. TREND LABEL SETTINGS - BACKGROUND (BG), TEXT (Txt)"
+show_trend_labels = input.bool(true, "Show", group=G_PA2B, inline="14B1", tooltip="Toggles the visibility of the Long (L) / Short (S) labels driven by the V-Reversal engine.")
+pa_lbl_pos = input.string("Standard (L=Low, S=High)", "Position", options=["Standard (L=Low, S=High)", "Inverted (L=High, S=Low)"], group=G_PA2B, inline="14B1", tooltip="Standard plots Longs below the bar and Shorts above. Inverted flips this.")
+pa_mSz  = input.string("Normal", "Size", options=["Auto", "Tiny", "Small", "Normal", "Large", "Huge"], group=G_PA2B, inline="14B1", tooltip="Text size for standard L and S marker labels.")
+pa_shwC = input.bool(true, "Show Hold L/S", group=G_PA2B, inline="14B2", tooltip="Toggles the visual plotting of the Hold logic on the chart when a strong Reversal Level (3 or 4) remains active.")
+pa_cSz  = input.string("Normal", "Size", options=["Auto", "Tiny", "Small", "Normal", "Large", "Huge"], group=G_PA2B, inline="14B2", tooltip="Text size for continuous Hold C-markers.")
+pa_off  = input.float(1.5, "L/S Offset", minval=0.1, step=0.1, group=G_PA2B, inline="14B3", tooltip="Vertical offset multiplier for the primary L/S Reversal markers.") 
+pa_hold_off = input.float(1.2, "Hold Offset", minval=0.1, step=0.1, group=G_PA2B, inline="14B3", tooltip="Vertical offset multiplier for the continuous Hold markers.") 
+pa_cB_input   = input.color(color.aqua, "Bullish (L/VL)", group=G_PA2B, inline="14B4", tooltip="Color applied to Bullish (L / VL) labels.")
+pa_cS_input   = input.color(color.orange, "Bearish (S/VS)", group=G_PA2B, inline="14B4", tooltip="Color applied to Bearish (S / VS) labels.")
+pa_txt_col    = input.color(color.white, "Txt Color", group=G_PA2B, inline="14B4", tooltip="Color of the text within the L/S labels.")
+
+// ========================================================================================
+// 	===== OTHER VARIABLES =====
+// ========================================================================================
+var bool alertsDisabledByReset = false
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: DAISY CHAIN LOCK SYSTEM (DO NOT MODIFY)
+// =====================================================================
+var bool lock9B1_from9B2 = false
+var bool lock10B1_from10B2 = false
+var bool lock11B1_from11B2 = false
+var bool lock9C1_from9C2 = false
+var bool lock10C1_from10C2 = false
+var bool lock11C1_from11C2 = false
+var bool lock9B2_self  = false
+var bool lock10B2_self = false
+var bool lock11B2_self = false
+var bool lock9C2_self  = false
+var bool lock10C2_self = false
+var bool lock11C2_self = false
+// =====================================================================
+
+// =============================================================================
+// 	===== TIME SECTIONS =====
+// =============================================================================
+var bool inUptrendTrade        = false
+var bool inDowntrendTrade      = false
+
+currentHour = hour(time, "Asia/Kolkata")
+currentMinute = minute(time, "Asia/Kolkata")
+currentTimeMinutes = currentHour * 60 + currentMinute
+
+startTime9 = clockStartHour9 * 60 + clockStartMin9
+endTime9 = clockEndHour9 * 60 + clockEndMin9
+startTime10 = clockStartHour10 * 60 + clockStartMin10
+endTime10 = clockEndHour10 * 60 + clockEndMin10
+startTime11 = clockStartHour11 * 60 + clockStartMin11
+endTime11 = clockEndHour11 * 60 + clockEndMin11
+
+inSection9 = alertEnabled9 and currentTimeMinutes >= startTime9 and currentTimeMinutes < endTime9
+inSection10 = alertEnabled10 and currentTimeMinutes >= startTime10 and currentTimeMinutes < endTime10
+inSection11 = alertEnabled11 and currentTimeMinutes >= startTime11 and currentTimeMinutes < endTime11
+
+activeSection = inSection9 ? 9 : inSection10 ? 10 : inSection11 ? 11 : 0
+alertEnabled = activeSection > 0
+
+// =============================================================================
+// 	===== HELPER FUNCTIONS =====
+// =============================================================================
+sz(v)=> v=="Auto"?size.auto:v=="Tiny"?size.tiny:v=="Small"?size.small:v=="Normal"?size.large:v=="Huge"?size.huge:size.small
+cl(t,c,r,x,b,tx,s)=>table.cell(t,c,r,x,bgcolor=b,text_color=tx,text_size=s)
+cl_b(t,c,r,x,b,tx,s)=>table.cell(t,c,r,x,bgcolor=b,text_color=tx,text_size=s, text_formatting=text.format_bold)
+
+f_last3(float p) =>
+    str.tostring(math.round(p) % 1000, "000")
+
+formatCell(tableID, col, row, varNameStr, statusValue) =>
+    fixeColbgColor = statusValue ? color.new(color.red, 40) : color.new(color.green, 40)
+    statusStr = statusValue ? "LU" : "LO"
+    table.cell(tableID, col, row, varNameStr, text_color=tableVariableColTextColor, bgcolor=tableVariableColColor, text_size=sz(table_size))
+    table.cell(tableID, col+1, row, statusStr, text_color=color.black, bgcolor=fixeColbgColor, text_size=sz(table_size))
+
+f_desc_ut_buy(id) =>
+    id==1?"3L=+100": id==2?"ST=+100": id==3?"3L+ST=+100": id==4?"HT=+100": id==5?"3L+HT=+100": id==6?"3L+ST+HT=+100": id==7?"HT+ST=+100": id==8?"3CTL=+100": id==9?"3CTL+3L=+100": id==10?"3CTL+ST=+100": id==11?"3CTL+HT=+100": id==12?"3CTL+3L+ST=+100": id==13?"3CTL+3L+ST+HT=+100": "Unknown"
+
+f_desc_ut_sell(id) =>
+    id==1?"3L=-100": id==2?"ST=-100": id==3?"3L+ST=-100": id==4?"HT=-100": id==5?"3L+HT=-100": id==6?"3L+ST+HT=-100": id==7?"3L+ST+RSI=+100": id==8?"3L+HT+RSI=+100": id==9?"3L+ST+HT+RSI=+100": id==10?"RSI=+100": id==11?"3CTL=-100": id==12?"3L+3CTL=-100": id==13?"ST+3CTL=-100": id==14?"3L+ST+3CTL=-100": id==15?"HT+3CTL=-100": id==16?"3L+HT+3CTL=-100": id==17?"3L+ST+HT+3CTL=-100": id==18?"3CTL+RSI=+100": id==19?"3L+ST+3CTL+RSI=+100": id==20?"3L+HT+3CTL+RSI=+100": id==21?"3L+ST+HT+3CTL+RSI=+100": id==22?"3CTL+3L+RSI=+100": "Unknown"
+
+f_desc_dt_buy(id) =>
+    id==1?"3L=-100": id==2?"ST=-100": id==3?"3L+ST=-100": id==4?"HT=-100": id==5?"3L+HT=-100": id==6?"3L+ST+HT=-100": id==7?"HT+ST=-100": id==8?"3CTL=-100": id==9?"3CTL+3L=-100": id==10?"3CTL+ST=-100": id==11?"3CTL+HT=-100": id==12?"3CTL+3L+ST=-100": id==13?"3CTL+3L+ST+HT=-100": "Unknown"
+
+f_desc_dt_sell(id) =>
+    id==1?"3L=+100": id==2?"ST=+100": id==3?"3L+ST=+100": id==4?"HT=+100": id==5?"3L+HT=+100": id==6?"3L+ST+HT=+100": id==7?"3L+ST+RSI=-100": id==8?"3L+HT+RSI=-100": id==9?"3L+ST+HT+RSI=-100": id==10?"RSI=-100": id==11?"3CTL=+100": id==12?"3L+3CTL=+100": id==13?"ST+3CTL=+100": id==14?"3L+ST+3CTL=+100": id==15?"HT+3CTL=+100": id==16?"3L+HT+3CTL=+100": id==17?"3L+ST+HT+3CTL=+100": id==18?"3CTL+RSI=-100": id==19?"3L+ST+3CTL+RSI=-100": id==20?"3L+HT+3CTL+RSI=-100": id==21?"3L+ST+HT+3CTL+RSI=-100": id==22?"3CTL+3L+RSI=-100": "Unknown"
+
+f_getActionBinary(actionText) =>
+    prefix = str.substring(actionText, 0, 3)
+    prefix == "BUY" ? 1 : prefix == "SEL" ? 0 : prefix == "HOL" ? 3 : na
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: NATIVE DYNAMIC HTF DATA REQUESTS
+// =====================================================================
+req(t)=>request.security(syminfo.tickerid,t,[high,low,close,high[1],low[1],close[1],high[2],low[2],close[2],high[3],low[3],close[3],high[4],low[4],close[4]],gaps=barmerge.gaps_off,lookahead=barmerge.lookahead_off,ignore_invalid_symbol=true)
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: V-REVERSAL (SURGE/SEQ) LOGIC (DO NOT MODIFY)
+// =====================================================================
+calc_lvl(h,l,c,h1,l1,c1,h2,l2,c2,h3,l3,c3)=>
+    float H=nz(h), float L=nz(l), float C=nz(c), float H1=nz(h1), float L1=nz(l1), float C1=nz(c1)
+    float H2=nz(h2), float L2=nz(l2), float C2=nz(c2), float H3=nz(h3), float L3=nz(l3)
+    
+    bool b_step0 = (H > H1) and (L > L1) and (C > H1)
+    bool b_step1 = (H1 > H2) and (L1 > L2) and (C1 > H2)
+    bool b_step2 = (H2 > H3) and (L2 > L3) and (C2 > H3)
+    
+    bool s_step0 = (H < H1) and (L < L1) and (C < L1)
+    bool s_step1 = (H1 < H2) and (L1 < L2) and (C1 < L2)
+    bool s_step2 = (H2 < H3) and (L2 < L3) and (C2 < L3)
+    
+    bool bull_nuke = b_step0 and (C > math.max(H1, math.max(H2, H3)))
+    bool bull_seq  = b_step0 and b_step1 and b_step2
+    
+    bool bear_nuke = s_step0 and (C < math.min(L1, math.min(L2, L3)))
+    bool bear_seq  = s_step0 and s_step1 and s_step2
+
+    int lvl = 0
+    int tag = 0 
+    
+    if bull_seq
+        lvl := 4
+        tag := 4
+    else if bull_nuke
+        lvl := 3
+        tag := 3
+    else if b_step0
+        lvl := 1
+        tag := 1
+        if C > H2
+            lvl := 2
+            tag := 2
+            
+    else if bear_seq
+        lvl := -4
+        tag := -4
+    else if bear_nuke
+        lvl := -3
+        tag := -3
+    else if s_step0
+        lvl := -1
+        tag := -1
+        if C < L2
+            lvl := -2
+            tag := -2
+
+    if na(h)
+        lvl := 99
+        tag := 99
+
+    [lvl, tag]
+// =====================================================================
+
+toTrend(lvl, req_str) =>
+    int(lvl == 99 ? 99 : math.abs(lvl) >= req_str ? (lvl > 0 ? 1 : -1) : 0)
+
+diff(c,h,l,h1,l1,h2,l2)=>
+    float deltaH = h - h1
+    float deltaL = l - l1
+    float deltaC = c >= ((h1 + l1) / 2) ? c - h1 : c - l1
+    TR.new(deltaH, deltaL, deltaC, "---")
+
+vis_atr = ta.atr(14)
+vis_offset_bs = vis_atr * pa_bs_off
+vis_offset_hold_bs = vis_atr * pa_hold_bs_off
+vis_offset_ls = vis_atr * pa_off
+vis_offset_hold = vis_atr * pa_hold_off
+
+label_(x, isUp, col, offset_val)=>
+    float y_loc = isUp ? high + offset_val : low - offset_val
+    string y_style = isUp ? label.style_label_down : label.style_label_up
+    if enable_debugging and show_lock_labels
+        label.new(bar_index, y_loc, str.tostring(x) + "\n" + f_last3(close), force_overlay = true, textcolor = label_text, color = col, size = sz(label_size), style=y_style)
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: JSON ALERT SYSTEM AND STRINGS (DO NOT MODIFY)
+// =====================================================================
+get_json_alert(string actionVal, string localT, string ex, string tick, float rsiV, int mode, string desc, float fLine, float mLine, float sLine, float stScaled, float htScaled, float rScaled, string activeSec, int actionBin,string lockstate, int t3ctl, float adxV, float adxS, string vRev, string stratRec, int trAction) =>
+    (
+    "{" + 
+    "\"action\":\"" + actionVal + "\"," + 
+    "\"indicator\":\"" + log_version_name + "\"," + 
+    "\"price\":\"" + str.tostring(close) + "\"," + 
+    "\"timestamp\":\"" + str.tostring(time) + "\"," + 
+    "\"local_time\":\"" + localT + "\"," + 
+    "\"exchange\":\"" + ex + "\"," + 
+    "\"ticker\":\"" + tick + "\"," + 
+    "\"rsi\":\"" + str.tostring(math.round(rsiV, 2)) + "\"," + 
+    "\"mode\":\"" + str.tostring(mode) + "\"," + 
+    "\"mode_desc\":\"" + desc + "\"," + 
+    "\"fast_line\":\"" + str.tostring(math.round(fLine, 2)) + "\"," + 
+    "\"mid_line\":\"" + str.tostring(math.round(mLine, 2)) + "\"," + 
+    "\"slow_line\":\"" + str.tostring(math.round(sLine, 2)) + "\"," + 
+    "\"supertrend\":\"" + str.tostring(stScaled) + "\"," + 
+    "\"half_trend\":\"" + str.tostring(math.round(htScaled, 2)) + "\"," + 
+    "\"rsi_scaled\":\"" + str.tostring(math.round(rScaled, 2)) + "\"," + 
+    "\"alert_system\":\"" + activeSec + "\"," + 
+    "\"action_binary\":\"" + str.tostring(actionBin) + "\"," + 
+    "\"lock_state\":\"" + str.tostring(lockstate) + "\"," + 
+    "\"3CTL\":\"" + str.tostring(t3ctl) + "\"," +
+    "\"adx\":\"" + str.tostring(math.round(adxV, 2)) + "\"," + 
+    "\"adx_scaled\":\"" + str.tostring(math.round(adxS, 2)) + "\"," + 
+    "\"v_rev\":\"" + vRev + "\"," + 
+    "\"strategy_rec\":\"" + stratRec + "\"," + 
+    "\"trend_action_binary\":\"" + str.tostring(trAction) + "\"" + 
+    "}"
+    )
+// =====================================================================
+
+addMode(array<ModeReq> lib, int id, int r3L, int rST, int rHT, int rRSI, int r3C) =>
+    lib.push(ModeReq.new(id, r3L, rST, rHT, rRSI, r3C))
+
+init_modes() =>
+    aBuy = array.new<ModeReq>()
+    aSell = array.new<ModeReq>()
+    aBuyDn = array.new<ModeReq>()
+    aSellDn = array.new<ModeReq>()
+    
+    addMode(aBuy, 1, 100, 0, 0, 0, 0), addMode(aBuy, 2, 0, 100, 0, 0, 0), addMode(aBuy, 3, 100, 100, 0, 0, 0), addMode(aBuy, 4, 0, 0, 100, 0, 0), addMode(aBuy, 5, 100, 0, 100, 0, 0), addMode(aBuy, 6, 100, 100, 100, 0, 0), addMode(aBuy, 7, 0, 100, 100, 0, 0), addMode(aBuy, 8, 0, 0, 0, 0, 100), addMode(aBuy, 9, 100, 0, 0, 0, 100), addMode(aBuy, 10, 0, 100, 0, 0, 100), addMode(aBuy, 11, 0, 0, 100, 0, 100), addMode(aBuy, 12, 100, 100, 0, 0, 100), addMode(aBuy, 13, 100, 100, 100, 0, 100)
+    addMode(aSell, 1, -100, 0, 0, 0, 0), addMode(aSell, 2, 0, -100, 0, 0, 0), addMode(aSell, 3, -100, -100, 0, 0, 0), addMode(aSell, 4, 0, 0, -100, 0, 0), addMode(aSell, 5, -100, 0, -100, 0, 0), addMode(aSell, 6, -100, -100, -100, 0, 0), addMode(aSell, 7, 100, 100, 0, 100, 0), addMode(aSell, 8, 100, 0, 100, 100, 0), addMode(aSell, 9, 100, 100, 100, 100, 0), addMode(aSell, 10, 0, 0, 0, 100, 0), addMode(aSell, 11, 0, 0, 0, 0, -100), addMode(aSell, 12, -100, 0, 0, 0, -100), addMode(aSell, 13, 0, -100, 0, 0, -100), addMode(aSell, 14, -100, -100, 0, 0, -100), addMode(aSell, 15, 0, 0, -100, 0, -100), addMode(aSell, 16, -100, 0, -100, 0, -100), addMode(aSell, 17, -100, -100, -100, 0, -100), addMode(aSell, 18, 0, 0, 0, 100, 100), addMode(aSell, 19, 100, 100, 0, 100, 100), addMode(aSell, 20, 100, 0, 100, 100, 100), addMode(aSell, 21, 100, 100, 100, 100, 100), addMode(aSell, 22, 100, 0, 0, 100, 100)
+    addMode(aBuyDn, 1, -100, 0, 0, 0, 0), addMode(aBuyDn, 2, 0, -100, 0, 0, 0), addMode(aBuyDn, 3, -100, -100, 0, 0, 0), addMode(aBuyDn, 4, 0, 0, -100, 0, 0), addMode(aBuyDn, 5, -100, 0, -100, 0, 0), addMode(aBuyDn, 6, -100, -100, -100, 0, 0), addMode(aBuyDn, 7, 0, -100, -100, 0, 0), addMode(aBuyDn, 8, 0, 0, 0, 0, -100), addMode(aBuyDn, 9, -100, 0, 0, 0, -100), addMode(aBuyDn, 10, 0, -100, 0, 0, -100), addMode(aBuyDn, 11, 0, 0, -100, 0, -100), addMode(aBuyDn, 12, -100, -100, 0, 0, -100), addMode(aBuyDn, 13, -100, -100, -100, 0, -100)
+    addMode(aSellDn, 1, 100, 0, 0, 0, 0), addMode(aSellDn, 2, 0, 100, 0, 0, 0), addMode(aSellDn, 3, 100, 100, 0, 0, 0), addMode(aSellDn, 4, 0, 0, 100, 0, 0), addMode(aSellDn, 5, 100, 0, 100, 0, 0), addMode(aSellDn, 6, 100, 100, 100, 0, 0), addMode(aSellDn, 7, -100, -100, 0, -100, 0), addMode(aSellDn, 8, -100, 0, -100, -100, 0), addMode(aSellDn, 9, -100, -100, -100, -100, 0), addMode(aSellDn, 10, 0, 0, 0, -100, 0), addMode(aSellDn, 11, 0, 0, 0, 0, 100), addMode(aSellDn, 12, 100, 0, 0, 0, 100), addMode(aSellDn, 13, 0, 100, 0, 0, 100), addMode(aSellDn, 14, 100, 100, 0, 0, 100), addMode(aSellDn, 15, 0, 0, 100, 0, 100), addMode(aSellDn, 16, 100, 0, 100, 0, 100), addMode(aSellDn, 17, 100, 100, 100, 0, 100), addMode(aSellDn, 18, 0, 0, 0, -100, -100), addMode(aSellDn, 19, -100, -100, 0, -100, -100), addMode(aSellDn, 20, -100, 0, -100, -100, -100), addMode(aSellDn, 21, -100, -100, -100, -100, -100), addMode(aSellDn, 22, -100, 0, 0, -100, -100)
+    
+    [aBuy, aSell, aBuyDn, aSellDn]
+
+var array<ModeReq> libBuyUp  = na
+var array<ModeReq> libSellUp = na
+var array<ModeReq> libBuyDn  = na
+var array<ModeReq> libSellDn = na
+
+if barstate.isfirst
+    [outBuy, outSell, outBuyDn, outSellDn] = init_modes()
+    libBuyUp  := outBuy
+    libSellUp := outSell
+    libBuyDn  := outBuyDn
+    libSellDn := outSellDn
+
+checkMode(int modeID, array<ModeReq> lib, float vFast, float vMid, float vSlow, float vST, float vHT, float vRSI, float v3C, float thresh) =>
+    if modeID < 1 or modeID > lib.size()
+        false
+    else
+        ModeReq m = lib.get(modeID - 1)
+        bool pass = true
+        
+        if m.r3L == 100
+            if math.abs(vFast - 100) > thresh or math.abs(vMid - 100) > thresh or math.abs(vSlow - 100) > thresh
+                pass := false
+        else if m.r3L == -100
+            if math.abs(vFast + 100) > thresh or math.abs(vMid + 100) > thresh or math.abs(vSlow + 100) > thresh
+                pass := false
+                
+    
+        if m.rST == 100
+            if vST != 100
+                pass := false
+        else if m.rST == -100
+            if vST != -100
+                pass := false
+        if m.rHT == 100
+    
+            if vHT < (100 - thresh)
+                pass := false
+        else if m.rHT == -100
+            if vHT > (-100 + thresh)
+                pass := false
+        if m.rRSI == 100
+           
+            if math.abs(vRSI - 100) > thresh
+                pass := false
+        else if m.rRSI == -100
+            if math.abs(vRSI + 100) > thresh
+                pass := false
+        if m.r3CTL == 100
+            if v3C != 100
+   
+                pass := false
+        else if m.r3CTL == -100
+            if v3C != -100
+                pass := false
+        pass
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: 3L LOGIC (DO NOT MODIFY)
+// =====================================================================
+slopeFast = (close - ta.ema(close, fastATRLen)) / ta.atr(fastATRLen)
+slopeMid = (close - ta.ema(close, midATRLen)) / ta.atr(midATRLen)
+slopeSlow = (close - ta.ema(close, slowATRLen)) / ta.atr(slowATRLen)
+
+akFast = slopeFast > 0 ? 100 : -100
+akMid = slopeMid > 0 ? 100 : -100
+akSlow = slopeSlow > 0 ? 100 : -100
+
+fastLine = ta.sma(ta.ema(akFast, fastLen), fastSmooth)
+midLine = ta.sma(ta.wma(akMid, midLen), midSmooth)
+slowSMA = ta.sma(akSlow, slowLen)
+slowRMA = ta.rma(akSlow, slowLen)
+slowLine = ta.sma((slowSMA * greenMix) + (slowRMA * (1 - greenMix)), slowSmooth)
+// =====================================================================
+
+[_, dir] = ta.supertrend(stMult, stAtrLen)
+superTrendScaled = dir == -1 ? 100 : -100
+
+highestHigh = ta.highest(high, halfTrendAtr)
+lowestLow = ta.lowest(low, halfTrendAtr)
+trendLine = (highestHigh + lowestLow) / 2
+distanceFromTrend = close - trendLine
+halfTrendRatio = math.max(-1.0, math.min(1.0, distanceFromTrend / halfTrendAmplitude))
+halfTrendScaled = halfTrendRatio * 100
+
+[d_plus, d_minus, adx_raw] = ta.dmi(adxLen, adxSmooth)
+float adx_scaled = 0.0
+if d_plus > d_minus
+    adx_scaled := math.min(100, (adx_raw / adxThreshold) * 100)
+else
+    adx_scaled := math.max(-100, (adx_raw / adxThreshold) * -100)
+
+[h5,l5,c5,h51,l51,c51,h52,l52,c52,h53,l53,c53,_,_,_]=req("5")
+[h10,l10,c10,h101,l101,c101,h102,l102,c102,h103,l103,c103,_,_,_]=req("10")
+[h15,l15,c15,h151,l151,c151,h152,l152,c152,h153,l153,c153,_,_,_]=req("15")
+[h30,l30,c30,h301,l301,c301,h302,l302,c302,h303,l303,c303,_,_,_]=req("30")
+[h60,l60,c60,h601,l601,c601,h602,l602,c602,h603,l603,c603,_,_,_]=req("60")
+[hD,lD,cD,hD1,lD1,cD1,hD2,lD2,cD2,hD3,lD3,cD3,hD4,lD4,cD4]=req("D")
+[hW,lW,cW,hW1,lW1,cW1,hW2,lW2,cW2,hW3,lW3,cW3,hW4,lW4,cW4]=req("W")
+[hM,lM,cM,hM1,lM1,cM1,hM2,lM2,cM2,hM3,lM3,cM3,_,_,_]=req("1M")
+
+[t5_lvl, t5_tag] = calc_lvl(h5,l5,c5,h51,l51,c51,h52,l52,c52,h53,l53,c53)
+[t10_lvl, t10_tag] = calc_lvl(h10,l10,c10,h101,l101,c101,h102,l102,c102,h103,l103,c103)
+[t15_lvl, t15_tag] = calc_lvl(h15,l15,c15,h151,l151,c151,h152,l152,c152,h153,l153,c153)
+[t30_lvl, t30_tag] = calc_lvl(h30,l30,c30,h301,l301,c301,h302,l302,c302,h303,l303,c303)
+[t60_lvl, t60_tag] = calc_lvl(h60,l60,c60,h601,l601,c601,h602,l602,c602,h603,l603,c603)
+
+[tDH_lvl, tDH_tag] = calc_lvl(hD1,lD1,cD1,hD2,lD2,cD2,hD3,lD3,cD3,hD4,lD4,cD4)
+[tWH_lvl, tWH_tag] = calc_lvl(hW1,lW1,cW1,hW2,lW2,cW2,hW3,lW3,cW3,hW4,lW4,cW4)
+[tMH_lvl, tMH_tag] = calc_lvl(hM1,lM1,cM1,hM2,lM2,cM2,hM3,lM3,cM3,hM3,lM3,cM3)
+
+[tDL_lvl, tDL_tag] = calc_lvl(hD,lD,cD,hD1,lD1,cD1,hD2,lD2,cD2,hD3,lD3,cD3)
+[tWL_lvl, tWL_tag] = calc_lvl(hW,lW,cW,hW1,lW1,cW1,hW2,lW2,cW2,hW3,lW3,cW3)
+[tML_lvl, tML_tag] = calc_lvl(hM,lM,cM,hM1,lM1,cM1,hM2,lM2,cM2,hM3,lM3,cM3)
+
+int t5=toTrend(t5_lvl,pa_rMod)
+int t10=toTrend(t10_lvl,pa_rMod)
+int t15=toTrend(t15_lvl,pa_rMod)
+int t30=toTrend(t30_lvl,1)
+int t60=toTrend(t60_lvl,1)
+int tDH=toTrend(tDH_lvl,1)
+int tWH=toTrend(tWH_lvl,1)
+int tMH=toTrend(tMH_lvl,1)
+int tDL=toTrend(tDL_lvl,1)
+int tWL=toTrend(tWL_lvl,1)
+int tML=toTrend(tML_lvl,1)
+
+bool RT=pa_sMod=="Real-Time (Zero Lag)"
+int oS=RT?0:1
+
+int raw_lvl = pa_sTF=="5"?t5_lvl[oS]:pa_sTF=="10"?t10_lvl[oS]:pa_sTF=="15"?t15_lvl[oS]:pa_sTF=="30"?t30_lvl[oS]:pa_sTF=="60"?t60_lvl[oS]:pa_sTF=="D"?tDL_lvl[oS]:pa_sTF=="W"?tWL_lvl[oS]:tML_lvl[oS]
+int raw_tag = pa_sTF=="5"?t5_tag[oS]:pa_sTF=="10"?t10_tag[oS]:pa_sTF=="15"?t15_tag[oS]:pa_sTF=="30"?t30_tag[oS]:pa_sTF=="60"?t60_tag[oS]:pa_sTF=="D"?tDL_tag[oS]:pa_sTF=="W"?tWL_tag[oS]:tML_tag[oS]
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: 3CTL ACCUMULATION LOGIC (DO NOT MODIFY)
+// =====================================================================
+var float trend3CTL = 0.0 
+float step_val = 200.0 / 3.0 
+
+if raw_lvl != 99 and raw_lvl != 0
+    float step_mult = math.min(math.abs(raw_lvl), 3) * math.sign(raw_lvl)
+    trend3CTL := math.max(-100.0, math.min(100.0, trend3CTL + (step_mult * step_val)))
+
+int strat_3CTL = trend3CTL >= 99.0 ? 100 : trend3CTL <= -99.0 ? -100 : 0
+// =====================================================================
+
+rsiValue9           = ta.rsi(close, rsiPeriod9)
+rsiValue10          = ta.rsi(close, rsiPeriod10)
+rsiValue11          = ta.rsi(close, rsiPeriod11)
+
+rsiValue            = activeSection == 9 ? rsiValue9 : activeSection == 10 ? rsiValue10 : rsiValue11
+dynRsiLowerRange    = activeSection == 9 ? rsiLowerRange9 : activeSection == 10 ? rsiLowerRange10 : rsiLowerRange11
+dynRsiUpperRange    = activeSection == 9 ? rsiUpperRange9 : activeSection == 10 ? rsiUpperRange10 : rsiUpperRange11
+
+rsiRange            = dynRsiUpperRange - dynRsiLowerRange
+rsiScaled           = rsiValue >= dynRsiUpperRange ? 100 : rsiValue <= dynRsiLowerRange ? -100 : ((rsiValue - dynRsiLowerRange) / rsiRange) * 200 - 100
+
+// ====================================================================================
+// 	===== INDICATOR CONDITIONS =====
+// ====================================================================================
+
+buyUptrendMode      = activeSection == 9 ? buyUptrendMode9 : activeSection == 10 ? buyUptrendMode10 : activeSection == 11 ? buyUptrendMode11 : 0
+buyDowntrendMode    = activeSection == 9 ? buyDowntrendMode9 : activeSection == 10 ? buyDowntrendMode10 : activeSection == 11 ? buyDowntrendMode11 : 0
+
+holdUptrendMode     = activeSection == 9 ? holdUptrendMode9 : activeSection == 10 ? holdUptrendMode10 : activeSection == 11 ? holdUptrendMode11 : 0
+sellUptrendMode     = activeSection == 9 ? sellUptrendMode9 : activeSection == 10 ? sellUptrendMode10 : activeSection == 11 ? sellUptrendMode11 : 0
+holdDowntrendMode   = activeSection == 9 ? holdDowntrendMode9 : activeSection == 10 ? holdDowntrendMode10 : activeSection == 11 ? holdDowntrendMode11 : 0
+sellDowntrendMode   = activeSection == 9 ? sellDowntrendMode9 : activeSection == 10 ? sellDowntrendMode10 : activeSection == 11 ? sellDowntrendMode11 : 0
+
+revDowntrendMode    = activeSection == 9 ? revDowntrendMode9 : activeSection == 10 ? revDowntrendMode10 : activeSection == 11 ? revDowntrendMode11 : 0
+revUptrendMode      = activeSection == 9 ? revUptrendMode9 : activeSection == 10 ? revDowntrendMode10 : activeSection == 11 ? revUptrendMode11 : 0
+
+
+useRSIGate = activeSection == 9 ? gate9_rsi : activeSection == 10 ? gate10_rsi : gate11_rsi
+useADXGate = activeSection == 9 ? gate9_adx : activeSection == 10 ? gate10_adx : gate11_adx
+
+bool block_BuyUT_RSI = useRSIGate and (rsiScaled == 100)
+bool block_BuyUT_ADX = useADXGate and (adx_scaled < 100)
+
+bool block_BuyDT_RSI = useRSIGate and (rsiScaled == -100)
+bool block_BuyDT_ADX = useADXGate and (adx_scaled > -100)
+
+// Triggers
+buyUptrendCondition   = (activeSection > 0) and checkMode(buyUptrendMode, libBuyUp, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, strat_3CTL, mergeThresh) and not block_BuyUT_RSI and not block_BuyUT_ADX
+buyDowntrendCondition = (activeSection > 0) and checkMode(buyDowntrendMode, libBuyDn, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, strat_3CTL, mergeThresh) and not block_BuyDT_RSI and not block_BuyDT_ADX
+
+holdUptrendLogic      = (activeSection > 0) and checkMode(holdUptrendMode, libBuyUp, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, strat_3CTL, mergeThresh)
+sellUptrendCondition  = (activeSection > 0) and checkMode(sellUptrendMode, libSellUp, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, strat_3CTL, mergeThresh)
+holdDowntrendLogic    = (activeSection > 0) and checkMode(holdDowntrendMode, libBuyDn, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, strat_3CTL, mergeThresh)
+sellDowntrendCondition= (activeSection > 0) and checkMode(sellDowntrendMode, libSellDn, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, strat_3CTL, mergeThresh)
+
+revDowntrendCondition = (activeSection > 0) and checkMode(revDowntrendMode, libBuyDn, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, strat_3CTL, mergeThresh) and not block_BuyDT_RSI and not block_BuyDT_ADX
+revUptrendCondition   = (activeSection > 0) and checkMode(revUptrendMode, libBuyUp, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, strat_3CTL, mergeThresh) and not block_BuyUT_RSI and not block_BuyUT_ADX
+
+localTime = str.format_time(timenow, "yyyy-MM-dd HH:mm:ss", pa_tz=="Exchange"?syminfo.timezone:pa_tz)
+exch = syminfo.prefix
+tickr = syminfo.ticker
+
+var int lastBuyAlertTime        = 0
+var int lastSellAlertTime     = 0
+var int lastBuyAlertTimeDown  = 0
+var int lastSellAlertTimeDown = 0
+
+var bool awaitingSellUptrend   = false
+var bool awaitingSellDowntrend = false
+
+bool wasInUptrend   = inUptrendTrade
+bool wasInDowntrend = inDowntrendTrade
+
+cooldownMs = 60000
+currTime = time
+
+//===== RESET SYSTEM LOGIC =====
+var bool resetTriggered = false
+var bool startLineLabelDrawn = false
+var bool resetLineLabelDrawn = false
+
+if not startLineLabelDrawn and time >= start_time
+    startLineLabelDrawn := true
+    label.new(bar_index, high +(high[1] - low[1]) * 1.02, "START: " + str.format_time(start_time, "dd-MMM HH:mm","UTC+0530"), yloc=yloc.price, textcolor=color.white, color=color.red, style=label.style_label_down, force_overlay=true)
+
+if time >= resetDateTime and enableReset and not resetTriggered
+    label.new(bar_index, high  +(high[1] - low[1])* 1.02, "RESET: " + str.format_time(resetDateTime, "dd-MMM HH:mm","UTC+0530"), yloc=yloc.price, textcolor=color.white, color=color.blue, style=label.style_label_down, force_overlay=true)
+    line.new(bar_index,open,bar_index,open + syminfo.mintick,xloc.bar_index,extend.both,resetLineColor,force_overlay = true,width = resetLineWidth)
+    resetTriggered           := true
+    alertsDisabledByReset    := true
+    lock9B1_from9B2         := false
+    lock9B2_self             := false
+    lock9C1_from9C2         := false
+    lock9C2_self            := false
+    lock10B1_from10B2       := false
+    lock10B2_self           := false
+    lock10C1_from10C2       := false
+    lock10C2_self           := false
+    lock11B1_from11B2       := false
+    lock11B2_self           := false
+    lock11C1_from11C2       := false
+    lock11C2_self           := false
+    inDowntrendTrade        := false
+    inUptrendTrade          := false
+    awaitingSellDowntrend   := false
+    awaitingSellUptrend     := false
+
+var strategy_started = false
+
+if not strategy_started and time >= start_time
+    strategy_started := true
+    alertsDisabledByReset := false
+    line.new(bar_index,open,bar_index,open + syminfo.mintick,xloc.bar_index,extend.both,startLineColor,force_overlay = true,width = startLineWidth)
+
+currentB2Lock = enableLockSystem and (activeSection == 9 ? lock9B2_self : activeSection == 10 ? lock10B2_self : lock11B2_self)
+currentC2Lock = enableLockSystem and (activeSection == 9 ? lock9C2_self : activeSection == 10 ? lock10C2_self : lock11C2_self)
+currentBLock = enableLockSystem and (activeSection == 9 ? lock9B1_from9B2 : activeSection == 10 ? lock10B1_from10B2 : activeSection == 11 ? lock11B1_from11B2 : false)
+currentCLock = enableLockSystem and (activeSection == 9 ? lock9C1_from9C2 : activeSection == 10 ? lock10C1_from10C2 : activeSection == 11 ? lock11C1_from11C2 : false)
+
+holdUptrendCondition   = inUptrendTrade   and holdUptrendLogic
+holdDowntrendCondition = inDowntrendTrade and holdDowntrendLogic
+
+var bool latched_UT = false
+var bool latched_DT = false
+
+if inUptrendTrade and holdUptrendLogic
+    latched_UT := true
+if inDowntrendTrade and holdDowntrendLogic
+    latched_DT := true
+
+buyUptrendJustStarted    = buyUptrendCondition    and not buyUptrendCondition[1]
+buyDowntrendJustStarted  = buyDowntrendCondition  and not buyDowntrendCondition[1]
+sellUptrendJustStarted   = sellUptrendCondition
+sellDowntrendJustStarted = sellDowntrendCondition
+
+revDowntrendJustStarted  = revDowntrendCondition  and not revDowntrendCondition[1]
+revUptrendJustStarted    = revUptrendCondition    and not revUptrendCondition[1]
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: INTELLIGENT REVERSAL LOGIC (DO NOT MODIFY)
+// =====================================================================
+// Standard Fresh Buy (Only when flat)
+bool freshBuyUp = buyUptrendJustStarted and not inUptrendTrade and not inDowntrendTrade
+// Reversal Flip to Long (Only when already Short)
+bool revBuyUp   = revUptrendJustStarted and inDowntrendTrade
+
+canFireBuyUp     = (activeSection > 0) and not alertsDisabledByReset and (freshBuyUp or revBuyUp) and not currentBLock and strategy_started
+
+// Standard Fresh Short (Only when flat)
+bool freshBuyDn = buyDowntrendJustStarted and not inDowntrendTrade and not inUptrendTrade
+// Reversal Flip to Short (Only when already Long)
+bool revBuyDn   = revDowntrendJustStarted and inUptrendTrade
+
+canFireBuyDown   = (activeSection > 0) and not alertsDisabledByReset and (freshBuyDn or revBuyDn) and not currentCLock and strategy_started
+// =====================================================================
+
+canFireSellUp    = (activeSection > 0) and not alertsDisabledByReset and ((sellUptrendJustStarted   and not currentB2Lock )) and inUptrendTrade  and strategy_started
+canFireSellDown  = (activeSection > 0) and not alertsDisabledByReset and ((sellDowntrendJustStarted and not currentC2Lock)) and inDowntrendTrade and strategy_started
+
+bool prev_latched_UT = bar_index > 0 ? latched_UT[1] : false
+bool prev_latched_DT = bar_index > 0 ? latched_DT[1] : false
+
+canFireHoldUp    = (activeSection > 0) and not alertsDisabledByReset and holdUptrendCondition and strategy_started and not prev_latched_UT
+canFireHoldDown  = (activeSection > 0) and not alertsDisabledByReset and holdDowntrendCondition and strategy_started and not prev_latched_DT
+
+bool final_HoldUp = canFireHoldUp and not canFireSellUp and not canFireBuyDown
+bool final_HoldDn = canFireHoldDown and not canFireSellDown and not canFireBuyUp
+
+var string activeSubsection = "None"
+
+if canFireBuyUp or (inUptrendTrade and not canFireSellUp)
+    activeSubsection := "-B1"
+else if canFireBuyDown or (inDowntrendTrade and not canFireSellDown)
+    activeSubsection := "-C1"
+else if canFireSellUp
+    activeSubsection := "-B2"
+else if canFireSellDown
+    activeSubsection := "-C2"
+
+
+buyUptrendDesc = f_desc_ut_buy(buyUptrendMode)
+holdUptrendDesc = f_desc_ut_buy(holdUptrendMode)
+sellUptrendDesc = f_desc_ut_sell(sellUptrendMode)
+
+buyDowntrendDesc = f_desc_dt_buy(buyDowntrendMode)
+holdDowntrendDesc = f_desc_dt_buy(holdDowntrendMode)
+sellDowntrendDesc = f_desc_dt_sell(sellDowntrendMode)
+
+revUptrendDesc = f_desc_ut_buy(revUptrendMode)
+revDowntrendDesc = f_desc_dt_buy(revDowntrendMode)
+
+lockStateValue = "none"
+int trend_confluence = (tWH == 1 and tDH == 1 and t60[oS] == 1) ? 1 : (tWH == -1 and tDH == -1 and t60[oS] == -1) ? -1 : 0
+string strategy_text = trend_confluence == 1 ? "Pos L" : trend_confluence == -1 ? "Pos S" : "Scalp ID"
+string json_strat_rec = trend_confluence == 1 ? "PL" : trend_confluence == -1 ? "PS" : "SCALP-ID"
+
+// JSON V-Rev Translator Variable
+string current_vRev_text = math.abs(raw_tag) == 4 ? "V-Seq" : math.abs(raw_tag) == 3 ? "V-Surge" : math.abs(raw_tag) == 2 ? "2-Bar" : math.abs(raw_tag) == 1 ? "1-Bar" : "---"
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: SIGNAL EXECUTION & JSON PAYLOADS
+// =====================================================================
+// 1. BUY UP (AND REVERSAL)
+if canFireBuyUp
+    lastBuyAlertTime        := currTime
+    inDowntrendTrade        := false
+    
+    actionValue             = wasInDowntrend ? "SELL_DT+BUY_UT" : "BUY_UT"
+    int execMode            = wasInDowntrend ? revUptrendMode : buyUptrendMode
+    string execDesc         = wasInDowntrend ? revUptrendDesc : buyUptrendDesc
+    
+    actionBinary            = 1
+    inUptrendTrade          := true
+    inDowntrendTrade        := false
+    awaitingSellUptrend     := true
+    awaitingSellDowntrend   := false
+    
+    latched_UT := false
+    latched_DT := false
+
+    if enableLockSystem
+        lockStateParts = ""
+        if activeSection == 9
+            if lock11B1_from11B2
+                lock11B1_from11B2 := false
+                lockStateParts := str.length(lockStateParts) == 0 ? "9B1 LO 11B1" : lockStateParts + " + 9B1 LO 11B1"
+            if lock10B2_self
+                lock10B2_self := false
+                lockStateParts := str.length(lockStateParts) == 0 ? "9B1 LO 10B2" : lockStateParts + " + 9B1 LO 10B2"
+        else if activeSection == 10
+            if lock9B1_from9B2
+                lock9B1_from9B2 := false
+                lockStateParts := str.length(lockStateParts) == 0 ? "10B1 LO 9B1" : lockStateParts + " + 10B1 LO 9B1"
+            if lock11B2_self
+                lock11B2_self := false
+                lockStateParts := str.length(lockStateParts) == 0 ? "10B1 LO 11B2" : lockStateParts + " + 10B1 LO 11B2"
+        else if activeSection == 11
+            if lock10B1_from10B2
+                lock10B1_from10B2 := false
+                lockStateParts    := str.length(lockStateParts) == 0 ? "11B1 LO 10B1" : lockStateParts + " + 11B1 LO 10B1"
+            if lock9B2_self
+                lock9B2_self   := false
+                lockStateParts := str.length(lockStateParts) == 0 ? "11B1 LO 9B2" : lockStateParts + " + 11B1 LO 9B2"
+        lockStateValue := str.length(lockStateParts) == 0 ? "none" : lockStateParts + " (Ba1)"
+    else
+        lockStateValue := "none"
+
+    label_(str.tostring(actionValue + "\n" + lockStateValue), false, c_lbl_buy_ut, vis_offset_bs)
+    string json_sec = str.tostring(activeSection) + activeSubsection
+    alert_msg = get_json_alert(actionValue, localTime, exch, tickr, rsiValue, execMode, execDesc, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, json_sec,  actionBinary,lockStateValue, strat_3CTL, adx_raw, adx_scaled, current_vRev_text, json_strat_rec, trend_confluence)
+    alert(alert_msg, alert.freq_once_per_bar_close)
+
+// 2. BUY DOWN (AND REVERSAL)
+else if canFireBuyDown
+    lastBuyAlertTimeDown        := currTime
+    
+    actionValue             = wasInUptrend ? "SELL_UT+BUY_DT" : "BUY_DT"
+    int execMode            = wasInUptrend ? revDowntrendMode : buyDowntrendMode
+    string execDesc         = wasInUptrend ? revDowntrendDesc : buyDowntrendDesc
+    
+    actionBinary            = 1
+    inDowntrendTrade        := true
+    inUptrendTrade          := false
+    awaitingSellDowntrend   := true
+    awaitingSellUptrend     := false
+    
+    latched_UT := false
+    latched_DT := false
+
+    if enableLockSystem
+        lockStateParts = ""
+        if activeSection == 9
+            if lock11C1_from11C2
+                lock11C1_from11C2 := false
+                lockStateParts := str.length(lockStateParts) == 0 ? "9C1 LO 11C1" : lockStateParts + " + 9C1 LO 11C1"
+            if lock10C2_self
+                lock10C2_self := false
+                lockStateParts := str.length(lockStateParts) == 0 ? "9C1 LO 10C2" : lockStateParts + " + 9C1 LO 10C2"
+        else if activeSection == 10
+            if lock9C1_from9C2
+                lock9C1_from9C2 := false
+                lockStateParts := str.length(lockStateParts) == 0 ? "10C1 LO 9C1" : lockStateParts + " + 10C1 LO 9C1"
+            if lock11C2_self
+                lockStateParts := str.length(lockStateParts) == 0 ? "10C1 LO 11C2" : lockStateParts + " + 10C1 LO 11C2"
+                lock11C2_self := false
+        else if activeSection == 11
+            if lock10C1_from10C2
+                lock10C1_from10C2 := false
+                lockStateParts := str.length(lockStateParts) == 0 ? "11C1 LO 10C1" : lockStateParts + " + 11C1 LO 10C1"
+            if lock9C2_self
+                lock9C2_self := false
+                lockStateParts := str.length(lockStateParts) == 0 ? "11C1 LO 9C2" : lockStateParts + " + 11C1 LO 9C2"
+        lockStateValue := str.length(lockStateParts) == 0 ? "none" : lockStateParts + " (Ba1)"
+    else
+        lockStateValue := "none"
+
+    label_(str.tostring(actionValue + "\n" + lockStateValue), true, c_lbl_buy_dt, vis_offset_bs)
+    string json_sec = str.tostring(activeSection) + activeSubsection
+    alert_msg = get_json_alert(actionValue, localTime, exch, tickr, rsiValue, execMode, execDesc, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, json_sec,  actionBinary,lockStateValue, strat_3CTL, adx_raw, adx_scaled, current_vRev_text, json_strat_rec, trend_confluence)
+    alert(alert_msg, alert.freq_once_per_bar_close)
+
+// 3. SELL UP
+else if canFireSellUp
+    lastSellAlertTime       := currTime
+    inUptrendTrade          := false
+    inDowntrendTrade        := false
+    awaitingSellUptrend     := false
+    awaitingSellDowntrend   := false
+    lockStateValue := "none"
+    
+    latched_UT := false
+    latched_DT := false
+
+    if enableFreshLock9 and activeSection == 9
+        if not lock9B2_self
+            lock9B2_self := true
+            lock9B1_from9B2 := true
+    if enableFreshLock10 and activeSection == 10
+        if not lock10B2_self
+            lock10B2_self := true
+            lock10B1_from10B2 := true
+    if enableFreshLock11 and activeSection == 11
+        if not lock11B2_self
+            lock11B2_self := true
+            lock11B1_from11B2 := true
+
+    if enableLockSystem and activeSection == 9 and enableFreshLock9
+        lockStateValue  := "9B2 LU 9B1 + 9B2 LU (Ba1)"
+    else if enableLockSystem and activeSection == 10 and enableFreshLock10
+        lockStateValue    := "10B2 LU 10B1 + 10B2 LU (Ba1)"
+    else if enableLockSystem and activeSection == 11 and enableFreshLock11
+        lockStateValue    := "11B2 LU 11B1 + 11B2 LU (Ba1)"
+
+    actionValue = "SELL_UT"
+    actionBinary = 0
+ 
+    string json_sec = str.tostring(activeSection) + activeSubsection
+    label_(str.tostring(actionValue + "\n" + lockStateValue), true, c_lbl_sell_ut, vis_offset_bs)
+    alert_msg = get_json_alert(actionValue, localTime, exch, tickr, rsiValue, sellUptrendMode, sellUptrendDesc, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, json_sec,  actionBinary,lockStateValue, strat_3CTL, adx_raw, adx_scaled, current_vRev_text, json_strat_rec, trend_confluence)
+    alert(alert_msg, alert.freq_once_per_bar_close)
+
+// 4. SELL DOWN
+else if canFireSellDown
+    lastSellAlertTimeDown   := currTime
+    inDowntrendTrade        := false
+    inUptrendTrade          := false
+    awaitingSellDowntrend   := false
+    
+    latched_UT := false
+    latched_DT := false
+
+    if enableLockSystem
+        if enableFreshLock9 and activeSection == 9
+            if not lock9C2_self
+                lock9C2_self := true
+                lock9C1_from9C2 := true
+                lockStateValue  := "9C2 LU 9C1 + 9C2 LU (Ba1)"
+        if enableFreshLock10 and activeSection == 10
+            if not lock10C2_self
+                lock10C2_self := true
+                lock10C1_from10C2 := true
+                lockStateValue    := "10C2 LU 10C1 + 10C2 LU (Ba1)"
+        if enableFreshLock11 and activeSection == 11
+            if not lock11C2_self
+                lock11C2_self := true
+                lock11C1_from11C2 := true
+                lockStateValue    := "11C2 LU 11C1 + 11C2 LU (Ba1)" 
+
+    actionValue = "SELL_DT"
+    actionBinary = 0
+    
+    string json_sec = str.tostring(activeSection) + activeSubsection
+    label_(str.tostring(actionValue + "\n" + lockStateValue), false, c_lbl_sell_dt, vis_offset_bs)
+    alert_msg = get_json_alert(actionValue, localTime, exch, tickr, rsiValue, sellDowntrendMode, sellDowntrendDesc, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, json_sec,  actionBinary,lockStateValue, strat_3CTL, adx_raw, adx_scaled, current_vRev_text, json_strat_rec, trend_confluence)
+    alert(alert_msg, alert.freq_once_per_bar_close)
+
+// 5. HOLD UP
+else if final_HoldUp
+    actionValue = "HOLD_BUY_UT"
+    actionBinary = 3
+    string json_sec = str.tostring(activeSection) + activeSubsection
+    alert_msg = get_json_alert(actionValue, localTime, exch, tickr, rsiValue, holdUptrendMode, holdUptrendDesc, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, json_sec, actionBinary,lockStateValue, strat_3CTL, adx_raw, adx_scaled, current_vRev_text, json_strat_rec, trend_confluence)
+    alert(alert_msg, alert.freq_once_per_bar_close)
+
+// 6. HOLD DOWN 
+else if final_HoldDn
+    actionValue = "HOLD_BUY_DT"
+    actionBinary = 3
+    string json_sec = str.tostring(activeSection) + activeSubsection
+    alert_msg = get_json_alert(actionValue, localTime, exch, tickr, rsiValue, holdDowntrendMode, holdDowntrendDesc, fastLine, midLine, slowLine, superTrendScaled, halfTrendScaled, rsiScaled, json_sec,  actionBinary,lockStateValue, strat_3CTL, adx_raw, adx_scaled, current_vRev_text, json_strat_rec, trend_confluence)
+    alert(alert_msg, alert.freq_once_per_bar_close)
+
+
+// ========================================================================================
+// 	===== PLOTTING (DUAL-LAYER DIAGNOSTIC UI) =====
+// ========================================================================================
+plot(show3Lines ? fastLine : na, title="Fast Line", color=c_fast, linewidth=2)
+plot(show3Lines ? midLine : na,  title="Mid Line",  color=c_mid, linewidth=2)
+plot(show3Lines ? slowLine : na, title="Slow Line", color=c_slow, linewidth=2)
+
+plot(showSuperTrend ? superTrendScaled : na, title="SuperTrend", color=superTrendScaled == 100 ? c_st_up : c_st_dn, linewidth=2, style=plot.style_line)
+plot(showHalfTrend ? halfTrendScaled : na, title="Half Trend", color=halfTrendScaled > 0 ? c_ht_up : c_ht_dn, linewidth=2)
+
+plot(show3CTL ? trend3CTL : na, title="3CTL Line", color=trend3CTL >= 99.0 ? c_3ctl_up : trend3CTL <= -99.0 ? c_3ctl_dn : c_3ctl_nt, linewidth=2)
+plot(showADX ? adx_scaled : na, title="Scaled ADX", color=adx_scaled > 0 ? c_di_plus : c_di_minus, linewidth=2)
+
+plot(100, title="Ref +100", color=c_ref_100, linewidth=1, style=plot.style_line)
+plot(-100, title="Ref -100", color=c_ref_n100,   linewidth=1, style=plot.style_line)
+plot(0, title="Ref 0",    color=c_ref_0,    linewidth=1, style=plot.style_line)
+plot(showRSI ? rsiScaled : na, title="RSI Scaled", color=c_rsi, linewidth=2)
+
+
+// =====================================================================
+// 🔓 STRICT IMMUTABLE CORE: STRATEGY LABELS PLOTTING & SETTINGS (Pillar #8) - UNLOCKED
+// =====================================================================
+plotshape(canFireBuyUp and show_lock_labels, title="Chart: Buy UT", style=shape.triangleup, location=location.belowbar, color=c_buy_up_c, size=size.tiny, force_overlay=true)
+plotshape(canFireSellUp and show_lock_labels, title="Chart: Sell UT", style=shape.circle, location=location.abovebar, color=c_sell_up_c, size=size.tiny, force_overlay=true)
+
+plotshape(canFireBuyDown and show_lock_labels, title="Chart: Buy DT", style=shape.triangledown, location=location.abovebar, color=c_buy_dn_c, size=size.tiny, force_overlay=true)
+plotshape(canFireSellDown and show_lock_labels, title="Chart: Sell DT", style=shape.circle, location=location.belowbar, color=c_sell_dn_c, size=size.tiny, force_overlay=true)
+
+plotshape(canFireBuyUp and show_lock_labels, title="Pane: Buy UT", location=location.top, style=shape.triangleup, color=c_buy_up_i, size=size.tiny)
+plotshape(canFireSellUp and show_lock_labels, title="Pane: Sell UT", location=location.top, style=shape.circle, color=c_sell_up_i, size=size.tiny)
+
+plotshape(canFireBuyDown and show_lock_labels, title="Pane: Buy DT", location=location.bottom, style=shape.triangledown, color=c_buy_dn_i, size=size.tiny)
+plotshape(canFireSellDown and show_lock_labels, title="Pane: Sell DT", location=location.bottom, style=shape.circle, color=c_sell_dn_i, size=size.tiny)
+
+bool visHoldUp = holdUptrendCondition and not canFireSellUp and not canFireBuyDown
+bool visHoldDn = holdDowntrendCondition and not canFireSellDown and not canFireBuyUp
+
+plotshape(visHoldUp and show_lock_labels, title="Chart: Hold UT", style=shape.cross, location=location.belowbar, color=c_hold_up_c, size=size.tiny, force_overlay=true)
+plotshape(visHoldDn and show_lock_labels, title="Chart: Hold DT", style=shape.cross, location=location.abovebar, color=c_hold_dn_c, size=size.tiny, force_overlay=true)
+plotshape(visHoldUp and show_lock_labels, title="Pane: Hold UT", location=location.top, style=shape.cross, color=c_hold_up_i, size=size.tiny)
+plotshape(visHoldDn and show_lock_labels, title="Pane: Hold DT", location=location.bottom, style=shape.cross, color=c_hold_dn_i, size=size.tiny)
+
+if show_lock_labels and enable_debugging
+    if final_HoldUp
+        label.new(bar_index, low - vis_offset_hold_bs, "HOLD_BUY_UT\n" + f_last3(close), color=c_lbl_buy_ut, style=label.style_label_up, textcolor=label_text, size=sz(label_size), force_overlay=true)
+    if final_HoldDn
+        label.new(bar_index, high + vis_offset_hold_bs, "HOLD_BUY_DT\n" + f_last3(close), color=c_lbl_buy_dt, style=label.style_label_down, textcolor=label_text, size=sz(label_size), force_overlay=true)
+// =====================================================================
+
+bgcolor(currentTimeMinutes >= startTime9 and currentTimeMinutes < endTime9 and show_lock_table ? c_bg_9_in : na, title="BG Section 9", force_overlay=true)
+bgcolor(currentTimeMinutes >= startTime10 and currentTimeMinutes < endTime10 and show_lock_table ? c_bg_10_in : na, title="BG Section 10", force_overlay=true)
+bgcolor(currentTimeMinutes >= startTime11 and currentTimeMinutes < endTime11 and show_lock_table ? c_bg_11_in : na, title="BG Section 11", force_overlay=true)
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: LOCK TABLE SETTINGS (GENERATION)
+// =====================================================================
+var table lockTable = table.new(table_pos, 9, 10, color.white, border_width=1, force_overlay=true)
+
+if show_lock_table
+    table.cell(lockTable, 0, 0, log_version_name, bgcolor=secLabelColor, text_color=tableTextColor, text_formatting = text.format_bold , text_size=sz(table_size))
+    table.merge_cells(lockTable, 0, 0, 3, 0)
+    table.cell(lockTable, 4, 0, "LOCK SYSTEM", bgcolor=secLabelColor, text_color=tableTextColor, text_formatting = text.format_bold , text_size=sz(table_size))
+    table.merge_cells(lockTable, 4, 0, 8, 0)
+
+    string txtStart = "START: " + str.format_time(start_time, "dd-MMM HH:mm", "Asia/Kolkata")
+    string txtReset = "RESET: " + str.format_time(resetDateTime, "dd-MMM HH:mm", "Asia/Kolkata")
+    
+    table.cell(lockTable, 0, 1, txtStart, bgcolor=startLineColor, text_color=c_txt_sr, text_size=sz(table_size))
+    table.merge_cells(lockTable, 0, 1, 3, 1) 
+    
+    table.cell(lockTable, 4, 1, txtReset, bgcolor=resetLineColor, text_color=c_txt_sr, text_size=sz(table_size))
+    table.merge_cells(lockTable, 4, 1, 8, 1) 
+
+    table.cell(lockTable, 0, 2, "SEC 9", bgcolor=secLabelColor, text_color=tableTextColor, text_formatting = text.format_bold, text_size=sz(table_size))
+    formatCell(lockTable, 1, 2, " 9 B1", lock9B1_from9B2), formatCell(lockTable, 3, 2, " 9 B2", lock9B2_self), formatCell(lockTable, 5, 2, " 9 C1", lock9C1_from9C2), formatCell(lockTable, 7, 2, " 9 C2", lock9C2_self)
+    
+    table.cell(lockTable, 0, 3, "SEC 10", bgcolor=secLabelColor, text_color=tableTextColor, text_formatting = text.format_bold, text_size=sz(table_size))
+    formatCell(lockTable, 1, 3, "10 B1", lock10B1_from10B2), formatCell(lockTable, 3, 3, "10 B2", lock10B2_self), formatCell(lockTable, 5, 3, "10 C1", lock10C1_from10C2), formatCell(lockTable, 7, 3, "10 C2", lock10C2_self)
+    
+    table.cell(lockTable, 0, 4, "SEC 11", bgcolor=secLabelColor, text_color=tableTextColor, text_formatting = text.format_bold, text_size=sz(table_size))
+    formatCell(lockTable, 1, 4, "11 B1", lock11B1_from11B2), formatCell(lockTable, 3, 4, "11 B2", lock11B2_self), formatCell(lockTable, 5, 4, "11 C1", lock11C1_from11C2), formatCell(lockTable, 7, 4, "11 C2", lock11C2_self)
+// =====================================================================
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: TREND TABLE CALCULATION & SETTINGS (Pillar #7)
+// =====================================================================
+var tblPA=table.new(pa_pos=="Top Left"?position.top_left:pa_pos=="Top Center"?position.top_center:pa_pos=="Top Right"?position.top_right:pa_pos=="Middle Left"?position.middle_left:pa_pos=="Middle Center"?position.middle_center:pa_pos=="Middle Right"?position.middle_right:pa_pos=="Bottom Left"?position.bottom_left:pa_pos=="Bottom Center"?position.bottom_center:position.bottom_right,7,14,border_width=1,border_color=color.new(color.gray,70),force_overlay=true)
+
+if (barstate.islast or barstate.isconfirmed) and show_trend_table
+
+    float[] AH = array.from(h5[oS], h10[oS], h15[oS], h30[oS], h60[oS], hD1, hW1, hM1)
+    float[] AL = array.from(l5[oS], l10[oS], l15[oS], l30[oS], l60[oS], lD1, lW1, lM1)
+    float[] AH1 = array.from(h51[oS], h101[oS], h151[oS], h301[oS], h601[oS], hD2, hW2, hM2)
+    float[] AL1 = array.from(l51[oS], l101[oS], l151[oS], l301[oS], l601[oS], lD2, lW2, lM2)
+    float[] AH2 = array.from(h52[oS], h102[oS], h152[oS], h302[oS], h602[oS], hD3, hW3, hM3)
+    float[] AL2 = array.from(l52[oS], l102[oS], l152[oS], l302[oS], l602[oS], lD3, lW3, lM3)
+    float[] AC = array.from(c5[oS], c10[oS], c15[oS], c30[oS], c60[oS], cD1, cW1, cM1)
+
+    TR r5 = RT ? diff(c5,h5,l5,h51,l51,h52,l52) : diff(c51,h51,l51,h52,l52,h53,l53)
+    TR r10 = RT ? diff(c10,h10,l10,h101,l101,h102,l102) : diff(c101,h101,l101,h102,l102,h103,l103)
+    TR r15 = RT ? diff(c15,h15,l15,h151,l151,h152,l152) : diff(c151,h151,l151,h152,l152,h153,l153)
+    TR r30 = RT ? diff(c30,h30,l30,h301,l301,h302,l302) : diff(c301,h301,l301,h302,l302,h303,l303)
+    TR r60 = RT ? diff(c60,h60,l60,h601,l601,h602,l602) : diff(c601,h601,l601,h602,l602,h603,l603)
+    TR rD=diff(cD1,hD1,lD1,hD2,lD2,hD3,lD3), TR rW=diff(cW1,hW1,lW1,hW2,lW2,hW3,lW3), TR rM=diff(cM1,hM1,lM1,hM2,lM2,hM3,lM3)
+    
+    int[] T=array.from(t5[oS], t10[oS], t15[oS], t30[oS], t60[oS], tDH, tWH, tMH)
+    int[] T_tag=array.from(t5_tag[oS], t10_tag[oS], t15_tag[oS], t30_tag[oS], t60_tag[oS], tDH_tag, tWH_tag, tMH_tag)
+    TR[] R=array.from(r5, r10, r15, r30, r60, rD, rW, rM)
+    string[] L=array.from("5 MIN", "10 MIN", "15 MIN", "30 MIN", "1 HOUR", "DAILY", "WEEKLY", "MONTHLY")
+    
+    int con=(tWH==1 and tDH==1 and t60[oS]==1)?1:(tWH==-1 and tDH==-1 and t60[oS]==-1)?-1:0
+    
+    cl(tblPA,1,1,log_version_name,secLabelColor,tableTextColor,sz(pa_fSz)), cl(tblPA,2,1,"TREND",secLabelColor,tableTextColor,sz(pa_fSz)), cl(tblPA,3,1,"H<>Hp",secLabelColor,tableTextColor,sz(pa_fSz)), cl(tblPA,4,1,"L<>Lp",secLabelColor,tableTextColor,sz(pa_fSz)), cl(tblPA,5,1,"C<>Hp/Lp",secLabelColor,tableTextColor,sz(pa_fSz)), cl(tblPA,6,1,"V-Rev",secLabelColor,tableTextColor,sz(pa_fSz))
+
+  
+    int cur_sec = timeframe.in_seconds(timeframe.period)
+    int[] display_indices = array.new_int(0)
+    
+    if timeframe.in_seconds("5") >= cur_sec
+        array.push(display_indices, 0)
+    if timeframe.in_seconds("10") >= cur_sec
+        array.push(display_indices, 1)
+    if timeframe.in_seconds("15") >= cur_sec
+        array.push(display_indices, 2)
+    if timeframe.in_seconds("30") >= cur_sec
+        array.push(display_indices, 3)
+    if timeframe.in_seconds("60") >= cur_sec
+        array.push(display_indices, 4)
+    if timeframe.in_seconds("D") >= cur_sec
+        array.push(display_indices, 5)
+    if timeframe.in_seconds("W") >= cur_sec
+        array.push(display_indices, 6)
+    if timeframe.in_seconds("1M") >= cur_sec
+        array.push(display_indices, 7)
+    
+    for j = 0 to display_indices.size() - 1
+        int i = display_indices.get(j)
+        int v=T.get(i), TR d=R.get(i), int dyn_tag = T_tag.get(i)
+        float _l = AL.get(i), float _l1 = AL1.get(i), float _l2 = AL2.get(i)
+        float _h = AH.get(i), float _h1 = AH1.get(i), float _h2 = AH2.get(i)
+        float _c = AC.get(i)
+        
+        bool isBull = (_h > _h1) and (_l > _l1) and (_c > _h1)
+        bool isBear = (_h < _h1) and (_l < _l1) and (_c < _l1)
+        int trendStatus = isBull ? 1 : isBear ? -1 : 0
+        
+        string vTxt = math.abs(dyn_tag) == 4 ? "V-Seq" : math.abs(dyn_tag) == 3 ? "V-Surge" : math.abs(dyn_tag) == 2 ? "2-Bar" : math.abs(dyn_tag) == 1 ? "1-Bar" : "---"
+        color vCol = dyn_tag >= 1 ? color.new(#00c853,pa_trp) : dyn_tag <= -1 ? color.new(#ff5252,pa_trp) : color.new(color.gray,pa_trp)
+        color bg=trendStatus==1?color.new(#00c853,pa_trp):trendStatus==-1?color.new(#ff5252,pa_trp):v==99?color.new(color.orange,pa_trp):color.new(color.gray,pa_trp)
+        
+        cl_b(tblPA,1,j+2,L.get(i),pa_lBg,pa_lTx,sz(pa_fSz)), cl(tblPA,2,j+2,trendStatus==1?"BULL":trendStatus==-1?"BEAR":v==99?"LOADING...":"NEUTRAL",bg,pa_cTx,sz(pa_fSz))
+        cl(tblPA,3,j+2,str.tostring(d.h,format.mintick),d.h>=0?color.new(color.green,pa_trp):color.new(color.red,pa_trp),pa_cTx,sz(pa_fSz))
+        cl(tblPA,4,j+2,str.tostring(d.l,format.mintick),d.l>=0?color.new(color.green,pa_trp):color.new(color.red,pa_trp),pa_cTx,sz(pa_fSz))
+        cl(tblPA,5,j+2,str.tostring(d.b,format.mintick),d.b>0?color.new(color.green,pa_trp):d.b<0?color.new(color.red,pa_trp):color.new(color.gray,pa_trp),pa_cTx,sz(pa_fSz))
+        cl(tblPA,6,j+2,vTxt,vCol,pa_cTx,sz(pa_fSz))
+
+    int conf_row = display_indices.size() + 2
+    int foot_row = display_indices.size() + 3
+
+    color cC=con==1?color.new(#00c853,pa_trp):con==-1?color.new(#ff5252,pa_trp):color.new(color.gray,pa_trp)
+    cl_b(tblPA,1,conf_row,"TREND (W+D+H)",pa_lBg,pa_lTx,sz(pa_fSz)), cl_b(tblPA,2,conf_row,con==1?"BULL":con==-1?"BEAR":"NEUTRAL",cC,pa_lTx,sz(pa_fSz))
+    cl(tblPA,3,conf_row,"",pa_lBg,pa_lTx,sz(pa_fSz)), cl(tblPA,4,conf_row,strategy_text,pa_lBg,pa_lTx,sz(pa_fSz)), cl(tblPA,5,conf_row,"",pa_lBg,pa_lTx,sz(pa_fSz)), cl(tblPA,6,conf_row,"",pa_lBg,pa_lTx,sz(pa_fSz))
+    table.merge_cells(tblPA,2,conf_row,3,conf_row) 
+    table.merge_cells(tblPA,4,conf_row,6,conf_row) 
+
+    string st_label= (RT?"Zero Lag":"Confirmed")+", "+pa_sTF+(str.contains("DWM",pa_sTF)?"":"m")
+    string tm_label=str.format_time(timenow,"yyyy-MM-dd HH:mm",pa_tz=="Exchange"?syminfo.timezone:pa_tz)
+    
+    cl(tblPA,1,foot_row,"Visual Label Time Frame",pa_sBg,pa_sTx,sz(pa_sSz)), cl(tblPA,2,foot_row,"",pa_sBg,pa_sTx,sz(pa_sSz))
+    table.merge_cells(tblPA,1,foot_row,2,foot_row)
+    
+    cl(tblPA,3,foot_row,st_label,pa_sBg,pa_sTx,sz(pa_sSz)), cl(tblPA,4,foot_row,"",pa_sBg,pa_sTx,sz(pa_sSz))
+    table.merge_cells(tblPA,3,foot_row,4,foot_row)
+    
+    cl(tblPA,5,foot_row,tm_label,pa_sBg,pa_sTx,sz(pa_sSz)), cl(tblPA,6,foot_row,"",pa_sBg,pa_sTx,sz(pa_sSz))
+    table.merge_cells(tblPA,5,foot_row,6,foot_row)
+
+    table.cell(tblPA, 0, 1, "3\nC\nT\nL\n\nT\nR\nE\nN\nD", bgcolor=secLabelColor, text_color=tableTextColor, text_size=sz(pa_fSz), text_formatting=text.format_bold)
+    table.merge_cells(tblPA, 0, 1, 0, foot_row) 
+// =====================================================================
+
+// =====================================================================
+// 🔒 STRICT IMMUTABLE CORE: TREND LABELS PLOTTING & SETTINGS (GENERATION)
+// =====================================================================
+int pa_x = RT ? bar_index : bar_index - 1
+if show_trend_labels
+    bool isStandard = pa_lbl_pos == "Standard (L=Low, S=High)"
+    
+    bool isBull = raw_lvl > 0 
+    bool putBelow = isStandard ? isBull : not isBull
+    
+    if (math.abs(raw_lvl) == 1 or math.abs(raw_lvl) == 2) and (math.abs(raw_lvl[1]) < 1)
+        float y_pos_L = putBelow ? low - vis_offset_ls : high + vis_offset_ls
+        string style_L = putBelow ? label.style_label_up : label.style_label_down
+        label.new(pa_x, y_pos_L, (isBull ? "L" : "S") + "\n" + f_last3(close), color=color.new(isBull ? pa_cB_input : pa_cS_input, 0), style=style_L, textcolor=pa_txt_col, size=sz(pa_mSz), force_overlay=true)
+
+    if (math.abs(raw_lvl) == 3 or math.abs(raw_lvl) == 4) and (math.abs(raw_lvl[1]) < 3)
+        float y_pos_VL = putBelow ? low - vis_offset_ls : high + vis_offset_ls
+        string style_VL = putBelow ? label.style_label_up : label.style_label_down
+        
+        string ext = math.abs(raw_tag) == 4 ? "-Sq" : "-Sg"
+        
+        label.new(pa_x, y_pos_VL, (isBull ? "VL" : "VS") + ext + "\n" + f_last3(close), color=color.new(isBull ? pa_cB_input : pa_cS_input, 0), style=style_VL, textcolor=pa_txt_col, size=sz(pa_mSz), force_overlay=true)
+
+    if pa_shwC and (math.abs(raw_lvl) == 3 or math.abs(raw_lvl) == 4) and (math.abs(raw_lvl[1]) >= 3)
+        float y_pos_hold = putBelow ? low - vis_offset_hold : high + vis_offset_hold
+        label.new(pa_x, y_pos_hold, (isBull ? "L" : "S"), style=label.style_none, textcolor=(isBull ? pa_cB_input : pa_cS_input), size=sz(pa_cSz), force_overlay=true)
+// =====================================================================

@@ -1,0 +1,96 @@
+#87 - Task #87: SEBI Limit Orders, UX Risk Fix & Strict Zero-Hardcode Architecture
+
+CRITICAL FROZEN CODE DIRECTIVE: Under NO circumstances should you modify, refactor, or touch any logic, UI components, or schema types related to Bracket Orders (bracketOrder). That system is frozen. Only append the new fields requested below.
+
+Background
+SEBI has banned pure Market Orders (MKT) for algos. Three parallel objectives:
+1. Add LMT/MKT Price Mode toggle at block level in the plan builder UI.
+2. Elevate Product Type to block level (already done in UI; enforce in engine).
+3. Strip every hardcoded fallback ("MIS", "MKT") from the engine and replace with DB-backed fail-fast logic.
+
+File Map
+shared/schema.ts — BlockConfig type, buildBrokerOrderParams
+client/src/components/trade-planning.tsx — block-level UI toggles
+client/src/pages/settings.tsx — GeneralTradingSettings (add buffer field)
+server/te-kotak-neo-v3.ts — resolveOrderParams, executeLegBasket, closeTrade, startPersistentRollback
+
+Step 1A: shared/schema.ts — BlockConfig + buildBrokerOrderParams
+1A-i. Extend BlockConfig type (line 63)
+export type BlockConfig = {
+  productMode: "MIS" | "NRML";
+  priceMode?: "LMT" | "MKT";   // NEW — default LMT for SEBI compliance
+  // Do NOT touch existing properties like bracketOrder
+};
+
+1A-ii. buildBrokerOrderParams fail-fast (line 748)
+REMOVE:
+const product = leg.orderType || config.productMode || "MIS";
+
+REPLACE WITH:
+const product = config.productMode;
+if (!product) throw new Error("Product Type (NRML/MIS) is missing from database configuration.");
+
+Note: leg.orderType is deprecated — block-level productMode is the authority.
+
+Step 1B: client/src/components/trade-planning.tsx — UI Changes
+1B-i. defaultBlockConfig
+CHANGE default from { productMode: "MIS" } to { productMode: "NRML", priceMode: "LMT" }. Also update the reset calls.
+
+1B-ii. Backward-compat loader 
+When loading old plans that have no priceMode, default priceMode to "LMT":
+setUptrendConfig(tp.uptrendConfig || { productMode: deriveMode(loadedUptrend), priceMode: "LMT" });
+
+1B-iii. Add priceMode segmented control beside the existing productMode Select
+In the block header, after the existing productMode <Select>, add a second <Select> for priceMode (LMT/MKT). Save this into the block config.
+
+Step 1C: client/src/pages/settings.tsx 
+Add a numeric input labeled "Limit Order Buffer (Points)" (min 0, step 0.05). Save to the appSettings table using the exact key "limit_order_buffer_points".
+
+Step 2: Trade Engine Execution (server/te-kotak-neo-v3.ts)
+
+2A. Add the DB-Backed Buffer Utility
+At the top of the file, add this helper function. Notice there is no fallback parameter:
+function getBufferedLimitPrice(currentPrice: number, action: string, bufferPoints: number): string {
+  if (!currentPrice || currentPrice <= 0) return "0";
+  const rawPrice = action.toUpperCase() === "BUY" 
+    ? currentPrice + bufferPoints 
+    : Math.max(0.05, currentPrice - bufferPoints); 
+  const roundedPrice = Math.round(rawPrice * 20) / 20;
+  return roundedPrice.toFixed(2);
+}
+
+2B. Strict Parameter Resolution (resolveOrderParams)
+Rewrite to remove hardcodes and rely strictly on the DB/TL:
+const dbProductDefault = TL.isReady() ? TL.getDefaultByUniversalName("productType", "order_place") : null;
+const productCode = ctx.blockConfig.productMode || dbProductDefault;
+if (!productCode) return { error: "ABORT: Product Type (NRML/MIS) not found in plan or global DB defaults." };
+
+const dbPriceDefault = TL.isReady() ? TL.getDefaultByUniversalName("priceType", "order_place") : null;
+const priceMode = ctx.blockConfig.priceMode || dbPriceDefault;
+if (!priceMode) return { error: "ABORT: Price Type (MKT/LMT) not found in plan or global DB defaults." };
+
+2C. DB-Backed Payload Construction (The 3 Execution Zones)
+Before firing EL.placeOrder in executeLegBasket, closeTrade, and startPersistentRollback, fetch the buffer from the DB. Do not use a fallback.
+
+// 1. Fetch from DB
+const bufferSetting = await storage.getSetting("limit_order_buffer_points");
+if (!bufferSetting?.value && priceMode === "LMT") {
+    throw new Error("ABORT: limit_order_buffer_points is missing from app_settings database."); 
+}
+const bufferPoints = parseFloat(bufferSetting?.value || "0");
+
+// 2. Resolve Price
+const evaluationPrice = trade.ltp || trade.price || 0; // Adjust variable name based on context
+const finalPrice = priceMode === "LMT" 
+    ? getBufferedLimitPrice(evaluationPrice, exitAction, bufferPoints) // Use tradeAction/reverseAction contextually
+    : "0";
+
+// 3. Construct Payload
+const payload = {
+    // ...
+    productType: productCode,
+    priceType: priceMode,
+    price: finalPrice
+};
+
+Apply this strict DB-only payload construction to all Kotak order placements. Ensure logPFL correctly logs any of these "Fail-Fast" aborts, and do not alter bracket order parameters if they exist in the payload.

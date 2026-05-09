@@ -1,0 +1,55 @@
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# pm2 logs
+[TAILING] Tailing last 15 lines for [all] processes (change the value with --lines option)
+/root/.pm2/pm2.log last 15 lines:
+PM2        | 2026-04-01T19:01:12: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-01T19:01:12: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-01T19:01:12: PM2 log: Script /root/relay.js had too many unstable restarts (16). Stopped. "errored"
+PM2        | 2026-04-01T21:31:04: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-01T21:31:04: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-08T13:31:37: PM2 log: Stopping app:kotak-relay id:0
+PM2        | 2026-04-08T13:31:37: PM2 log: App [kotak-relay:0] exited with code [0] via signal [SIGINT]
+PM2        | 2026-04-08T13:31:38: PM2 log: pid=11299 msg=process killed
+PM2        | 2026-04-08T13:31:38: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-08T13:31:38: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-08T15:17:08: PM2 log: Stopping app:kotak-relay id:0
+PM2        | 2026-04-08T15:17:08: PM2 log: App [kotak-relay:0] exited with code [0] via signal [SIGINT]
+PM2        | 2026-04-08T15:17:08: PM2 log: pid=272498 msg=process killed
+PM2        | 2026-04-08T15:17:08: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-08T15:17:08: PM2 log: App [kotak-relay:0] online
+
+/root/.pm2/logs/kotak-relay-out.log last 15 lines:
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/interactive
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/realtime
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/interactive
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/realtime
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/interactive
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/realtime
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/interactive
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/realtime
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/interactive
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/realtime
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/interactive
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/realtime
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/interactive
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/realtime
+0|kotak-re | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/interactive
+
+/root/.pm2/logs/kotak-relay-error.log last 15 lines:
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+0|kotak-re | [RELAY] WS Proxy Error: connect ETIMEDOUT 203.199.89.129:443
+
+0|kotak-relay  | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/realtime
+0|kotak-relay  | [RELAY] Proxying WS to: wss://hstream.kotaksecurities.com/interactive

@@ -1,0 +1,437 @@
+CONNECTION
+CONNECTION - 1. Create WS Object
+This shows how to make connection with Interactive data js-api, Here server_url specifies the URL to which to connect.
+
+websocket
+HSIWebSocket
+Sample
+var hsiSocket = new HSIWebSocket(server_url);
+CONNECTION - 2. Authentication with x-access-token
+To authenticate for updates.
+
+websocket
+HSIWebSocket
+Parameter
+Field	Type	Description
+type	String	
+Type
+
+x-access-token	String	
+x-access-token
+
+source	String	
+source(WEB/MOB)
+
+Request
+{
+    "type": "cn",
+    "x-access-token": "x-access-token1",
+    "source": "WEB"
+}
+Success Parameter
+Field	Type	Description
+ak	String	
+Status
+
+type	String	
+Type
+
+msg	String	
+Message
+
+Success response
+{
+    "ak": "ok",
+    "type": "cn",
+    "msg": "connected"
+}
+Error Parameter
+Name	Type	Description
+ak	String	
+Status
+
+type	String	
+Type
+
+msg	String	
+Message
+
+Error response 1
+{
+    "ak": "nk",
+    "type": "cn",
+    "msg": "failed to connect"
+}
+CONNECTION - 3. Authentication
+To authenticate for updates.
+
+websocket
+HSIWebSocket
+Parameter
+Field	Type	Description
+type	String	
+Type
+
+Authorization	String	
+Authorization
+
+Sid	String	
+Sid
+
+source	String	
+source(WEB/MOB)
+
+Request
+{
+    "type": "cn",
+    "Authorization": "Authorization1",
+    "Sid": "Sid",
+    "source": "WEB"
+}
+Success Parameter
+Field	Type	Description
+ak	String	
+Status
+
+type	String	
+Type
+
+msg	String	
+Message
+
+Success response
+{
+    "ak": "ok",
+    "type": "cn",
+    "msg": "connected"
+}
+Error Parameter
+Name	Type	Description
+ak	String	
+Status
+
+type	String	
+Type
+
+msg	String	
+Message
+
+Error response 1
+{
+    "ak": "nk",
+    "type": "cn",
+    "msg": "failed to connect"
+}
+INTERACTIVE DATA UPDATES
+INTERACTIVE DATA UPDATES - 1. Order Update Data
+To view Order updates.
+
+websocket
+HSIWebSocket
+orderUpdate
+Field	Type	Description
+actId	String	
+Account id
+
+cnlQty	String	
+Cancelled quantity
+
+dscQty	String	
+Disclosed quantity
+
+exCfmTm	String	
+Exchange time stamp
+
+exSeg	String	
+Exchange segment
+
+fldQty	String	
+Filled quantity
+
+hsUpTm	String	
+Last Updated Time
+
+mfdBy	String	
+Modified by user
+
+mktPro	String	
+Market protection
+
+nOrdNo	String	
+Nest order number
+
+ordDtTm	String	
+Ordered time
+
+ordEntTm	String	
+Order entry time
+
+ordSt	String	
+Order status
+
+ordValDt	String	
+Order validity date
+
+prc	String	
+Price
+
+prcTp	String	
+Price type
+
+qty	String	
+Quantity
+
+rejRsn	String	
+Rejection reason
+
+reqId	String	
+Request id
+
+rmk	String	
+rmk
+
+tok	String	
+Token/Symbol
+
+trdSym	String	
+Trading smbol
+
+trgPrc	String	
+Trigger price
+
+unFldSz	String	
+Unfilled size
+
+vldt	String	
+Order validity
+
+exOrdId	String	
+Exchange order id
+
+Order Update
+{
+    "type": "order",
+    "data": {
+        "avgPrc": "3915.00",
+        "cnlQty": 0,
+        "dscQty": 0,
+        "exCfmTm": "20-Sep-2021 12:05:24",
+        "exSeg": "nse_cm",
+        "fldQty": 1,
+        "hsUpTm": "2021/09/20 12:05:24",
+        "mfdBy": "NA",
+        "mktPro": "0.00",
+        "nOrdNo": "210920000000065",
+        "ordDtTm": "20-Sep-2021 12:05:24",
+        "ordEntTm": "20-Sep-2021 11:57:39",
+        "ordSt": "complete",
+        "ordValDt": "NA",
+        "prc": "3915.00",
+        "prcTp": "L",
+        "qty": 1,
+        "rejRsn": "--",
+        "reqId": "1",
+        "rmk": "--",
+        "tok": "11536",
+        "trdSym": "TCS-EQ",
+        "trgPrc": "0.00",
+        "unFldSz": 0,
+        "vldt": "DAY"
+    }
+}
+INTERACTIVE DATA UPDATES - 2. Trade Update Data
+To view Order updates.
+
+websocket
+HSIWebSocket
+tradeUpdate
+Field	Type	Description
+avgPrc	String	
+Average price
+
+exOrdId	String	
+Exchange order id
+
+exSeg	String	
+Exchange segment
+
+exTm	String	
+Exchange time
+
+flDt	String	
+Fill date
+
+flId	String	
+Fill id
+
+flTm	String	
+Fill time
+
+fldQty	Integer	
+Filled quantity
+
+nOrdNo	String	
+Nest order number
+
+prod	String	
+Product code
+
+tok	String	
+Token
+
+trdSym	String	
+Trading symbol
+
+trnsTp	String	
+Transaction type
+
+Trade update
+{
+    "type": "trade",
+    "data": {
+        "avgPrc": "3915.00",
+        "exOrdId": "1100000000000702",
+        "exSeg": "nse_cm",
+        "exTm": "20-Sep-2021 11:57:00",
+        "flDt": "20-Sep-2021",
+        "flId": "50000332",
+        "flTm": "12:05:24",
+        "fldQty": 1,
+        "nOrdNo": "210920000000062",
+        "prod": "NRML",
+        "tok": "11536",
+        "trdSym": "TCS-EQ",
+        "trnsTp": "B"
+    }
+}
+INTERACTIVE DATA UPDATES - 3. Position Update Data
+To view Order updates.
+
+websocket
+HSIWebSocket
+positionUpdate
+Field	Type	Description
+buyAmt	String	
+Buy amount
+
+cfBuyAmt	String	
+CF buy amount
+
+cfBuyQty	String	
+CF buy quantity
+
+cfSellAmt	String	
+CF sell amount
+
+cfSellQty	String	
+CF sell quantity
+
+exSeg	String	
+Exchange segment
+
+flBuyQty	String	
+Fill buy quantity
+
+flSellQty	String	
+Fill sell quantity
+
+hsUpTm	String	
+HS Last update time
+
+prod	String	
+Product code
+
+sellAmt	String	
+Sell amount
+
+sym	String	
+Symbol name
+
+tok	String	
+Token
+
+trdSym	String	
+Trading symbol
+
+Position update
+{
+    "type": "position",
+    "data": {
+        "buyAmt": "7830.00",
+        "cfBuyAmt": "0.00",
+        "cfBuyQty": "0",
+        "cfSellAmt": "0.00",
+        "cfSellQty": "0",
+        "exSeg": "nse_cm",
+        "flBuyQty": "2",
+        "flSellQty": "2",
+        "hsUpTm": "2021/09/20 12:05:24",
+        "prod": "NRML",
+        "sym": "BANKNIFTY",
+        "sellAmt": "7833.00",
+        "tok": "11536",
+        "trdSym": "BANKNIFTY21JULFUT"
+    }
+}
+JS API EVENTS
+JS API EVENTS - 1. On Open
+This event occurs when socket connection is established.
+
+websocket
+HSIWebSocket.onopen
+Sample
+hsiSocket.onopen = function () 
+{
+	//code
+}
+JS API EVENTS - 2. On Message
+This event occurs when client receives data from server.
+
+websocket
+HSIWebSocket.onmessage
+Sample
+hsiSocket.onmessage = function (message) 
+{
+	//message -> connection response/order update/trade update/position update
+}
+JS API EVENTS - 3. On Close
+This event occurs when connection is closed.
+
+websocket
+HSIWebSocket.onclose
+Sample
+hsiSocket.onclose = function () 
+{
+	//code
+}
+JS API EVENTS - 4. On Error
+This event occurs when there is any error in communication.
+
+websocket
+HSIWebSocket.onerror
+Sample
+hsiSocket.onerror = function () 
+{
+	//code
+}
+JS API METHODS
+JS API METHODS - 1. Send
+This function is used for sending the json request.
+
+websocket
+HSIWebSocket.send
+Sample
+hsiWebSocket.send(request);
+Request
+{
+    "type": "cn",
+    "x-access-token": "sx-access-token1",
+    "source": "WEB"
+}
+JS API METHODS - 2. Close
+This function is used for closing the webscoket connection.
+
+websocket
+HSIWebSocket.close
+Sample
+hsiWebSocket.close();

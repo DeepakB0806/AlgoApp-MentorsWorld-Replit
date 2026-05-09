@@ -1,0 +1,59 @@
+Task: Implement #118 - Capture and Pass dataCenter in WS Auth
+
+Context:
+We need to capture the dataCenter value returned during the Kotak Neo MPIN login step, save it to the brokerConfigs table, and pass it in the cn authentication message for both HSM and HSI WebSockets. I am officially granting permission to open 🔒 LOCKED BLOCK [EL-3].
+
+Instructions for Replit:
+Apply the following surgical modifications exactly as requested.
+
+Task 1: Update Schema
+File: shared/schema.ts
+Locate the brokerConfigs table definition. Add the dataCenter column:
+
+TypeScript
+  // Add this inside the brokerConfigs pgTable definition:
+  dataCenter: text("data_center"),
+CRITICAL: Run npm run db:push in the shell immediately after saving this file.
+
+Task 2: Extract from EL (Unlock EL-3)
+File: server/el-kotak-neo-v3.ts
+Inside the authenticate method (around the MPIN validation step inside [EL-3]), locate the final return object. Map the dataCenter from the response and return it:
+
+TypeScript
+      // Add dataCenter to the returned object:
+      return {
+        success: true,
+        token: finalToken,
+        sid: sid,
+        // Map the dataCenter exactly as provided by Kotak
+        dataCenter: mpinData?.data?.dataCenter || null,
+        message: "Login successful"
+      };
+Task 3: Persist to Database
+File: server/routes/broker-routes.ts
+Locate the Kotak Neo login route (typically router.post('/login/kotak-neo')). Update the database persistence block where updateBrokerConfig is called:
+
+TypeScript
+      // Inside the updateBrokerConfig payload, map the new field:
+      await storage.updateBrokerConfig(config.id, {
+         accessToken: result.token,
+         sessionId: result.sid,
+         dataCenter: result.dataCenter || null, // ADD THIS LINE
+         status: 'ACTIVE',
+         lastLoginAt: new Date()
+      });
+Task 4: Include in WS Auth Messages
+File: server/hsm-kotak-neo-v3.ts AND server/hsi-kotak-neo-v3.ts
+Locate the buildAuthMessage function (or the spot where the { type: "cn", ... } object is constructed) in BOTH files. Update the returned object to dynamically spread the dataCenter:
+
+TypeScript
+    // Inside the connection message builder, add the dataCenter conditionally:
+    const authMessage = {
+      type: "cn",
+      Authorization: config.accessToken,
+      Sid: config.sessionId,
+      source: "WEB",
+      ...(config.dataCenter ? { dataCenter: config.dataCenter } : {})
+    };
+    
+    ws.send(JSON.stringify(authMessage));

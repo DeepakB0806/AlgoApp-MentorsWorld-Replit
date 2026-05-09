@@ -1,0 +1,84 @@
+#171 - Pre-Build Architecture Checklist Skill
+What & Why
+This project is entirely schema-driven — every data field that appears in the UI or backend must exist as a column in the database before any code is written. Without a mandatory checklist, task agents (and the main agent) have shipped feature plans that skipped schema entirely, requiring the user to catch the gap manually.
+
+This task creates a permanent skill file at .agents/skills/pre-build-checklist/SKILL.md that every task agent must load and answer before writing a single line of implementation code. It is not optional and not stylistic — it is a hard architectural gate.
+
+Done looks like
+.agents/skills/pre-build-checklist/SKILL.md exists with the full checklist
+The skill is referenced in replit.md under a "Mandatory Agent Rules" section so it is always visible in the main agent's memory
+Any future task plan written by the main agent includes a "Pre-Build Checklist" section answered explicitly before the implementation steps
+Out of scope
+Changing any existing task or code
+Enforcing this retroactively on already-merged tasks
+Steps
+Step 1: Create the skill file
+Create .agents/skills/pre-build-checklist/SKILL.md with the following content:
+
+---
+name: pre-build-checklist
+description: Mandatory architectural gate. Load and answer this checklist before writing any code for any task.
+---
+# Pre-Build Architecture Checklist
+This checklist is MANDATORY. Answer every question explicitly before writing any implementation code.
+Skip no question. If the answer is unclear, read the relevant files until it is clear.
+---
+## Q1 — Does this feature introduce new data fields?
+For every new field visible in the UI or processed by the backend, ask:
+- Is this field persisted to the database?
+  - YES → a schema column is required. Do NOT write any other code until the column exists.
+  - NO  → document why (e.g. computed at runtime, in-memory only, config only)
+**Rule**: If any answer is YES, Step 1 of the task plan must be the schema change. No exceptions.
+---
+## Q2 — For each new persisted field, identify:
+| Field name | DB table | Drizzle column type | Nullable? |
+|---|---|---|---|
+| (fill in) | (fill in) | text / real / integer / boolean / timestamp | yes / no |
+All tables are defined in `shared/schema.ts`.
+Common tables: `strategyTrades`, `strategyPlans`, `brokerConfigs`, `webhookData`.
+---
+## Q3 — Schema change execution order (non-negotiable):
+1. Edit `shared/schema.ts` — add the column to the correct pgTable
+2. Run `npm run db:push` — applies the migration to the live database
+3. Confirm the column exists: run a quick SELECT or check DB introspection
+4. ONLY THEN write storage, backend, and frontend code
+---
+## Q4 — Which TypeScript types need manual updates?
+Auto-derived (no manual change needed):
+- `insertStrategyTradeSchema` and similar — auto-derived via `createInsertSchema`
+- `StrategyTrade`, `StrategyPlan` etc. — auto-derived via `$inferSelect`
+Require MANUAL update:
+- Shared config types: `TrailingStoplossConfig`, `BlockConfig`, `TradeParams`, etc. (~line 60-120 in schema.ts)
+- Zod schemas used in forms or API validation
+- Any `interface` or `type` in `shared/schema.ts` that mirrors the new field
+---
+## Q5 — Existing queries and writes — do they need updating?
+For the table that gained new columns:
+- SELECT queries that fetch full rows: do they need to include the new column? (usually auto-included via `db.select()`)
+- INSERT/UPDATE calls: do they need to pass the new field? Update all relevant `storage.create*` and `storage.update*` calls.
+- Any raw SQL or `.set({...})` calls that enumerate columns explicitly: add the new column.
+---
+## Q6 — Does the feature read external data provided by a third-party spec?
+If YES (e.g. a Gemini spec, a PDF, a demo file, user-written pseudocode):
+- Treat the external spec as a STARTING POINT only
+- Re-derive every data field from first principles using Q1–Q5 above
+- Do NOT copy field names from the spec without verifying they exist in the schema
+- Do NOT assume the spec includes schema steps — it almost never does
+---
+## Checklist sign-off
+Before writing code, confirm all 6 questions are answered.
+Write a one-line summary: "Schema change needed: YES/NO. New columns: [list]. Migration: db:push."
+
+Step 2: Update replit.md
+Add a "Mandatory Agent Rules" section to replit.md that references this skill:
+
+## Mandatory Agent Rules
+Before writing any implementation code for any task, load and answer the
+`.agents/skills/pre-build-checklist/SKILL.md` checklist. This is not optional.
+Key rule: If a feature introduces any new data field stored in the database,
+the schema change in `shared/schema.ts` and `npm run db:push` MUST be the
+first step — before storage, backend, or frontend code.
+
+Relevant files
+.agents/skills/pre-build-checklist/SKILL.md — new file (create)
+replit.md — add Mandatory Agent Rules section

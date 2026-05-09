@@ -1,0 +1,61 @@
+#112 - Fix: Fresh-Session Neutral Leg Auto-Seed
+What & Why
+When a composite reversal signal like SELL_DT+BUY_UT fires and the plan has no open positions (fresh session — e.g., plan was activated mid-day after the initial BUY_UT was missed), the action mapper is correctly configured with neutral=HOLD for reversal semantics. However, HOLD means "leave neutral as-is during a reversal" — when no neutral trade exists, the system must still seed neutral legs before the directional SELL.
+
+The original fix-neutral-legs task added a !hasOpenNeutral check in buildEntryBasket that auto-seeded neutral legs whenever they were not open. A subsequent task (fix-neutral-legs-honour-configurator) removed this check to fix a March 2026 production incident where neutral legs were being closed during reversals and then wrongly re-entered at new strikes.
+
+That incident was caused by a separate bug (|| t.blockType === "neutralLegs" in the reversal close filter), which was correctly fixed in the same task. With that filter bug gone, neutral legs are no longer closed during reversals — making it safe to restore the !hasOpenNeutral auto-seed in buildEntryBasket. During a reversal, neutral remains in remainingOpen → hasOpenNeutral = true → auto-seed skipped. During a fresh session, neutral is absent → hasOpenNeutral = false → auto-seed fires before the directional SELL, preventing margin rejection.
+
+Done looks like
+SELL_DT+BUY_UT fires with no existing positions: neutral BUY legs are placed first, then the directional SELL leg — Kotak accepts the SELL because the hedge is already booked.
+SELL_DT+BUY_UT fires with existing downtrend positions (normal reversal): neutral legs are already open → hasOpenNeutral = true → not re-seeded, only the directional block switches.
+BUY_UT fires (initial signal, normal flow): neutral=ENTRY is dispatched explicitly by the action mapper → enters neutral first (unchanged path).
+No change in behavior for strategies that have no neutralLegs configured in their trade params (empty array → hasOpenNeutral check passes harmlessly, no legs pushed).
+Out of scope
+Changes to the action mapper UI or action mapper configuration
+Changes to executeSellSignal, closeTrade, squareOffPlan, or any persistent loop
+Schema or storage changes
+Re-adding || t.blockType === "neutralLegs" to the reversal close filter — this must remain absent (March 2026 fix)
+Tasks
+Restore !hasOpenNeutral in buildEntryBasket — In buildEntryBasket, before pushing ctx.legs, check if any open trade has blockType === "neutralLegs". If none found, push all ctx.neutralLegs items (with blockType: "neutralLegs") into the basket before the directional legs. The existing BUY-before-SELL sort already ensures the neutral BUY entries precede the directional SELL in the final basket.
+Critical constraints
+The reversal close filter in executeBuySignal must NOT be changed — || t.blockType === "neutralLegs" must remain absent from openOpposites
+The change is confined to buildEntryBasket only — no other function is touched
+ctx.neutralLegs is already populated in TradeContext from tradeParams?.neutralLegs — no new field or schema change needed
+
+Relevant files
+server/te-kotak-neo-v3.ts:830-842
+server/te-kotak-neo-v3.ts:858-915
+
+Code Snippet
+function buildEntryBasket(ctx: TradeContext): ActionMapperEntry[] {
+  const basket: ActionMapperEntry[] = [];
+
+  // --- TASK #112: FRESH-SESSION NEUTRAL LEG AUTO-SEED ---
+  // 1. Check if the portfolio already has open neutral legs
+  const hasOpenNeutral = ctx.openTrades.some((t) => t.blockType === "neutralLegs");
+
+  // 2. If no neutral legs exist, push the configured neutral legs into the basket FIRST
+  if (!hasOpenNeutral && ctx.neutralLegs && ctx.neutralLegs.length > 0) {
+    console.log(`[TE] Fresh session detected: Auto-seeding neutral legs for margin protection.`);
+    for (const nLeg of ctx.neutralLegs) {
+      basket.push({
+        action: "ENTER",
+        blockType: "neutralLegs",
+        leg: nLeg,
+      });
+    }
+  }
+  // ------------------------------------------------------
+
+  // 3. Push the incoming directional legs into the basket
+  for (const leg of ctx.legs) {
+    basket.push({
+      action: "ENTER",
+      blockType: ctx.blockType,
+      leg,
+    });
+  }
+
+  return basket;
+}

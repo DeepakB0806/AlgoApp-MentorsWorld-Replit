@@ -1,0 +1,26 @@
+#39 - Fix Holiday Expiry Cache Miss
+What & Why
+FP3 — Holiday Expiry Cache Miss: On any week where NSE shifts a weekly expiry to the prior day due to a public holiday (e.g., Thursday expiry moved to Wednesday for Holi, Diwali, etc.), getTargetExpiry returns the theoretical Thursday date, but the liveContractCache was populated from the Kotak scrip master CSV which uses the actual Wednesday expiry date. The cache key lookup fails with "No contract in multi-expiry cache for..." and the trade is silently dropped.
+
+Root cause: getTargetExpiry is pure calendar math — it computes "next Thursday" without consulting what dates actually exist in the scrip master. The fix is to make the expiry lookup cache-anchored: after computing the theoretical expiry date, if no matching contract exists in liveContractCache for that date, search for the nearest actual expiry date within a ±3 day window for that ticker/strike/type.
+
+Done looks like
+On a holiday-shifted expiry week, trades execute successfully against the correct Wednesday-dated contract instead of dropping
+The Process Flow Log shows [TE] Cache FALLBACK: NIFTY_2027-03-18_21000_CE not found, using nearest: NIFTY_2027-03-17_21000_CE
+No regression on normal weeks (theoretical date matches actual expiry date exactly, no fallback needed)
+A warning log is emitted whenever the fallback path is used, clearly distinguishing exact hits from date-shifted fallbacks
+Out of scope
+Full holiday calendar management in the UI
+Auto-detection of expiry shifts before market open
+BFO contracts (apply same logic only if BFO contracts follow the same NSE holiday pattern)
+Tasks
+Cache-anchored lookup helper — In option-symbol-builder.ts, add a new exported function findNearestCachedExpiry(ticker, targetDate, strike, optType, liveContractCache, windowDays=3) that searches ±windowDays days from targetDate for a matching key in the cache, returning the nearest match date or null.
+
+Fallback in resolveOrderParams — In te-kotak-neo-v3.ts, after the existing exact cache lookup (liveContractCache.get(cacheKey)) returns nothing, call findNearestCachedExpiry and if a result is found, log a warning and use that contract. Only return the error string if no match is found within the window.
+
+Validation — Manually test by temporarily inserting a cache entry with a Wednesday date for a NIFTY contract and verifying the TE resolves it correctly when getTargetExpiry returns Thursday.
+
+Relevant files
+server/option-symbol-builder.ts:143-181
+server/te-kotak-neo-v3.ts:400-433
+server/scrip-master-sync.ts:190-207

@@ -1,0 +1,77 @@
+Task #89: [CORRECTION] Strategy-Level Controls & Frozen Logic Protection
+CRITICAL MANDATE: This is a structural UI move only. You are strictly forbidden from refactoring, modifying, or touching any code related to bracketOrder logic, its visibility toggles, or its internal state. Follow these "Search & Replace" instructions byte-for-byte to ensure frozen code remains intact.
+
+File: client/src/components/trade-planning.tsx
+
+Step 1: The "Search & Destroy" (Remove Block-Level Toggles)
+Find the execution blocks for uptrendConfig, downtrendConfig, and neutralConfig.
+
+Action: Locate the h4 header row and the settings panel for each block.
+
+Delete: Completely remove any <Select> components and <Label> tags that reference productMode or priceMode from these blocks.
+
+Goal: The block headers should now only show the title (e.g., "Uptrend Block") and the "Add Leg" button.
+
+Step 2: The "Strategic Injection" (Add Global Toggles)
+Locate the top-level form section where Exchange and Ticker/Symbol are currently selected.
+
+Action: Immediately after the Ticker Select component (or in the same row), insert this centralized control panel:
+
+TypeScript
+{/* --- GLOBAL STRATEGY CONTROLS (SEBI COMPLIANT) --- */}
+<div className="grid grid-cols-2 gap-4 p-4 mb-6 bg-primary/5 rounded-xl border border-primary/10 shadow-inner">
+  <div className="space-y-2">
+    <Label className="text-xs font-bold uppercase tracking-wider text-primary/70">Strategy Product Type</Label>
+    <Select 
+      value={uptrendConfig.productMode || "NRML"} 
+      onValueChange={(v) => {
+        const mode = v as "MIS" | "NRML";
+        const update = (prev: any) => ({ 
+          ...prev, 
+          productMode: mode, 
+          // Byte-for-byte identical logic to Task #87 to protect bracketOrder
+          bracketOrder: mode === "NRML" ? undefined : prev.bracketOrder 
+        });
+        setUptrendConfig(update);
+        setDowntrendConfig(update);
+        setNeutralConfig(update);
+      }}
+    >
+      <SelectTrigger className="w-full h-10 bg-background border-primary/20">
+        <SelectValue placeholder="Select Product" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="NRML">NRML (Overnight / Standard)</SelectItem>
+        <SelectItem value="MIS">MIS (Intraday / Margin)</SelectItem>
+      </SelectContent>
+    </Select>
+  </div>
+
+  <div className="space-y-2">
+    <Label className="text-xs font-bold uppercase tracking-wider text-primary/70">Execution Mode</Label>
+    <Select 
+      value={uptrendConfig.priceMode || "LMT"} 
+      onValueChange={(v) => {
+        const mode = v as "LMT" | "MKT";
+        const update = (prev: any) => ({ ...prev, priceMode: mode });
+        setUptrendConfig(update);
+        setDowntrendConfig(update);
+        setNeutralConfig(update);
+      }}
+    >
+      <SelectTrigger className="w-full h-10 bg-background border-primary/20">
+        <SelectValue placeholder="Select Execution" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="LMT">LMT (Buffered Limit - SEBI Safe)</SelectItem>
+        <SelectItem value="MKT">MKT (Market Order - Unsafe)</SelectItem>
+      </SelectContent>
+    </Select>
+  </div>
+</div>
+Step 3: Verify State Synchronization
+Action: Ensure the hasMISLegs boolean (which controls the visibility of the Bracket Order UI section) is updated to strictly check the new shared state: const hasMISLegs = uptrendConfig.productMode === "MIS";.
+
+Action: When the savePlan mutation fires, ensure the final JSON payload for uptrendConfig, downtrendConfig, and neutralConfig all include these shared productMode and priceMode values.
+
+Final Constraint: Do not modify the existing bracketOrder sub-object structure or the logic that renders its inputs (Stoploss, Target, Trailing SL).

@@ -1,0 +1,125 @@
+Task #101: Automated NSE Holiday Sync Engine (Cron Job)
+
+What & Why
+Instead of relying on manual CSV uploads for the Dual-Engine Fallback (Task #100), the system must autonomously fetch the official holiday list directly from the NSE website. Because the NSE blocks direct API calls, we are building a dedicated scraper service that mimics a browser, captures session cookies from the homepage, and uses them to access the hidden holiday-master JSON API. A Cron Job will run this sync automatically on server startup and every Sunday night.
+
+Done looks like
+
+Scraper Service: server/nse-holiday-sync.ts successfully bypasses NSE anti-bot protections using the "cookie dance" to fetch live holiday JSON.
+
+Database Integration: The fetched dates are parsed and upserted into the market_holidays table, replacing old data.
+
+Cron Job: node-cron is implemented in server/index.ts to run the sync automatically.
+
+Admin UI: The Settings page displays the live synced holidays and shows the "Last Synced" timestamp. (Manual CSV upload is no longer needed).
+
+Task 1 — Install Dependencies
+Action: Run npm install axios node-cron and npm install -D @types/node-cron in the Replit shell.
+
+Task 2 — The NSE Scraper Service
+File: Create a new file server/nse-holiday-sync.ts
+Implement the two-step cookie mechanism to fetch the data.
+
+TypeScript
+import axios from "axios";
+import { format, parse } from "date-fns";
+import { storage } from "./storage";
+
+const NSE_URL = "https://www.nseindia.com";
+const HOLIDAY_API = "https://www.nseindia.com/api/holiday-master?type=trading";
+
+export async function syncNSEHolidays() {
+  console.log("[NSE-SYNC] Initiating automated holiday sync...");
+  try {
+    // Step 1: Mimic a standard browser to get session cookies
+    const baseRes = await axios.get(NSE_URL, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+      timeout: 10000,
+    });
+
+    const cookies = baseRes.headers["set-cookie"];
+    if (!cookies) throw new Error("Failed to extract session cookies from NSE");
+
+    const cookieString = cookies.map(c => c.split(";")[0]).join("; ");
+
+    // Step 2: Request the actual JSON API using the captured cookies
+    const apiRes = await axios.get(HOLIDAY_API, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "en-US,en;q=0.5",
+        "X-Requested-With": "XMLHttpRequest",
+        "Cookie": cookieString,
+        "Referer": "https://www.nseindia.com/resources/exchange-communication-holidays"
+      },
+      timeout: 10000,
+    });
+
+    const holidayData = apiRes.data;
+    if (!holidayData || !holidayData.CM) throw new Error("Invalid JSON structure from NSE");
+
+    // Parse the CM (Capital Market) / FO (Futures & Options) holidays
+    const extractedHolidays: { date: string, description: string }[] = [];
+    
+    for (const item of holidayData.CM) {
+      // NSE returns dates like "26-Jan-2026". Convert to "YYYY-MM-DD" for our DB.
+      try {
+        const parsedDate = parse(item.tradingDate, "dd-MMM-yyyy", new Date());
+        extractedHolidays.push({
+          date: format(parsedDate, "yyyy-MM-dd"),
+          description: item.description
+        });
+      } catch (e) {
+        console.warn(`[NSE-SYNC] Could not parse date format: ${item.tradingDate}`);
+      }
+    }
+
+    if (extractedHolidays.length > 0) {
+      await storage.bulkUpsertHolidays(extractedHolidays);
+      await storage.upsertSetting("last_nse_holiday_sync", new Date().toISOString());
+      console.log(`[NSE-SYNC] Successfully synced ${extractedHolidays.length} holidays to database.`);
+    }
+
+  } catch (error: any) {
+    console.error("[NSE-SYNC] Critical Failure syncing holidays:", error.message);
+  }
+}
+Task 3 — Implement the Cron Job
+File: server/index.ts
+Wire the scraper to run automatically so the user never has to touch it.
+
+TypeScript
+import cron from "node-cron";
+import { syncNSEHolidays } from "./nse-holiday-sync";
+
+// ... existing imports and setup ...
+
+// INJECT CRON JOB (Around where you start the server)
+// Run at 02:00 AM every Sunday
+cron.schedule("0 2 * * 0", async () => {
+  console.log("[CRON] Executing weekly NSE Holiday Sync...");
+  await syncNSEHolidays();
+});
+
+// Run once on server startup (fire and forget)
+setTimeout(() => {
+  syncNSEHolidays().catch(console.error);
+}, 5000); 
+Task 4 — Wire the UI
+File: client/src/pages/settings.tsx
+Update the "Market Calendar" UI. Remove the CSV uploader. Instead, add a simple "Force Sync Now" button that calls a new endpoint POST /api/settings/holidays/sync (which triggers syncNSEHolidays()). Display the data table of currently loaded holidays, and show the "Last Synced" timestamp by fetching the last_nse_holiday_sync setting from the database.
+
+The Architecture Upgrade
+With this task, your algorithmic infrastructure achieves complete calendar independence.
+
+The server boots up.
+
+It quietly reaches out to the NSE, sneaks past the bot-protection, grabs the live JSON calendar, and loads it into your database.
+
+Your Dual-Engine Fallback now has a mathematically perfect, autonomously updated map of the year's trading days.
+
+If Kotak's Scrip Master goes offline, your engine won't even flinch. Hand this to Replit to automate the final piece of your risk management layer!

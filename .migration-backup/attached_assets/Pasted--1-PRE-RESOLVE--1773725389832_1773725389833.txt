@@ -1,0 +1,89 @@
+// ═══════════════════════════════════════════════════════════════════════════
+  // 1. PRE-RESOLVE ALL LEGS FOR BASKET BATCHING
+  // ═══════════════════════════════════════════════════════════════════════════
+  const basketLegs = [];
+  for (let i = 0; i < ctx.legs.length; i++) {
+    const leg = ctx.legs[i];
+    const resolved = resolveOrderParams(leg, ctx, i);
+    if ("error" in resolved) {
+      return { success: false, action: "error", broker, planId: plan.id, message: resolved.error, executionTimeMs: Date.now() - ctx.startTime };
+    }
+    basketLegs.push({ originalIndex: i, leg, params: resolved });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 2. SMART BASKET SORTING (MARGIN SAFETY NET)
+  // Options Selling requires heavy margin. By executing BUY legs first, 
+  // Kotak registers the hedge, drastically reducing the margin required for 
+  // the subsequent SELL legs and preventing outright order rejections.
+  // ═══════════════════════════════════════════════════════════════════════════
+  basketLegs.sort((a, b) => {
+    const aType = a.params.transactionType.toUpperCase();
+    const bType = b.params.transactionType.toUpperCase();
+    
+    // Prioritize BUY (or 'B') over SELL (or 'S')
+    if ((aType === "BUY" || aType === "B") && (bType === "SELL" || bType === "S")) return -1;
+    if ((aType === "SELL" || aType === "S") && (bType === "BUY" || bType === "B")) return 1;
+    return 0;
+  });
+
+  console.log(`[BASKET] Smart sorting applied. Executing ${basketLegs.length} legs for Plan "${plan.name}". BUY orders prioritized.`);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 3. SEQUENTIAL BASKET EXECUTION WITH THROTTLING
+  // ═══════════════════════════════════════════════════════════════════════════
+  for (const item of basketLegs) {
+    const { originalIndex: i, leg, params } = item; // Keep original index for DB mapping
+
+    let orderId: string | undefined;
+    let productType = "PAPER";
+
+    if (broker === "kotak_neo") {
+      const l = leg as Record<string, any>;
+      const actualProductType = l.productType || leg.orderType || params.productCode;
+      const actualPriceType = l.priceType || orderTypeForRecord || "MKT";
+      const actualPrice = actualPriceType === "LMT" ? String(l.limitPrice || ctx.price) : "0";
+
+      const universalPayload: Record<string, any> = {
+        tradingSymbol: params.tradingSymbol,
+        exchange: EL.mapExchange(ctx.exchange),
+        transactionType: params.transactionType,
+        quantity: String(params.quantity),
+        productType: actualProductType,
+        priceType: actualPriceType,
+        price: actualPrice,
+        validity: l.validity || "DAY",
+        afterMarket: "NO"
+      };
+
+      const orderResult = await EL.placeOrder(brokerConfig, universalPayload);
+      if (!orderResult.success) {
+        return { success: false, action: "error", broker, planId: plan.id, message: `Kotak Neo order failed: ${orderResult.error}`, executionTimeMs: Date.now() - ctx.startTime };
+      }
+      orderId = orderResult.data?.orderNo;
+      productType = params.productCode;
+
+      // 🛡️ API THROTTLING: 100ms delay between Kotak API calls 
+      // Prevents Kotak from rejecting the batch due to rate-limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+    } else {
+      orderId = `PT-${Date.now()}-L${i}`;
+    }
+
+    // ── Fetch Execution Price & Save to Database ──
+    const fillPrice = (broker === "kotak_neo" && orderId)
+      ? await getFillPrice(brokerConfig, orderId, ctx.price)
+      : ctx.price;
+
+    const trade = await storage.createStrategyTrade({
+      planId: plan.id, orderId: orderId || `${broker.toUpperCase()}-${Date.now()}-L${i}`,
+      tradingSymbol: params.tradingSymbol, exchange: ctx.exchange, quantity: params.quantity, price: fillPrice, 
+      action: leg.action ? leg.action.toUpperCase() : "BUY", 
+      blockType: ctx.resolvedBlockType, legIndex: i, orderType: orderTypeForRecord, productType, status: "open", pnl: 0, ltp: fillPrice, executedAt: ctx.now, createdAt: ctx.now, updatedAt: ctx.now, timeUnix: ctx.data.timeUnix || null, ticker: ctx.data.indices || ctx.ticker, indicator: ctx.data.indicator || null, alert: ctx.data.alert || null, localTime: ctx.data.localTime || null, mode: ctx.data.mode || null, modeDesc: ctx.data.modeDesc || null,
+      webhookDataId: ctx.data.id || undefined,
+    });
+
+    trades.push(trade);
+    if (orderId) orderIds.push(orderId);
+  }

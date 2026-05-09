@@ -1,0 +1,65 @@
+That confirms this is an Out of Memory (OOM) crash.
+
+If the backend is trying to read a 50MB+ CSV file using fs.readFileSync() or trying to send it via res.send(), Node.js attempts to load all 50 million characters into V8 heap memory at once. It chokes, crashes, and throws a 500 error.
+
+To fix this, the backend must stream the existing file directly from the disk to the HTTP response using fs.createReadStream().pipe(res). This uses almost zero RAM.
+
+The Fix: Update your Backend Route
+Open your server/routes.ts (or wherever your API endpoints are defined) and locate the app.get("/api/broker-configs/:id/scrip-master-download", ...) route.
+
+Replace the entire route with this memory-safe streaming version:
+
+TypeScript
+import fs from 'fs';
+import path from 'path';
+
+app.get("/api/broker-configs/:id/scrip-master-download", async (req, res) => {
+  try {
+    // 1. Construct the exact filename your system already uses to save the daily CSV
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const filename = `scrip_master_nfo_${dateStr}.csv`;
+    
+    // Resolve the absolute path to where it is saved (usually the root project directory)
+    // Note: If you save it inside a specific folder like 'data' or 'temp', add it here: path.resolve(process.cwd(), 'data', filename)
+    const filePath = path.resolve(process.cwd(), filename);
+
+    // 2. Verify the file exists on the disk
+    if (!fs.existsSync(filePath)) {
+      console.error(`[DOWNLOAD] File not found at path: ${filePath}`);
+      return res.status(404).json({ error: "Scrip master file not found on disk. Please trigger a manual sync first." });
+    }
+
+    console.log(`[DOWNLOAD] Streaming file to client: ${filePath}`);
+
+    // 3. Set proper headers to force the browser to download it as a file
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    
+    // 4. MEMORY SAFE: Stream the file directly to the response in chunks
+    const fileStream = fs.createReadStream(filePath);
+    
+    fileStream.on('error', (error) => {
+      console.error("[DOWNLOAD] Error streaming file:", error);
+      // Only send a 500 if we haven't already started sending the file headers
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to stream the file to the browser." });
+      }
+    });
+
+    // Pipe the chunks to the client
+    fileStream.pipe(res);
+
+  } catch (error: any) {
+    console.error("[DOWNLOAD] Route crash:", error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Internal server error during download preparation." });
+    }
+  }
+});
+Why this instantly fixes the 500 Error:
+Zero RAM Usage (createReadStream): Instead of loading the 50MB file into memory, it reads it in tiny 64kb chunks and instantly passes those chunks down the network cable to the browser (.pipe(res)).
+
+Correct Targeting: It looks for the exact file that your smc-kotak-neo-v3.ts (Scrip Master Cache) already downloaded earlier this morning.
+
+Replace that route, restart your server, and that download button will instantly pull the CSV without breaking a sweat!

@@ -1,0 +1,71 @@
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# nano relay.js
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# pm2 restart relay.js
+Use --update-env to update environment variables
+[PM2] Applying action restartProcessId on app [relay.js](ids: [ 0 ])
+[PM2] [kotak-relay](0) ✓
+┌────┬────────────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name           │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+├────┼────────────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┼──────────┤
+│ 0  │ kotak-relay    │ default     │ 1.0.0   │ fork    │ 653826   │ 0s     │ 1103 │ online    │ 0%       │ 11.4mb   │ root     │ disabled │
+└────┴────────────────┴─────────────┴─────────┴─────────┴──────────┴──���─────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# pm2 log
+[TAILING] Tailing last 15 lines for [all] processes (change the value with --lines option)
+/root/.pm2/pm2.log last 15 lines:
+PM2        | 2026-04-15T15:35:07: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T15:35:09: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T15:35:09: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T15:35:09: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T15:35:11: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T15:35:11: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T15:35:11: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T15:35:13: PM2 log: App [kotak-relay:0] exited with code [1] via signal [SIGINT]
+PM2        | 2026-04-15T15:35:13: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T15:35:13: PM2 log: App [kotak-relay:0] online
+PM2        | 2026-04-15T15:35:14: PM2 log: Stopping app:kotak-relay id:0
+PM2        | 2026-04-15T15:35:14: PM2 log: App [kotak-relay:0] exited with code [0] via signal [SIGINT]
+PM2        | 2026-04-15T15:35:15: PM2 log: pid=653807 msg=process killed
+PM2        | 2026-04-15T15:35:15: PM2 log: App [kotak-relay:0] starting in -fork mode-
+PM2        | 2026-04-15T15:35:15: PM2 log: App [kotak-relay:0] online
+
+/root/.pm2/logs/kotak-relay-error.log last 15 lines:
+0|kotak-re |     at WebSocket.emitClose (/root/node_modules/ws/lib/websocket.js:273:10)
+0|kotak-re |     at TLSSocket.socketOnClose (/root/node_modules/ws/lib/websocket.js:1346:15)
+0|kotak-re |     at TLSSocket.emit (node:events:536:35)
+0|kotak-re |     at node:net:343:12
+0|kotak-re |     at TCP.done (node:_tls_wrap:669:7)
+0|kotak-re | TypeError: First argument must be a valid error code number
+0|kotak-re |     at Sender.close (/root/node_modules/ws/lib/sender.js:187:13)
+0|kotak-re |     at WebSocket.close (/root/node_modules/ws/lib/websocket.js:316:18)
+0|kotak-re |     at WebSocket.<anonymous> (/root/relay.js:73:57)
+0|kotak-re |     at WebSocket.emit (node:events:524:28)
+0|kotak-re |     at WebSocket.emitClose (/root/node_modules/ws/lib/websocket.js:273:10)
+0|kotak-re |     at TLSSocket.socketOnClose (/root/node_modules/ws/lib/websocket.js:1346:15)
+0|kotak-re |     at TLSSocket.emit (node:events:536:35)
+0|kotak-re |     at node:net:343:12
+0|kotak-re |     at TCP.done (node:_tls_wrap:669:7)
+
+/root/.pm2/logs/kotak-relay-out.log last 15 lines:
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | Relay server running on port 8080 (REST + WebSockets)
+0|kotak-re | [RELAY] Proxying WS to: wss://e41.kotaksecurities.com/realtime
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | Relay server running on port 8080 (REST + WebSockets)
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | [RELAY] Proxying WS to: wss://e41.kotaksecurities.com/realtime
+0|kotak-re | Relay server running on port 8080 (REST + WebSockets)
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | Relay server running on port 8080 (REST + WebSockets)
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | Relay server running on port 8080 (REST + WebSockets)
+0|kotak-re | [RELAY] Proxying WS to: wss://mlhsm.kotaksecurities.com
+0|kotak-re | Relay server running on port 8080 (REST + WebSockets)
+0|kotak-re | Relay server running on port 8080 (REST + WebSockets)
+
+^C
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# pm2 status
+┌────┬────────────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name           │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+├────┼────────────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┼──────────┤
+│ 0  │ kotak-relay    │ default     │ 1.0.0   │ fork    │ 653826   │ 46s    │ 1103 │ online    │ 0%       │ 56.7mb   │ root     │ disabled │
+└────┴────────────────┴─────────────┴─────────┴─────────┴──────────┴──���─────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+root@debian-s-2vcpu-3gbR-25GbSSD-blr1-01:~# 

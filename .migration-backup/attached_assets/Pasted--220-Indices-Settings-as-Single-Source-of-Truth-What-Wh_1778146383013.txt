@@ -1,0 +1,40 @@
+#220 - Indices Settings as Single Source of Truth
+What & Why
+Index-level configuration is currently split across three places: index_margin_settings (rate fields), instrument_configs (lotSize, strikeInterval, expiryDay), and index_expiry_settings (expiry day again). Global app_settings keys also duplicate two of the rate fields. Every system (CM, TE, Plan Monitor, capital-manager, broker-linking) reads from a different combination. The goal is to make index_margin_settings the single schema that all systems read from for index-level fields, with the Scrip Master sync as the sole writer of the technical fields (lotSize, strikeInterval, expiryDay) and the Indices Settings UI as the sole writer of the rate fields (spanRate, exposureRate, expiryMultiplier).
+
+Done looks like
+index_margin_settings schema gains three new columns: lotSize (integer), expiryDay (text), strikeInterval (integer)
+Scrip Master sync (smc-kotak-neo-v3.ts) writes lotSize, expiryDay, strikeInterval into index_margin_settings after every sync (upsert by indexName)
+CM engine (cm-kotak-neo-v3.ts) reads ALL index fields — lotSize, strikeInterval, expiryDay, spanRate, exposureRate, expiryMultiplier — from index_margin_settings only; no storage.getSetting() calls for global app_settings fallbacks remain
+TE engine (te-kotak-neo-v3.ts) reads expiryDay, lotSize, strikeInterval from index_margin_settings instead of instrument_configs
+Plan monitor (plan-monitor.ts) reads expiryDay from index_margin_settings instead of index_expiry_settings / instrument_configs
+Capital-manager and broker-linking read expiryDay from index_margin_settings
+Indices Settings UI shows lotSize, expiryDay, strikeInterval as read-only columns (already shown but confirms they come from index_margin_settings now)
+"SPAN Rate for Margin Calculation (%)" and "Expiry Day SPAN Multiplier" removed from Trading Execution section in General Settings (UI + state + queries + mutations)
+"Index Expiry Days" card removed from Market Calendar section in General Settings (UI + state + queries + mutations)
+exposure_rate_percent startup seed removed from server/index.ts
+instrument_configs table and its storage methods remain but are used only for token (broker-specific field needed for quote lookups) and raw scrip master parsing; all index-level fields are authoritative in index_margin_settings
+Out of scope
+Dropping the index_expiry_settings or instrument_configs tables (leave them, just stop reading the duplicated fields from them in the listed systems)
+Removing span_rate_percent / expiry_day_span_multiplier orphan rows from app_settings (harmless, leave them)
+TL or EL changes — they do not consume index-level configuration fields directly
+Steps
+Schema — Add lotSize integer not null default 1, expiryDay text not null default 'Thursday', strikeInterval integer not null default 50 columns to the indexMarginSettings table in shared/schema.ts. Update the corresponding IStorage methods (upsertIndexMarginSetting) to accept these fields.
+Scrip sync writer — In smc-kotak-neo-v3.ts, after computing lotSize, expiryDay, strikeInterval for each instrument during Phase A and the disk-load path, call storage.upsertIndexMarginSetting to write those three fields into index_margin_settings (merge with existing rates — do not overwrite spanRate/exposureRate/expiryMultiplier if already set by admin).
+CM engine reader — In cm-kotak-neo-v3.ts, replace the storage.getInstrumentConfig() call with storage.getIndexMarginSetting(ticker) to get lotSize, strikeInterval, expiryDay, spanRate, exposureRate, expiryMultiplier from the one row. Remove the three storage.getSetting() global-fallback calls entirely. Use hard-coded defaults (spanRate=10.0, expiryMultiplier=1.25, exposureRate=2.0, lotSize=1, strikeInterval=50, expiryDay="Thursday") only when no index_margin_settings row exists for the ticker. Still read instrumentConfig.token from instrument_configs for the EL.getQuote call.
+TE engine reader — In te-kotak-neo-v3.ts, replace the getInstrumentConfig() usage for expiryDay, lotSize, strikeInterval with a getIndexMarginSetting(ticker) lookup. Still read instrumentConfig.token from instrument_configs for option symbol resolution.
+Plan monitor reader — In plan-monitor.ts, replace the index_expiry_settings lookup and instrConfig.expiryDay fallback with a single storage.getIndexMarginSetting(ticker) call to get expiryDay.
+Capital-manager and broker-linking — Replace instrConfig.expiryDay usage with a lookup from index_margin_settings.
+Startup seed cleanup — In server/index.ts, remove the exposure_rate_percent getSetting/setSetting block. The index_margin_settings startup seed already covers all 6 indices with default rates; extend the seed data to also set the new lotSize/expiryDay/strikeInterval defaults.
+Settings UI — Remove "SPAN Rate for Margin Calculation (%)" and "Expiry Day SPAN Multiplier" blocks from TradingExecutionSettings (state, queries, mutations, JSX). Remove the "Index Expiry Days" card from the Market Calendar section (state, queries, mutations, JSX).
+Relevant files
+shared/schema.ts:853-866
+server/storage.ts — upsertIndexMarginSetting, getIndexMarginSetting
+server/smc-kotak-neo-v3.ts:340-380,540-560 — instrument parsing + upsert calls
+server/cm-kotak-neo-v3.ts:498-615
+server/te-kotak-neo-v3.ts:537-580,655-665
+server/plan-monitor.ts:61-122
+server/capital-manager.ts
+server/index.ts:319-325,340-345
+client/src/pages/settings.tsx:543-584,650-655,793-816,835,1086-1148,1499-1520,1728-1800
+client/src/components/broker-linking.tsx:549,628

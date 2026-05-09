@@ -1,0 +1,107 @@
+Task: Full-Stack Local Trailing Stop Loss (TSL) Implementation (Backend + UI)
+
+Context:
+We are shifting Trailing Stop Loss (TSL) management entirely to our local Replit backend so it operates at the strategy level, independent of Kotak's native Bracket Order (BO) trailing logic. This requires updating the backend to monitor all product types (NRML, BO, MIS) and upgrading the Trade Planning UI's "Exit & Risk Settings" to include a comprehensive TSL configuration matrix.
+
+Instructions for Replit:
+
+Part 1: Backend Updates (Universal TSL)
+
+File: server/te-kotak-neo-v3.ts
+Locate executeLegBasket. Find the stagedTrade object construction (around lines 867-874). Remove the productType === "NRML" restriction so TSL data saves to the database for all products:
+
+TypeScript
+        // Modify the stagedTrade object to include TSL fields unconditionally:
+        ...(initialSl !== null || trailingStepVal !== null ? {
+          initialSlPrice: initialSl !== null ? Number(initialSl) : null,
+          trailingStep: trailingStepVal !== null ? Number(trailingStepVal) : null,
+          currentSlPrice: initialSl !== null ? Number(initialSl) : null,
+          highWaterMark: fillPrice,
+        } : {}),
+File: server/storage.ts
+Rename getOpenNrmlTradesWithTsl to getOpenTradesWithTsl in the IStorage interface and DatabaseStorage class. Update the SQL query to remove product type restrictions, relying solely on trailingStep:
+
+TypeScript
+  async getOpenTradesWithTsl(): Promise<StrategyTrade[]> {
+    return await db
+      .select()
+      .from(strategyTrades)
+      .where(
+        and(
+          inArray(strategyTrades.status, ["open", "partially_closed"]),
+          // ProductType filter removed to support BO/MIS/NRML
+          isNotNull(strategyTrades.trailingStep),
+          gt(strategyTrades.trailingStep, 0)
+        )
+      );
+  }
+(Make sure to update the method name in the IStorage interface at the top of the file as well).
+
+File: server/tsl-kotak-neo-v3.ts
+Inside startTslEngine(), update the rehydration fetch to use the new method:
+
+TypeScript
+    // Replace the old call with the new one:
+    const openTrades = await storage.getOpenTradesWithTsl();
+Part 2: Frontend Updates (Trade Planning UI)
+
+File: client/src/pages/trade-planning.tsx (or the exact component handling Strategy Exit Settings)
+Locate the "Exit & Risk Settings" panel. Add a new "Trailing Stoploss" section. Implement the following grid layout with state bindings to the block config or exit settings payload.
+
+JavaScript
+{/* Add this below the existing MTM toggles */}
+<div className="mt-6 border-t pt-4">
+  <div className="flex items-center gap-2 mb-4">
+    <h4 className="text-sm font-medium">Trailing Stoploss</h4>
+    <span className="text-xs text-muted-foreground">(Processed locally on server)</span>
+  </div>
+  <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+    <div className="space-y-2">
+      <Label>Type</Label>
+      <Select 
+        value={blockConfig.tslType || 'points'} 
+        onValueChange={(val) => updateBlockConfig('tslType', val)}
+      >
+        <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="points">Points</SelectItem>
+          <SelectItem value="amount">Amount</SelectItem>
+          <SelectItem value="percentage">Percentage</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+    <div className="space-y-2">
+      <Label>Activate At (Initial SL)</Label>
+      <Input 
+        type="number" 
+        value={blockConfig.initialSl || ''} 
+        onChange={(e) => updateBlockConfig('initialSl', e.target.value)} 
+      />
+    </div>
+    <div className="space-y-2">
+      <Label>Lock Profit At</Label>
+      <Input 
+        type="number" 
+        value={blockConfig.tslLockProfit || ''} 
+        onChange={(e) => updateBlockConfig('tslLockProfit', e.target.value)} 
+      />
+    </div>
+    <div className="space-y-2">
+      <Label>When Profit increase by</Label>
+      <Input 
+        type="number" 
+        value={blockConfig.tslProfitStep || ''} 
+        onChange={(e) => updateBlockConfig('tslProfitStep', e.target.value)} 
+      />
+    </div>
+    <div className="space-y-2">
+      <Label>Increase TSL by (Step)</Label>
+      <Input 
+        type="number" 
+        value={blockConfig.trailingStep || ''} 
+        onChange={(e) => updateBlockConfig('trailingStep', e.target.value)} 
+      />
+    </div>
+  </div>
+</div>
+Developer Note: Ensure that the initialSl and trailingStep values from this UI are correctly mapped into the JSON payload sent to the backend, so that te-kotak-neo-v3.ts can extract them when building the stagedTrade.

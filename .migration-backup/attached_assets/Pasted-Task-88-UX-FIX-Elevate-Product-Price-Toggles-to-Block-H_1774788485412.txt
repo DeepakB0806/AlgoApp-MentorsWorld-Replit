@@ -1,0 +1,61 @@
+Task #88: UX FIX - Elevate Product & Price Toggles to Block Header
+CRITICAL BUG: In trade-planning.tsx, the <Select> components for productMode (NRML/MIS) and priceMode (LMT/MKT) are currently rendering inside the individual leg rows (e.g., inside the block.legs.map or legs.map UI loop). Because these settings now dictate the entire block, rendering them per-leg is confusing and dangerous.
+
+Please execute this exact UI structural fix:
+
+Step 1: Rip the Toggles OUT of the Leg Rows
+Target File: client/src/components/trade-planning.tsx
+
+Action: Find the UI section that maps over the individual trade legs (where Action, Type, Strike, and Lots are rendered).
+
+Delete: Completely remove the <Select> elements and their wrapper <div>s for productMode and priceMode from this leg-level row.
+
+Step 2: Inject the Toggles INTO the Block Header
+Action: Find the top-level Block Header UI for each strategy execution block. This is typically near the block title (e.g., "Uptrend Block") or right above the "Add Leg" button, alongside the time-based or bracket order configurations.
+
+Insert: Add the two toggles side-by-side at this block level.
+
+Use this exact JSX snippet (adjusting styling classes if needed to match your flexbox layout):
+
+TypeScript
+<div className="flex items-center gap-4 mb-4 p-4 bg-muted/30 rounded-lg border border-border">
+  <div className="flex flex-col gap-1.5">
+    <Label className="text-xs text-muted-foreground font-semibold">Product Type (Block Level)</Label>
+    <Select 
+      value={block.config.productMode || "NRML"} 
+      onValueChange={(v) => block.configSetter((prev) => ({ 
+        ...prev, 
+        productMode: v as "MIS" | "NRML", 
+        bracketOrder: v === "NRML" ? undefined : prev.bracketOrder 
+      }))}
+    >
+      <SelectTrigger className="w-[120px] h-8 text-xs font-semibold">
+        <SelectValue placeholder="Product" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="NRML">NRML (Overnight)</SelectItem>
+        <SelectItem value="MIS">MIS (Intraday)</SelectItem>
+      </SelectContent>
+    </Select>
+  </div>
+
+  <div className="flex flex-col gap-1.5">
+    <Label className="text-xs text-muted-foreground font-semibold">Order Type (Block Level)</Label>
+    <Select 
+      value={block.config.priceMode || "LMT"} 
+      onValueChange={(v) => block.configSetter((prev) => ({ 
+        ...prev, 
+        priceMode: v as "LMT" | "MKT" 
+      }))}
+    >
+      <SelectTrigger className="w-[120px] h-8 text-xs font-semibold">
+        <SelectValue placeholder="Order Type" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="LMT">LMT (Buffered)</SelectItem>
+        <SelectItem value="MKT">MKT (Unsafe)</SelectItem>
+      </SelectContent>
+    </Select>
+  </div>
+</div>
+Constraint: Ensure these toggles only appear ONCE per strategy block (Uptrend, Downtrend, Neutral) and absolutely do NOT repeat for every leg added to the block. Do not touch any other existing functionality.

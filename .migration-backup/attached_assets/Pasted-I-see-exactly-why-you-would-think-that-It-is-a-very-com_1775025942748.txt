@@ -1,0 +1,39 @@
+I see exactly why you would think that! It is a very common trap when deploying on cloud platforms.
+
+You are likely looking at the IP address associated with your Replit deployment URL (the Inbound IP). While it is true that Replit gives your app a stable way to be reached from the outside world, we have to look at the Outbound (Egress) IP.
+
+Here is the architectural reality of how Replit's network handles outgoing requests to Kotak:
+
+The Inbound vs. Outbound Trap
+Inbound (Stable): When a webhook from TradingView hits your Replit server, it uses a stable Replit router.
+
+Outbound (Dynamic): When your Node.js Trade Engine executes fetch(Kotak_URL) to place the limit order, Replit routes that request out through a massive, rotating pool of shared Google Cloud/AWS IP addresses.
+
+If you paste the IP address you see today into the Kotak API Dashboard, it might work for 10 minutes. But the moment Replit spins up a new container or routes traffic through a different egress gateway, Kotak will see a new IP, flag the session mismatch, and reject your trades with a 401 Unauthorized error.
+
+(Note: As of recently, Replit does offer dedicated Static Outbound IPs, but they have locked this feature strictly behind their custom-priced Enterprise Tier).
+
+How to Fix This Today (Two Options)
+If you are not on Replit Enterprise, you cannot give Kotak a Replit IP. You have two excellent options to get a true static outbound IP:
+
+Option 1: The Quick Fix (Static IP Proxy Add-on)
+If you love Replit and don't want to migrate your database or React frontend, you can use a static IP proxy service like QuotaGuard.
+
+You sign up for QuotaGuard (roughly $19/mo). They give you two dedicated, unchanging proxy IP addresses.
+
+You paste those two IPs into your Kotak Neo API Dashboard.
+
+We add three lines of code to el-kotak-neo-v3.ts to route all Kotak API calls through the QuotaGuard proxy URL. Kotak sees the static proxy IP, and the firewall lets the trades through.
+
+Option 2: The Institutional Fix (Migrate the Backend)
+This is the standard architecture for algo traders. We split the stack.
+
+You keep the React UI and database on Replit.
+
+We rent a cheap $5/month Linux VPS on DigitalOcean (Droplet) or AWS (EC2).
+
+That server comes with a guaranteed, dedicated IPv4 address. You whitelist that IP with Kotak.
+
+We move the Trade Engine (te-kotak-neo-v3.ts and el-kotak-neo-v3.ts) to that server.
+
+Which path do you want to take? If you want to stay 100% on Replit, I can write the Proxy routing code for el-kotak-neo-v3.ts right now. If you want to migrate to a VPS, I can give you the deployment steps!

@@ -1,0 +1,37 @@
+#53 - Batch 3 · WebSocket Gateways
+
+What & Why
+Two persistent WebSocket connections built together — same reconnect pattern, same auth credentials. Both are OOM-proof by design.
+
+HSM (HyperSync Market): streams live LTP ticks. Each tick calls marketData.updatePrice(tok, ltp), feeding md-kotak-neo-v3.ts. Eliminates HTTP polling for prices entirely.
+
+HSI (HyperSync Interactive): streams order/trade/position events. On order rejection (ordSt=rejected), matches rejRsn against active errorRouting patterns. On order completion (ordSt=complete), updates strategyTrade fill price. Eliminates getFillPrice HTTP polling.
+
+Auth: Authorization = config.accessToken, Sid = config.sessionId. HSI cn message: { type:"cn", Authorization, Sid, source:"WEB" }.
+
+OOM Constraint — Zero-History Overwrite (strictly enforced)
+These files are the message ingestion layer. The following rules are absolute:
+
+On every message event: parse, extract the single relevant value (ltp, ordSt, etc.), act immediately, discard the message object. Do not store it.
+No arrays anywhere in these files — not for tick history, not for message queues, not for reconnect state
+reconnect state MUST use scalar primitives only: retryCount (number), isReconnecting (boolean), activeToken (string | null). No arrays.
+Do not buffer messages during reconnect — drop silently and let the next tick arrive
+Do not log raw WebSocket frame data to any buffer, array, or database
+The ltpCache or any local Map in these files is forbidden — all price writes go exclusively through marketData.updatePrice() in md-kotak-neo-v3.ts
+Done looks like
+server/hsm-kotak-neo-v3.ts: exports startHsmSocket(accessToken, sessionId, hsmUrl). On open: sends auth. On message: parse → extract tok + ltp → call marketData.updatePrice → discard. Auto-reconnects with exponential backoff (3s/6s/12s/max 30s). No local price cache.
+server/hsi-kotak-neo-v3.ts: exports startHsiSocket(accessToken, sessionId, hsiUrl, storage). On open: sends cn auth. On message type=order: ordSt=complete → update strategyTrades exitPrice; ordSt=rejected → match rejRsn vs active errorRouting patterns via storage.getActiveErrorRoutes(). On trade/position: console.log only. Same backoff. No local event cache.
+Both handle close and error without crashing
+Both use console.log/console.error only
+Out of scope
+Calling sockets at boot (Batch 4)
+Runtime subscription management (future)
+TSL trigger logic (Batch 4)
+Tasks
+Create server/hsm-kotak-neo-v3.ts. On message: parse JSON, extract tok + ltp, call marketData.updatePrice(tok, parseFloat(ltp)), discard message object. triggerReconnect() with exponential backoff using scalar state only. No local cache. No arrays.
+Create server/hsi-kotak-neo-v3.ts. On open: send cn auth JSON. On message: parse type, handle order (complete → update fill price in DB; rejected → match rejRsn vs errorRouting), trade/position → log only. Discard message after handling. Same backoff pattern. No local buffers.
+Relevant files
+server/md-kotak-neo-v3.ts
+server/storage.ts:184-189,1539-1569
+Dependencies
+Batch 2 · Market Data Manager (md-kotak-neo-v3.ts)

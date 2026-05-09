@@ -1,0 +1,101 @@
+#94 - Explicit Config Mandate — No Silent Fallbacks
+
+What & Why
+In algorithmic trading, silent fallbacks on execution parameters are dangerous. If a critical setting like inter-leg delay or retry interval is missing from the database, the engine must refuse to trade rather than guessing. All four execution variables must be explicitly configured by the user in the UI, and the Trade Engine must hard-abort if any of them are absent.
+
+Done looks like
+A new "Inter-Leg Execution Delay (ms)" field appears in the Trading Execution section of General Settings, wired to order_execution_delay_ms exactly like the other four fields (query, useEffect, mutation, Save button)
+In the Trade Engine, every silent fallback on the four critical settings is replaced by a hard abort:
+order_execution_delay_ms: 4 call sites — removes || 200 fallback → ABORT if missing
+squareoff_retry_interval_ms: 5 call sites — removes || 1000 / || 2000 fallbacks → ABORT if missing
+margin_shortfall_retry_count: 1 call site — removes || 0 fallback → ABORT if missing
+limit_order_buffer_points: 3 additional call sites (exit/rollback paths) — removes || "0" fallback → ABORT if missing (entry path already aborts correctly)
+The startup seed block in server/index.ts does NOT seed any of these four settings — they must be explicitly set by the user
+ABORT messages follow the existing pattern: "ABORT: <setting_key> is missing from app_settings"
+Out of scope
+Changing the existing seeds for rollback_api_retry_count and scrip_master_sync_time (those remain)
+Any changes to bracket order logic (completely frozen)
+Validation of the numeric range beyond checking for presence
+Tasks
+Add order_execution_delay_ms UI field — Add a new input in the "Trading Execution" card in client/src/pages/settings.tsx for "Inter-Leg Execution Delay (ms)". Wire it with a query, useEffect, mutation, and Save button following the identical pattern used by the other four fields. Description: "Delay in milliseconds between sequenced leg executions (entry and exit). Required — no default. Set to 0 for immediate sequential fire."
+
+Replace all silent fallbacks with hard aborts in the Trade Engine — In server/te-kotak-neo-v3.ts, locate all 13 call sites across the four settings and replace every || N or ?? N fallback with a pattern that throws/returns an ABORT error when the DB row is missing or its value is empty. Preserve the existing abort guard on limit_order_buffer_points at the entry path (line 590–594) — extend the same pattern to the 3 remaining call sites on that setting.
+
+Confirm no startup seeds for the four execution variables — Review server/index.ts startup seeding block and ensure limit_order_buffer_points, squareoff_retry_interval_ms, margin_shortfall_retry_count, and order_execution_delay_ms are absent from it. No removal needed if already absent — this is a verification step.
+
+Relevant files
+client/src/pages/settings.tsx:370-688
+server/te-kotak-neo-v3.ts:560-562,590-595,636-639,658-659,739-742,794-796,853-855,938-939,1022-1024,1122-1124,1164-1166,1235-1237,1268-1270,1314-1316
+server/index.ts:231-240
+
+
+
+CRITICAL IMPLEMENTATION SNIPPETS:
+Use the exact patterns below to implement Task #94. Do not invent your own error messages or silent fallbacks.
+
+1. Settings UI Snippet (client/src/pages/settings.tsx)
+Inject this exact block into the "Trading Execution" Card, matching the styling of the other fields:
+
+TypeScript
+<div className="space-y-2 pt-4 border-t border-border/50">
+  <div className="flex items-center justify-between">
+    <Label htmlFor="order_execution_delay_ms" className="text-amber-500 font-semibold">
+      Inter-Leg Execution Delay (ms)
+    </Label>
+    <Badge variant="outline" className="text-xs">Required</Badge>
+  </div>
+  <p className="text-xs text-muted-foreground">
+    Delay in milliseconds between sequenced leg executions (entry and exit). Required — no default. Set to 0 for immediate sequential fire.
+  </p>
+  <div className="flex gap-2">
+    <Input
+      id="order_execution_delay_ms"
+      type="number"
+      value={orderDelayMs}
+      onChange={(e) => setOrderDelayMs(e.target.value)}
+      placeholder="e.g., 200"
+      className="max-w-[200px]"
+    />
+    <Button 
+      variant="secondary" 
+      onClick={() => saveSetting.mutate({ key: "order_execution_delay_ms", value: orderDelayMs })}
+      disabled={saveSetting.isPending}
+    >
+      Save
+    </Button>
+  </div>
+</div>
+(Note to Replit: Ensure orderDelayMs state, query binding, and useEffect hooks are created at the top of the file to support this block, mirroring the existing fields).
+
+2. Trade Engine Abort Pattern (server/te-kotak-neo-v3.ts)
+For all 13 call sites you identified, completely remove the || or ?? fallback operators. Use this exact strict abort pattern before attempting to use the setting value.
+
+Example for order_execution_delay_ms:
+
+TypeScript
+const delaySetting = await storage.getSetting("order_execution_delay_ms");
+if (!delaySetting || delaySetting.value === undefined || delaySetting.value === "") {
+  await logPFL(plan.id, leg.id, "ABORT", "ABORT: order_execution_delay_ms is missing from app_settings");
+  // return or throw depending on the exact function context
+  return; 
+}
+const executionDelay = Number(delaySetting.value);
+Example for updating the Exit/Rollback paths of limit_order_buffer_points:
+
+TypeScript
+const bufferSetting = await storage.getSetting("limit_order_buffer_points");
+if (!bufferSetting || bufferSetting.value === undefined || bufferSetting.value === "") {
+  await logPFL(plan.id, leg.id, "ABORT", "ABORT: limit_order_buffer_points is missing from app_settings");
+  return; 
+}
+const limitBuffer = Number(bufferSetting.value);
+3. Startup Seed Verification (server/index.ts)
+Ensure the seed array strictly DOES NOT contain these keys. If they exist in the defaultSettings array, delete them:
+
+limit_order_buffer_points
+
+squareoff_retry_interval_ms
+
+margin_shortfall_retry_count
+
+order_execution_delay_ms

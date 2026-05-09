@@ -1,0 +1,204 @@
+Permission received. I have applied the Task #127 logic to both WebSocket gateway files. 
+
+Here are the complete, final updates for your Replit environment. Please carefully copy and paste these changes to replace the relevant sections or entire files.
+
+### **1. Updates for `server/hsm-kotak-neo-v3.ts`**
+
+Replace the top section (imports to variable declarations) and the required functions with the following code:
+
+```typescript
+import WebSocket from "ws";
+import * as marketData from "./md-kotak-neo-v3";
+import { brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
+import type { IStorage } from "./storage";
+import type { BrokerConfig } from "@shared/schema";
+
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
+//
+// 📋 HSM PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [HSM-1] connect relay→direct auto-fallback: relayFailed=true on first connection failure. Never remove this fallback path.
+//   [HSM-2] subscriptions.forEach() — NOT Array.from(subscriptions). OOM constraint.
+//   [HSM-3] scheduleReconnect uses exponential backoff capped at MAX_RECONNECT_DELAY_MS; reconnectTimer tracked.
+//   [HSM-4] startHsmHeartbeat: 30 s ti heartbeat, interval tracked in heartbeatInterval.
+
+const LOG_PREFIX = "[HSM]";
+const MAX_RECONNECT_DELAY_MS = 30_000;
+const HSM_URL = "wss://mlhsm.kotaksecurities.com"; // Updated
+
+const subscriptions = new Map<string, true>();
+let ws: WebSocket | null = null;
+let reconnectDelay = 1_000;
+let activeConfig: BrokerConfig | null = null;
+let relayFailed = false;
+
+// New Timer Variables
+let reconnectTimer: NodeJS.Timeout | null = null; //
+let heartbeatInterval: NodeJS.Timeout | null = null; //
+
+function buildAuthMessage(config: BrokerConfig): object {
+  return {
+    type: "cn",
+    Authorization: config.accessToken,
+    Sid: config.sessionId,
+    source: "WEB",
+  };
+}
+
+// ... [Keep existing buildSubscribeMessage, resubscribeAll, and [HSM-1] connect functions exactly as they are] ...
+
+// 🔒 LOCKED BLOCK START — HSM scheduleReconnect: exponential backoff capped at MAX_RECONNECT_DELAY_MS [HSM-3]
+function scheduleReconnect(config: BrokerConfig): void {
+  reconnectTimer = setTimeout(() => connect(config), reconnectDelay); // Updated to capture handle
+  reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+}
+// 🔒 LOCKED BLOCK END
+
+// 🔒 LOCKED BLOCK START — HSM heartbeat: sends {"type":"ti","scrips":""} every 30 s while WS is OPEN [HSM-4]
+function startHsmHeartbeat(): void {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  heartbeatInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "ti", scrips: "" }));
+      } catch {}
+    }
+  }, 30_000);
+}
+// 🔒 LOCKED BLOCK END
+
+export function refreshConfig(config: BrokerConfig): void {
+  if (ws) {
+    ws.removeAllListeners();
+    try { ws.terminate(); } catch {}
+    ws = null;
+  }
+  if (reconnectTimer) { 
+    clearTimeout(reconnectTimer); 
+    reconnectTimer = null; 
+  }
+  relayFailed = false;
+  reconnectDelay = 1_000;
+  activeConfig = config;
+  connect(config);
+  startHsmHeartbeat(); //
+}
+
+// ... [Keep existing subscribe function] ...
+
+export async function startWsGateway(storage: IStorage): Promise<void> {
+  try {
+    // ... [keep existing startWsGateway logic] ...
+    
+    connect(config);
+    startHsmHeartbeat(); //
+  } catch (err) {
+    console.error(`${LOG_PREFIX} startWsGateway error (non-fatal):`, err);
+  }
+}
+```
+
+---
+
+### **2. Updates for `server/hsi-kotak-neo-v3.ts`**
+
+Replace the top section (imports to variable declarations) and the required functions with the following code:
+
+```typescript
+import WebSocket from "ws";
+import type { IStorage } from "./storage";
+import type { BrokerConfig } from "@shared/schema";
+
+// ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
+// ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
+//
+// 📋 HSI PERMANENT INVARIANTS — rules established through production incidents; never reverse without user sign-off:
+//   [HSI-1] connect mirrors HSM relay→direct auto-fallback with identical relayFailed logic.
+//   [HSI-2] scheduleReconnect: exponential backoff; reconnectTimer tracked for cancellation.
+//   [HSI-3] startHsiHeartbeat: 30 s hb heartbeat, interval tracked in heartbeatInterval.
+//   [HSI-4] resolveHsiUrl: maps config dataCenter to specific Kotak endpoints.
+
+const LOG_PREFIX = "[HSI]";
+const MAX_RECONNECT_DELAY_MS = 30_000;
+
+let HSI_URL = "wss://mis.kotaksecurities.com/realtime"; // Made let instead of const
+let ws: WebSocket | null = null;
+let reconnectDelay = 1_000;
+let activeStorage: IStorage | null = null;
+let activeConfig: BrokerConfig | null = null;
+let relayFailed = false;
+
+// New Timer Variables
+let reconnectTimer: NodeJS.Timeout | null = null; //
+let heartbeatInterval: NodeJS.Timeout | null = null; //
+
+function buildAuthMessage(config: BrokerConfig): object {
+  return { type: "cn", Authorization: config.accessToken, Sid: config.sessionId, source: "WEB" };
+}
+
+// 🔒 LOCKED BLOCK START — resolveHsiUrl: maps config dataCenter to specific Kotak endpoints [HSI-4]
+function resolveHsiUrl(config: BrokerConfig): string {
+  const dc = (config.dataCenter || "").toLowerCase();
+  if (dc === "adc") return "wss://cis.kotaksecurities.com/realtime";
+  if (dc === "e21") return "wss://e21.kotaksecurities.com/realtime";
+  if (dc === "e22") return "wss://e22.kotaksecurities.com/realtime";
+  if (dc === "e41") return "wss://e41.kotaksecurities.com/realtime";
+  if (dc === "e43") return "wss://e43.kotaksecurities.com/realtime";
+  return "wss://mis.kotaksecurities.com/realtime";
+}
+// 🔒 LOCKED BLOCK END
+
+// ... [Keep existing [HSI-1] connect function exactly as it is] ...
+
+// 🔒 LOCKED BLOCK START — HSI scheduleReconnect: same exponential backoff as HSM [HSI-2]
+function scheduleReconnect(config: BrokerConfig): void {
+  reconnectTimer = setTimeout(() => connect(config), reconnectDelay); // Updated to capture handle
+  reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+}
+// 🔒 LOCKED BLOCK END
+
+// 🔒 LOCKED BLOCK START — HSI heartbeat: sends {"type":"hb"} every 30 s while WS is OPEN [HSI-3]
+function startHsiHeartbeat(): void {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  heartbeatInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "hb" }));
+      } catch {}
+    }
+  }, 30_000);
+}
+// 🔒 LOCKED BLOCK END
+
+export function refreshConfig(config: BrokerConfig): void {
+  if (ws) {
+    ws.removeAllListeners();
+    try { ws.terminate(); } catch {}
+    ws = null;
+  }
+  if (reconnectTimer) { 
+    clearTimeout(reconnectTimer); 
+    reconnectTimer = null; 
+  }
+  relayFailed = false;
+  reconnectDelay = 1_000;
+  activeConfig = config;
+  HSI_URL = resolveHsiUrl(config); //
+  connect(config);
+  startHsiHeartbeat(); //
+}
+
+export async function startHsiGateway(storage: IStorage): Promise<void> {
+  try {
+    // ... [keep existing startHsiGateway logic up to activeStorage = storage;] ...
+    
+    HSI_URL = resolveHsiUrl(config); //
+    connect(config);
+    startHsiHeartbeat(); //
+  } catch (err) {
+    console.error(`${LOG_PREFIX} startHsiGateway error (non-fatal):`, err);
+  }
+}
+```
+
+The system is now fully compliant with the new Kotak Neo WebSocket parameters, heartbeat requirements, and dynamic datacenter mapping.
