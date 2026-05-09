@@ -1,5 +1,9 @@
 import type { IStorage } from "./storage";
-import type { StrategyTrade } from "@workspace/db";
+import type { BrokerConfig, StrategyTrade } from "@workspace/db";
+import { getPrice } from "./md-kotak-neo-v3";
+import { isWithinMarketHours, getISTDatetimeNow } from "./market-calendar";
+import { brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
+import EL from "./el-kotak-neo-v3";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -14,6 +18,8 @@ import type { StrategyTrade } from "@workspace/db";
 const LOG_PREFIX = "[TSL]";
 const FLUSH_INTERVAL_MS = 15_000;
 const WS_STALE_MS = 2_000;
+const WS_FALLBACK_THRESHOLD_MS = 30_000;
+const REST_FALLBACK_INTERVAL_MS = 30_000;
 
 interface TslState {
   tradeId: string;
@@ -36,6 +42,7 @@ interface TslState {
 const trails = new Map<string, TslState>();
 const trailsBySymbol = new Map<string, Set<string>>();
 let lastWsTickAt: number = 0;
+let lastRestFallbackAt: number = 0;
 let _storage: IStorage | null = null;
 let _closeTradeById: ((storage: IStorage, tradeId: string) => Promise<void>) | null = null;
 
@@ -186,12 +193,45 @@ export function registerNewTrail(trade: StrategyTrade): void {
 }
 // 🔒 LOCKED BLOCK END
 
+async function runRestFallbackTick(): Promise<void> {
+  if (!_storage || trails.size === 0) return;
+  const { time: istTime, date: istDate } = getISTDatetimeNow();
+  const inHours = await isWithinMarketHours(_storage, "NFO", istTime, istDate);
+  if (!inHours) return;
+
+  const openTrades = await _storage.getOpenTradesWithTsl();
+  const configCache = new Map<string, BrokerConfig | undefined>();
+
+  for (const trade of openTrades) {
+    if (!trails.has(trade.id)) continue;
+    if (!configCache.has(trade.planId)) {
+      const plan = await _storage.getStrategyPlan(trade.planId);
+      const bc = plan?.brokerConfigId ? await _storage.getBrokerConfig(plan.brokerConfigId) : undefined;
+      configCache.set(trade.planId, bc);
+    }
+    const bc = configCache.get(trade.planId);
+    if (!bc) continue;
+    const token = brokerSymbolToTokenMap.get(trade.tradingSymbol);
+    const exchange = EL.mapExchange((trade as any).exchange ?? "NFO");
+    const ltp = await getPrice(trade.tradingSymbol, bc, exchange, token);
+    if (ltp !== null) {
+      processTick(trade.tradingSymbol, ltp);
+    }
+  }
+}
+
 // 🔒 LOCKED BLOCK START — TSL flushDirtyTrails: persists dirty states only; WS stale detection log must remain [TSL-3]
 async function flushDirtyTrails(): Promise<void> {
   if (!_storage) return;
 
   if (lastWsTickAt > 0 && Date.now() - lastWsTickAt > WS_STALE_MS) {
-    console.log(`${LOG_PREFIX} WS stale (${Math.round((Date.now() - lastWsTickAt) / 1000)}s), using REST fallback`);
+    const staleMs = Date.now() - lastWsTickAt;
+    console.log(`${LOG_PREFIX} WS stale (${Math.round(staleMs / 1000)}s), using REST fallback`);
+    if (staleMs > WS_FALLBACK_THRESHOLD_MS && trails.size > 0 && Date.now() - lastRestFallbackAt > REST_FALLBACK_INTERVAL_MS) {
+      lastRestFallbackAt = Date.now();
+      console.log(`${LOG_PREFIX} WS stale — REST fallback firing`);
+      runRestFallbackTick().catch(err => console.error(`${LOG_PREFIX} REST fallback error:`, err));
+    }
   }
 
   for (const [tradeId, state] of trails) {
