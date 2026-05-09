@@ -72,13 +72,13 @@ export default function Slide08ScaleEnvelope() {
                 Intraday sweep
               </td>
               <td className="text-[2vw] font-body text-primary" style={{ padding: "1.4vh 2vw" }}>
-                300 ms / 10 min
+                300 ms / 5 min
               </td>
               <td className="text-[2vw] font-body text-accent" style={{ padding: "1.4vh 2vw" }}>
-                ~6 s / 10 min
+                ~6 s / 5 min
               </td>
               <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.4vh 0 1.4vh 2vw" }}>
-                New setInterval · market hours · ~1% duty cycle
+                New setInterval · market hours · &lt;2% duty cycle
               </td>
             </tr>
             <tr style={{ borderBottom: "1px solid hsl(217 33% 14%)" }}>
@@ -86,13 +86,13 @@ export default function Slide08ScaleEnvelope() {
                 Per-fill refresh
               </td>
               <td className="text-[2vw] font-body text-primary" style={{ padding: "1.4vh 2vw" }}>
-                immediate
+                ≤5 min
               </td>
               <td className="text-[2vw] font-body text-accent" style={{ padding: "1.4vh 2vw" }}>
-                ≤1 s per UCC
+                ≤5 min
               </td>
               <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.4vh 0 1.4vh 2vw" }}>
-                TE post-fill hook → refreshCapitalForUcc(ucc)
+                Intraday sweep + on-demand button (TE hook dropped to keep TE frozen)
               </td>
             </tr>
             <tr style={{ borderBottom: "1px solid hsl(217 33% 14%)" }}>
@@ -129,11 +129,11 @@ export default function Slide08ScaleEnvelope() {
         <div className="mt-[2vh] bp-node flex gap-[5vw]">
           <div>
             <div className="text-[1.5vw] font-body text-muted uppercase tracking-wider mb-[0.5vh]">TE behavior</div>
-            <div className="text-[2vw] font-body text-text">Unchanged · reads DB snapshot per signal · staleness window ≤1 s after each fill</div>
+            <div className="text-[2vw] font-body text-text">Unchanged · reads DB snapshot per signal · staleness window identical to today</div>
           </div>
           <div>
             <div className="text-[1.5vw] font-body text-muted uppercase tracking-wider mb-[0.5vh]">Daily Kotak getLimits at 1000 users</div>
-            <div className="text-[2vw] font-body text-text">~38,000/day scheduler · 37 sweeps × 1000 UCCs + 1000 daily · 1.7 calls/sec avg</div>
+            <div className="text-[2vw] font-body text-text">~76,000/day · 75 sweeps × 1000 UCCs + 1000 daily · 3.4 calls/sec avg</div>
           </div>
         </div>
       </div>
