@@ -6,20 +6,21 @@
   --color-bg: var(--slide-bg);
   --color-text: var(--slide-text);
   --color-muted: var(--slide-muted);
+  --color-card: var(--slide-card);
   --font-display: var(--font-display-family);
   --font-body: var(--font-body-family);
 }
 
 :root {
-  /* Replace these with brand colors */
-  --slide-primary: #4f46e5;
-  --slide-accent: #06b6d4;
-  --slide-bg: #f8fafc;
-  --slide-text: #0f172a;
-  --slide-muted: #64748b;
-  --font-display-family: "Inter", system-ui, sans-serif;
-  --font-body-family: "Inter", system-ui, sans-serif;
-  color-scheme: light;
+  --slide-bg: #0d1f2d;
+  --slide-primary: #10b981;
+  --slide-accent: #f59e0b;
+  --slide-text: #e2eeff;
+  --slide-muted: #6b8fa8;
+  --slide-card: #091622;
+  --font-display-family: "Barlow Condensed", sans-serif;
+  --font-body-family: "Barlow", sans-serif;
+  color-scheme: dark;
 }
 
 html,
@@ -45,4 +46,48 @@ body {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.bp-grid {
+  background-image:
+    linear-gradient(rgba(100, 180, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(100, 180, 255, 0.055) 1px, transparent 1px);
+  background-size: 5vw 5.625vh;
+}
+
+.bp-label {
+  font-size: 1.3vw;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: #6b8fa8;
+  margin-bottom: 0.5vh;
+  font-family: var(--font-body-family);
+  font-weight: 500;
+}
+
+.bp-node {
+  border: 1px solid #1e3d57;
+  background-color: #091622;
+  padding: 2vh 2vw;
+}
+
+.bp-node-green {
+  border: 1px solid #10b981;
+  background-color: #061410;
+  padding: 2vh 2vw;
+}
+
+.bp-node-amber {
+  border: 1px solid #f59e0b;
+  background-color: #110900;
+  padding: 2vh 2vw;
+}
+
+.bp-arrow {
+  color: #2d5470;
+  font-size: 2.5vw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
