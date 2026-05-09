@@ -1,0 +1,83 @@
+#239 - Persist TSL Activation State Across Restarts
+
+What & Why
+The TSL engine (Task #215) tracks tslActivated in memory. A trade with tslActivateAt = 500 starts with tslActivated = false and only begins trailing once ₹500 profit is reached. But if the server restarts while that trade is live and already activated, the engine rehydrates it from DB with tslActivated = false — it reverts to "waiting" mode and may miss the trailing window entirely.
+
+This is a silent correctness bug: the server logs look normal after restart, but the active trail is no longer advancing its SL, and there's no way to know without checking the DB directly.
+
+Done looks like
+tslActivated is stored as a boolean column in strategy_trades
+When a trail activates (tslActivated flips from false to true), flushDirtyTrails persists the new value to DB on the next flush cycle (within 15 s)
+On server restart, registerNewTrail reads tslActivated from the rehydrated trade record and initializes the trail correctly — already-active trails resume trailing immediately
+Trades with tslActivateAt = null / 0 (immediate activation) are unaffected — their tslActivated starts true both in memory and in DB
+Out of scope
+Changing the flush interval (remains at 15 s)
+Persisting highWaterMark mid-trail more frequently (separate concern)
+Any UI changes (Task #237 handles display)
+Steps
+Add tslActivated column to both schema copies — Add tslActivated: boolean("tsl_activated").default(false) to the strategyTrades table in both lib/db/src/schema/schema.ts and artifacts/mentors-world/src/shared/schema.ts. Run pnpm --filter @workspace/db run push to apply.
+Persist tslActivated in flushDirtyTrails — In tsl-kotak-neo-v3.ts, extend the updateStrategyTrade call in flushDirtyTrails [TSL-3] to also write tslActivated when the state is dirty. The field only changes once per trade lifetime (false → true), so the extra column write is negligible.
+Read tslActivated in registerNewTrail — In registerNewTrail [TSL-2], read (trade as any).tslActivated ?? false when initializing the in-memory TslState. If true, set tslActivated: true and skip the activation gate — the trail resumes trailing immediately using the persisted highWaterMark and currentSlPrice.
+Relevant files
+lib/db/src/schema/schema.ts:228-236
+artifacts/mentors-world/src/shared/schema.ts
+artifacts/api-server/src/tsl-kotak-neo-v3.ts
+artifacts/api-server/src/storage.ts:1040
+Dependencies
+
+Fix TSL: activateAt bug + read-only Strategy Card + scale-grade WS price feed
+Open task
+
+Code Snippets from Gemini:
+Task: Execute #239 - Persist TSL Activation State
+
+Context:
+We need to persist the `tslActivated` boolean to the database so active trails survive server restarts.
+
+Instructions for Replit:
+
+1. Update `shared/schema.ts`:
+Locate the `strategyTrades` table definition. Add the `tslActivated` column immediately after `tslActivateAt`:
+\`\`\`typescript
+  tslActivateAt: real("tsl_activate_at"),
+  tslActivated: boolean("tsl_activated").default(false),
+\`\`\`
+Run your standard Drizzle push command (e.g., `npm run db:push` or `npx drizzle-kit push`) to apply this to PostgreSQL.
+
+2. Update `server/tsl-kotak-neo-v3.ts` (flushDirtyTrails):
+Locate the `flushDirtyTrails` function. Add `tslActivated` to the update payload:
+\`\`\`typescript
+    if (state.isDirty) {
+      await _storage.updateStrategyTrade(state.tradeId, {
+        currentSlPrice: String(state.currentSlPrice.toFixed(2)),
+        highWaterMark: String(state.highWaterMark.toFixed(2)),
+        tslActivated: state.tslActivated // <-- Add this line
+      });
+      state.isDirty = false;
+    }
+\`\`\`
+
+3. Update `server/tsl-kotak-neo-v3.ts` (registerNewTrail):
+Locate the `registerNewTrail` function. Initialize the state from the DB:
+\`\`\`typescript
+    const state: TslState = {
+      tradeId: trade.id,
+      planId: trade.planId,
+      symbol: trade.symbol,
+      tslType: trade.tslType as any,
+      tslActivateAt: trade.tslActivateAt ? Number(trade.tslActivateAt) : null,
+      tslActivated: (trade as any).tslActivated ?? false, // <-- Add this line
+      tslLockProfit: Number(trade.tslLockProfit),
+      tslProfitStep: Number(trade.tslProfitStep),
+      currentSlPrice: Number(trade.currentSlPrice),
+      highWaterMark: Number(trade.highWaterMark),
+      entryPrice: Number(trade.averagePrice),
+      direction: trade.transactionType === "BUY" ? 1 : -1,
+      isDirty: false,
+    };
+
+    // If no activation threshold, or if it was already activated in a previous session
+    if (state.tslActivateAt === null || state.tslActivateAt === 0) {
+      state.tslActivated = true;
+    }
+\`\`\`

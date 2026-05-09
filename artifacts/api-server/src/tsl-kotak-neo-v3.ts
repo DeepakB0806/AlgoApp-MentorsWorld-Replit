@@ -158,7 +158,7 @@ export function registerNewTrail(trade: StrategyTrade): void {
   if (!trade.trailingStep) return;
   const isBuy = trade.action === "BUY";
   const tslActivateAt = (trade as any).tslActivateAt ?? null;
-  const tslActivated = !tslActivateAt || tslActivateAt <= 0;
+  const tslActivated = (trade as any).tslActivated ?? (!tslActivateAt || tslActivateAt <= 0);
   const hwm = trade.highWaterMark ?? (trade.ltp || trade.price || 0);
   const state: TslState = {
     tradeId: trade.id,
@@ -200,6 +200,7 @@ async function flushDirtyTrails(): Promise<void> {
       await _storage.updateStrategyTrade(tradeId, {
         currentSlPrice: state.currentSlPrice,
         highWaterMark: state.highWaterMark,
+        tslActivated: state.tslActivated,
         updatedAt: new Date().toISOString(),
       });
       state.dirty = false;
