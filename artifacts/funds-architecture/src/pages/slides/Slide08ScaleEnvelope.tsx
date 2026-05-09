@@ -72,27 +72,27 @@ export default function Slide08ScaleEnvelope() {
                 Intraday sweep
               </td>
               <td className="text-[2vw] font-body text-primary" style={{ padding: "1.4vh 2vw" }}>
-                300 ms / 5 min
+                300 ms / 10 min
               </td>
               <td className="text-[2vw] font-body text-accent" style={{ padding: "1.4vh 2vw" }}>
-                ~6 s / 5 min
+                ~6 s / 10 min
               </td>
               <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.4vh 0 1.4vh 2vw" }}>
-                New setInterval · market hours only · &lt;2% duty cycle
+                New setInterval · market hours · ~1% duty cycle
               </td>
             </tr>
             <tr style={{ borderBottom: "1px solid hsl(217 33% 14%)" }}>
               <td className="text-[2vw] font-body text-text" style={{ padding: "1.4vh 2vw 1.4vh 0" }}>
-                Display staleness after fill
+                Per-fill refresh
               </td>
               <td className="text-[2vw] font-body text-primary" style={{ padding: "1.4vh 2vw" }}>
-                ≤5 min
+                immediate
               </td>
               <td className="text-[2vw] font-body text-accent" style={{ padding: "1.4vh 2vw" }}>
-                ≤5 min
+                ≤1 s per UCC
               </td>
               <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.4vh 0 1.4vh 2vw" }}>
-                Intraday scheduler + on-demand Refresh button
+                TE post-fill hook → refreshCapitalForUcc(ucc)
               </td>
             </tr>
             <tr style={{ borderBottom: "1px solid hsl(217 33% 14%)" }}>
@@ -133,7 +133,7 @@ export default function Slide08ScaleEnvelope() {
           </div>
           <div>
             <div className="text-[1.5vw] font-body text-muted uppercase tracking-wider mb-[0.5vh]">Daily Kotak calls at 1000 users</div>
-            <div className="text-[2vw] font-body text-text">~76,000/day · 75 sweeps × 1000 UCCs + 1000 daily · 3.4 calls/sec avg</div>
+            <div className="text-[2vw] font-body text-text">~38,000/day · 37 sweeps × 1000 UCCs + 1000 daily · 1.7 calls/sec avg</div>
           </div>
         </div>
       </div>

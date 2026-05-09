@@ -99,7 +99,7 @@ export default function Slide10OutOfScope() {
               </div>
               <div className="flex items-start gap-[1vw]">
                 <div className="text-[2vw] text-primary flex-none mt-[0.2vh]">+</div>
-                <div className="text-[2vw] font-body text-text leading-snug">Intraday 5-min scheduler</div>
+                <div className="text-[2vw] font-body text-text leading-snug">Intraday 10-min scheduler + post-fill hook</div>
               </div>
               <div className="flex items-start gap-[1vw]">
                 <div className="text-[2vw] text-primary flex-none mt-[0.2vh]">+</div>
