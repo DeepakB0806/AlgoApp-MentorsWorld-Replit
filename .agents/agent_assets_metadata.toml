@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "rIB3IlzV5_4Ftd65qlXHk"
+uri = "file://.local/outputs/AlgoApp-MWV.pptx"
+type = "slides"
+title = "AlgoApp MWV.pptx"
