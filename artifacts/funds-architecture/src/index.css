@@ -12,12 +12,13 @@
 }
 
 :root {
-  --slide-bg: #0d1f2d;
-  --slide-primary: #10b981;
-  --slide-accent: #f59e0b;
-  --slide-text: #e2eeff;
-  --slide-muted: #6b8fa8;
-  --slide-card: #091622;
+  /* Pulled from artifacts/mentors-world/src/index.css dark-mode tokens */
+  --slide-bg: hsl(222 47% 11%);          /* --background */
+  --slide-primary: hsl(160 84% 39%);     /* --primary */
+  --slide-accent: #fbbf24;               /* amber-400 (used as text-amber-400 on margin lines) */
+  --slide-text: hsl(210 40% 98%);        /* --foreground */
+  --slide-muted: hsl(215 20% 65%);       /* --muted-foreground */
+  --slide-card: hsl(217 33% 17%);        /* --card / --secondary (dark mode) */
   --font-display-family: "Barlow Condensed", sans-serif;
   --font-body-family: "Barlow", sans-serif;
   color-scheme: dark;
@@ -49,9 +50,10 @@ body {
 }
 
 .bp-grid {
+  /* Grid lines derived from app's --border: hsl(217 33% 17%) */
   background-image:
-    linear-gradient(rgba(100, 180, 255, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(100, 180, 255, 0.055) 1px, transparent 1px);
+    linear-gradient(hsl(217 33% 22% / 0.5) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(217 33% 22% / 0.5) 1px, transparent 1px);
   background-size: 5vw 5.625vh;
 }
 
@@ -66,25 +68,29 @@ body {
 }
 
 .bp-node {
-  border: 1px solid #1e3d57;
-  background-color: #091622;
+  /* --border: hsl(217 33% 17%) */
+  border: 1px solid hsl(217 33% 20%);
+  background-color: hsl(222 47% 8%);
   padding: 2vh 2vw;
 }
 
 .bp-node-green {
-  border: 1px solid #10b981;
-  background-color: #061410;
+  /* --primary: hsl(160 84% 39%) */
+  border: 1px solid hsl(160 84% 39%);
+  background-color: hsl(160 84% 5%);
   padding: 2vh 2vw;
 }
 
 .bp-node-amber {
-  border: 1px solid #f59e0b;
-  background-color: #110900;
+  /* amber-400 = #fbbf24 */
+  border: 1px solid hsl(43 96% 56% / 0.6);
+  background-color: hsl(43 96% 4%);
   padding: 2vh 2vw;
 }
 
 .bp-arrow {
-  color: #2d5470;
+  /* Muted blue-gray connector */
+  color: hsl(217 33% 35%);
   font-size: 2.5vw;
   display: flex;
   align-items: center;

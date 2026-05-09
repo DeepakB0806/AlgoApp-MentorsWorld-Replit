@@ -14,42 +14,51 @@ export default function Slide05RefreshPaths() {
         </div>
       </div>
 
-      <div className="absolute top-[11vh] left-[5vw] z-10">
-        <div className="text-[4vw] font-display font-bold text-text leading-none tracking-tight mb-[0.5vh]">
+      <div className="absolute top-[8vh] left-[5vw] z-10">
+        <div className="text-[3.2vw] font-display font-bold text-text leading-none tracking-tight mb-[0.3vh]">
           Refresh Paths — Write Side
         </div>
-        <div className="text-[2vw] font-body text-muted mb-[1.5vh]">Three triggers, one pipeline, one destination</div>
+        <div className="text-[1.7vw] font-body text-muted mb-[0.8vh]">Four triggers, one pipeline, one destination</div>
         <div className="w-[8vw] h-[0.3vh] bg-accent" />
       </div>
 
-      <div className="absolute top-[22vh] left-[5vw] right-[5vw] z-10 flex gap-[2vw] items-stretch">
+      <div className="absolute top-[17vh] left-[5vw] right-[5vw] z-10 flex gap-[2vw] items-stretch">
 
-        <div className="flex flex-col gap-[2vh]" style={{ width: "33vw" }}>
-          <div className="bp-label mb-[0.5vh]">TRIGGERS</div>
+        <div className="flex flex-col gap-[1vh]" style={{ width: "33vw" }}>
+          <div className="bp-label mb-[0.2vh]">TRIGGERS</div>
 
-          <div className="bp-node-amber">
-            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.5vh]">
+          <div className="bp-node-amber" style={{ padding: "1.2vh 1.5vw" }}>
+            <div className="text-[1.25vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.25vh]">
               (A) Daily 09:00 IST Sweep
             </div>
-            <div className="text-[2vw] font-body text-text leading-snug">
+            <div className="text-[1.7vw] font-body text-text leading-snug">
               scheduleNextCapitalRefresh → refreshAllCapital · all active UCCs at market open
             </div>
           </div>
 
-          <div className="bp-node-amber">
-            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.5vh]">
-              (B) Intraday Every 5 Min
+          <div className="bp-node-amber" style={{ padding: "1.2vh 1.5vw" }}>
+            <div className="text-[1.25vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.25vh]">
+              (B) Intraday Every 10 Min
             </div>
-            <div className="text-[2vw] font-body text-text leading-snug">
-              setInterval · gated to 09:15–15:30 IST · same batched pipeline · ~2% duty cycle at 1000 UCCs
+            <div className="text-[1.7vw] font-body text-text leading-snug">
+              setInterval · gated to 09:15–15:30 IST · batched pipeline · ≤6 s at 1000 UCCs
             </div>
           </div>
 
-          <div className="bp-node-amber">
-            <div className="text-[1.5vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.5vh]">
-              (C) On-Demand Refresh Button
+          <div className="bp-node-amber" style={{ padding: "1.2vh 1.5vw" }}>
+            <div className="text-[1.25vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.25vh]">
+              (C) Post-Fill Hook from TE per UCC
             </div>
-            <div className="text-[2vw] font-body text-text leading-snug">
+            <div className="text-[1.7vw] font-body text-text leading-snug">
+              te-kotak-neo-v3.ts calls refreshCapitalForUcc(ucc) immediately after each order fill
+            </div>
+          </div>
+
+          <div className="bp-node-amber" style={{ padding: "1.2vh 1.5vw" }}>
+            <div className="text-[1.25vw] font-body text-accent font-semibold uppercase tracking-wider mb-[0.25vh]">
+              (D) On-Demand Refresh Button
+            </div>
+            <div className="text-[1.7vw] font-body text-text leading-snug">
               POST /api/broker-capital-snapshots/:id/refresh · 30 s server debounce per UCC
             </div>
           </div>

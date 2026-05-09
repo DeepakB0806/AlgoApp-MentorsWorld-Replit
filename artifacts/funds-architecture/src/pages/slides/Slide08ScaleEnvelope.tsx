@@ -18,122 +18,122 @@ export default function Slide08ScaleEnvelope() {
         <div className="text-[4vw] font-display font-bold text-text leading-none tracking-tight mb-[0.5vh]">
           Scale Envelope
         </div>
-        <div className="text-[2vw] font-body text-muted mb-[1.5vh]">Zero-TE-change variant · 1000-user load targets</div>
+        <div className="text-[2vw] font-body text-muted mb-[1.5vh]">Numbers verbatim from project task · 1 user vs 1000 users</div>
         <div className="w-[8vw] h-[0.3vh] bg-accent" />
       </div>
 
       <div className="absolute top-[22vh] left-[5vw] right-[5vw] z-10">
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr style={{ borderBottom: "1px solid #1e3d57" }}>
+            <tr style={{ borderBottom: "1px solid hsl(217 33% 20%)" }}>
               <th
                 className="text-[1.4vw] font-body text-muted tracking-[0.2em] uppercase font-medium text-left"
-                style={{ padding: "1.5vh 2vw 1.5vh 0" }}
+                style={{ padding: "1.2vh 2vw 1.2vh 0" }}
               >
                 METRIC
               </th>
               <th
                 className="text-[1.4vw] font-body text-primary tracking-[0.2em] uppercase font-medium text-left"
-                style={{ padding: "1.5vh 2vw" }}
+                style={{ padding: "1.2vh 2vw" }}
               >
                 TODAY (1 USER)
               </th>
               <th
                 className="text-[1.4vw] font-body text-accent tracking-[0.2em] uppercase font-medium text-left"
-                style={{ padding: "1.5vh 2vw" }}
+                style={{ padding: "1.2vh 2vw" }}
               >
                 TARGET (1000 USERS)
               </th>
               <th
                 className="text-[1.4vw] font-body text-muted tracking-[0.2em] uppercase font-medium text-left"
-                style={{ padding: "1.5vh 0 1.5vh 2vw" }}
+                style={{ padding: "1.2vh 0 1.2vh 2vw" }}
               >
                 MECHANISM
               </th>
             </tr>
           </thead>
           <tbody>
-            <tr style={{ borderBottom: "1px solid #0f2a3e" }}>
-              <td className="text-[2vw] font-body text-text" style={{ padding: "1.8vh 2vw 1.8vh 0" }}>
-                Daily refresh latency
+            <tr style={{ borderBottom: "1px solid hsl(217 33% 14%)" }}>
+              <td className="text-[2vw] font-body text-text" style={{ padding: "1.4vh 2vw 1.4vh 0" }}>
+                Daily refresh
               </td>
-              <td className="text-[2vw] font-body text-primary" style={{ padding: "1.8vh 2vw" }}>
-                ~300 ms
+              <td className="text-[2vw] font-body text-primary" style={{ padding: "1.4vh 2vw" }}>
+                300 ms
               </td>
-              <td className="text-[2vw] font-body text-accent" style={{ padding: "1.8vh 2vw" }}>
+              <td className="text-[2vw] font-body text-accent" style={{ padding: "1.4vh 2vw" }}>
                 ~6 s
               </td>
-              <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.8vh 0 1.8vh 2vw" }}>
-                runWithConcurrency (cap 50)
+              <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.4vh 0 1.4vh 2vw" }}>
+                Existing runWithConcurrency (cap 50)
               </td>
             </tr>
-            <tr style={{ borderBottom: "1px solid #0f2a3e" }}>
-              <td className="text-[2vw] font-body text-text" style={{ padding: "1.8vh 2vw 1.8vh 0" }}>
+            <tr style={{ borderBottom: "1px solid hsl(217 33% 14%)" }}>
+              <td className="text-[2vw] font-body text-text" style={{ padding: "1.4vh 2vw 1.4vh 0" }}>
                 Intraday sweep
               </td>
-              <td className="text-[2vw] font-body text-primary" style={{ padding: "1.8vh 2vw" }}>
-                ~300 ms / 5 min
+              <td className="text-[2vw] font-body text-primary" style={{ padding: "1.4vh 2vw" }}>
+                300 ms / 10 min
               </td>
-              <td className="text-[2vw] font-body text-accent" style={{ padding: "1.8vh 2vw" }}>
-                ~6 s / 5 min
+              <td className="text-[2vw] font-body text-accent" style={{ padding: "1.4vh 2vw" }}>
+                ~6 s / 10 min
               </td>
-              <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.8vh 0 1.8vh 2vw" }}>
-                setInterval · market hours only
-              </td>
-            </tr>
-            <tr style={{ borderBottom: "1px solid #0f2a3e" }}>
-              <td className="text-[2vw] font-body text-text" style={{ padding: "1.8vh 2vw 1.8vh 0" }}>
-                Intraday API duty cycle
-              </td>
-              <td className="text-[2vw] font-body text-primary" style={{ padding: "1.8vh 2vw" }}>
-                negligible
-              </td>
-              <td className="text-[2vw] font-body text-accent" style={{ padding: "1.8vh 2vw" }}>
-                ~2% of clock
-              </td>
-              <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.8vh 0 1.8vh 2vw" }}>
-                50-parallel · 200 ms inter-batch gap
+              <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.4vh 0 1.4vh 2vw" }}>
+                New setInterval · market hours only
               </td>
             </tr>
-            <tr style={{ borderBottom: "1px solid #0f2a3e" }}>
-              <td className="text-[2vw] font-body text-text" style={{ padding: "1.8vh 2vw 1.8vh 0" }}>
+            <tr style={{ borderBottom: "1px solid hsl(217 33% 14%)" }}>
+              <td className="text-[2vw] font-body text-text" style={{ padding: "1.4vh 2vw 1.4vh 0" }}>
+                Per-fill refresh
+              </td>
+              <td className="text-[2vw] font-body text-primary" style={{ padding: "1.4vh 2vw" }}>
+                immediate
+              </td>
+              <td className="text-[2vw] font-body text-accent" style={{ padding: "1.4vh 2vw" }}>
+                ≤1 s per UCC
+              </td>
+              <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.4vh 0 1.4vh 2vw" }}>
+                TE post-fill hook → refreshCapitalForUcc
+              </td>
+            </tr>
+            <tr style={{ borderBottom: "1px solid hsl(217 33% 14%)" }}>
+              <td className="text-[2vw] font-body text-text" style={{ padding: "1.4vh 2vw 1.4vh 0" }}>
                 UI read load
               </td>
-              <td className="text-[2vw] font-body text-primary" style={{ padding: "1.8vh 2vw" }}>
+              <td className="text-[2vw] font-body text-primary" style={{ padding: "1.4vh 2vw" }}>
                 1 DB query / 60 s
               </td>
-              <td className="text-[2vw] font-body text-accent" style={{ padding: "1.8vh 2vw" }}>
+              <td className="text-[2vw] font-body text-accent" style={{ padding: "1.4vh 2vw" }}>
                 ~17 queries / sec
               </td>
-              <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.8vh 0 1.8vh 2vw" }}>
+              <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.4vh 0 1.4vh 2vw" }}>
                 Indexed read on ≤1000-row table
               </td>
             </tr>
             <tr>
-              <td className="text-[2vw] font-body text-text" style={{ padding: "1.8vh 2vw 1.8vh 0" }}>
+              <td className="text-[2vw] font-body text-text" style={{ padding: "1.4vh 2vw 1.4vh 0" }}>
                 Refresh-button abuse
               </td>
-              <td className="text-[2vw] font-body text-primary" style={{ padding: "1.8vh 2vw" }}>
+              <td className="text-[2vw] font-body text-primary" style={{ padding: "1.4vh 2vw" }}>
                 N/A
               </td>
-              <td className="text-[2vw] font-body text-accent" style={{ padding: "1.8vh 2vw" }}>
+              <td className="text-[2vw] font-body text-accent" style={{ padding: "1.4vh 2vw" }}>
                 ≤33 Kotak calls / sec
               </td>
-              <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.8vh 0 1.8vh 2vw" }}>
+              <td className="text-[1.8vw] font-body text-muted" style={{ padding: "1.4vh 0 1.4vh 2vw" }}>
                 30 s per-UCC server debounce
               </td>
             </tr>
           </tbody>
         </table>
 
-        <div className="mt-[2.5vh] bp-node flex gap-[5vw]">
+        <div className="mt-[2vh] bp-node flex gap-[5vw]">
           <div>
             <div className="text-[1.5vw] font-body text-muted uppercase tracking-wider mb-[0.5vh]">TE behavior</div>
-            <div className="text-[2vw] font-body text-text">Unchanged — reads DB snapshot per signal regardless of UI staleness</div>
+            <div className="text-[2vw] font-body text-text">Unchanged — reads DB snapshot per signal · staleness window identical to today</div>
           </div>
           <div>
             <div className="text-[1.5vw] font-body text-muted uppercase tracking-wider mb-[0.5vh]">Daily Kotak calls at 1000 users</div>
-            <div className="text-[2vw] font-body text-text">~76,000 / day · average 3.4 calls / sec across 6.25 hr market window</div>
+            <div className="text-[2vw] font-body text-text">~76,000 / day · 3.4 calls/sec avg across 6.25 hr market window</div>
           </div>
         </div>
       </div>

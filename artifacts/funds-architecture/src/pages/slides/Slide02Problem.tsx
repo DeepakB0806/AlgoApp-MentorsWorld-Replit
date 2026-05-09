@@ -77,7 +77,7 @@ export default function Slide02Problem() {
               Live fund snapshot in the UI
             </div>
             <div className="text-[2vw] font-body text-text leading-snug">
-              Capital position on the Broker Linking page, refreshed every 5 min during market hours
+              Capital position on the Broker Linking page — refreshed every 10 min or instantly on fill
             </div>
           </div>
 
