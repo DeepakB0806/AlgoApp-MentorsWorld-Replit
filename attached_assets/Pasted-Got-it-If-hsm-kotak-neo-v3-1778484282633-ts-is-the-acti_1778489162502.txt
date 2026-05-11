@@ -1,0 +1,78 @@
+Got it. If hsm-kotak-neo-v3_1778484282633.ts is the active file the Replit agent is currently working on, we need to explicitly point the agent to that exact filename so it doesn't accidentally modify an older, unused backup file.
+
+Here is the exact prompt, updated with your specific filename. Copy and paste this entirely into your Replit chat:
+
+🤖 Prompt for Replit Agent
+Agent Instruction: Please execute Task #244 to fix the HSM Authentication protocol. You MUST read this carefully: Kotak's HSM server DOES NOT ACCEPT JSON. It strictly requires a custom binary Buffer frame for authentication. Do not use JSON.stringify for the auth payload in HSM.
+
+File to modify: hsm-kotak-neo-v3_1778484282633.ts (Note the specific filename)
+
+Step 1: Add the Binary Builder Function
+Add the following helper function at the top level of the file (e.g., right below the imports or right before the connect function). This function constructs the exact Big-Endian byte sequence Kotak expects.
+
+TypeScript
+function buildHsmAuthBinary(jwt: string, sid: string): Buffer {
+  const source = "JS_API";
+  
+  const jwtLen = Buffer.byteLength(jwt, 'utf8');
+  const sidLen = Buffer.byteLength(sid, 'utf8');
+  const sourceLen = Buffer.byteLength(source, 'utf8');
+  
+  // Total size: start(1) + type(1) + count(1) + [len(2)+jwt] + [len(2)+sid] + [len(2)+source] + end(1)
+  const totalLength = 1 + 1 + 1 + 2 + jwtLen + 2 + sidLen + 2 + sourceLen + 1;
+  const buf = Buffer.alloc(totalLength);
+  
+  let offset = 0;
+  
+  buf.writeUInt8(10, offset++); // Start of message (0x0A)
+  buf.writeUInt8(1, offset++);  // Connection Type (1)
+  buf.writeUInt8(3, offset++);  // Field count (3)
+  
+  // Field 1: JWT
+  buf.writeUInt16BE(jwtLen, offset); offset += 2;
+  buf.write(jwt, offset, jwtLen, 'utf8'); offset += jwtLen;
+  
+  // Field 2: SID
+  buf.writeUInt16BE(sidLen, offset); offset += 2;
+  buf.write(sid, offset, sidLen, 'utf8'); offset += sidLen;
+  
+  // Field 3: Source
+  buf.writeUInt16BE(sourceLen, offset); offset += 2;
+  buf.write(source, offset, sourceLen, 'utf8'); offset += sourceLen;
+  
+  buf.writeUInt8(13, offset++); // End of message (0x0D)
+  
+  return buf;
+}
+Step 2: Replace the JSON ws.send in connect()
+Inside the connect function, locate the ws.on("open", ...) event handler.
+You must DELETE the line that looks like ws!.send(JSON.stringify(buildAuthMessage(config))); and replace the entire try/catch block inside the open handler with this exactly:
+
+TypeScript
+  ws.on("open", () => {
+    opened = true;
+    console.log(`${LOG_PREFIX} Connected to Kotak HSM`);
+    reconnectDelay = 1_000;
+    
+    try {
+      // TASK #244: Send Custom Binary Buffer instead of JSON
+      const jwt = config.viewToken || config.accessToken || "";
+      const sid = config.sidView || config.sessionId || config.sessionToken || "";
+      
+      if (!jwt || !sid) {
+        console.warn(`${LOG_PREFIX} Missing tokens for binary auth.`);
+      }
+      
+      const binaryPayload = buildHsmAuthBinary(jwt, sid);
+      
+      console.log(`${LOG_PREFIX} Sending binary auth frame: ${binaryPayload.length} bytes`);
+      // Crucial: Send the raw Buffer. No JSON stringification!
+      ws!.send(binaryPayload);
+    } catch (err) {
+      console.error(`${LOG_PREFIX} Auth send error:`, err);
+    }
+    
+    resubscribeAll();
+  });
+Step 3: Verification
+Deploy this fix. If successful, the server log will output [HSM] Sending binary auth frame: <X> bytes immediately followed by Kotak returning the Auth Ok confirmation.
