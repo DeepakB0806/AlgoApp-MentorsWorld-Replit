@@ -53,6 +53,38 @@ An automated algorithmic trading platform integrating with Kotak Neo broker API.
 
 _Populate as you build — explicit user instructions worth remembering across sessions._
 
+## Milestones
+
+### [MILESTONE] HSM as single price source for TSL, SL, and Profit Target — verified 2026-05-11
+
+**Finding:** All three exit systems (TSL trailing stop, plan-level SL, plan-level profit target) receive prices exclusively through HSM ticks when HSM is live. This was verified by tracing the full data flow from the HSM WS handler to each consumer.
+
+**The single source — `artifacts/api-server/src/hsm-kotak-neo-v3.ts` lines 207–210:**
+```typescript
+if (symbol && ltp !== undefined) {
+  marketData.updatePrice(symbol, Number(ltp));  // → MD priceCache (feeds MTM monitor SL/Profit)
+  processTick(symbol, Number(ltp));              // → TSL engine directly (feeds trailing SL)
+  updateLastWsTick();                            // → resets REST fallback staleness timer
+}
+```
+
+**How each system uses it:**
+- **TSL** (`artifacts/api-server/src/tsl-kotak-neo-v3.ts`): receives ticks directly via `processTick()` — real-time per tick
+- **SL + Profit Target** (`artifacts/api-server/src/mtm-monitor.ts`): calls `getPrice()` from `artifacts/api-server/src/md-kotak-neo-v3.ts` — reads from `priceCache` kept fresh by `marketData.updatePrice()` above
+- **MD price cache** (`artifacts/api-server/src/md-kotak-neo-v3.ts` line 22–25): `updatePrice()` sets cache + broadcasts SSE
+
+**Fallback chain when HSM tick is NOT flowing** (`[MD-1]` invariant in `md-kotak-neo-v3.ts`):
+1. WS cache (fresh < 2s) → immediate return
+2. REST quote via `EL.getQuote()` → fetched on demand
+3. Stale cache → last known price returned
+- TSL additionally has its own REST fallback (`runRestFallbackTick()` in `tsl-kotak-neo-v3.ts` line ~196) — fires every 30s when `lastWsTickAt` is stale, calls `getPrice()` and pipes result into `processTick()`
+
+**Diagnostic — if HSM tick stops working, check in order:**
+1. `GET /api/admin/hsm/status` → `authOk` must be `true`, `subscriptionCount` must be > 0 when trades are open
+2. `[HSM]` logs — look for `auth_ok` confirmation after connect; absence means Kotak HSM server not completing handshake
+3. `[TSL]` logs — if REST fallback is active you will see fallback firing every ~30s instead of per-tick
+4. `[MTM]` logs — SL/profit checks continue via REST but with quote-level latency
+
 ## Gotchas
 
 - Do NOT run `pnpm dev` at workspace root — use `restart_workflow` instead
