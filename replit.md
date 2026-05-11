@@ -53,6 +53,15 @@ An automated algorithmic trading platform integrating with Kotak Neo broker API.
 
 _Populate as you build — explicit user instructions worth remembering across sessions._
 
+## Multi-broker scaling model
+
+The platform is designed to scale to multiple brokers without changing the core strategy or fit-check logic:
+
+- **Margins are broker-specific** — each strategy is deployed under a specific broker. Margin data (via API and/or CSV) is fetched from that broker's own endpoints. A Kotak Neo plan uses Kotak Neo margin rates; a future Zerodha plan would use Zerodha's rates.
+- **Available Funds are UCC-specific per broker** — the capital snapshot (available funds) belongs to a UCC on a particular broker, not a pooled cross-broker figure. The fit check groups plans by UCC + brokerConfig and evaluates each group independently.
+- **To onboard a new broker** — add a new section under Broker API alongside the existing Kotak Neo section. Each broker gets its own connection flow, credential management, margin engine, and capital snapshot. No changes needed to strategies, webhooks, fit-check, or TSL/SL logic — they already key off `brokerConfigId`.
+- **UI pattern** — the Broker API page will grow one link/tab per broker (e.g. Kotak Neo | Zerodha | …). Each tab manages connections for that broker only.
+
 ## Milestones
 
 ### [MILESTONE] HSM as single price source for TSL, SL, and Profit Target — verified 2026-05-11
