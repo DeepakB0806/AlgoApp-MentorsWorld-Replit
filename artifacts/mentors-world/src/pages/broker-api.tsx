@@ -2358,7 +2358,7 @@ function HsiStatusCard() {
               </div>
             </div>
           )}
-          {!isLoading && !data?.connected && (
+          {!isLoading && (!data?.connected || !data?.authOk) && (
             <div className="mt-3">
               <Button
                 variant="outline"
@@ -2369,7 +2369,7 @@ function HsiStatusCard() {
                 data-testid="button-hsi-reconnect"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${reconnectMutation.isPending ? "animate-spin" : ""}`} />
-                {reconnectMutation.isPending ? "Reconnecting…" : "Reconnect Now"}
+                {reconnectMutation.isPending ? "Reconnecting…" : data?.connected && !data?.authOk ? "Re-authenticate" : "Reconnect Now"}
               </Button>
             </div>
           )}
@@ -2558,7 +2558,7 @@ function HsmStatusCard() {
               </div>
             </div>
           )}
-          {!isLoading && !data?.connected && (
+          {!isLoading && (!data?.connected || !data?.authOk) && (
             <div className="mt-3">
               <Button
                 variant="outline"
@@ -2569,7 +2569,7 @@ function HsmStatusCard() {
                 data-testid="button-hsm-reconnect"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${reconnectMutation.isPending ? "animate-spin" : ""}`} />
-                {reconnectMutation.isPending ? "Reconnecting…" : "Reconnect Now"}
+                {reconnectMutation.isPending ? "Reconnecting…" : data?.connected && !data?.authOk ? "Re-authenticate" : "Reconnect Now"}
               </Button>
             </div>
           )}
