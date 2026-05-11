@@ -1285,6 +1285,18 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  // ── Daily Strategy Fit Log (#247) ─────────────────────────────────────────
+  app.get("/api/admin/fit-log", async (req, res) => {
+    try {
+      const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const date = typeof req.query.date === "string" ? req.query.date : todayIST;
+      const rows = await storage.getDailyStrategyFitByDate(date);
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch fit log" });
+    }
+  });
+
   // ── TSL Price-Update Endpoint ─────────────────────────────────────────────
   // External WebSocket Scout pushes live LTP ticks here; calls processTick()
   // and stamps the last-WS-tick timestamp so the 15s flush suppresses stale warnings.

@@ -5,7 +5,8 @@ import {
   strategies, webhooks, webhookLogs, webhookStatusLogs, webhookData, appSettings, brokerConfigs, webhookRegistry,
   brokerTestLogs, brokerSessionLogs, strategyConfigs, strategyPlans, strategyTrades, strategyDailyPnl,
   broker_field_mappings, universal_fields, instrumentConfigs, broker_exchange_maps, processFlowLogs, errorRouting,
-  exchangeSettings, indexExpirySettings, indexMarginSettings, marketHolidays, brokerCapitalSnapshots,
+  exchangeSettings, indexExpirySettings, indexMarginSettings, marketHolidays, brokerCapitalSnapshots, dailyStrategyFit,
+  type DailyStrategyFit, type InsertDailyStrategyFit,
   type Strategy, type InsertStrategy,
   type Webhook, type InsertWebhook,
   type WebhookLog, type InsertWebhookLog,
@@ -232,6 +233,11 @@ export interface IStorage {
   // Primary broker config (#184)
   getPrimaryBrokerConfig(): Promise<BrokerConfig | undefined>;
   setPrimaryBrokerConfig(id: string): Promise<void>;
+
+  // Daily Strategy Fit audit rows (#247)
+  upsertDailyStrategyFit(row: InsertDailyStrategyFit & { id: string }): Promise<DailyStrategyFit>;
+  getDailyStrategyFitByDate(date: string): Promise<DailyStrategyFit[]>;
+  getDailyStrategyFitByUcc(ucc: string, date?: string): Promise<DailyStrategyFit[]>;
 
   // Trading Data (fetched from broker or mock)
   getPositions(): Promise<Position[]>;
@@ -1836,6 +1842,49 @@ export class DatabaseStorage implements IStorage {
   async setPrimaryBrokerConfig(id: string): Promise<void> {
     await db.update(brokerConfigs).set({ isPrimary: false });
     await db.update(brokerConfigs).set({ isPrimary: true }).where(eq(brokerConfigs.id, id));
+  }
+
+  // ── Daily Strategy Fit (#247) ────────────────────────────────────────────────
+  async upsertDailyStrategyFit(row: InsertDailyStrategyFit & { id: string }): Promise<DailyStrategyFit> {
+    const [result] = await db
+      .insert(dailyStrategyFit)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [dailyStrategyFit.date, dailyStrategyFit.planId],
+        set: {
+          ucc: row.ucc,
+          configId: row.configId,
+          rank: row.rank,
+          availableCapital: row.availableCapital,
+          effectiveMargin: row.effectiveMargin,
+          fit: row.fit,
+          deploymentStatus: row.deploymentStatus,
+          reason: row.reason,
+          calculatedAt: row.calculatedAt,
+        },
+      })
+      .returning();
+    return result;
+  }
+
+  async getDailyStrategyFitByDate(date: string): Promise<DailyStrategyFit[]> {
+    return await db
+      .select()
+      .from(dailyStrategyFit)
+      .where(eq(dailyStrategyFit.date, date));
+  }
+
+  async getDailyStrategyFitByUcc(ucc: string, date?: string): Promise<DailyStrategyFit[]> {
+    if (date) {
+      return await db
+        .select()
+        .from(dailyStrategyFit)
+        .where(and(eq(dailyStrategyFit.ucc, ucc), eq(dailyStrategyFit.date, date)));
+    }
+    return await db
+      .select()
+      .from(dailyStrategyFit)
+      .where(eq(dailyStrategyFit.ucc, ucc));
   }
 
   async backfillUniqueCodes(): Promise<void> {

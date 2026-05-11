@@ -890,6 +890,30 @@ export const insertMarketHolidaySchema = createInsertSchema(marketHolidays).omit
 export type InsertMarketHoliday = z.infer<typeof insertMarketHolidaySchema>;
 export type MarketHoliday = typeof marketHolidays.$inferSelect;
 
+// Daily Strategy Fit — one row per (date, planId), written at fit_check_time IST each trading day
+export const dailyStrategyFit = pgTable("daily_strategy_fit", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  date: text("date").notNull(),
+  ucc: text("ucc").notNull(),
+  planId: varchar("plan_id", { length: 36 }).notNull(),
+  configId: varchar("config_id", { length: 36 }),
+  rank: integer("rank"),
+  availableCapital: numeric("available_capital"),
+  effectiveMargin: numeric("effective_margin"),
+  fit: boolean("fit").notNull(),
+  deploymentStatus: text("deployment_status"),
+  reason: text("reason"),
+  calculatedAt: text("calculated_at"),
+}, (table) => [
+  uniqueIndex("uq_daily_strategy_fit_date_plan").on(table.date, table.planId),
+  index("idx_daily_strategy_fit_date").on(table.date),
+  index("idx_daily_strategy_fit_ucc").on(table.ucc),
+]);
+
+export const insertDailyStrategyFitSchema = createInsertSchema(dailyStrategyFit).omit({ id: true });
+export type InsertDailyStrategyFit = z.infer<typeof insertDailyStrategyFitSchema>;
+export type DailyStrategyFit = typeof dailyStrategyFit.$inferSelect;
+
 // Capital snapshots — one row per UCC, updated by Capital Manager after each scrip sync
 export const brokerCapitalSnapshots = pgTable("broker_capital_snapshots", {
   ucc: text("ucc").primaryKey(),

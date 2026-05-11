@@ -240,6 +240,10 @@ app.get("/api/health", (_req, res) => {
     if (!existingIntradayCapital) await storage.setSetting("cm_intraday_refresh_mins", "5");
     const existingAutoPauseThreshold = await storage.getSetting("auto_pause_skip_threshold");
     if (!existingAutoPauseThreshold) await storage.setSetting("auto_pause_skip_threshold", "3");
+    const existingMarginCalcTime = await storage.getSetting("margin_calc_time");
+    if (!existingMarginCalcTime) await storage.setSetting("margin_calc_time", "09:12");
+    const existingFitCheckTime = await storage.getSetting("fit_check_time");
+    if (!existingFitCheckTime) await storage.setSetting("fit_check_time", "09:15");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
   }

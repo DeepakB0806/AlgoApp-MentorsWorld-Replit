@@ -257,6 +257,8 @@ export async function startCapitalManager(storage: IStorage): Promise<void> {
   }
   scheduleNextCapitalRefresh(storage);
   startIntradayCapitalRefresh(storage);
+  scheduleMarginCalc(storage);
+  scheduleFitCheck(storage);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -619,5 +621,268 @@ export async function calculatePlanMargins(
     console.log(`${MLOG} Cache invalidated for broker ${brokerConfig.name}`);
   } catch (err: any) {
     console.error(`${MLOG} calculatePlanMargins outer error: ${err.message}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MARGIN CALC DAILY SCHEDULER  (#247)
+// Fires at `margin_calc_time` IST (default 09:12) once per day.
+// Runs calculatePlanMargins for every connected Kotak broker.
+// Startup catch-up: if already past the target time today, fires immediately.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let marginCalcTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+let marginCalcFiredToday = false;
+
+async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): Promise<void> {
+  try {
+    const allConfigs = await storage.getBrokerConfigs();
+    const liveBrokers = allConfigs.filter(bc => bc.isConnected && bc.brokerName === "kotak_neo");
+    if (liveBrokers.length === 0) {
+      console.log(`[MARGIN-SCHED] ${timeStr} IST — no connected Kotak brokers, skipping`);
+    } else {
+      for (const bc of liveBrokers) {
+        console.log(`[MARGIN-SCHED] ${timeStr} IST — running calculatePlanMargins for ${bc.ucc || bc.id}`);
+        await calculatePlanMargins(storage, bc).catch(err =>
+          console.warn(`[MARGIN-SCHED] calculatePlanMargins error for ${bc.ucc}: ${err}`)
+        );
+      }
+    }
+  } catch (err) {
+    console.error(`[MARGIN-SCHED] Daily margin calc error: ${err}`);
+  }
+}
+
+function scheduleMarginCalcForTomorrow(storage: IStorage, timeStr: string, hh: number, mm: number): void {
+  if (marginCalcTimeoutHandle !== null) { clearTimeout(marginCalcTimeoutHandle); marginCalcTimeoutHandle = null; }
+  const targetIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  targetIST.setUTCHours(hh - 5, mm - 30, 0, 0);
+  targetIST.setUTCDate(targetIST.getUTCDate() + 1); // always tomorrow
+  const msUntil = targetIST.getTime() - Date.now();
+  console.log(`[MARGIN-SCHED] Next margin calc scheduled at ${timeStr} IST tomorrow (in ${Math.round(msUntil / 60000)} min)`);
+  marginCalcTimeoutHandle = setTimeout(async () => {
+    marginCalcTimeoutHandle = null;
+    marginCalcFiredToday = false;
+    await runMarginCalcForAllBrokers(storage, timeStr);
+    scheduleMarginCalcForTomorrow(storage, timeStr, hh, mm);
+  }, msUntil);
+}
+
+export async function scheduleMarginCalc(storage: IStorage): Promise<void> {
+  if (marginCalcTimeoutHandle !== null) {
+    clearTimeout(marginCalcTimeoutHandle);
+    marginCalcTimeoutHandle = null;
+  }
+
+  const setting = await storage.getSetting("margin_calc_time").catch(() => null);
+  const timeStr = setting?.value || "09:12";
+  const [hh, mm] = timeStr.split(":").map(Number);
+
+  const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const targetIST = new Date(nowIST);
+  targetIST.setUTCHours(hh - 5, mm - 30, 0, 0);
+
+  const msUntil = targetIST.getTime() - Date.now();
+
+  if (msUntil <= 0 && !marginCalcFiredToday) {
+    // Past target time today — fire once immediately (startup catch-up) then schedule tomorrow
+    marginCalcFiredToday = true;
+    console.log(`[MARGIN-SCHED] Past ${timeStr} IST — firing margin calc immediately (startup catch-up)`);
+    setImmediate(async () => {
+      await runMarginCalcForAllBrokers(storage, timeStr);
+      scheduleMarginCalcForTomorrow(storage, timeStr, hh, mm);
+    });
+  } else if (msUntil <= 0 && marginCalcFiredToday) {
+    // Already fired today — just schedule tomorrow
+    scheduleMarginCalcForTomorrow(storage, timeStr, hh, mm);
+  } else {
+    console.log(`[MARGIN-SCHED] Scheduled daily margin calc at ${timeStr} IST (in ${Math.round(msUntil / 60000)} min)`);
+    marginCalcTimeoutHandle = setTimeout(async () => {
+      marginCalcTimeoutHandle = null;
+      marginCalcFiredToday = false;
+      await runMarginCalcForAllBrokers(storage, timeStr);
+      scheduleMarginCalcForTomorrow(storage, timeStr, hh, mm);
+    }, msUntil);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DAILY FIT CHECK SCHEDULER  (#247)
+// Fires at `fit_check_time` IST (default 09:15) once per day.
+// Writes daily_strategy_fit audit rows and activates/pauses plans (autoResume only).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let fitCheckTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleFitCheckForTomorrow(storage: IStorage, timeStr: string, hh: number, mm: number): void {
+  if (fitCheckTimeoutHandle !== null) { clearTimeout(fitCheckTimeoutHandle); fitCheckTimeoutHandle = null; }
+  const targetIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  targetIST.setUTCHours(hh - 5, mm - 30, 0, 0);
+  targetIST.setUTCDate(targetIST.getUTCDate() + 1); // always tomorrow
+  const msUntil = targetIST.getTime() - Date.now();
+  console.log(`[FIT-CHECK] Next fit check scheduled at ${timeStr} IST tomorrow (in ${Math.round(msUntil / 60000)} min)`);
+  fitCheckTimeoutHandle = setTimeout(async () => {
+    fitCheckTimeoutHandle = null;
+    try { await runDailyFitCheck(storage); } catch (err) { console.error(`[FIT-CHECK] Error: ${err}`); }
+    scheduleFitCheckForTomorrow(storage, timeStr, hh, mm);
+  }, msUntil);
+}
+
+export async function scheduleFitCheck(storage: IStorage): Promise<void> {
+  if (fitCheckTimeoutHandle !== null) {
+    clearTimeout(fitCheckTimeoutHandle);
+    fitCheckTimeoutHandle = null;
+  }
+
+  const setting = await storage.getSetting("fit_check_time").catch(() => null);
+  const timeStr = setting?.value || "09:15";
+  const [hh, mm] = timeStr.split(":").map(Number);
+
+  const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const targetIST = new Date(nowIST);
+  targetIST.setUTCHours(hh - 5, mm - 30, 0, 0);
+
+  const msUntil = targetIST.getTime() - Date.now();
+
+  if (msUntil <= 0) {
+    // Already past fit check time today — skip today (margins may not be ready), schedule tomorrow
+    console.log(`[FIT-CHECK] Past ${timeStr} IST — skipping today's fit check (margins may not be ready at startup)`);
+    scheduleFitCheckForTomorrow(storage, timeStr, hh, mm);
+  } else {
+    console.log(`[FIT-CHECK] Scheduled daily fit check at ${timeStr} IST (in ${Math.round(msUntil / 60000)} min)`);
+    fitCheckTimeoutHandle = setTimeout(async () => {
+      fitCheckTimeoutHandle = null;
+      try { await runDailyFitCheck(storage); } catch (err) { console.error(`[FIT-CHECK] Error: ${err}`); }
+      scheduleFitCheckForTomorrow(storage, timeStr, hh, mm);
+    }, msUntil);
+  }
+}
+
+export async function runDailyFitCheck(storage: IStorage): Promise<void> {
+  const FLOG = "[FIT-CHECK]";
+  console.log(`${FLOG} Starting daily fit check`);
+
+  try {
+    const plans = await storage.getStrategyPlans();
+    const activePlans = plans.filter(p =>
+      ["active", "paused", "deployed"].includes(p.deploymentStatus || "")
+    );
+    if (activePlans.length === 0) {
+      console.log(`${FLOG} No active/paused/deployed plans — nothing to check`);
+      return;
+    }
+
+    // Group by broker config ID
+    const byBroker = new Map<string, typeof activePlans>();
+    for (const plan of activePlans) {
+      if (!plan.brokerConfigId) continue;
+      if (!byBroker.has(plan.brokerConfigId)) byBroker.set(plan.brokerConfigId, []);
+      byBroker.get(plan.brokerConfigId)!.push(plan);
+    }
+
+    const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const nowStr = new Date().toISOString();
+
+    let totalFit = 0;
+    let totalNotFit = 0;
+    let activated = 0;
+    let paused = 0;
+
+    for (const [brokerConfigId, brokerPlans] of byBroker) {
+      const brokerConfig = await storage.getBrokerConfig(brokerConfigId);
+      if (!brokerConfig) continue;
+
+      const ucc = brokerConfig.ucc || brokerConfigId;
+
+      // Get available capital from snapshot
+      const snapshot = await storage.getCapitalSnapshot(ucc).catch(() => null);
+      const availableCapital = snapshot?.availableCapital !== null && snapshot?.availableCapital !== undefined
+        ? Number(snapshot.availableCapital)
+        : null;
+
+      // Sort by rank (ASC, nulls last)
+      const sorted = [...brokerPlans].sort((a, b) => {
+        if (a.rank === null && b.rank === null) return 0;
+        if (a.rank === null) return 1;
+        if (b.rank === null) return -1;
+        return (a.rank ?? 0) - (b.rank ?? 0);
+      });
+
+      let cumulativeMargin = 0;
+
+      for (const plan of sorted) {
+        const { randomUUID } = await import("crypto");
+        const effectiveMargin = plan.estimatedMargin !== null && plan.estimatedMargin !== undefined
+          ? Number(plan.estimatedMargin)
+          : null;
+
+        let fit = false;
+        let reason = "";
+
+        if (availableCapital === null) {
+          reason = "No capital snapshot available";
+          fit = false;
+        } else if (effectiveMargin === null || effectiveMargin === 0) {
+          reason = "Margin not calculated — run margin calc first";
+          fit = false;
+        } else {
+          cumulativeMargin += effectiveMargin;
+          if (cumulativeMargin <= availableCapital) {
+            fit = true;
+            reason = `Cumulative margin ₹${cumulativeMargin.toFixed(2)} ≤ available ₹${availableCapital.toFixed(2)}`;
+          } else {
+            fit = false;
+            reason = `Cumulative margin ₹${cumulativeMargin.toFixed(2)} exceeds available ₹${availableCapital.toFixed(2)}`;
+          }
+        }
+
+        if (fit) totalFit++; else totalNotFit++;
+
+        // Write audit row (upsert — idempotent)
+        await storage.upsertDailyStrategyFit({
+          id: randomUUID(),
+          date: todayIST,
+          ucc,
+          planId: plan.id,
+          configId: plan.configId,
+          rank: plan.rank ?? null,
+          availableCapital: availableCapital !== null ? String(availableCapital) : null,
+          effectiveMargin: effectiveMargin !== null ? String(effectiveMargin) : null,
+          fit,
+          deploymentStatus: plan.deploymentStatus,
+          reason,
+          calculatedAt: nowStr,
+        }).catch(err => console.warn(`${FLOG} upsertDailyStrategyFit error for plan ${plan.id}: ${err}`));
+
+        // Activate/pause only if autoResume=true
+        if (!plan.autoResume) continue;
+
+        if (fit && plan.deploymentStatus === "paused") {
+          await storage.updateStrategyPlan(plan.id, {
+            deploymentStatus: "active",
+            autoPauseReason: null,
+            autoPausedAt: null,
+            updatedAt: nowStr,
+          }).catch(err => console.warn(`${FLOG} Failed to activate plan ${plan.id}: ${err}`));
+          console.log(`${FLOG} Activated plan "${plan.name}" (rank ${plan.rank ?? "-"}, ${reason})`);
+          activated++;
+        } else if (!fit && (plan.deploymentStatus === "active" || plan.deploymentStatus === "deployed")) {
+          await storage.updateStrategyPlan(plan.id, {
+            deploymentStatus: "paused",
+            autoPauseReason: reason,
+            autoPausedAt: nowStr,
+            updatedAt: nowStr,
+          }).catch(err => console.warn(`${FLOG} Failed to pause plan ${plan.id}: ${err}`));
+          console.log(`${FLOG} Paused plan "${plan.name}" (rank ${plan.rank ?? "-"}, ${reason})`);
+          paused++;
+        }
+      }
+
+      console.log(`${FLOG} UCC ${ucc}: ${sorted.length} plans checked, capital=₹${availableCapital ?? "?"}`);
+    }
+
+    console.log(`${FLOG} Done — fit=${totalFit}, notFit=${totalNotFit}, activated=${activated}, paused=${paused}`);
+  } catch (err: any) {
+    console.error(`${FLOG} Outer error: ${err.message}`);
   }
 }

@@ -540,6 +540,8 @@ function GeneralTradingSettings() {
   const [orderDelayMs, setOrderDelayMs] = useState<string>("");
   const [syncClockValue, setSyncClockValue] = useState<string>("09:10");
   const [intradayIntervalValue, setIntradayIntervalValue] = useState<string>("0");
+  const [marginCalcTimeValue, setMarginCalcTimeValue] = useState<string>("09:12");
+  const [fitCheckTimeValue, setFitCheckTimeValue] = useState<string>("09:15");
   const { toast } = useToast();
 
   const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
@@ -572,6 +574,14 @@ function GeneralTradingSettings() {
 
   const { data: intradayIntervalSetting, isLoading: intradayIntervalLoading } = useQuery<{ key: string; value: string | null }>({
     queryKey: ["/api/settings/scrip_master_intraday_interval_mins"],
+  });
+
+  const { data: marginCalcTimeSetting, isLoading: marginCalcTimeLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/margin_calc_time"],
+  });
+
+  const { data: fitCheckTimeSetting, isLoading: fitCheckTimeLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/fit_check_time"],
   });
 
   useEffect(() => {
@@ -635,6 +645,22 @@ function GeneralTradingSettings() {
       setIntradayIntervalValue("0");
     }
   }, [intradayIntervalSetting, intradayIntervalLoading]);
+
+  useEffect(() => {
+    if (marginCalcTimeSetting?.value) {
+      setMarginCalcTimeValue(marginCalcTimeSetting.value);
+    } else if (!marginCalcTimeLoading) {
+      setMarginCalcTimeValue("09:12");
+    }
+  }, [marginCalcTimeSetting, marginCalcTimeLoading]);
+
+  useEffect(() => {
+    if (fitCheckTimeSetting?.value) {
+      setFitCheckTimeValue(fitCheckTimeSetting.value);
+    } else if (!fitCheckTimeLoading) {
+      setFitCheckTimeValue("09:15");
+    }
+  }, [fitCheckTimeSetting, fitCheckTimeLoading]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -762,6 +788,36 @@ function GeneralTradingSettings() {
     },
   });
 
+  const saveMarginCalcTimeMutation = useMutation({
+    mutationFn: async () => {
+      if (!marginCalcTimeValue) throw new Error("Enter a valid time");
+      const res = await apiRequest("POST", "/api/settings/margin_calc_time", { value: marginCalcTimeValue });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/margin_calc_time"] });
+      toast({ title: "Saved", description: `Margin calculation time set to ${marginCalcTimeValue} IST. Takes effect on next server restart.` });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const saveFitCheckTimeMutation = useMutation({
+    mutationFn: async () => {
+      if (!fitCheckTimeValue) throw new Error("Enter a valid time");
+      const res = await apiRequest("POST", "/api/settings/fit_check_time", { value: fitCheckTimeValue });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/fit_check_time"] });
+      toast({ title: "Saved", description: `Daily fit check time set to ${fitCheckTimeValue} IST. Takes effect on next server restart.` });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   return (
     <Card data-testid="card-general-trading-settings">
       <CardHeader>
@@ -774,7 +830,7 @@ function GeneralTradingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isLoading || shortfallLoading || rollbackLoading || maxCloseRetryLoading || bufferLoading || orderDelayLoading || syncClockLoading || intradayIntervalLoading ? (
+        {isLoading || shortfallLoading || rollbackLoading || maxCloseRetryLoading || bufferLoading || orderDelayLoading || syncClockLoading || intradayIntervalLoading || marginCalcTimeLoading || fitCheckTimeLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
           <>
@@ -1022,6 +1078,62 @@ function GeneralTradingSettings() {
                 disabled={saveIntradayIntervalMutation.isPending}
               >
                 {saveIntradayIntervalMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="input-margin-calc-time">
+                Margin Calculation Time (IST)
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Time each morning when the Distance-SPAN margin engine runs for all connected brokers. Must be after the daily scrip master sync and before the fit check. Default: 09:12.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <input
+                  id="input-margin-calc-time"
+                  data-testid="input-margin-calc-time"
+                  type="time"
+                  value={marginCalcTimeValue}
+                  onChange={(e) => setMarginCalcTimeValue(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">Takes effect on next server restart. Suggested: 09:12 IST (2 min after scrip sync).</p>
+              <Button
+                data-testid="button-save-margin-calc-time"
+                onClick={() => saveMarginCalcTimeMutation.mutate()}
+                disabled={saveMarginCalcTimeMutation.isPending}
+              >
+                {saveMarginCalcTimeMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="input-fit-check-time">
+                Daily Strategy Fit Check Time (IST)
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Time each morning when the platform checks whether each strategy plan fits within the available capital for its broker. Plans with Auto-Resume enabled are automatically activated (if capital is sufficient) or paused (if not). An audit row is written for every plan regardless. Default: 09:15.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <input
+                  id="input-fit-check-time"
+                  data-testid="input-fit-check-time"
+                  type="time"
+                  value={fitCheckTimeValue}
+                  onChange={(e) => setFitCheckTimeValue(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">Takes effect on next server restart. Must be after margin calc time. Suggested: 09:15 IST.</p>
+              <Button
+                data-testid="button-save-fit-check-time"
+                onClick={() => saveFitCheckTimeMutation.mutate()}
+                disabled={saveFitCheckTimeMutation.isPending}
+              >
+                {saveFitCheckTimeMutation.isPending ? "Saving..." : "Save"}
               </Button>
             </div>
 
