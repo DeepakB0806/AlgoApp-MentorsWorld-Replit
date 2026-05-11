@@ -95,3 +95,21 @@ if (symbol && ltp !== undefined) {
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+
+### [MILESTONE] Agent skills restored and milestone-logging established — verified 2026-05-11
+
+**Task:** Skills setup — pre-build-checklist, sop-bop, milestone-logging
+
+**What changed:** Three agent skills created in `.agents/skills/` making them active for all future tasks. Two were recovered from `.migration-backup/` (had never been active in the monorepo). One is new.
+
+**Key files:**
+- `.agents/skills/pre-build-checklist/SKILL.md` — mandatory architectural gate before any code is written; file paths updated from old structure to current monorepo (`lib/db/src/schema/schema.ts`, `artifacts/api-server/src/`)
+- `.agents/skills/sop-bop/SKILL.md` — 8-step broker onboarding process; paths updated to monorepo structure
+- `.agents/skills/milestone-logging/SKILL.md` — new skill; instructs agent to append a `### [MILESTONE]` block to `replit.md` before every `mark_task_complete`
+
+**How it works:** Skills in `.agents/skills/` are read automatically when their description matches the current task context. `milestone-logging` description says "before marking any task complete" — this is the trigger that makes it run on every task, same pattern as `follow-up-tasks`.
+
+**Diagnostic — if skills stop being followed:**
+1. Confirm files exist at `.agents/skills/*/SKILL.md` (not in `.migration-backup/`)
+2. Check skill `description` frontmatter — that's the discovery trigger
+3. `pre-build-checklist` must be referenced before any code is written; `milestone-logging` before `mark_task_complete`
