@@ -113,3 +113,25 @@ if (symbol && ltp !== undefined) {
 1. Confirm files exist at `.agents/skills/*/SKILL.md` (not in `.migration-backup/`)
 2. Check skill `description` frontmatter — that's the discovery trigger
 3. `pre-build-checklist` must be referenced before any code is written; `milestone-logging` before `mark_task_complete`
+
+### [MILESTONE] HSM full binary protocol — subscriptions, heartbeat, DATA_TYPE decode — verified 2026-05-11
+
+**Task:** #245 — Fix HSM binary protocol so live market data ticks flow
+
+**What changed:** Replaced all remaining JSON wire frames with the correct binary protocol derived from `hslib.js`. Subscriptions now send binary SUBSCRIBE_TYPE=4 frames with `sf|nse_fo|{token}` encoding. Heartbeat sends binary THROTTLING_TYPE=2 frames (11 bytes). Incoming DATA_TYPE=6 frames are decoded (SNAP establishes topicId→symbol, UPDATE extracts float32 LTP) and fed to all downstream consumers.
+
+**Key files:**
+- `artifacts/api-server/src/hsm-kotak-neo-v3.ts` — added `buildHsmSubscribeBinary`, `buildHsmHeartbeatBinary`, `buildHsmAckBinary`, `emitTick`; updated `resubscribeAll`, `subscribe`, `startHsmHeartbeat`; added DATA_TYPE=6 decode block in message handler; added `topicList` and `lastTickLogAt` at module scope
+
+**How it works:**
+- **Subscribe**: `buildHsmSubscribeBinary(tokens[])` → `[uint16BE payloadLen][4=SUBSCRIBE_TYPE][2=fieldCount][1=fid:scrips][uint16BE scripByteArrayLen][[uint16BE count][for each: byte len + "sf|nse_fo|{token}"]][2=fid:channel][uint16BE 1][byte 1]`
+- **Heartbeat**: `buildHsmHeartbeatBinary()` → 11 bytes: `[uint16BE 9][2=THROTTLING][1][1][uint16BE 4][uint32BE 0]`
+- **DATA_TYPE decode**: `buf[2]===6` → read ackNum, send ACK if needed, loop sub-packets: SNAP(83) extracts token from topic name "sf|nse_fo|{token}", reads float32 LTP at long-field index 5, stores topicId→symbol in `topicList`; UPDATE(85) reads topicId from `topicList` for O(1) symbol lookup, reads float32 LTP at index 5, calls `emitTick`
+- **emitTick**: calls `marketData.updatePrice` + `processTick` + `updateLastWsTick`, throttle-logs at most once per 10s per symbol
+
+**Diagnostic — if ticks stop flowing after this build:**
+1. `[HSM] auth_ok received` must appear in logs — if not, auth broke (check Task #244 path)
+2. `[HSM] Resubscribed N symbol(s) via binary frame` must appear after connect when open trades exist
+3. First SNAP tick will log `[HSM] Tick {symbol} ltp={price}` — if missing, check `brokerSymbolToTokenMap` has the token (scrip master may not have loaded)
+4. If SNAP arrives but UPDATE ticks silent: `topicList` may be empty — check SNAP parsing didn't throw (add try/catch log temporarily)
+5. Frame byte layout verified against `ByteData` constructor + `prepareSubsUnSubsRequest` + `getScripByteArray` in `artifacts/api-server/public/kotak-test/hslib.js`

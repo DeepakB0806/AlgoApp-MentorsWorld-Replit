@@ -20,6 +20,10 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
 const HSM_URL = "wss://mlhsm.kotaksecurities.com";
 
 const subscriptions = new Map<string, true>();
+// topicId → symbol mapping established from SNAP frames; used for O(1) UPDATE decode
+const topicList = new Map<number, { symbol: string }>();
+// Throttle tick log noise: last-logged timestamp per symbol
+const lastTickLogAt = new Map<string, number>();
 let ws: WebSocket | null = null;
 let reconnectDelay = 1_000;
 let activeConfig: BrokerConfig | null = null;
@@ -148,21 +152,101 @@ export function buildHsmAuthBinary(jwt: string, sid: string): Buffer {
   return buf;
 }
 
-function buildSubscribeMessage(exchange: string, token: string): object {
-  return { type: "sub", scrips: `${exchange}|${token}` };
+// ── Binary frame builders (Task #245) ────────────────────────────────────────
+//
+// Binary subscription frame (mirrors hslib.js prepareSubsUnSubsRequest + getScripByteArray)
+// Layout:
+//   [0..1]  uint16BE  payload length (= total − 2)
+//   [2]     byte      SUBSCRIBE_TYPE = 4
+//   [3]     byte      2  (field count: scrips + channel)
+//   [4]     byte      1  (field ID: scrips)
+//   [5..6]  uint16BE  scripByteArray length
+//   [7..N]  bytes     scripByteArray:
+//                       [0..1] uint16BE scripsCount
+//                       for each "sf|nse_fo|{token}": [byte len][UTF-8 bytes]
+//   [N+1]   byte      2  (field ID: channel)
+//   [N+2..N+3] uint16BE  1
+//   [N+4]   byte      1  (channelnum)
+function buildHsmSubscribeBinary(tokens: string[]): Buffer {
+  const scripStrings = tokens.map(tok => `sf|nse_fo|${tok}`);
+  const scripDataLen = scripStrings.reduce((s, str) => s + 1 + Buffer.byteLength(str, "utf8"), 0);
+  const scripByteArrayLen = 2 + scripDataLen; // 2 = uint16BE scripsCount
+  // 2 header + 1 type + 1 fcount + 1 fid1 + 2 scripLen + scripByteArrayLen + 1 fid2 + 2 chanLen + 1 chanNum
+  const totalLength = 2 + 1 + 1 + 1 + 2 + scripByteArrayLen + 1 + 2 + 1;
+  const buf = Buffer.alloc(totalLength);
+  let off = 0;
+  buf.writeUInt16BE(totalLength - 2, off); off += 2;
+  buf.writeUInt8(4, off++);                             // SUBSCRIBE_TYPE
+  buf.writeUInt8(2, off++);                             // field count
+  buf.writeUInt8(1, off++);                             // field ID: scrips
+  buf.writeUInt16BE(scripByteArrayLen, off); off += 2;
+  buf.writeUInt16BE(tokens.length, off); off += 2;      // scripsCount
+  for (const s of scripStrings) {
+    const sLen = Buffer.byteLength(s, "utf8");
+    buf.writeUInt8(sLen, off++);
+    buf.write(s, off, sLen, "utf8"); off += sLen;
+  }
+  buf.writeUInt8(2, off++);                             // field ID: channel
+  buf.writeUInt16BE(1, off); off += 2;
+  buf.writeUInt8(1, off++);                             // channelnum = 1
+  return buf;
 }
+
+// Binary heartbeat frame (mirrors hslib.js prepareThrottlingIntervalRequest(0))
+// [0..1] uint16BE 9 | [2] THROTTLING_TYPE=2 | [3] 1 | [4] 1 | [5..6] uint16BE 4 | [7..10] uint32BE 0
+function buildHsmHeartbeatBinary(): Buffer {
+  const buf = Buffer.alloc(11);
+  let off = 0;
+  buf.writeUInt16BE(9, off); off += 2;   // payload length = 11 − 2
+  buf.writeUInt8(2, off++);              // THROTTLING_TYPE
+  buf.writeUInt8(1, off++);             // field count
+  buf.writeUInt8(1, off++);             // field ID
+  buf.writeUInt16BE(4, off); off += 2;  // value length
+  buf.writeUInt32BE(0, off);            // interval value = 0
+  return buf;
+}
+
+// Binary ACK frame (mirrors hslib.js getAcknowledgementReq(msgNum))
+// [0..1] uint16BE 9 | [2] ACK_TYPE=3 | [3] 1 | [4] 1 | [5..6] uint16BE 4 | [7..10] uint32BE msgNum
+function buildHsmAckBinary(msgNum: number): Buffer {
+  const buf = Buffer.alloc(11);
+  let off = 0;
+  buf.writeUInt16BE(9, off); off += 2;
+  buf.writeUInt8(3, off++);              // ACK_TYPE
+  buf.writeUInt8(1, off++);
+  buf.writeUInt8(1, off++);
+  buf.writeUInt16BE(4, off); off += 2;
+  buf.writeUInt32BE(msgNum, off);
+  return buf;
+}
+
+// Emit an LTP tick to all downstream consumers and throttle-log it
+function emitTick(symbol: string, ltp: number): void {
+  marketData.updatePrice(symbol, ltp);
+  processTick(symbol, ltp);
+  updateLastWsTick();
+  const now = Date.now();
+  if (now - (lastTickLogAt.get(symbol) ?? 0) > 10_000) {
+    console.log(`${LOG_PREFIX} Tick ${symbol} ltp=${ltp.toFixed(2)}`);
+    lastTickLogAt.set(symbol, now);
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 function resubscribeAll(): void {
   if (!ws || ws.readyState !== WebSocket.OPEN || !activeConfig) return;
+  const tokens: string[] = [];
   subscriptions.forEach((_, symbol) => {
     const token = brokerSymbolToTokenMap.get(symbol);
-    if (!token) return;
-    try {
-      ws!.send(JSON.stringify(buildSubscribeMessage("nfo", token)));
-    } catch (err) {
-      console.error(`${LOG_PREFIX} resubscribeAll send error for ${symbol}:`, err);
-    }
+    if (token) tokens.push(token);
   });
+  if (tokens.length === 0) return;
+  try {
+    ws!.send(buildHsmSubscribeBinary(tokens));
+    console.log(`${LOG_PREFIX} Resubscribed ${tokens.length} symbol(s) via binary frame`);
+  } catch (err) {
+    console.error(`${LOG_PREFIX} resubscribeAll send error:`, err);
+  }
 }
 
 // 🔒 LOCKED BLOCK START — HSM connect: relay→direct auto-fallback (relayFailed=true on failure) must not be removed; subscriptions.forEach() only, not Array.from() [HSM-1, HSM-2]
@@ -203,6 +287,7 @@ function connect(config: BrokerConfig): void {
     opened = true;
     hsmAuthOkInSession = false; // HSM-1 Build #164: reset per-session auth flag
     hsmFirstMessageLogged = false;
+    topicList.clear(); // Task #245: reset topic→symbol map on every reconnect
     console.log(`${LOG_PREFIX} Connected to Kotak HSM`);
     reconnectDelay = 1_000;
     try {
@@ -243,6 +328,84 @@ function connect(config: BrokerConfig): void {
           }
         }
       }
+      // ── Task #245: Binary DATA_TYPE=6 market data decode ─────────────────
+      // Mirrors hslib.js HSWrapper.parseData DATA_TYPE branch.
+      // SNAP (83) establishes topicId→symbol; UPDATE (85) emits ticks via topicList.
+      if (buf.length > 4 && buf[2] === 6 /* DATA_TYPE */) {
+        try {
+          const ackNum = buf[3];
+          let pos = 4;
+          // ACK required when ackNum > 0 (protocol compliance; server stops sending if missed)
+          if (ackNum > 0 && pos + 4 <= buf.length) {
+            const msgNum = buf.readUInt32BE(pos); pos += 4;
+            try { ws!.send(buildHsmAckBinary(msgNum)); } catch {}
+          }
+          if (pos + 2 > buf.length) return;
+          const subPacketCount = buf.readUInt16BE(pos); pos += 2;
+          for (let n = 0; n < subPacketCount; n++) {
+            pos += 2; // skip 2 padding bytes per hslib.js parseData loop
+            if (pos >= buf.length) break;
+            const responseType = buf[pos++];
+            if (responseType === 83 /* SNAP */) {
+              if (pos + 5 > buf.length) break;
+              const topicId = buf.readUInt32BE(pos); pos += 4;
+              const nameLen = buf[pos++];
+              if (pos + nameLen > buf.length) break;
+              const topicName = buf.toString("utf8", pos, pos + nameLen); pos += nameLen;
+              // topicName = "sf|nse_fo|12345" → token at index 2
+              const parts = topicName.split("|");
+              const token = parts.length >= 3 ? parts[2] : undefined;
+              let symbol: string | undefined;
+              if (token) {
+                brokerSymbolToTokenMap.forEach((tok, sym) => {
+                  if (!symbol && tok === token) symbol = sym;
+                });
+              }
+              // Numeric long values: LTP at sequential index 5 (SCRIP_INDEX.LTP), IEEE 754 float32 BE
+              if (pos >= buf.length) break;
+              const fcount = buf[pos++];
+              const ltpStart = pos;
+              pos += fcount * 4;
+              let ltp: number | undefined;
+              if (fcount > 5 && ltpStart + 6 * 4 <= buf.length) {
+                ltp = buf.readFloatBE(ltpStart + 5 * 4);
+              }
+              // Skip string fields
+              if (pos < buf.length) {
+                const scount = buf[pos++];
+                for (let i = 0; i < scount && pos + 1 < buf.length; i++) {
+                  pos++; // fid
+                  if (pos >= buf.length) break;
+                  const dLen = buf[pos++];
+                  pos += dLen;
+                }
+              }
+              if (symbol) {
+                topicList.set(topicId, { symbol });
+                if (ltp !== undefined && isFinite(ltp) && ltp > 0) emitTick(symbol, ltp);
+              }
+            } else if (responseType === 85 /* UPDATE */) {
+              if (pos + 5 > buf.length) break;
+              const topicId = buf.readUInt32BE(pos); pos += 4;
+              const fcount = buf[pos++];
+              const ltpStart = pos;
+              pos += fcount * 4;
+              const entry = topicList.get(topicId);
+              if (entry && fcount > 5 && ltpStart + 6 * 4 <= buf.length) {
+                const ltp = buf.readFloatBE(ltpStart + 5 * 4);
+                if (isFinite(ltp) && ltp > 0) emitTick(entry.symbol, ltp);
+              }
+            } else {
+              break; // unknown response type — stop parsing this frame
+            }
+          }
+        } catch {
+          // malformed DATA_TYPE frame — ignore and fall through
+        }
+        return; // DATA_TYPE fully handled; skip JSON fallback
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       // JSON parse fallback — kept for any text-framed responses (HSM-1 additive)
       const parsed = JSON.parse(buf.toString());
       // Kotak HSM returns auth response as array: [{"stat":"Ok","type":"cn",...}]
@@ -294,12 +457,13 @@ function scheduleReconnect(config: BrokerConfig): void {
 }
 // 🔒 LOCKED BLOCK END
 
-// 🔒 LOCKED BLOCK START — HSM heartbeat: sends {"type":"ti","scrips":""} every 30 s while WS is OPEN [HSM-4]
+// 🔒 LOCKED BLOCK START — HSM heartbeat: sends binary THROTTLING_TYPE=2 frame every 30 s while WS is OPEN [HSM-4]
+// Task #245: replaced JSON {"type":"ti"} with binary prepareThrottlingIntervalRequest(0) frame (11 bytes)
 function startHsmHeartbeat(): void {
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   heartbeatInterval = setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(JSON.stringify({ type: "ti", scrips: "" })); } catch {}
+      try { ws.send(buildHsmHeartbeatBinary()); } catch {}
     }
   }, 30_000);
 }
@@ -337,7 +501,7 @@ export function subscribe(symbol: string): void {
   const token = brokerSymbolToTokenMap.get(symbol);
   if (token && ws && ws.readyState === WebSocket.OPEN) {
     try {
-      ws.send(JSON.stringify(buildSubscribeMessage("nfo", token)));
+      ws.send(buildHsmSubscribeBinary([token]));
     } catch (err) {
       console.error(`${LOG_PREFIX} subscribe send error for ${symbol}:`, err);
     }

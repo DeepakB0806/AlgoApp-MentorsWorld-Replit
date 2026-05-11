@@ -1,0 +1,114 @@
+Step 1: Replace Subscription Builder
+Find function buildSubscribeMessage(exchange: string, token: string) and replace it entirely with this binary builder:
+
+TypeScript
+function buildHsmSubscriptionBinary(exchange: string, token: string): Buffer {
+  // Kotak requires "nse_fo" for NFO tokens in HSM subscriptions
+  const targetExchange = exchange.toLowerCase() === "nfo" ? "nse_fo" : exchange.toLowerCase();
+  const scripStr = `${targetExchange}|${token}`;
+  const scripLen = Buffer.byteLength(scripStr, 'utf8');
+
+  // Total size: start(1) + type(1) + count(1) + [len(2)+scrip] + end(1)
+  const totalLength = 1 + 1 + 1 + 2 + scripLen + 1;
+  const buf = Buffer.alloc(totalLength);
+  
+  let offset = 0;
+  buf.writeUInt8(10, offset++); // Start (0x0A)
+  buf.writeUInt8(4, offset++);  // ReqTypeValues.SCRIP_SUBS (4)
+  buf.writeUInt8(1, offset++);  // Field count (1)
+  
+  buf.writeUInt16BE(scripLen, offset); offset += 2;
+  buf.write(scripStr, offset, scripLen, 'utf8'); offset += scripLen;
+  
+  buf.writeUInt8(13, offset++); // End (0x0D)
+  return buf;
+}
+Step 2: Update subscribe() and resubscribeAll()
+Locate the subscribe function at the bottom of the file. Update the ws.send call:
+
+TypeScript
+export function subscribe(symbol: string): void {
+  subscriptions.set(symbol, true);
+  const token = brokerSymbolToTokenMap.get(symbol);
+  if (token && ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      // TASK #245: Binary subscription frame
+      const isOption = symbol.length > 10; // Simple heuristic for NFO vs NSE
+      const exchange = isOption ? "nfo" : "nse_cm"; 
+      ws.send(buildHsmSubscriptionBinary(exchange, token));
+    } catch (err) {
+      console.error(`${LOG_PREFIX} subscribe send error for ${symbol}:`, err);
+    }
+  }
+}
+(Also ensure any ws.send inside resubscribeAll() uses this new logic instead of JSON).
+
+Step 3: Replace JSON Heartbeat
+Find function startHsmHeartbeat(). Replace the JSON ws.send with the binary throttling ping (ReqType = 2):
+
+TypeScript
+// 🔒 LOCKED BLOCK START — startHsmHeartbeat: 30 s ti heartbeat [HSM-4]
+function startHsmHeartbeat(): void {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  heartbeatInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        // TASK #245: Binary Heartbeat (THROTTLING_TYPE = 2)
+        const buf = Buffer.alloc(4);
+        buf.writeUInt8(10, 0); // Start
+        buf.writeUInt8(2, 1);  // THROTTLING_TYPE
+        buf.writeUInt8(0, 2);  // 0 fields
+        buf.writeUInt8(13, 3); // End
+        ws.send(buf);
+      } catch {}
+    }
+  }, 30_000);
+}
+// 🔒 LOCKED BLOCK END
+Step 4: Decode Binary Market Data
+Inside the connect function, locate ws.on("message", (raw: WebSocket.RawData) => {. We need to handle Buffer decoding BEFORE the try { JSON.parse() } fallback. Add this logic at the top of the message handler:
+
+TypeScript
+  const lastTickLogAt = new Map<string, number>(); // Add this outside the message handler
+
+  ws.on("message", (raw: WebSocket.RawData) => {
+    if (Buffer.isBuffer(raw)) {
+      // Check if this is a binary market data frame (DATA_TYPE = 6)
+      if (raw.length > 2 && raw[1] === 6) {
+        try {
+          // Kotak binary format: [10][6][fields][len][data][len][data]...[13]
+          // The actual JSON market data string is usually the first field payload.
+          // Skip start (1), type (1), fields (1). Read length at offset 3.
+          const jsonLen = raw.readUInt16BE(3);
+          const jsonStr = raw.toString('utf8', 5, 5 + jsonLen);
+          const data = JSON.parse(jsonStr);
+
+          // Map token to symbol
+          const tokenStr = String(data.tk);
+          let symbol = "";
+          brokerSymbolToTokenMap.forEach((tok, sym) => {
+            if (tok === tokenStr) symbol = sym;
+          });
+
+          if (symbol && data.ltp) {
+            const ltp = Number(data.ltp);
+            marketData.updatePrice(symbol, ltp);
+            
+            // Throttle logging to every 10 seconds per symbol
+            const now = Date.now();
+            if (now - (lastTickLogAt.get(symbol) || 0) > 10000) {
+              console.log(`${LOG_PREFIX} Tick ${symbol} ltp=${ltp}`);
+              lastTickLogAt.set(symbol, now);
+            }
+          }
+          return; // Successfully handled binary tick, skip JSON fallback
+        } catch (err) {
+          // Fall through to JSON parser if binary extraction fails
+        }
+      }
+    }
+
+    try {
+      // Existing JSON fallback logic remains here...
+      const parsed = JSON.parse(raw.toString());
+      // ...
