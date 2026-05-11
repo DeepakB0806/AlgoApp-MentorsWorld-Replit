@@ -701,7 +701,7 @@ async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
     await storage.setSetting("margin_calc_last_run", istDateStr()).catch(() => null);
     console.log(`[MARGIN-SCHED] Margins verified via marginCalculatedAt — guard persisted for today`);
   } else {
-    console.log(`[MARGIN-SCHED] No plans updated today — guard not persisted (no primary broker or no active plans); will retry at ${timeStr} IST tomorrow`);
+    console.log(`[MARGIN-SCHED] No plans updated today (no primary broker or no active plans) — scheduling tomorrow`);
   }
 
   // Chain: trigger fit check 3 min after margin calc if it hasn't run today
@@ -717,8 +717,17 @@ async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
     await storage.setSetting("fit_check_last_run", istDateStr()).catch(() => null);
   }, FIT_CHAIN_DELAY_MS);
 
-  // Reschedule for next day, re-reading settings fresh
-  await scheduleMarginCalc(storage);
+  // Always schedule for TOMORROW directly — never re-call scheduleMarginCalc() here.
+  // Re-calling scheduleMarginCalc() would re-evaluate the past-time guard and could
+  // trigger another setImmediate if plans weren't updated, causing an infinite loop.
+  const [hh, mm] = timeStr.split(":").map(Number);
+  const tomorrowTarget = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  tomorrowTarget.setUTCHours(hh - 5, mm - 30, 0, 0);
+  tomorrowTarget.setUTCDate(tomorrowTarget.getUTCDate() + 1);
+  const msUntilTomorrow = tomorrowTarget.getTime() - Date.now();
+  if (marginCalcTimeoutHandle !== null) clearTimeout(marginCalcTimeoutHandle);
+  marginCalcTimeoutHandle = setTimeout(() => runAndRescheduleMarginCalc(storage), msUntilTomorrow);
+  console.log(`[MARGIN-SCHED] Next margin calc at ${timeStr} IST tomorrow (in ${Math.round(msUntilTomorrow / 60000)} min)`);
 }
 
 export async function scheduleMarginCalc(storage: IStorage): Promise<void> {
