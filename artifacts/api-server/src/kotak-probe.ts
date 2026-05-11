@@ -156,7 +156,21 @@ export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Pro
 
     ws.on("message", (raw: WebSocket.RawData) => {
       try {
-        const parsed = JSON.parse(raw.toString());
+        const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer);
+        // HSM responds in binary. Detect CONNECTION_TYPE auth-ack per hslib.js HSWrapper.parseData:
+        //   [0..1] packetsCount  [2] type=1(CONNECTION_TYPE)  [3] fCount
+        //   [4] fid1  [5..6] valLen(uint16BE)  [7..7+valLen-1] status
+        //   BinRespStat.OK="K" (0x4B), BinRespStat.NOT_OK="N"
+        if (target === "hsm" && buf.length >= 8 && buf[2] === 1 /* CONNECTION_TYPE */) {
+          const valLen = buf.readUInt16BE(5);
+          if (valLen >= 1 && 7 + valLen <= buf.length) {
+            const status = buf.toString("utf8", 7, 7 + valLen);
+            if (status === "K") { settle("auth_ok"); return; }
+            if (status === "N") { settle("auth_failed"); return; }
+          }
+        }
+        // JSON fallback — HSI uses text frames; HSM may also use JSON in edge cases
+        const parsed = JSON.parse(buf.toString());
         // HSM returns an array: [{"stat":"Ok","type":"cn","msg":"successful","stCode":200}]
         // HSI returns a plain object: {"ak":"ok","type":"cn","task":"cn","msg":"connected"}
         const msg = Array.isArray(parsed) ? parsed[0] : parsed;
