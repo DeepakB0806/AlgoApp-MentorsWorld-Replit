@@ -31,16 +31,6 @@ function resolveHsiEndpoint(config: BrokerConfig): string {
 
 const HSM_DIRECT_URL = "wss://mlhsm.kotaksecurities.com";
 
-function buildHsmAuthMessage(config: BrokerConfig): string {
-  return JSON.stringify({
-    type: "cn",
-    Authorization: config.viewToken ?? config.accessToken,
-    Sid: config.sidView ?? config.sessionId,
-    source: "WEB",
-    ...(config.dataCenter ? { dataCenter: config.dataCenter } : {}),
-  });
-}
-
 function buildHsiAuthMessage(config: BrokerConfig): string {
   return JSON.stringify({
     type: "cn",
