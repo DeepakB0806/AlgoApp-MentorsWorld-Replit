@@ -136,8 +136,8 @@ function resubscribeAll(): void {
 // 🔒 LOCKED BLOCK START — HSM connect: relay→direct auto-fallback (relayFailed=true on failure) must not be removed; subscriptions.forEach() only, not Array.from() [HSM-1, HSM-2]
 // HSM-1 amended by Build #164 (2026-05-02): hsmAuthOkInSession reset on open, set on cn:ok; hsmConsecutiveFailures incremented on close-without-auth; probe auto-triggered at threshold — additive only.
 function connect(config: BrokerConfig): void {
-  if (!config.accessToken || !config.sessionId) {
-    console.error(`${LOG_PREFIX} No accessToken/sessionId — skipping WS connection`);
+  if (!(config.viewToken || config.accessToken) || !(config.sidView || config.sessionId)) {
+    console.error(`${LOG_PREFIX} No auth credentials (viewToken/sidView or accessToken/sessionId) — skipping WS connection`);
     return;
   }
 
