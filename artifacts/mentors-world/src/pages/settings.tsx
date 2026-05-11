@@ -1086,7 +1086,7 @@ function GeneralTradingSettings() {
                 Margin Calculation Time (IST)
               </Label>
               <p className="text-sm text-muted-foreground">
-                Time each morning when the Distance-SPAN margin engine runs for all connected brokers. Must be after the daily scrip master sync and before the fit check. Default: 09:12.
+                Time each morning when the Distance-SPAN margin engine runs via the primary Kotak Neo broker. Must be after the daily scrip master sync (09:10) and before the fit check. Default: 09:12.
               </p>
               <div className="flex items-center gap-3 max-w-xs">
                 <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
