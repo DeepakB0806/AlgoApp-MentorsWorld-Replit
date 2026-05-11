@@ -638,28 +638,22 @@ function istDateStr(): string {
   return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-// Returns true if at least one primary broker was found and processed (even if calc skipped internally).
-// Guard is only persisted when a primary broker exists — prevents false "already ran" when no primary.
-async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): Promise<boolean> {
+async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): Promise<void> {
   try {
     const allConfigs = await storage.getBrokerConfigs();
     const liveBrokers = allConfigs.filter(bc => bc.isConnected && bc.brokerName === "kotak_neo");
     if (liveBrokers.length === 0) {
       console.log(`[MARGIN-SCHED] ${timeStr} IST — no connected Kotak brokers, skipping`);
-      return false;
+      return;
     }
-    let primaryFound = false;
     for (const bc of liveBrokers) {
-      if (bc.isPrimary) primaryFound = true;
       console.log(`[MARGIN-SCHED] ${timeStr} IST — running calculatePlanMargins for ${bc.ucc || bc.id}`);
       await calculatePlanMargins(storage, bc).catch(err =>
         console.warn(`[MARGIN-SCHED] calculatePlanMargins error for ${bc.ucc}: ${err}`)
       );
     }
-    return primaryFound;
   } catch (err) {
     console.error(`[MARGIN-SCHED] Daily margin calc error: ${err}`);
-    return false;
   }
 }
 
@@ -667,12 +661,11 @@ async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
   const setting = await storage.getSetting("margin_calc_time").catch(() => null);
   const timeStr = setting?.value || "09:12";
 
-  const primaryFound = await runMarginCalcForAllBrokers(storage, timeStr);
+  await runMarginCalcForAllBrokers(storage, timeStr);
 
-  // Persist "ran today" — only when a primary broker was actually processed (restart-safe guard)
-  if (primaryFound) {
-    await storage.setSetting("margin_calc_last_run", istDateStr()).catch(() => null);
-  }
+  // Always persist the guard after any attempt — prevents infinite rerun loops on restarts
+  // when no connected/primary broker is available. Tomorrow's run will retry.
+  await storage.setSetting("margin_calc_last_run", istDateStr()).catch(() => null);
 
   // Chain: trigger fit check 3 min after margin calc if it hasn't run today
   const FIT_CHAIN_DELAY_MS = 3 * 60 * 1000;
@@ -736,6 +729,13 @@ export async function scheduleMarginCalc(storage: IStorage): Promise<void> {
 let fitCheckTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
 async function runAndRescheduleFitCheck(storage: IStorage): Promise<void> {
+  // Pre-run guard: prevent double-fire when both chain timer and scheduled timer fire on the same day
+  const lastRun = await storage.getSetting("fit_check_last_run").catch(() => null);
+  if (lastRun?.value === istDateStr()) {
+    console.log(`[FIT-CHECK] Already ran today — skipping duplicate fire`);
+    await scheduleFitCheck(storage);
+    return;
+  }
   try { await runDailyFitCheck(storage); } catch (err) { console.error(`[FIT-CHECK] Error: ${err}`); }
   await storage.setSetting("fit_check_last_run", istDateStr()).catch(() => null);
   await scheduleFitCheck(storage);
