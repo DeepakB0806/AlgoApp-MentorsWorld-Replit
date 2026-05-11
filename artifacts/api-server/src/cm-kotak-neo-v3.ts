@@ -629,7 +629,8 @@ export async function calculatePlanMargins(
 // Fires at `margin_calc_time` IST (default 09:12) once per day.
 // Guard (source of truth): marginCalculatedAt on active/deployed plans for primary broker.
 // Fast cache: "margin_calc_last_run" settings key (YYYY-MM-DD IST) — set only after verified calc.
-// Chains fit check 3 min after completion; fit check has its own guard.
+// After calc: chains fit check 30s later ONLY as catch-up (when fit_check_time already past today).
+// Primary fit-check trigger is always the scheduleFitCheck() daily timer at fit_check_time.
 // Config: calling scheduleMarginCalc() re-reads setting and reschedules immediately.
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -704,18 +705,34 @@ async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
     console.log(`[MARGIN-SCHED] No plans updated today (no primary broker or no active plans) — scheduling tomorrow`);
   }
 
-  // Chain: trigger fit check 30s after margin calc if it hasn't run today
-  const FIT_CHAIN_DELAY_MS = 30 * 1000;
-  console.log(`[MARGIN-SCHED] Margin calc done — fit check will chain in 30s`);
+  // Chain: 30s after margin calc, check if fit_check_time has already passed today AND
+  // fit check hasn't run yet. If fit_check_time is still in the future, do nothing —
+  // the daily scheduleFitCheck() timer is the primary trigger and will fire at the right time.
+  // This chain only acts as a catch-up for the case where margin calc ran but the fit-check
+  // scheduler missed or the server started after fit_check_time.
+  console.log(`[MARGIN-SCHED] Margin calc done — will check fit-check chain in 30s`);
   setTimeout(async () => {
     const lastFit = await storage.getSetting("fit_check_last_run").catch(() => null);
     if (lastFit?.value === istDateStr()) {
       console.log(`[MARGIN-SCHED] Fit check already ran today — skipping chain`);
       return;
     }
+    // Only chain if fit_check_time is already past (otherwise the scheduler handles it)
+    const fitSetting = await storage.getSetting("fit_check_time").catch(() => null);
+    const fitTimeStr = fitSetting?.value || "09:15";
+    const [fhh, fmm] = fitTimeStr.split(":").map(Number);
+    const fitTargetIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    fitTargetIST.setUTCHours(fhh - 5, fmm - 30, 0, 0);
+    const msFitUntil = fitTargetIST.getTime() - Date.now();
+    if (msFitUntil > 0) {
+      console.log(`[MARGIN-SCHED] ${fitTimeStr} IST still ${Math.round(msFitUntil / 60000)} min away — scheduleFitCheck() will handle it`);
+      return;
+    }
+    // fit_check_time already past and not yet run today — chain as catch-up
+    console.log(`[MARGIN-SCHED] ${fitTimeStr} IST already passed, fit check not yet run — chaining now (catch-up)`);
     await runDailyFitCheck(storage).catch(err => console.error(`[FIT-CHECK] Chain error: ${err}`));
     await storage.setSetting("fit_check_last_run", istDateStr()).catch(() => null);
-  }, FIT_CHAIN_DELAY_MS);
+  }, 30 * 1000);
 
   // Always schedule for TOMORROW directly — never re-call scheduleMarginCalc() here.
   // Re-calling scheduleMarginCalc() would re-evaluate the past-time guard and could
