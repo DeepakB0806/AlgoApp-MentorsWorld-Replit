@@ -75,6 +75,7 @@ export function getHsiStatus() {
   return {
     connected: isConnected,
     reconnecting: isReconnecting,
+    authOk: hsiAuthOkInSession,
     connectionMode: usingRelay ? "relay" : "direct",
     reconnectAttempts,
     reconnectDelayMs: reconnectDelay,

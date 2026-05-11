@@ -2156,6 +2156,7 @@ interface ConnectionEvent {
 interface HsiStatusData {
   connected: boolean;
   reconnecting: boolean;
+  authOk: boolean;
   connectionMode: "relay" | "direct";
   reconnectAttempts: number;
   reconnectDelayMs: number;
@@ -2169,6 +2170,7 @@ interface HsiStatusData {
 interface HsmStatusData {
   connected: boolean;
   reconnecting: boolean;
+  authOk: boolean;
   connectionMode: "relay" | "direct";
   reconnectAttempts: number;
   reconnectDelayMs: number;
@@ -2221,24 +2223,30 @@ function HsiStatusCard() {
 
   const statusLabel = isLoading
     ? "Checking..."
-    : data?.connected
-    ? "Connected"
+    : data?.connected && data?.authOk
+    ? "Auth OK"
+    : data?.connected && !data?.authOk
+    ? "No Auth"
     : data?.reconnecting
     ? "Reconnecting"
     : "Failed";
 
   const statusColor = isLoading
     ? "bg-muted text-muted-foreground"
-    : data?.connected
+    : data?.connected && data?.authOk
     ? "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30"
+    : data?.connected && !data?.authOk
+    ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30"
     : data?.reconnecting
     ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30"
     : "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30";
 
   const StatusIcon = isLoading
     ? Loader2
-    : data?.connected
-    ? Wifi
+    : data?.connected && data?.authOk
+    ? ShieldCheck
+    : data?.connected && !data?.authOk
+    ? AlertTriangle
     : data?.reconnecting
     ? RefreshCw
     : WifiOff;
@@ -2280,6 +2288,15 @@ function HsiStatusCard() {
               <span className="text-muted-foreground">Connection Mode</span>
               <span className="font-medium capitalize" data-testid="text-hsi-mode">
                 {isLoading ? "—" : data?.connectionMode ?? "—"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">Auth Status</span>
+              <span
+                className={`font-medium text-xs ${isLoading ? "" : data?.authOk ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}
+                data-testid="text-hsi-auth-ok"
+              >
+                {isLoading ? "—" : data?.authOk ? "Confirmed" : "Pending / not confirmed"}
               </span>
             </div>
             <div className="flex items-center justify-between px-4 py-2.5">
@@ -2409,24 +2426,30 @@ function HsmStatusCard() {
 
   const statusLabel = isLoading
     ? "Checking..."
-    : data?.connected
-    ? "Connected"
+    : data?.connected && data?.authOk
+    ? "Auth OK"
+    : data?.connected && !data?.authOk
+    ? "No Auth"
     : data?.reconnecting
     ? "Reconnecting"
     : "Failed";
 
   const statusColor = isLoading
     ? "bg-muted text-muted-foreground"
-    : data?.connected
+    : data?.connected && data?.authOk
     ? "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30"
+    : data?.connected && !data?.authOk
+    ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30"
     : data?.reconnecting
     ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30"
     : "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30";
 
   const StatusIcon = isLoading
     ? Loader2
-    : data?.connected
-    ? Wifi
+    : data?.connected && data?.authOk
+    ? ShieldCheck
+    : data?.connected && !data?.authOk
+    ? AlertTriangle
     : data?.reconnecting
     ? RefreshCw
     : WifiOff;
@@ -2468,6 +2491,15 @@ function HsmStatusCard() {
               <span className="text-muted-foreground">Connection Mode</span>
               <span className="font-medium capitalize" data-testid="text-hsm-mode">
                 {isLoading ? "—" : data?.connectionMode ?? "—"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">Auth Status</span>
+              <span
+                className={`font-medium text-xs ${isLoading ? "" : data?.authOk ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}
+                data-testid="text-hsm-auth-ok"
+              >
+                {isLoading ? "—" : data?.authOk ? "Confirmed" : "Pending / not confirmed"}
               </span>
             </div>
             <div className="flex items-center justify-between px-4 py-2.5">
