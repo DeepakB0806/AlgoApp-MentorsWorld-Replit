@@ -638,22 +638,28 @@ function istDateStr(): string {
   return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): Promise<void> {
+// Returns true if at least one primary broker was found and processed (even if calc skipped internally).
+// Guard is only persisted when a primary broker exists — prevents false "already ran" when no primary.
+async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): Promise<boolean> {
   try {
     const allConfigs = await storage.getBrokerConfigs();
     const liveBrokers = allConfigs.filter(bc => bc.isConnected && bc.brokerName === "kotak_neo");
     if (liveBrokers.length === 0) {
       console.log(`[MARGIN-SCHED] ${timeStr} IST — no connected Kotak brokers, skipping`);
-    } else {
-      for (const bc of liveBrokers) {
-        console.log(`[MARGIN-SCHED] ${timeStr} IST — running calculatePlanMargins for ${bc.ucc || bc.id}`);
-        await calculatePlanMargins(storage, bc).catch(err =>
-          console.warn(`[MARGIN-SCHED] calculatePlanMargins error for ${bc.ucc}: ${err}`)
-        );
-      }
+      return false;
     }
+    let primaryFound = false;
+    for (const bc of liveBrokers) {
+      if (bc.isPrimary) primaryFound = true;
+      console.log(`[MARGIN-SCHED] ${timeStr} IST — running calculatePlanMargins for ${bc.ucc || bc.id}`);
+      await calculatePlanMargins(storage, bc).catch(err =>
+        console.warn(`[MARGIN-SCHED] calculatePlanMargins error for ${bc.ucc}: ${err}`)
+      );
+    }
+    return primaryFound;
   } catch (err) {
     console.error(`[MARGIN-SCHED] Daily margin calc error: ${err}`);
+    return false;
   }
 }
 
@@ -661,10 +667,12 @@ async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
   const setting = await storage.getSetting("margin_calc_time").catch(() => null);
   const timeStr = setting?.value || "09:12";
 
-  await runMarginCalcForAllBrokers(storage, timeStr);
+  const primaryFound = await runMarginCalcForAllBrokers(storage, timeStr);
 
-  // Persist "ran today" — restart-safe guard
-  await storage.setSetting("margin_calc_last_run", istDateStr()).catch(() => null);
+  // Persist "ran today" — only when a primary broker was actually processed (restart-safe guard)
+  if (primaryFound) {
+    await storage.setSetting("margin_calc_last_run", istDateStr()).catch(() => null);
+  }
 
   // Chain: trigger fit check 3 min after margin calc if it hasn't run today
   const FIT_CHAIN_DELAY_MS = 3 * 60 * 1000;
@@ -821,7 +829,9 @@ export async function runDailyFitCheck(storage: IStorage): Promise<void> {
         return (a.rank ?? 0) - (b.rank ?? 0);
       });
 
-      let cumulativeMargin = 0;
+      // Spec algorithm: iterate by rank, decrement remaining ONLY when plan fits.
+      // This ensures an earlier unfit plan (margin > remaining) doesn't penalise later smaller plans.
+      let remaining = availableCapital;
 
       for (const plan of sorted) {
         const effectiveMargin = plan.estimatedMargin !== null && plan.estimatedMargin !== undefined
@@ -834,15 +844,13 @@ export async function runDailyFitCheck(storage: IStorage): Promise<void> {
         if (effectiveMargin === null || effectiveMargin === 0) {
           reason = "Margin not calculated — run margin calc first";
           fit = false;
+        } else if (remaining >= effectiveMargin) {
+          fit = true;
+          remaining -= effectiveMargin; // decrement only when fit
+          reason = `Margin ₹${effectiveMargin.toFixed(2)} fits within remaining ${capitalLabel === "∞ (no snapshot)" ? "∞" : `₹${remaining.toFixed(2)} left of ${capitalLabel}`}`;
         } else {
-          cumulativeMargin += effectiveMargin;
-          if (cumulativeMargin <= availableCapital) {
-            fit = true;
-            reason = `Cumulative margin ₹${cumulativeMargin.toFixed(2)} ≤ available ${capitalLabel}`;
-          } else {
-            fit = false;
-            reason = `Cumulative margin ₹${cumulativeMargin.toFixed(2)} exceeds available ${capitalLabel}`;
-          }
+          fit = false;
+          reason = `Margin ₹${effectiveMargin.toFixed(2)} exceeds remaining ₹${remaining.toFixed(2)} of ${capitalLabel}`;
         }
 
         if (fit) totalFit++; else totalNotFit++;

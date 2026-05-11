@@ -140,25 +140,27 @@ if (symbol && ltp !== undefined) {
 
 **Task:** #247 — Margin Calc Time + Daily Fit Check
 
-**What changed:** Moved `calculatePlanMargins` out of the periodic scrip refresh cycle into a dedicated 09:12 IST daily scheduler. Added a 09:15 IST daily fit check that writes `daily_strategy_fit` audit rows per plan per UCC and activates/pauses plans (autoResume=true plans only). Both times are configurable from the Settings UI. Fixed a startup infinite-loop bug (catch-up fired continuously until `marginCalcFiredToday` guard was added).
+**What changed:** Moved `calculatePlanMargins` out of the periodic scrip refresh cycle into a dedicated 09:12 IST daily scheduler. Added a 09:15 IST daily fit check that writes `daily_strategy_fit` audit rows per plan per UCC and activates/pauses plans (autoResume=true plans only). Both times are configurable from the Settings UI.
 
 **Key files:**
-- `artifacts/api-server/src/cm-kotak-neo-v3.ts` — added `scheduleMarginCalc`, `scheduleFitCheck`, `runDailyFitCheck`, `runMarginCalcForAllBrokers`, `scheduleMarginCalcForTomorrow`, `scheduleFitCheckForTomorrow`; `startCapitalManager` calls both schedulers on startup
+- `artifacts/api-server/src/cm-kotak-neo-v3.ts` — added `scheduleMarginCalc`, `scheduleFitCheck`, `runDailyFitCheck`, `runMarginCalcForAllBrokers`, `runAndRescheduleMarginCalc`, `runAndRescheduleFitCheck`; `startCapitalManager` calls both schedulers on startup
 - `artifacts/api-server/src/scrip-sync-scheduler.ts` — all 6 periodic `calculatePlanMargins` call sites removed (intraday Phase A/B, daily timeout Phase A/B, daily interval Phase A/B); fault-recovery paths kept their calls via dynamic import
-- `lib/db/src/schema/schema.ts` — `dailyStrategyFit` table added (date, planId, planName, ucc, rank, marginRequired, capitalAvailable, fits, reason, action, autoResume)
+- `lib/db/src/schema/schema.ts` — `dailyStrategyFit` table added
 - `artifacts/api-server/src/storage.ts` — `upsertDailyStrategyFit`, `getDailyStrategyFitByDate`, `getDailyStrategyFitByUcc` added to IStorage + DatabaseStorage
 - `artifacts/api-server/src/index.ts` — seeds `margin_calc_time="09:12"` and `fit_check_time="09:15"` settings
-- `artifacts/mentors-world/src/pages/settings.tsx` — two new time-input UI blocks for both configurable times
-- `artifacts/api-server/src/routes/broker-routes.ts` — `GET /api/admin/fit-log?date=YYYY-MM-DD` route added
+- `artifacts/mentors-world/src/pages/settings.tsx` — two new time-input UI blocks for both configurable times; "Effective immediately when saved"
+- `artifacts/api-server/src/routes/broker-routes.ts` — `GET /api/admin/fit-log?date=YYYY-MM-DD&ucc=` route added
 
 **How it works:**
-- On startup, `scheduleMarginCalc` checks if it's already past 09:12 IST; if so, fires once immediately (startup catch-up via `setImmediate`) then calls `scheduleMarginCalcForTomorrow`. The `marginCalcFiredToday` boolean prevents re-entrancy.
-- `scheduleFitCheck` on startup: if already past 09:15 IST, skips today (margins may not be ready) and schedules for tomorrow.
-- `runDailyFitCheck` queries all plans, groups connected Kotak brokers by UCC, ranks plans by margin required (ascending), and iterates in order marking each fit/unfit based on remaining capital. autoResume=true plans get activated when fit, paused when unfit.
-- Settings UI saves times via existing `PATCH /api/admin/settings` and the schedulers re-read from DB at each fire.
+- **Restart-safe guard**: DB settings keys `margin_calc_last_run` and `fit_check_last_run` store the IST date (YYYY-MM-DD) of the last run. On startup, if the key matches today's IST date, the scheduler skips to tomorrow. Guard is only persisted when a primary broker is found (`isPrimary=true`) — prevents false "already ran" when no primary broker is connected.
+- **Startup catch-up**: If it's past the scheduled time and the guard has not fired today, `setImmediate` fires the calc/check once, then schedules for tomorrow.
+- **Margin→fit chain**: After margin calc completes, a 3-minute delayed `setImmediate` triggers fit check (if it hasn't already run today).
+- **Fit allocation algorithm**: Plans ranked by `rank` ASC (nulls last). A `remaining` budget starts at `availableCapital` (Infinity if no snapshot). Each plan is compared against `remaining`; if `remaining >= effectiveMargin`, plan is `fit=true` and `remaining -= effectiveMargin`. Unfit plans do NOT reduce `remaining` — a large unfit plan cannot block later smaller plans.
+- **Plan scope**: active + deployed plans, plus paused plans with `autoResume=true`. Manually-paused plans (`autoResume=false`) excluded.
+- **Config effective immediately**: saving `margin_calc_time` or `fit_check_time` in Settings triggers dynamic import + reschedule without server restart.
 
 **Diagnostic — if this breaks, check:**
-1. Startup logs must show `[MARGIN-SCHED] Past 09:12 IST — firing margin calc immediately (startup catch-up)` (when started after 09:12 IST) and `[MARGIN-SCHED] Next margin calc scheduled at 09:12 IST tomorrow (in N min)` — if firing repeatedly, check `marginCalcFiredToday` guard
-2. `[FIT-CHECK] Next fit check scheduled at 09:15 IST tomorrow (in N min)` must appear — if missing, `scheduleFitCheck` was not called from `startCapitalManager`
+1. Startup logs must show `[MARGIN-SCHED] Already ran today — next margin calc at 09:12 IST tomorrow` OR `[MARGIN-SCHED] Past 09:12 IST — firing margin calc immediately (startup catch-up)`. If firing repeatedly, the DB guard key `margin_calc_last_run` is not being persisted (check primary broker flag).
+2. `[FIT-CHECK] Next fit check scheduled at 09:15 IST tomorrow` must appear — if missing, `scheduleFitCheck` was not called from `startCapitalManager`
 3. `GET /api/admin/fit-log?date=YYYY-MM-DD` returns audit rows — empty means either fit check hasn't fired yet or no connected brokers
 4. DB table `daily_strategy_fit` — unique constraint `(date, planId)` ensures idempotent upserts; check with `SELECT * FROM daily_strategy_fit ORDER BY created_at DESC LIMIT 20`
