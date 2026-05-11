@@ -152,7 +152,7 @@ if (symbol && ltp !== undefined) {
 - `artifacts/api-server/src/routes/broker-routes.ts` — `GET /api/admin/fit-log?date=YYYY-MM-DD&ucc=` route added
 
 **How it works:**
-- **Restart-safe guard**: DB settings keys `margin_calc_last_run` and `fit_check_last_run` store the IST date (YYYY-MM-DD) of the last run. On startup, if the key matches today's IST date, the scheduler skips to tomorrow. Guard is only persisted when a primary broker is found (`isPrimary=true`) — prevents false "already ran" when no primary broker is connected.
+- **Restart-safe guard (source of truth)**: `isMarginsCalculatedToday(storage)` checks primary broker's active/deployed plans for today's IST date in `marginCalculatedAt`. Fast cache: `margin_calc_last_run` settings key checked first (O(1)); falls through to full plan scan only on cache miss. Guard key only persisted after verified calc (at least one plan updated today). `fit_check_last_run` settings key is the guard for fit check.
 - **Startup catch-up**: If it's past the scheduled time and the guard has not fired today, `setImmediate` fires the calc/check once, then schedules for tomorrow.
 - **Margin→fit chain**: After margin calc completes, a 3-minute delayed `setImmediate` triggers fit check (if it hasn't already run today).
 - **Fit allocation algorithm**: Plans ranked by `rank` ASC (nulls last). A `remaining` budget starts at `availableCapital` (Infinity if no snapshot). Each plan is compared against `remaining`; if `remaining >= effectiveMargin`, plan is `fit=true` and `remaining -= effectiveMargin`. Unfit plans do NOT reduce `remaining` — a large unfit plan cannot block later smaller plans.

@@ -627,7 +627,8 @@ export async function calculatePlanMargins(
 // ═══════════════════════════════════════════════════════════════════════════════
 // MARGIN CALC DAILY SCHEDULER  (#247)
 // Fires at `margin_calc_time` IST (default 09:12) once per day.
-// Guard: persisted DB key "margin_calc_last_run" (YYYY-MM-DD IST) — restart-safe.
+// Guard (source of truth): marginCalculatedAt on active/deployed plans for primary broker.
+// Fast cache: "margin_calc_last_run" settings key (YYYY-MM-DD IST) — set only after verified calc.
 // Chains fit check 3 min after completion; fit check has its own guard.
 // Config: calling scheduleMarginCalc() re-reads setting and reschedules immediately.
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -636,6 +637,36 @@ let marginCalcTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
 function istDateStr(): string {
   return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function utcIsoToISTDate(isoStr: string): string {
+  return new Date(new Date(isoStr).getTime() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+// Data-derived guard: returns true if the primary Kotak broker's active/deployed plans
+// have marginCalculatedAt matching today's IST date.
+// Falls back to fast-cache settings key to avoid full plan scan on every restart.
+async function isMarginsCalculatedToday(storage: IStorage): Promise<boolean> {
+  const todayIST = istDateStr();
+
+  // Fast-cache check first (O(1) — avoids full plan scan)
+  const lastRun = await storage.getSetting("margin_calc_last_run").catch(() => null);
+  if (lastRun?.value === todayIST) return true;
+
+  // Data-derived: check primary broker's active/deployed plans
+  const allConfigs = await storage.getBrokerConfigs().catch(() => [] as BrokerConfig[]);
+  const primaryBroker = allConfigs.find(bc => bc.isPrimary && bc.brokerName === "kotak_neo");
+  if (!primaryBroker) return false; // no primary = margins cannot have been calculated
+
+  const allPlans = await storage.getStrategyPlans().catch(() => []);
+  const active = allPlans.filter(p =>
+    p.deploymentStatus === "active" || p.deploymentStatus === "deployed"
+  );
+  if (active.length === 0) return false; // no active plans = nothing to calc
+
+  return active.some(p =>
+    p.marginCalculatedAt && utcIsoToISTDate(p.marginCalculatedAt) === todayIST
+  );
 }
 
 async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): Promise<void> {
@@ -663,9 +694,15 @@ async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
 
   await runMarginCalcForAllBrokers(storage, timeStr);
 
-  // Always persist the guard after any attempt — prevents infinite rerun loops on restarts
-  // when no connected/primary broker is available. Tomorrow's run will retry.
-  await storage.setSetting("margin_calc_last_run", istDateStr()).catch(() => null);
+  // Persist fast-cache guard ONLY if data confirms plans were actually updated today.
+  // This prevents guard from being set when no primary/no connected broker existed.
+  const calcRanToday = await isMarginsCalculatedToday(storage);
+  if (calcRanToday) {
+    await storage.setSetting("margin_calc_last_run", istDateStr()).catch(() => null);
+    console.log(`[MARGIN-SCHED] Margins verified via marginCalculatedAt — guard persisted for today`);
+  } else {
+    console.log(`[MARGIN-SCHED] No plans updated today — guard not persisted (no primary broker or no active plans); will retry at ${timeStr} IST tomorrow`);
+  }
 
   // Chain: trigger fit check 3 min after margin calc if it hasn't run today
   const FIT_CHAIN_DELAY_MS = 3 * 60 * 1000;
@@ -699,16 +736,15 @@ export async function scheduleMarginCalc(storage: IStorage): Promise<void> {
   const msUntil = targetIST.getTime() - Date.now();
 
   if (msUntil <= 0) {
-    // Past target time today — check persisted guard
-    const lastRun = await storage.getSetting("margin_calc_last_run").catch(() => null);
-    if (lastRun?.value === istDateStr()) {
-      // Already ran today (restart-safe) — schedule for tomorrow
+    // Past target time today — use data-derived guard as source of truth
+    if (await isMarginsCalculatedToday(storage)) {
+      // Plans already have today's marginCalculatedAt — schedule for tomorrow
       targetIST.setUTCDate(targetIST.getUTCDate() + 1);
       const msUntilTomorrow = targetIST.getTime() - Date.now();
       console.log(`[MARGIN-SCHED] Already ran today — next margin calc at ${timeStr} IST tomorrow (in ${Math.round(msUntilTomorrow / 60000)} min)`);
       marginCalcTimeoutHandle = setTimeout(() => runAndRescheduleMarginCalc(storage), msUntilTomorrow);
     } else {
-      // Startup catch-up — not yet run today, fire immediately
+      // No plans updated today — startup catch-up
       console.log(`[MARGIN-SCHED] Past ${timeStr} IST — firing margin calc immediately (startup catch-up)`);
       setImmediate(() => runAndRescheduleMarginCalc(storage));
     }
