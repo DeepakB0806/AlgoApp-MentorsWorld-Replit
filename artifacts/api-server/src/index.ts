@@ -108,7 +108,7 @@ app.get("/api/health", (_req, res) => {
 
   await registerRoutes(httpServer, app);
 
-  app.use("/kotak-test", express.static(path.resolve("public/kotak-test"), { index: "demo.html" }));
+  app.use("/api/kotak-test", express.static(path.resolve("public/kotak-test"), { index: "demo.html" }));
 
   async function waitForDatabase() {
     console.log(`[BOOT] Probing database connection (waking up serverless DB)...`);

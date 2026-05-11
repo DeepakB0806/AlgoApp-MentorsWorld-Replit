@@ -90,7 +90,7 @@ function KotakTestHarnessCard() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => window.open("/kotak-test/", "_blank")}
+              onClick={() => window.open("/api/kotak-test/", "_blank")}
               data-testid="button-open-test-harness"
             >
               <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
