@@ -672,17 +672,17 @@ async function isMarginsCalculatedToday(storage: IStorage): Promise<boolean> {
 async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): Promise<void> {
   try {
     const allConfigs = await storage.getBrokerConfigs();
-    const liveBrokers = allConfigs.filter(bc => bc.isConnected && bc.brokerName === "kotak_neo");
-    if (liveBrokers.length === 0) {
-      console.log(`[MARGIN-SCHED] ${timeStr} IST — no connected Kotak brokers, skipping`);
+    // Only run against the primary Kotak broker — calculatePlanMargins is primary-only and
+    // targeting it directly avoids redundant invocations and log noise for non-primary brokers.
+    const primaryBroker = allConfigs.find(bc => bc.isPrimary && bc.isConnected && bc.brokerName === "kotak_neo");
+    if (!primaryBroker) {
+      console.log(`[MARGIN-SCHED] ${timeStr} IST — no connected primary Kotak broker, skipping`);
       return;
     }
-    for (const bc of liveBrokers) {
-      console.log(`[MARGIN-SCHED] ${timeStr} IST — running calculatePlanMargins for ${bc.ucc || bc.id}`);
-      await calculatePlanMargins(storage, bc).catch(err =>
-        console.warn(`[MARGIN-SCHED] calculatePlanMargins error for ${bc.ucc}: ${err}`)
-      );
-    }
+    console.log(`[MARGIN-SCHED] ${timeStr} IST — running calculatePlanMargins for primary broker ${primaryBroker.ucc || primaryBroker.id}`);
+    await calculatePlanMargins(storage, primaryBroker).catch(err =>
+      console.warn(`[MARGIN-SCHED] calculatePlanMargins error for ${primaryBroker.ucc}: ${err}`)
+    );
   } catch (err) {
     console.error(`[MARGIN-SCHED] Daily margin calc error: ${err}`);
   }
@@ -704,9 +704,9 @@ async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
     console.log(`[MARGIN-SCHED] No plans updated today (no primary broker or no active plans) — scheduling tomorrow`);
   }
 
-  // Chain: trigger fit check 3 min after margin calc if it hasn't run today
-  const FIT_CHAIN_DELAY_MS = 3 * 60 * 1000;
-  console.log(`[MARGIN-SCHED] Margin calc done — fit check will chain in 3 min`);
+  // Chain: trigger fit check 30s after margin calc if it hasn't run today
+  const FIT_CHAIN_DELAY_MS = 30 * 1000;
+  console.log(`[MARGIN-SCHED] Margin calc done — fit check will chain in 30s`);
   setTimeout(async () => {
     const lastFit = await storage.getSetting("fit_check_last_run").catch(() => null);
     if (lastFit?.value === istDateStr()) {

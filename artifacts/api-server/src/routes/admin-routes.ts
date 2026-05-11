@@ -324,4 +324,19 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // ── Daily Strategy Fit Log (#247) ──────────────────────────────────────────
+  app.get("/api/admin/fit-log", async (req, res) => {
+    try {
+      const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const date = typeof req.query.date === "string" ? req.query.date : todayIST;
+      const ucc = typeof req.query.ucc === "string" ? req.query.ucc : undefined;
+      const rows = ucc
+        ? await storage.getDailyStrategyFitByUcc(ucc, date)
+        : await storage.getDailyStrategyFitByDate(date);
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch fit log" });
+    }
+  });
 }
