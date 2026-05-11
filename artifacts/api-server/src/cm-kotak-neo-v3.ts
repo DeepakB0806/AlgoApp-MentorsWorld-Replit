@@ -770,11 +770,14 @@ export async function runDailyFitCheck(storage: IStorage): Promise<void> {
 
   try {
     const plans = await storage.getStrategyPlans();
+    // Evaluate active/deployed plans (normal candidates) + autoResume=true paused plans (candidates for reactivation)
     const activePlans = plans.filter(p =>
-      ["active", "paused", "deployed"].includes(p.deploymentStatus || "")
+      p.deploymentStatus === "active" ||
+      p.deploymentStatus === "deployed" ||
+      (p.deploymentStatus === "paused" && p.autoResume === true)
     );
     if (activePlans.length === 0) {
-      console.log(`${FLOG} No active/paused/deployed plans — nothing to check`);
+      console.log(`${FLOG} No active/deployed/autoResume-paused plans — nothing to check`);
       return;
     }
 
@@ -800,11 +803,15 @@ export async function runDailyFitCheck(storage: IStorage): Promise<void> {
     let paused = 0;
 
     for (const [ucc, brokerPlans] of byUcc) {
-      // Get available capital from snapshot for this UCC
+      // Get available capital from snapshot for this UCC.
+      // If no snapshot exists, treat as Infinity — plans are fit by default when capital data is unavailable,
+      // preventing spurious auto-pauses due to missing snapshot (spec requirement).
       const snapshot = await storage.getCapitalSnapshot(ucc).catch(() => null);
-      const availableCapital = snapshot?.availableCapital !== null && snapshot?.availableCapital !== undefined
+      const snapshotValue = snapshot?.availableCapital !== null && snapshot?.availableCapital !== undefined
         ? Number(snapshot.availableCapital)
         : null;
+      const availableCapital: number = snapshotValue !== null ? snapshotValue : Infinity;
+      const capitalLabel = snapshotValue !== null ? `₹${availableCapital.toFixed(2)}` : "∞ (no snapshot)";
 
       // Sort by rank (ASC, nulls last)
       const sorted = [...brokerPlans].sort((a, b) => {
@@ -824,20 +831,17 @@ export async function runDailyFitCheck(storage: IStorage): Promise<void> {
         let fit = false;
         let reason = "";
 
-        if (availableCapital === null) {
-          reason = "No capital snapshot available";
-          fit = false;
-        } else if (effectiveMargin === null || effectiveMargin === 0) {
+        if (effectiveMargin === null || effectiveMargin === 0) {
           reason = "Margin not calculated — run margin calc first";
           fit = false;
         } else {
           cumulativeMargin += effectiveMargin;
           if (cumulativeMargin <= availableCapital) {
             fit = true;
-            reason = `Cumulative margin ₹${cumulativeMargin.toFixed(2)} ≤ available ₹${availableCapital.toFixed(2)}`;
+            reason = `Cumulative margin ₹${cumulativeMargin.toFixed(2)} ≤ available ${capitalLabel}`;
           } else {
             fit = false;
-            reason = `Cumulative margin ₹${cumulativeMargin.toFixed(2)} exceeds available ₹${availableCapital.toFixed(2)}`;
+            reason = `Cumulative margin ₹${cumulativeMargin.toFixed(2)} exceeds available ${capitalLabel}`;
           }
         }
 
@@ -851,7 +855,7 @@ export async function runDailyFitCheck(storage: IStorage): Promise<void> {
           planId: plan.id,
           configId: plan.configId,
           rank: plan.rank ?? null,
-          availableCapital: availableCapital !== null ? String(availableCapital) : null,
+          availableCapital: snapshotValue !== null ? String(snapshotValue) : null,
           effectiveMargin: effectiveMargin !== null ? String(effectiveMargin) : null,
           fit,
           deploymentStatus: plan.deploymentStatus,
