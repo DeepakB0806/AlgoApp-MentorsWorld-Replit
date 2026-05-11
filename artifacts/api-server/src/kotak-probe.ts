@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import type { BrokerConfig } from "@workspace/db";
-import { getHsmStatus, isHsmAuthOk } from "./hsm-kotak-neo-v3";
+import { getHsmStatus, isHsmAuthOk, buildHsmAuthBinary } from "./hsm-kotak-neo-v3";
 
 export interface ProbeResult {
   target: "hsm" | "hsi";
@@ -139,14 +139,16 @@ export async function runProbe(config: BrokerConfig, target: "hsm" | "hsi"): Pro
 
     ws.on("open", () => {
       try {
-        let auth: string;
         if (target === "hsm") {
-          auth = buildHsmAuthMessage(config);
+          // Send binary frame matching Kotak HSM's binary protocol (same as hslib.js demo)
+          const jwt = config.viewToken ?? config.accessToken ?? "";
+          const sid = config.sidView ?? config.sessionId ?? "";
+          ws.send(buildHsmAuthBinary(jwt, sid));
         } else {
           // Production HSI strips all quote characters before sending — match exactly
-          auth = buildHsiAuthMessage(config).replace(/"/g, "");
+          const auth = buildHsiAuthMessage(config).replace(/"/g, "");
+          ws.send(auth);
         }
-        ws.send(auth);
       } catch {
         settle("unreachable");
       }

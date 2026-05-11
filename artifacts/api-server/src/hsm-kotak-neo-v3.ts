@@ -116,6 +116,38 @@ function buildAuthMessage(config: BrokerConfig): object {
   };
 }
 
+// Binary auth frame matching Kotak HSM's binary protocol (mirrors hslib.js prepareConnectionRequest2).
+// Frame layout (all big-endian):
+//   [0..1]  uint16  payload length (= total frame size − 2)
+//   [2]     byte    1 (CONNECTION_TYPE)
+//   [3]     byte    3 (field count)
+//   [4]     byte    1 (field ID: JWT)    [5..6] uint16 jwtLen    [7..]  JWT bytes
+//   [N]     byte    2 (field ID: SID)    [N+1..N+2] uint16 sidLen  [N+3..] SID bytes
+//   [M]     byte    3 (field ID: source) [M+1..M+2] uint16 srcLen  [M+3..] "JS_API"
+export function buildHsmAuthBinary(jwt: string, sid: string): Buffer {
+  const source = "JS_API";
+  const jwtLen = Buffer.byteLength(jwt, "utf8");
+  const sidLen = Buffer.byteLength(sid, "utf8");
+  const sourceLen = Buffer.byteLength(source, "utf8"); // always 6
+  // 2 (header) + 1 (type) + 1 (count) + 3×(1 fieldId + 2 len) + data = 13 + data
+  const totalLength = 13 + jwtLen + sidLen + sourceLen;
+  const buf = Buffer.alloc(totalLength);
+  let offset = 0;
+  buf.writeUInt16BE(totalLength - 2, offset); offset += 2;  // payload length
+  buf.writeUInt8(1, offset++);                               // CONNECTION_TYPE
+  buf.writeUInt8(3, offset++);                               // field count = 3
+  buf.writeUInt8(1, offset++);                               // field ID 1: JWT
+  buf.writeUInt16BE(jwtLen, offset); offset += 2;
+  buf.write(jwt, offset, jwtLen, "utf8"); offset += jwtLen;
+  buf.writeUInt8(2, offset++);                               // field ID 2: SID
+  buf.writeUInt16BE(sidLen, offset); offset += 2;
+  buf.write(sid, offset, sidLen, "utf8"); offset += sidLen;
+  buf.writeUInt8(3, offset++);                               // field ID 3: source
+  buf.writeUInt16BE(sourceLen, offset); offset += 2;
+  buf.write(source, offset, sourceLen, "utf8");
+  return buf;
+}
+
 function buildSubscribeMessage(exchange: string, token: string): object {
   return { type: "sub", scrips: `${exchange}|${token}` };
 }
@@ -174,7 +206,12 @@ function connect(config: BrokerConfig): void {
     console.log(`${LOG_PREFIX} Connected to Kotak HSM`);
     reconnectDelay = 1_000;
     try {
-      ws!.send(JSON.stringify(buildAuthMessage(config)));
+      const binaryAuth = buildHsmAuthBinary(
+        config.viewToken || config.accessToken || "",
+        config.sidView || config.sessionId || "",
+      );
+      console.log(`${LOG_PREFIX} Sending binary auth frame: ${binaryAuth.length} bytes`);
+      ws!.send(binaryAuth);
     } catch (err) {
       console.error(`${LOG_PREFIX} Auth send error:`, err);
     }
@@ -183,11 +220,31 @@ function connect(config: BrokerConfig): void {
 
   ws.on("message", (raw: WebSocket.RawData) => {
     try {
+      const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer);
       if (!hsmFirstMessageLogged) {
         hsmFirstMessageLogged = true;
-        console.log(`${LOG_PREFIX} [DIAG] First raw message from Kotak: ${raw.toString()}`);
+        console.log(`${LOG_PREFIX} [DIAG] First raw message: ${buf.length} bytes hex=${buf.toString("hex").slice(0, 64)}`);
       }
-      const parsed = JSON.parse(raw.toString());
+      // Binary CONNECTION_TYPE auth response detection (HSM-1 additive):
+      // Kotak HSM responds in binary. Layout per hslib.js HSWrapper.parseData:
+      //   [0..1] packetsCount  [2] type=1(CONNECTION_TYPE)  [3] fCount
+      //   [4] fid1  [5..6] valLen(uint16BE)  [7..7+valLen-1] status
+      // BinRespStat.OK = "K" (0x4B), BinRespStat.NOT_OK = "N"
+      if (buf.length >= 8 && buf[2] === 1 /* CONNECTION_TYPE */) {
+        const valLen = buf.readUInt16BE(5);
+        if (valLen >= 1 && 7 + valLen <= buf.length) {
+          const status = buf.toString("utf8", 7, 7 + valLen);
+          if (status === "K") { // HSM-1 Build #244: binary BinRespStat.OK — auth confirmed
+            hsmAuthOkInSession = true;
+            hsmConsecutiveFailures = 0;
+            console.log(`${LOG_PREFIX} auth_ok received (binary CONNECTION_TYPE response)`);
+          } else if (status === "N") {
+            console.warn(`${LOG_PREFIX} auth NOT_OK received (binary) — token may be expired`);
+          }
+        }
+      }
+      // JSON parse fallback — kept for any text-framed responses (HSM-1 additive)
+      const parsed = JSON.parse(buf.toString());
       // Kotak HSM returns auth response as array: [{"stat":"Ok","type":"cn",...}]
       const msgCn = Array.isArray(parsed) ? parsed[0] : parsed;
       if (msgCn && msgCn.type === "cn" && (msgCn.ak === "ok" || msgCn.stat === "Ok")) { // HSM-1 Build #164: track auth confirmation
