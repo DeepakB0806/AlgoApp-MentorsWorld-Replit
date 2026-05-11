@@ -87,6 +87,20 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
           console.error(`[SCRIP-MASTER] Failed to reschedule after settings save: ${err}`)
         );
       }
+      if (req.params.key === "margin_calc_time") {
+        import("../cm-kotak-neo-v3").then(m =>
+          m.scheduleMarginCalc(storage).catch(err =>
+            console.error(`[MARGIN-SCHED] Failed to reschedule after settings save: ${err}`)
+          )
+        );
+      }
+      if (req.params.key === "fit_check_time") {
+        import("../cm-kotak-neo-v3").then(m =>
+          m.scheduleFitCheck(storage).catch(err =>
+            console.error(`[FIT-CHECK] Failed to reschedule after settings save: ${err}`)
+          )
+        );
+      }
       res.json(setting);
     } catch (error) {
       res.status(500).json({ error: "Failed to save setting" });

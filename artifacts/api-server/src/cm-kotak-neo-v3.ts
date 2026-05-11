@@ -627,12 +627,16 @@ export async function calculatePlanMargins(
 // ═══════════════════════════════════════════════════════════════════════════════
 // MARGIN CALC DAILY SCHEDULER  (#247)
 // Fires at `margin_calc_time` IST (default 09:12) once per day.
-// Runs calculatePlanMargins for every connected Kotak broker.
-// Startup catch-up: if already past the target time today, fires immediately.
+// Guard: persisted DB key "margin_calc_last_run" (YYYY-MM-DD IST) — restart-safe.
+// Chains fit check 3 min after completion; fit check has its own guard.
+// Config: calling scheduleMarginCalc() re-reads setting and reschedules immediately.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let marginCalcTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
-let marginCalcFiredToday = false;
+
+function istDateStr(): string {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
 
 async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): Promise<void> {
   try {
@@ -653,19 +657,30 @@ async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): P
   }
 }
 
-function scheduleMarginCalcForTomorrow(storage: IStorage, timeStr: string, hh: number, mm: number): void {
-  if (marginCalcTimeoutHandle !== null) { clearTimeout(marginCalcTimeoutHandle); marginCalcTimeoutHandle = null; }
-  const targetIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-  targetIST.setUTCHours(hh - 5, mm - 30, 0, 0);
-  targetIST.setUTCDate(targetIST.getUTCDate() + 1); // always tomorrow
-  const msUntil = targetIST.getTime() - Date.now();
-  console.log(`[MARGIN-SCHED] Next margin calc scheduled at ${timeStr} IST tomorrow (in ${Math.round(msUntil / 60000)} min)`);
-  marginCalcTimeoutHandle = setTimeout(async () => {
-    marginCalcTimeoutHandle = null;
-    marginCalcFiredToday = false;
-    await runMarginCalcForAllBrokers(storage, timeStr);
-    scheduleMarginCalcForTomorrow(storage, timeStr, hh, mm);
-  }, msUntil);
+async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
+  const setting = await storage.getSetting("margin_calc_time").catch(() => null);
+  const timeStr = setting?.value || "09:12";
+
+  await runMarginCalcForAllBrokers(storage, timeStr);
+
+  // Persist "ran today" — restart-safe guard
+  await storage.setSetting("margin_calc_last_run", istDateStr()).catch(() => null);
+
+  // Chain: trigger fit check 3 min after margin calc if it hasn't run today
+  const FIT_CHAIN_DELAY_MS = 3 * 60 * 1000;
+  console.log(`[MARGIN-SCHED] Margin calc done — fit check will chain in 3 min`);
+  setTimeout(async () => {
+    const lastFit = await storage.getSetting("fit_check_last_run").catch(() => null);
+    if (lastFit?.value === istDateStr()) {
+      console.log(`[MARGIN-SCHED] Fit check already ran today — skipping chain`);
+      return;
+    }
+    await runDailyFitCheck(storage).catch(err => console.error(`[FIT-CHECK] Chain error: ${err}`));
+    await storage.setSetting("fit_check_last_run", istDateStr()).catch(() => null);
+  }, FIT_CHAIN_DELAY_MS);
+
+  // Reschedule for next day, re-reading settings fresh
+  await scheduleMarginCalc(storage);
 }
 
 export async function scheduleMarginCalc(storage: IStorage): Promise<void> {
@@ -678,54 +693,44 @@ export async function scheduleMarginCalc(storage: IStorage): Promise<void> {
   const timeStr = setting?.value || "09:12";
   const [hh, mm] = timeStr.split(":").map(Number);
 
-  const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-  const targetIST = new Date(nowIST);
+  const targetIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
   targetIST.setUTCHours(hh - 5, mm - 30, 0, 0);
-
   const msUntil = targetIST.getTime() - Date.now();
 
-  if (msUntil <= 0 && !marginCalcFiredToday) {
-    // Past target time today — fire once immediately (startup catch-up) then schedule tomorrow
-    marginCalcFiredToday = true;
-    console.log(`[MARGIN-SCHED] Past ${timeStr} IST — firing margin calc immediately (startup catch-up)`);
-    setImmediate(async () => {
-      await runMarginCalcForAllBrokers(storage, timeStr);
-      scheduleMarginCalcForTomorrow(storage, timeStr, hh, mm);
-    });
-  } else if (msUntil <= 0 && marginCalcFiredToday) {
-    // Already fired today — just schedule tomorrow
-    scheduleMarginCalcForTomorrow(storage, timeStr, hh, mm);
+  if (msUntil <= 0) {
+    // Past target time today — check persisted guard
+    const lastRun = await storage.getSetting("margin_calc_last_run").catch(() => null);
+    if (lastRun?.value === istDateStr()) {
+      // Already ran today (restart-safe) — schedule for tomorrow
+      targetIST.setUTCDate(targetIST.getUTCDate() + 1);
+      const msUntilTomorrow = targetIST.getTime() - Date.now();
+      console.log(`[MARGIN-SCHED] Already ran today — next margin calc at ${timeStr} IST tomorrow (in ${Math.round(msUntilTomorrow / 60000)} min)`);
+      marginCalcTimeoutHandle = setTimeout(() => runAndRescheduleMarginCalc(storage), msUntilTomorrow);
+    } else {
+      // Startup catch-up — not yet run today, fire immediately
+      console.log(`[MARGIN-SCHED] Past ${timeStr} IST — firing margin calc immediately (startup catch-up)`);
+      setImmediate(() => runAndRescheduleMarginCalc(storage));
+    }
   } else {
     console.log(`[MARGIN-SCHED] Scheduled daily margin calc at ${timeStr} IST (in ${Math.round(msUntil / 60000)} min)`);
-    marginCalcTimeoutHandle = setTimeout(async () => {
-      marginCalcTimeoutHandle = null;
-      marginCalcFiredToday = false;
-      await runMarginCalcForAllBrokers(storage, timeStr);
-      scheduleMarginCalcForTomorrow(storage, timeStr, hh, mm);
-    }, msUntil);
+    marginCalcTimeoutHandle = setTimeout(() => runAndRescheduleMarginCalc(storage), msUntil);
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DAILY FIT CHECK SCHEDULER  (#247)
 // Fires at `fit_check_time` IST (default 09:15) once per day.
-// Writes daily_strategy_fit audit rows and activates/pauses plans (autoResume only).
+// Guard: persisted DB key "fit_check_last_run" (YYYY-MM-DD IST).
+// Also triggered as a chain 3 min after margin calc completes.
+// Config: calling scheduleFitCheck() re-reads and reschedules immediately.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let fitCheckTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
-function scheduleFitCheckForTomorrow(storage: IStorage, timeStr: string, hh: number, mm: number): void {
-  if (fitCheckTimeoutHandle !== null) { clearTimeout(fitCheckTimeoutHandle); fitCheckTimeoutHandle = null; }
-  const targetIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-  targetIST.setUTCHours(hh - 5, mm - 30, 0, 0);
-  targetIST.setUTCDate(targetIST.getUTCDate() + 1); // always tomorrow
-  const msUntil = targetIST.getTime() - Date.now();
-  console.log(`[FIT-CHECK] Next fit check scheduled at ${timeStr} IST tomorrow (in ${Math.round(msUntil / 60000)} min)`);
-  fitCheckTimeoutHandle = setTimeout(async () => {
-    fitCheckTimeoutHandle = null;
-    try { await runDailyFitCheck(storage); } catch (err) { console.error(`[FIT-CHECK] Error: ${err}`); }
-    scheduleFitCheckForTomorrow(storage, timeStr, hh, mm);
-  }, msUntil);
+async function runAndRescheduleFitCheck(storage: IStorage): Promise<void> {
+  try { await runDailyFitCheck(storage); } catch (err) { console.error(`[FIT-CHECK] Error: ${err}`); }
+  await storage.setSetting("fit_check_last_run", istDateStr()).catch(() => null);
+  await scheduleFitCheck(storage);
 }
 
 export async function scheduleFitCheck(storage: IStorage): Promise<void> {
@@ -738,28 +743,29 @@ export async function scheduleFitCheck(storage: IStorage): Promise<void> {
   const timeStr = setting?.value || "09:15";
   const [hh, mm] = timeStr.split(":").map(Number);
 
-  const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-  const targetIST = new Date(nowIST);
+  const targetIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
   targetIST.setUTCHours(hh - 5, mm - 30, 0, 0);
-
   const msUntil = targetIST.getTime() - Date.now();
 
   if (msUntil <= 0) {
-    // Already past fit check time today — skip today (margins may not be ready), schedule tomorrow
-    console.log(`[FIT-CHECK] Past ${timeStr} IST — skipping today's fit check (margins may not be ready at startup)`);
-    scheduleFitCheckForTomorrow(storage, timeStr, hh, mm);
+    // Past today's fit check time — schedule for tomorrow regardless
+    // (fit check may still run today via the margin calc chain)
+    const tomorrow = new Date(targetIST);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const msUntilTomorrow = tomorrow.getTime() - Date.now();
+    const lastRun = await storage.getSetting("fit_check_last_run").catch(() => null);
+    const alreadyRan = lastRun?.value === istDateStr();
+    console.log(`[FIT-CHECK] Past ${timeStr} IST — ${alreadyRan ? "already ran today" : "not yet run today (margin chain will trigger)"} — scheduling tomorrow (in ${Math.round(msUntilTomorrow / 60000)} min)`);
+    fitCheckTimeoutHandle = setTimeout(() => runAndRescheduleFitCheck(storage), msUntilTomorrow);
   } else {
     console.log(`[FIT-CHECK] Scheduled daily fit check at ${timeStr} IST (in ${Math.round(msUntil / 60000)} min)`);
-    fitCheckTimeoutHandle = setTimeout(async () => {
-      fitCheckTimeoutHandle = null;
-      try { await runDailyFitCheck(storage); } catch (err) { console.error(`[FIT-CHECK] Error: ${err}`); }
-      scheduleFitCheckForTomorrow(storage, timeStr, hh, mm);
-    }, msUntil);
+    fitCheckTimeoutHandle = setTimeout(() => runAndRescheduleFitCheck(storage), msUntil);
   }
 }
 
 export async function runDailyFitCheck(storage: IStorage): Promise<void> {
   const FLOG = "[FIT-CHECK]";
+  const { randomUUID } = await import("crypto");
   console.log(`${FLOG} Starting daily fit check`);
 
   try {
@@ -772,15 +778,20 @@ export async function runDailyFitCheck(storage: IStorage): Promise<void> {
       return;
     }
 
-    // Group by broker config ID
-    const byBroker = new Map<string, typeof activePlans>();
+    // Group plans by UCC (multiple brokerConfigs can share the same UCC)
+    const allConfigs = await storage.getBrokerConfigs();
+    const configById = new Map(allConfigs.map(bc => [bc.id, bc]));
+
+    const byUcc = new Map<string, typeof activePlans>();
     for (const plan of activePlans) {
       if (!plan.brokerConfigId) continue;
-      if (!byBroker.has(plan.brokerConfigId)) byBroker.set(plan.brokerConfigId, []);
-      byBroker.get(plan.brokerConfigId)!.push(plan);
+      const bc = configById.get(plan.brokerConfigId);
+      if (!bc?.ucc) continue;
+      if (!byUcc.has(bc.ucc)) byUcc.set(bc.ucc, []);
+      byUcc.get(bc.ucc)!.push(plan);
     }
 
-    const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const todayIST = istDateStr();
     const nowStr = new Date().toISOString();
 
     let totalFit = 0;
@@ -788,13 +799,8 @@ export async function runDailyFitCheck(storage: IStorage): Promise<void> {
     let activated = 0;
     let paused = 0;
 
-    for (const [brokerConfigId, brokerPlans] of byBroker) {
-      const brokerConfig = await storage.getBrokerConfig(brokerConfigId);
-      if (!brokerConfig) continue;
-
-      const ucc = brokerConfig.ucc || brokerConfigId;
-
-      // Get available capital from snapshot
+    for (const [ucc, brokerPlans] of byUcc) {
+      // Get available capital from snapshot for this UCC
       const snapshot = await storage.getCapitalSnapshot(ucc).catch(() => null);
       const availableCapital = snapshot?.availableCapital !== null && snapshot?.availableCapital !== undefined
         ? Number(snapshot.availableCapital)
@@ -811,7 +817,6 @@ export async function runDailyFitCheck(storage: IStorage): Promise<void> {
       let cumulativeMargin = 0;
 
       for (const plan of sorted) {
-        const { randomUUID } = await import("crypto");
         const effectiveMargin = plan.estimatedMargin !== null && plan.estimatedMargin !== undefined
           ? Number(plan.estimatedMargin)
           : null;
@@ -838,7 +843,7 @@ export async function runDailyFitCheck(storage: IStorage): Promise<void> {
 
         if (fit) totalFit++; else totalNotFit++;
 
-        // Write audit row (upsert — idempotent)
+        // Write audit row (upsert — idempotent on date+planId)
         await storage.upsertDailyStrategyFit({
           id: randomUUID(),
           date: todayIST,

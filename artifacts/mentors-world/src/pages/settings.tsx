@@ -796,7 +796,7 @@ function GeneralTradingSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings/margin_calc_time"] });
-      toast({ title: "Saved", description: `Margin calculation time set to ${marginCalcTimeValue} IST. Takes effect on next server restart.` });
+      toast({ title: "Saved", description: `Margin calculation time set to ${marginCalcTimeValue} IST. Effective immediately.` });
     },
     onError: (err: any) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -811,7 +811,7 @@ function GeneralTradingSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings/fit_check_time"] });
-      toast({ title: "Saved", description: `Daily fit check time set to ${fitCheckTimeValue} IST. Takes effect on next server restart.` });
+      toast({ title: "Saved", description: `Daily fit check time set to ${fitCheckTimeValue} IST. Effective immediately.` });
     },
     onError: (err: any) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -1099,7 +1099,7 @@ function GeneralTradingSettings() {
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
               </div>
-              <p className="text-xs text-muted-foreground">Takes effect on next server restart. Suggested: 09:12 IST (2 min after scrip sync).</p>
+              <p className="text-xs text-muted-foreground">Effective immediately when saved. Suggested: 09:12 IST (2 min after scrip sync).</p>
               <Button
                 data-testid="button-save-margin-calc-time"
                 onClick={() => saveMarginCalcTimeMutation.mutate()}
@@ -1127,7 +1127,7 @@ function GeneralTradingSettings() {
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
               </div>
-              <p className="text-xs text-muted-foreground">Takes effect on next server restart. Must be after margin calc time. Suggested: 09:15 IST.</p>
+              <p className="text-xs text-muted-foreground">Effective immediately when saved. Must be after margin calc time. Suggested: 09:15 IST.</p>
               <Button
                 data-testid="button-save-fit-check-time"
                 onClick={() => saveFitCheckTimeMutation.mutate()}
