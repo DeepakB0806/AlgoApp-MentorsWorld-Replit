@@ -126,8 +126,10 @@ export function getNextExpiry(
   let daysUntil = targetDay - currentDay;
   if (daysUntil < 0) daysUntil += 7;
   if (daysUntil === 0) {
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
+    // Use IST time (UTC+5:30) for the 15:30 market-close roll — server runs UTC
+    const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
+    const currentHour = istNow.getUTCHours();
+    const currentMinute = istNow.getUTCMinutes();
     if (currentHour > 15 || (currentHour === 15 && currentMinute >= 30)) {
       daysUntil = 7;
     }
@@ -175,8 +177,10 @@ export function getTargetExpiry(
   let daysUntil = targetDay - currentDay;
   if (daysUntil < 0) daysUntil += 7;
   if (daysUntil === 0) {
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
+    // Use IST time (UTC+5:30) for the 15:30 market-close roll — server runs UTC
+    const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
+    const currentHour = istNow.getUTCHours();
+    const currentMinute = istNow.getUTCMinutes();
     if (currentHour > 15 || (currentHour === 15 && currentMinute >= 30)) {
       daysUntil = 7;
     }

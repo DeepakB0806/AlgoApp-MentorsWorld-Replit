@@ -16,7 +16,7 @@ import { Plus, Trash2, Settings, Link2, Loader2, X, Clock, Shield, Target, Trend
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl, Position, InstrumentConfig } from "@shared/schema";
+import type { StrategyConfig, StrategyPlan, StrategyTrade, StrategyDailyPnl, Position, InstrumentConfig, IndexMarginSetting } from "@shared/schema";
 import type { TradeParams, TimeLogicConfig, TrailingStoplossConfig } from "@shared/schema";
 import { buildBrokerOrderParams } from "@shared/schema";
 import type { BrokerConfig, Webhook } from "@shared/schema";
@@ -546,9 +546,14 @@ export function BrokerLinking() {
     refetchInterval: 60 * 1000,
   });
 
-  // #206 Instrument configs — used to read expiryDay for 1.5x uplift
+  // #206 Instrument configs — used to read expiryDay per index
   const { data: instrumentConfigs = [] } = useQuery<InstrumentConfig[]>({
     queryKey: ["/api/instrument-configs"],
+  });
+
+  // #254 Index margin settings — used to read expiryMultiplier per index (replaces hardcoded 1.5x)
+  const { data: indexMarginSettings = [] } = useQuery<IndexMarginSetting[]>({
+    queryKey: ["/api/index-margin-settings"],
   });
 
   const refreshCapitalMutation = useMutation({
@@ -596,10 +601,10 @@ export function BrokerLinking() {
   const activePlans = plans.filter((p) => p.status === "active");
 
   // #206 Per-broker capital gating mirror — must match server TE logic exactly:
-  // sort gateable plans by rank, deduct estimatedMargin (1.5x on expiry day) per plan.
-  // Returns map: planId -> { remainingAfter, fits, gatingMargin, isExpiryDay }
+  // sort gateable plans by rank, deduct estimatedMargin (expiryMultiplier× on expiry day) per plan.
+  // Returns map: planId -> { remainingAfter, fits, gatingMargin, isExpiryDay, expiryMultiplier, brokerConfigId }
   const fundsByPlan = (() => {
-    const out = new Map<string, { remainingAfter: number; fits: boolean; gatingMargin: number; isExpiryDay: boolean; brokerConfigId: string }>();
+    const out = new Map<string, { remainingAfter: number; fits: boolean; gatingMargin: number; isExpiryDay: boolean; expiryMultiplier: number; brokerConfigId: string }>();
     const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
     const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
     const today = dayNames[istNow.getDay()];
@@ -607,6 +612,9 @@ export function BrokerLinking() {
     for (const s of capitalSnapshots) if (s.brokerConfigId) snapByBcId.set(s.brokerConfigId, s);
     const instrByKey = new Map<string, InstrumentConfig>();
     for (const ic of instrumentConfigs) instrByKey.set(`${ic.ticker}|${ic.exchange}`, ic);
+    // #254 Build multiplier map from schema — keyed by indexName (e.g. "NIFTY")
+    const multiplierByIndex = new Map<string, number>();
+    for (const ims of indexMarginSettings) multiplierByIndex.set(ims.indexName, Number(ims.expiryMultiplier));
 
     const gateable = activePlans.filter(p =>
       p.brokerConfigId &&
@@ -627,10 +635,12 @@ export function BrokerLinking() {
         const ic = instrByKey.get(`${p.ticker}|${p.exchange}`);
         const isExpiryDay = !!(ic?.expiryDay && ic.expiryDay === today);
         const est = Number(p.estimatedMargin);
-        const gatingMargin = isExpiryDay ? est * 1.5 : est;
+        // #254 Read expiryMultiplier from schema (keyed by ticker e.g. "NIFTY"); default 1.25
+        const expiryMultiplier = isExpiryDay ? (multiplierByIndex.get(p.ticker ?? "") ?? 1.25) : 1;
+        const gatingMargin = est * expiryMultiplier;
         const fits = gatingMargin <= remaining;
         if (fits) remaining -= gatingMargin;
-        out.set(p.id, { remainingAfter: remaining, fits, gatingMargin, isExpiryDay, brokerConfigId: bcId });
+        out.set(p.id, { remainingAfter: remaining, fits, gatingMargin, isExpiryDay, expiryMultiplier, brokerConfigId: bcId });
       }
     }
     return out;
@@ -1075,7 +1085,7 @@ export function BrokerLinking() {
                         {fp.fits ? (
                           <span className="text-emerald-400">✓ fits</span>
                         ) : (
-                          <span className="text-red-400">⛔ skip — needs ₹{fp.gatingMargin.toLocaleString("en-IN", { maximumFractionDigits: 0 })}{fp.isExpiryDay ? " (1.5x expiry)" : ""}</span>
+                          <span className="text-red-400">⛔ skip — needs ₹{fp.gatingMargin.toLocaleString("en-IN", { maximumFractionDigits: 0 })}{fp.isExpiryDay ? ` (${fp.expiryMultiplier}x expiry)` : ""}</span>
                         )}
                       </div>
                     );

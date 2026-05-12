@@ -64,6 +64,27 @@ The platform is designed to scale to multiple brokers without changing the core 
 
 ## Milestones
 
+### [MILESTONE] Fix expiry multiplier, paused plan filter, IST roll — verified 2026-05-12
+
+**Task:** #254 — Fix three expiry-multiplier bugs: hardcoded 1.5×, wrong plan filter, IST roll
+
+**What changed:** Three independent bugs fixed. (1) Frontend capital gating no longer hardcodes 1.5× on expiry day — it now reads `expiryMultiplier` from `index_margin_settings` per index (NIFTY=1.25). (2) `calculatePlanMargins` and `isMarginsCalculatedToday` now include ALL paused plans (regardless of `autoResume`), not just active/deployed. (3) `getTargetExpiry` and `getNextExpiry` now use IST time (UTC+5:30) for the 15:30 market-close roll instead of raw UTC — fixing a 5h window where expiry-day entry orders resolved to the expiring contract instead of next week.
+
+**Key files:**
+- `artifacts/mentors-world/src/components/broker-linking.tsx` — added `useQuery` for `/api/index-margin-settings`; built `multiplierByIndex` map; replaced `est * 1.5` with `est * (multiplierByIndex.get(ticker) ?? 1.25)`; updated "1.5x expiry" label to show actual schema value; added `IndexMarginSetting` import
+- `artifacts/api-server/src/cm-kotak-neo-v3.ts` — `calculatePlanMargins` filter: added `|| p.deploymentStatus === "paused"`; `isMarginsCalculatedToday` guard: same addition, renamed `active` → `plansToCheck`; `refreshAllCapital` filter left unchanged (correct: `active || deployed` only)
+- `artifacts/api-server/src/option-symbol-builder.ts` — both `getNextExpiry` [OSB-2] and `getTargetExpiry` [OSB-3] locked blocks: replaced `now.getHours()/getMinutes()` (UTC) with `istNow.getUTCHours()/getUTCMinutes()` where `istNow = new Date(Date.now() + 5.5 * 3600 * 1000)`
+
+**How it works:**
+- **Expiry multiplier**: frontend `fundsByPlan` builds `Map<indexName, expiryMultiplier>` from the `/api/index-margin-settings` response. On expiry day, `gatingMargin = est * multiplierByIndex.get(ticker) ?? 1.25`. The label dynamically shows `(1.25x expiry)` or whatever the schema value is.
+- **Paused plan margin**: `autoResume` governs fit-check automation only. All non-draft plans need current margin figures — a paused plan (even `autoResume=false`) needs margin for the user to see what funds it requires before manually resuming. `draft` plans are still excluded (no `tradeParams`).
+- **IST roll**: `Date.now() + 5.5 * 3600 * 1000` gives the current UTC millisecond interpreted as IST wall-clock time. `getUTCHours()` on that value reads IST hours correctly without any timezone locale dependency.
+
+**Diagnostic — if this breaks, check:**
+1. Capital gating label: open Dashboard → find a plan with `isExpiryMargin=true` → label should show `(1.25x expiry)` not `(1.5x expiry)` — if still 1.5x, `/api/index-margin-settings` fetch is failing or `multiplierByIndex.get(ticker)` key mismatch (check `p.ticker` vs `ims.indexName` casing)
+2. Paused plan margin: run `SELECT name, deployment_status, estimated_margin, margin_calculated_at FROM strategy_plans WHERE deployment_status='paused';` — after next margin calc, all paused plans should have today's IST date in `margin_calculated_at`
+3. IST roll: on any expiry day between 15:30–20:30 IST, a new order should resolve to next week's contract — `[TE]` logs will show the symbol with next-week expiry date
+
 ### [MILESTONE] HSI-Driven Trade Confirmation + MTM Sanity Guard — verified 2026-05-12
 
 **Task:** #253 — HSI-Driven Trade Confirmation (Primary) + REST Fallback

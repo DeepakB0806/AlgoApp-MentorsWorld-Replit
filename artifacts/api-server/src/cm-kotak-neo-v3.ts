@@ -519,14 +519,15 @@ export async function calculatePlanMargins(
     }
 
     const allPlans = await storage.getStrategyPlans();
-    // Primary broker calculates margins for ALL active/deployed plans across all users —
+    // Primary broker calculates margins for ALL active/deployed/paused plans across all users —
     // not just plans belonging to its own brokerConfigId.
+    // autoResume is a fit-check flag only — all non-draft plans need current margin figures.
     const plansToCalc = allPlans
-      .filter(p => p.deploymentStatus === "active" || p.deploymentStatus === "deployed")
+      .filter(p => p.deploymentStatus === "active" || p.deploymentStatus === "deployed" || p.deploymentStatus === "paused")
       .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
 
     if (plansToCalc.length === 0) {
-      console.log(`${MLOG} No active/deployed plans for broker ${brokerConfig.name}`);
+      console.log(`${MLOG} No active/deployed/paused plans for broker ${brokerConfig.name}`);
       return;
     }
     console.log(`${MLOG} Calculating margins for ${plansToCalc.length} plan(s) — primary broker [all users] [DISTANCE-SPAN]`);
@@ -667,12 +668,12 @@ async function isMarginsCalculatedToday(storage: IStorage): Promise<boolean> {
   if (!primaryBroker) return false; // no Kotak Neo broker at all
 
   const allPlans = await storage.getStrategyPlans().catch(() => []);
-  const active = allPlans.filter(p =>
-    p.deploymentStatus === "active" || p.deploymentStatus === "deployed"
+  const plansToCheck = allPlans.filter(p =>
+    p.deploymentStatus === "active" || p.deploymentStatus === "deployed" || p.deploymentStatus === "paused"
   );
-  if (active.length === 0) return false; // no active plans = nothing to calc
+  if (plansToCheck.length === 0) return false; // no non-draft plans = nothing to calc
 
-  return active.some(p =>
+  return plansToCheck.some(p =>
     p.marginCalculatedAt && utcIsoToISTDate(p.marginCalculatedAt) === todayIST
   );
 }
