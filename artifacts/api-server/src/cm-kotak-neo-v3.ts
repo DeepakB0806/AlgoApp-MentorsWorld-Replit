@@ -508,13 +508,6 @@ export async function calculatePlanMargins(
 ): Promise<void> {
   const MLOG = "[MARGIN-CALC]";
   try {
-    // 0. Primary-only guard — one calculation per cycle regardless of connected user count
-    if (!brokerConfig.isPrimary) {
-      console.log(`${MLOG} Skipping — not primary broker (${brokerConfig.name})`);
-      return;
-    }
-
-
     const allPlans = await storage.getStrategyPlans();
     // Primary broker calculates margins for ALL active/deployed plans across all users —
     // not just plans belonging to its own brokerConfigId.
@@ -606,10 +599,11 @@ export async function calculatePlanMargins(
         const totalMargin = Math.max(utMargin, dtMargin);
         console.log(`${MLOG} Plan "${plan.name}" [DISTANCE-SPAN] UT=₹${utMargin.toFixed(2)} DT=₹${dtMargin.toFixed(2)} → estimatedMargin=₹${totalMargin.toFixed(2)}`);
 
-        // 9. Persist
+        // 9. Persist — isExpiryMargin records whether this margin includes the SEBI ELM expiry multiplier
         await storage.updateStrategyPlan(plan.id, {
           estimatedMargin: String(totalMargin.toFixed(2)),
           marginCalculatedAt: new Date().toISOString(),
+          isExpiryMargin: isExpiry,
         });
 
       } catch (planErr: any) {
@@ -656,8 +650,11 @@ async function isMarginsCalculatedToday(storage: IStorage): Promise<boolean> {
 
   // Data-derived: check primary broker's active/deployed plans
   const allConfigs = await storage.getBrokerConfigs().catch(() => [] as BrokerConfig[]);
-  const primaryBroker = allConfigs.find(bc => bc.isPrimary && bc.brokerName === "kotak_neo");
-  if (!primaryBroker) return false; // no primary = margins cannot have been calculated
+  // Use primary if set, otherwise any Kotak Neo broker as reference
+  const primaryBroker =
+    allConfigs.find(bc => bc.isPrimary && bc.brokerName === "kotak_neo") ||
+    allConfigs.find(bc => bc.brokerName === "kotak_neo");
+  if (!primaryBroker) return false; // no Kotak Neo broker at all
 
   const allPlans = await storage.getStrategyPlans().catch(() => []);
   const active = allPlans.filter(p =>
@@ -673,14 +670,17 @@ async function isMarginsCalculatedToday(storage: IStorage): Promise<boolean> {
 async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): Promise<void> {
   try {
     const allConfigs = await storage.getBrokerConfigs();
-    // Only run against the primary Kotak broker — calculatePlanMargins is primary-only and
-    // targeting it directly avoids redundant invocations and log noise for non-primary brokers.
-    const primaryBroker = allConfigs.find(bc => bc.isPrimary && bc.isConnected && bc.brokerName === "kotak_neo");
+    // Run against one Kotak Neo broker per cycle. Prefer primary if set; fall back to
+    // any connected Kotak Neo broker so the calc never silently skips when no primary is set.
+    const primaryBroker =
+      allConfigs.find(bc => bc.isPrimary && bc.brokerName === "kotak_neo") ||
+      allConfigs.find(bc => bc.isConnected && bc.brokerName === "kotak_neo");
     if (!primaryBroker) {
-      console.log(`[MARGIN-SCHED] ${timeStr} IST — no connected primary Kotak broker, skipping`);
+      console.log(`[MARGIN-SCHED] ${timeStr} IST — no Kotak Neo broker configured, skipping`);
       return;
     }
-    console.log(`[MARGIN-SCHED] ${timeStr} IST — running calculatePlanMargins for primary broker ${primaryBroker.ucc || primaryBroker.id}`);
+    const brokerLabel = primaryBroker.isPrimary ? "primary" : "connected (no primary set)";
+    console.log(`[MARGIN-SCHED] ${timeStr} IST — running calculatePlanMargins for ${brokerLabel} broker ${primaryBroker.ucc || primaryBroker.id}`);
     await calculatePlanMargins(storage, primaryBroker).catch(err =>
       console.warn(`[MARGIN-SCHED] calculatePlanMargins error for ${primaryBroker.ucc}: ${err}`)
     );

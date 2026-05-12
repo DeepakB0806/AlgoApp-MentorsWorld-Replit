@@ -502,7 +502,12 @@ function CapitalGatingStatus() {
                     </td>
                     <td className="px-2 py-1.5 text-right font-mono">
                       {plan.estimatedMargin ? (
-                        <span className="text-foreground">₹{Number(plan.estimatedMargin).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>
+                        <span className="flex items-center justify-end gap-1.5">
+                          {plan.isExpiryMargin && (
+                            <Badge className="text-[9px] px-1 py-0 h-4 bg-orange-500/20 text-orange-400 border-orange-400/30 font-semibold">Expiry</Badge>
+                          )}
+                          <span className="text-foreground">₹{Number(plan.estimatedMargin).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>
+                        </span>
                       ) : scripStatus?.isStale ? (
                         <span className="text-muted-foreground/50 flex items-center justify-end gap-1">
                           <AlertTriangle className="w-3 h-3" />

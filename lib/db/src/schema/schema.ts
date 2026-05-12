@@ -176,6 +176,7 @@ export const strategyPlans = pgTable("strategy_plans", {
   autoResume: boolean("auto_resume").default(true).notNull(),
   estimatedMargin: numeric("estimated_margin"),
   marginCalculatedAt: text("margin_calculated_at"),
+  isExpiryMargin: boolean("is_expiry_margin").default(false),
   consecutiveCapitalSkips: integer("consecutive_capital_skips").default(0).notNull(),
   autoPauseReason: text("auto_pause_reason"),
   autoPausedAt: text("auto_paused_at"),

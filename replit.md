@@ -64,6 +64,25 @@ The platform is designed to scale to multiple brokers without changing the core 
 
 ## Milestones
 
+### [MILESTONE] Margin Scheduler Fix + Expiry Day Badge — verified 2026-05-12
+
+**Task #251** — Two margin calculation fixes:
+
+**Fix 1 — Scheduler no longer skips after restart/republish:**
+Root cause: `runMarginCalcForAllBrokers` required `isPrimary && isConnected` to find a broker, but neither flag was set on "Kotak Neo - Production" after server restart. Changed to: prefer `isPrimary` first, fall back to any connected Kotak Neo broker, then any configured Kotak Neo broker. Also removed the redundant `isPrimary` guard inside `calculatePlanMargins` itself (caller is now responsible for broker selection). `isMarginsCalculatedToday` guard updated with same fallback logic.
+
+**Fix 2 — `isExpiryMargin` DB column + "Expiry" badge:**
+Added `is_expiry_margin boolean` to `strategy_plans` table. `calculatePlanMargins` now persists `isExpiryMargin: isExpiry` alongside `estimatedMargin` and `marginCalculatedAt`. The Settings margin table shows an orange "Expiry" badge next to the figure when `isExpiryMargin=true`.
+
+**Verified from logs (2026-05-12 restart):**
+- `[MARGIN-SCHED] 09:12 IST — running calculatePlanMargins for primary broker 2KVW9` ✅
+- `EXPIRY DAY: spanRate ×1.16 → 11.60%` applied to both NIFTY plans ✅ (Tuesday IS expiry day for these plans)
+- `[MARGIN-SCHED] Margins verified via marginCalculatedAt — guard persisted for today` ✅
+
+**Key files:** `artifacts/api-server/src/cm-kotak-neo-v3.ts`, `lib/db/src/schema/schema.ts`, `artifacts/mentors-world/src/pages/settings.tsx`
+
+
+
 ### [MILESTONE] HSM as single price source for TSL, SL, and Profit Target — verified 2026-05-11
 
 **Finding:** All three exit systems (TSL trailing stop, plan-level SL, plan-level profit target) receive prices exclusively through HSM ticks when HSM is live. This was verified by tracing the full data flow from the HSM WS handler to each consumer.
