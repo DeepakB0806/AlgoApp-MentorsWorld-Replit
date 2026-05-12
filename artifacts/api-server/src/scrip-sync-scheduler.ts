@@ -124,7 +124,7 @@ export function scheduleStartupScripSyncRetry(storage: IStorage, attempt: number
               `[SCRIP-MASTER] Startup auto-recovery: recovered after ${attempt} attempt(s) — ${result.synced} contracts loaded`,
             );
             const { calculatePlanMargins } = await import("./cm-kotak-neo-v3");
-            await calculatePlanMargins(storage, bc).catch(err =>
+            await calculatePlanMargins(storage, bc, { skipPrimaryGuard: true }).catch(err =>
               console.warn(`[SCRIP-MASTER] Capital margin calc error (startup recovery): ${err}`)
             );
           } else {
@@ -177,7 +177,7 @@ export function scheduleScripSyncRetry(
           `[SCRIP-MASTER] Auto-recovery: recovered after ${attempt} attempt(s) — ${result.synced} contracts loaded`,
         );
         const { calculatePlanMargins } = await import("./cm-kotak-neo-v3");
-        await calculatePlanMargins(storage, brokerConfig).catch(err =>
+        await calculatePlanMargins(storage, brokerConfig, { skipPrimaryGuard: true }).catch(err =>
           console.warn(`[SCRIP-MASTER] Capital margin calc error (retry recovery): ${err}`)
         );
       } else {

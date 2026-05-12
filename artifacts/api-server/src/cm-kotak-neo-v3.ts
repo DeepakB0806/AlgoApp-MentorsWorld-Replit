@@ -505,9 +505,19 @@ async function cmDistanceSpanBlock(
 export async function calculatePlanMargins(
   storage: IStorage,
   brokerConfig: BrokerConfig,
+  { skipPrimaryGuard = false }: { skipPrimaryGuard?: boolean } = {},
 ): Promise<void> {
   const MLOG = "[MARGIN-CALC]";
   try {
+    // Primary-only guard — prevents runScripMasterSyncPhaseB and other multi-broker
+    // paths from triggering a full recalc for every broker in parallel.
+    // The scheduler and startup paths pass skipPrimaryGuard=true after selecting
+    // the correct broker themselves (primary if set, connected fallback otherwise).
+    if (!skipPrimaryGuard && !brokerConfig.isPrimary) {
+      console.log(`${MLOG} Skipping — not primary broker (${brokerConfig.name})`);
+      return;
+    }
+
     const allPlans = await storage.getStrategyPlans();
     // Primary broker calculates margins for ALL active/deployed plans across all users —
     // not just plans belonging to its own brokerConfigId.
@@ -681,7 +691,7 @@ async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): P
     }
     const brokerLabel = primaryBroker.isPrimary ? "primary" : "connected (no primary set)";
     console.log(`[MARGIN-SCHED] ${timeStr} IST — running calculatePlanMargins for ${brokerLabel} broker ${primaryBroker.ucc || primaryBroker.id}`);
-    await calculatePlanMargins(storage, primaryBroker).catch(err =>
+    await calculatePlanMargins(storage, primaryBroker, { skipPrimaryGuard: true }).catch(err =>
       console.warn(`[MARGIN-SCHED] calculatePlanMargins error for ${primaryBroker.ucc}: ${err}`)
     );
   } catch (err) {

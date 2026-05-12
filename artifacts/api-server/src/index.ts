@@ -180,7 +180,7 @@ app.get("/api/health", (_req, res) => {
         const result = await runScripMasterSync(storage, primaryBroker);
         if ((result as any).success) {
           log(`[STARTUP] Scrip master Phase A: ${(result as any).synced} contracts via ${primaryBroker.ucc || primaryBroker.id}`);
-          calculatePlanMargins(storage, primaryBroker).catch((err: any) =>
+          calculatePlanMargins(storage, primaryBroker, { skipPrimaryGuard: true }).catch((err: any) =>
             log(`[STARTUP] Capital margin calc error: ${err}`)
           );
         } else {
