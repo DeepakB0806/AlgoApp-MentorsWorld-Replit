@@ -686,7 +686,7 @@ async function runMarginCalcForAllBrokers(storage: IStorage, timeStr: string): P
       allConfigs.find(bc => bc.isPrimary && bc.brokerName === "kotak_neo") ||
       allConfigs.find(bc => bc.isConnected && bc.brokerName === "kotak_neo");
     if (!primaryBroker) {
-      console.log(`[MARGIN-SCHED] ${timeStr} IST — no Kotak Neo broker configured, skipping`);
+      console.log(`[MARGIN-SCHED] ${timeStr} IST — no Kotak Neo broker found (none configured or connected), skipping`);
       return;
     }
     const brokerLabel = primaryBroker.isPrimary ? "primary" : "connected (no primary set)";
