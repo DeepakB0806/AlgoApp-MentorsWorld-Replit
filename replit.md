@@ -270,3 +270,18 @@ if (symbol && ltp !== undefined) {
 **Diagnostic — if this breaks, check:**
 1. Badge missing on expiry day → check `SELECT is_expiry_margin, margin_calculated_at FROM strategy_plans WHERE name ILIKE '%nifty%'` — if `false`, margin calc ran before expiry day or on a non-expiry day
 2. Badge shows on non-expiry day → `is_expiry_margin` is stale from a previous expiry — will clear on next daily margin calc
+
+### [MILESTONE] Fix Recalculate Margins button silently skipping — verified 2026-05-12
+
+**Task:** #258 — Fix recalculate-margins endpoint skipping non-primary broker
+
+**What changed:** The "↻ Recalculate" button was calling `calculatePlanMargins` without `{ skipPrimaryGuard: true }`. That guard exits immediately if the broker config is not `isPrimary`, returning silently while the endpoint still responded `{ success: true }`. The toast showed "Margins recalculated" but nothing happened. One-line fix: pass `{ skipPrimaryGuard: true }` in the endpoint since it's an explicit admin action targeting a specific broker.
+
+**Key files:**
+- `artifacts/api-server/src/routes/broker-routes.ts:164` — added `{ skipPrimaryGuard: true }` to `calculatePlanMargins` call in `POST /api/broker-configs/:id/calculate-margins`
+
+**How it works:** `skipPrimaryGuard: true` tells `calculatePlanMargins` to skip the `!brokerConfig.isPrimary` early-return and run the full margin calc for whichever broker was passed. The daily scheduler already used this flag; the manual endpoint now does too.
+
+**Diagnostic — if this breaks, check:**
+1. After clicking Recalculate, server logs must show `[MARGIN-CALC] Calculating margins for N plan(s)` — if "Skipping — not primary broker" appears instead, the flag is missing again
+2. `SELECT estimated_margin, margin_calculated_at FROM strategy_plans` — `margin_calculated_at` should update to within seconds of the button click
