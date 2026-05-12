@@ -64,6 +64,30 @@ The platform is designed to scale to multiple brokers without changing the core 
 
 ## Milestones
 
+### [MILESTONE] HSI-Driven Trade Confirmation + MTM Sanity Guard — verified 2026-05-12
+
+**Task:** #253 — HSI-Driven Trade Confirmation (Primary) + REST Fallback
+
+**What changed:** HSI is now the primary source for fill prices on both entry and exit orders. REST `getOrderHistory` is a 10s-timeout fallback only. `ctx.price` (index spot) can never be stored as a fill price again. Ghost exit trades are addressed by 3-retry DB writes and the HSI exit registry. The MTM monitor skips any NFO/BFO leg whose `entryPrice > 5000` as a safety net for any stale records already in the DB.
+
+**Key files:**
+- `artifacts/api-server/src/hsi-kotak-neo-v3.ts` — full refactor: singleton vars → per-UCC `HsiState` instances (`hsiInstances` Map); `orderConfirmRegistry` + `exitOrderRegistry` exported; `handleOrderConfirm()` updates entry fill price and closes exit trade (3-retry) on every `trade`/`order COMPLETE` event; `startHsiGateway` loops all connected Kotak Neo configs
+- `artifacts/api-server/src/te-kotak-neo-v3.ts` — `getFillPrice` rewritten: Step 1 = HSI callback (10s timeout), Step 2 = REST fallback, Step 3 = `0` (never `ctx.price`); `closeTrade` registers `closeOrderId → tradeId` in exit registry before calling `getFillPrice`; pre-write check skips final `updateStrategyTrade` if HSI already closed the trade; 3-retry wrapper on the "closed" DB write
+- `artifacts/api-server/src/storage.ts` — `getTradeByOrderId(orderId)` added to `IStorage` interface + `DatabaseStorage`; queries `strategy_trades.order_id`
+- `artifacts/api-server/src/mtm-monitor.ts` — sanity guard in `computePlanMTM`: skips NFO/BFO legs where `entryPrice > 5000`, logs `[MTM-MONITOR] WARN: skipping {symbol} — entry price ₹{price} looks like index spot`
+
+**How it works:**
+- **Entry fill price**: `closeTrade` (or entry basket) gets an `orderId` → `getFillPrice` registers a callback in `orderConfirmRegistry` and races a 10s `Promise`. HSI fires `order COMPLETE` → `handleOrderConfirm` resolves the callback with `avgPrc` AND proactively writes `strategy_trades.price = avgPrc`. `getFillPrice` returns in < 1s in normal operation. If HSI is down, REST `getOrderHistory` runs (existing logic). If REST also fails → return `0` → MTM guard skips the leg.
+- **Exit confirmation**: `closeTrade` calls `registerExitOrder(closeOrderId, trade.id)` immediately after order placement. HSI fires → `handleOrderConfirm` writes `status=closed, exitPrice=avgPrc, pnl=calculated` with 3 retries. `closeTrade`'s own final write checks `getStrategyTrade(id)` first — if already closed with a valid exitPrice, it skips to avoid overwrite.
+- **Per-UCC instances**: `startHsiGateway` now iterates all connected `kotak_neo` broker configs and starts one independent `HsiState` + WS + heartbeat per config. `getHsiStatus()` reads from the first instance (backward-compat with existing status routes).
+
+**Diagnostic — if this breaks, check:**
+1. `[HSI] Starting HSI instance for UCC=...` must appear once per connected Kotak Neo broker config on startup
+2. `[HSI] Auth confirmed (cn ok)` must appear for each instance — if missing, relay/direct fallback path applies
+3. `[TE] Fill price from HSI (XXXXXXXX): ₹N.NN [order]` must appear after any order placement — if `[TE] WARN: HSI fill confirmation timeout` appears instead, HSI is disconnected and REST fallback is active
+4. `[HSI] Entry fill confirmed: {symbol} orderId=... avgPrc=N` and/or `[HSI] Exit confirmed via HSI: tradeId=... avgPrc=N` confirm proactive DB writes fired
+5. `[MTM-MONITOR] WARN: skipping {symbol} — entry price ₹N looks like index spot` means an old stale trade with wrong entryPrice is being safely skipped
+
 ### [MILESTONE] Margin Scheduler Fix + Expiry Day Badge — verified 2026-05-12
 
 **Task #251** — Two margin calculation fixes:

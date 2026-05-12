@@ -26,6 +26,7 @@ import {
   getTargetExpiry,
 } from "./option-symbol-builder";
 import { liveContractCache, brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
+import { registerOrderCallback, deregisterOrderCallback, registerExitOrder } from "./hsi-kotak-neo-v3";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -43,15 +44,42 @@ import { liveContractCache, brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 // FILL PRICE LOOKUP
 // After a Kotak order is placed, fetch actual execution price from order history
 // ═══════════════════════════════════════════════════════════════════════════════
-async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallback: number, isRetry = false): Promise<{ fillPrice: number; status: string; reason: string; filledQty: number }> {
+// Build #253: getFillPrice — HSI primary (real-time avgPrc via WS event), REST fallback, 0 last resort.
+// Never returns the raw fallback/ctx.price on total failure — prevents index spot price stored as option fill price.
+async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, _fallback: number): Promise<{ fillPrice: number; status: string; reason: string; filledQty: number }> {
+  // ── Step 1: Await HSI order-confirmation (primary path) ────────────────────
+  const hsiResult = await new Promise<{ avgPrc: number; source: string } | null>((resolve) => {
+    const timeout = setTimeout(() => {
+      deregisterOrderCallback(orderId);
+      resolve(null);
+    }, 10_000);
+    registerOrderCallback(orderId, (result) => {
+      clearTimeout(timeout);
+      deregisterOrderCallback(orderId);
+      resolve(result);
+    });
+  });
+
+  if (hsiResult && hsiResult.avgPrc > 0) {
+    console.log(`[TE] Fill price from HSI (${orderId.slice(0, 8)}): ${hsiResult.avgPrc} [${hsiResult.source}]`);
+    return { fillPrice: hsiResult.avgPrc, status: "COMPLETED", reason: "", filledQty: 0 };
+  }
+
+  // ── Step 2: REST fallback — HSI disconnected or timed out ──────────────────
+  console.warn(`[TE] WARN: HSI fill confirmation timeout for ${orderId.slice(0, 8)} — falling back to REST getOrderHistory`);
   try {
     const histResult = await EL.getOrderHistory(brokerConfig, orderId);
 
     // TASK #119: Retry once after 1s if history is empty (race condition after placement)
-    if ((!histResult.success || !Array.isArray(histResult.data) || histResult.data.length === 0) && !isRetry) {
+    if (!histResult.success || !Array.isArray(histResult.data) || histResult.data.length === 0) {
       console.log(`[TE] getOrderHistory empty for ${orderId} — retrying in 1s...`);
       await new Promise(r => setTimeout(r, 1000));
-      return getFillPrice(brokerConfig, orderId, fallback, true);
+      const retry = await EL.getOrderHistory(brokerConfig, orderId);
+      if (!retry.success || !Array.isArray(retry.data) || retry.data.length === 0) {
+        console.warn(`[TE] REST fill lookup failed after retry for ${orderId.slice(0, 8)} — returning 0`);
+        return { fillPrice: 0, status: "UNKNOWN", reason: "History empty after retry", filledQty: 0 };
+      }
+      Object.assign(histResult, retry);
     }
 
     if (histResult.success && Array.isArray(histResult.data) && histResult.data.length > 0) {
@@ -61,7 +89,6 @@ async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallbac
       console.debug(`[TE] RAW HISTORY DEBUG [${orderId}]: length=${histResult.data.length} | index[0] keys=${Object.keys(firstElem || {}).join(',')} | ordSt[0]=${firstElem?.ordSts || firstElem?.ordSt || firstElem?.status || firstElem?.stText} | ordSt[last]=${lastElem?.ordSts || lastElem?.ordSt || lastElem?.status || lastElem?.stText}`);
 
       // Kotak Neo V3 assumed newest-first (index 0). Verify via RAW HISTORY DEBUG log on first live trade.
-      // If debug log shows real status is at [last], change data[0] → data[data.length - 1] and remove debug line.
       const latest = histResult.data[0] as any;
 
       const fill = Number(
@@ -86,16 +113,17 @@ async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, fallbac
       const filledQty = Number(latest?.filledShares || latest?.fldQty || latest?.fil_qty || 0);
 
       if (fill > 0) {
-        console.log(`[TE] Fill price from order history (${orderId.slice(0,8)}): ${fill} (fallback was ${fallback}) | status: ${normalizedStatus}`);
+        console.log(`[TE] Fill price from REST (${orderId.slice(0, 8)}): ${fill} | status: ${normalizedStatus}`);
         return { fillPrice: fill, status: normalizedStatus, reason, filledQty };
       }
-      return { fillPrice: fallback, status: normalizedStatus, reason, filledQty };
     }
-    return { fillPrice: fallback, status: "UNKNOWN", reason: "History empty after retry", filledQty: 0 };
   } catch (err: any) {
-    console.error(`[TE] Error in getFillPrice for ${orderId}:`, err);
-    return { fillPrice: fallback, status: "UNKNOWN", reason: err.message, filledQty: 0 };
+    console.error(`[TE] REST getOrderHistory error for ${orderId}:`, err);
   }
+
+  // ── Step 3: Total failure — return 0, never ctx.price ─────────────────────
+  console.warn(`[TE] WARN: Both HSI and REST fill lookup failed for ${orderId.slice(0, 8)} — storing 0 (MTM guard will skip this leg)`);
+  return { fillPrice: 0, status: "UNKNOWN", reason: "HSI timeout + REST failure", filledQty: 0 };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1519,17 +1547,44 @@ async function closeTrade(
 
     const closeOrderId = orderResult.data?.orderNo;
     if (closeOrderId) {
-      exitPrice = (await getFillPrice(brokerConfig, closeOrderId, exitPrice)).fillPrice;
+      // Build #253: register exit order in HSI registry BEFORE awaiting getFillPrice,
+      // so HSI can close the trade proactively even if this call path is interrupted.
+      registerExitOrder(closeOrderId, trade.id);
+      const fill = (await getFillPrice(brokerConfig, closeOrderId, exitPrice)).fillPrice;
+      if (fill > 0) exitPrice = fill;
     }
+  }
+
+  // Build #253: If HSI already closed this trade via exitOrderRegistry (handleOrderConfirm),
+  // skip the write to avoid overwriting correct exitPrice/pnl with stale values.
+  const latestTrade = await storage.getStrategyTrade(trade.id);
+  if (latestTrade?.status === "closed" && (latestTrade?.exitPrice ?? 0) > 0) {
+    console.log(`[TRADE] Trade ${trade.id} already closed by HSI — skipping redundant DB write`);
+    tradingCache.invalidateOpenTrades(trade.planId);
+    return latestTrade;
   }
 
   const entryPrice = trade.price || 0;
   const qty = trade.quantity || 1;
   const pnl = trade.action === "BUY" ? (exitPrice - entryPrice) * qty : (entryPrice - exitPrice) * qty;
 
-  const updated = await storage.updateStrategyTrade(trade.id, {
-    status: "closed", pnl: Math.round(pnl * 100) / 100, ltp: exitPrice, exitPrice, exitAction, exitedAt: now, updatedAt: now,
-  });
+  // Build #253: 3-retry wrapper — DB write failure here causes ghost trade (stays "open" in DB forever)
+  let updated: typeof trade | undefined;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      updated = await storage.updateStrategyTrade(trade.id, {
+        status: "closed", pnl: Math.round(pnl * 100) / 100, ltp: exitPrice, exitPrice, exitAction, exitedAt: now, updatedAt: now,
+      }) ?? undefined;
+      break;
+    } catch (err: any) {
+      if (attempt < 3) {
+        console.warn(`[TRADE] updateStrategyTrade "closed" failed (attempt ${attempt}/3) tradeId=${trade.id}: ${err?.message} — retrying in 500ms`);
+        await new Promise(r => setTimeout(r, 500));
+      } else {
+        console.error(`[TRADE] WARN: updateStrategyTrade "closed" failed after 3 retries — tradeId=${trade.id} may remain open (ghost trade risk)`);
+      }
+    }
+  }
 
   tradingCache.invalidateOpenTrades(trade.planId);
 

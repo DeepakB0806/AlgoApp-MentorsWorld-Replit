@@ -29,6 +29,16 @@ async function computePlanMTM(
   for (const trade of trades) {
     const entryPrice = trade.price ?? 0;
     const qty = trade.quantity ?? 0;
+
+    // Build #253 — MTM sanity guard: skip legs where entryPrice looks like an index spot price,
+    // not an option premium. NFO/BFO options are never priced above ₹5,000 per lot at entry.
+    // This protects against wrong fill prices stored from the ctx.price fallback (e.g. ₹23,624).
+    const exch = (trade.exchange ?? "").toUpperCase();
+    if ((exch === "NFO" || exch === "BFO") && entryPrice > 5000) {
+      console.warn(`${LOG_PREFIX} WARN: skipping ${trade.tradingSymbol} — entry price ₹${entryPrice} looks like index spot, not option premium (tradeId=${trade.id})`);
+      continue;
+    }
+
     capital += entryPrice * qty;
 
     const token = brokerSymbolToTokenMap.get(trade.tradingSymbol);

@@ -160,6 +160,7 @@ export interface IStorage {
   getUnsettledClosedTrades(): Promise<StrategyTrade[]>;
   markTradesPnlCalculated(ids: string[]): Promise<void>;
   getOpenTradesWithTsl(): Promise<StrategyTrade[]>;
+  getTradeByOrderId(orderId: string): Promise<StrategyTrade | undefined>;
 
   // Strategy Daily P&L - daily P&L log entries
   getStrategyDailyPnl(planId: string): Promise<StrategyDailyPnl[]>;
@@ -1050,6 +1051,13 @@ export class DatabaseStorage implements IStorage {
         isNotNull(strategyTrades.trailingStep),
         gt(strategyTrades.trailingStep, 0)
       ));
+  }
+
+  async getTradeByOrderId(orderId: string): Promise<StrategyTrade | undefined> {
+    const [result] = await db.select().from(strategyTrades)
+      .where(eq(strategyTrades.orderId, orderId))
+      .limit(1);
+    return result;
   }
 
   async createStrategyTrade(trade: InsertStrategyTrade): Promise<StrategyTrade> {
