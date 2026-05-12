@@ -237,3 +237,21 @@ if (symbol && ltp !== undefined) {
 2. `[FIT-CHECK] Next fit check scheduled at 09:15 IST tomorrow` must appear — if missing, `scheduleFitCheck` was not called from `startCapitalManager`
 3. `GET /api/admin/fit-log?date=YYYY-MM-DD` returns audit rows — empty means either fit check hasn't fired yet or no connected brokers
 4. DB table `daily_strategy_fit` — unique constraint `(date, planId)` ensures idempotent upserts; check with `SELECT * FROM daily_strategy_fit ORDER BY created_at DESC LIMIT 20`
+
+### [MILESTONE] TE capital gating reads expiryMultiplier from DB — verified 2026-05-12
+
+**Task:** #256 — Fix TE capital gating hardcoded 1.5× expiry multiplier
+
+**What changed:** The Trade Executor pre-flight loop (PFL) no longer hardcodes `estimatedMargin * 1.5` on expiry day. It now reads `expiryMultiplier` from `index_margin_settings` per index (NIFTY = 1.25 in production) and applies that value, matching what the frontend capital gating display already does after #254.
+
+**Key files:**
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:357-365` — pre-loads `getAllIndexMarginSettings()` into `expiryMultiplierByIndex: Map<string, number>` once per webhook signal, before the per-UCC group loop
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:402-412` — E9 block: replaced `estimatedMargin * 1.5` with `estimatedMargin * expiryMult` where `expiryMult = expiryMultiplierByIndex.get(plan.ticker) ?? 1.25`; log message updated to show actual multiplier value
+
+**How it works:** On each incoming webhook signal, `getAllIndexMarginSettings()` is called once to fetch all index rows. A `Map<indexName, number>` is built. For each plan in the PFL loop, `plan.ticker` (e.g. `"NIFTY"`) is looked up in the map. If found, that multiplier is used; if not, 1.25 (schema default) is the fallback. The gating comparison and log message both reflect the actual value: `(1.25x expiry)` instead of the old `(1.5x expiry)`.
+
+**Diagnostic — if this breaks, check:**
+1. On expiry day, `[PFL] ⛔` log must show `(1.25x expiry)` not `(1.5x expiry)` when a plan is skipped
+2. On expiry day, successful plans should consume `estimatedMargin × 1.25` from `remaining` — check by comparing `remaining` before and after a plan fires
+3. If plans are incorrectly skipped on expiry day, `SELECT index_name, expiry_multiplier FROM index_margin_settings WHERE index_name = 'NIFTY'` — confirm value is as configured
+4. If `expiryMultiplierByIndex` is empty (all plans fall back to 1.25), check `storage.getAllIndexMarginSettings()` — table may be empty or DB unreachable at signal time

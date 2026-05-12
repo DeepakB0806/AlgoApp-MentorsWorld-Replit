@@ -354,6 +354,13 @@ export async function processTradeSignal(
   const autoPauseSettingRaw = await storage.getSetting("auto_pause_skip_threshold");
   const autoPauseThreshold = Math.max(1, parseInt(autoPauseSettingRaw?.value || "3", 10) || 3);
 
+  // #256 Load expiry multipliers from index_margin_settings (single source of truth — configurable via Settings → Indices)
+  const allIdxMarginSettings = await storage.getAllIndexMarginSettings();
+  const expiryMultiplierByIndex = new Map<string, number>();
+  for (const ims of allIdxMarginSettings) {
+    expiryMultiplierByIndex.set(ims.indexName, Number(ims.expiryMultiplier));
+  }
+
   const plansByBcId = new Map<string, typeof rankedPlans>();
   for (const plan of rankedPlans) {
     const bcId = plan.brokerConfigId!;
@@ -392,13 +399,14 @@ export async function processTradeSignal(
           continue;
         }
 
-        // E9: expiry day 1.5x uplift (applied only at comparison, stored value unchanged)
+        // E9: expiry day uplift — multiplier from index_margin_settings (configurable via Settings → Indices), not hardcoded
         const instrConf = tradingCache.getInstrumentConfig(plan.ticker || "", plan.exchange || "");
         const isExpiryDay = !!(instrConf?.expiryDay && instrConf.expiryDay === todayDayName);
-        const gatingMargin = isExpiryDay ? estimatedMargin * 1.5 : estimatedMargin;
+        const expiryMult = isExpiryDay ? (expiryMultiplierByIndex.get(plan.ticker || "") ?? 1.25) : 1;
+        const gatingMargin = estimatedMargin * expiryMult;
 
         if (gatingMargin > remaining) {
-          const msg = `Plan "${plan.name}" (rank=${plan.rank ?? "unranked"}) SKIPPED — margin ₹${gatingMargin.toFixed(0)}${isExpiryDay ? " (1.5x expiry)" : ""} > available ₹${remaining.toFixed(0)}`;
+          const msg = `Plan "${plan.name}" (rank=${plan.rank ?? "unranked"}) SKIPPED — margin ₹${gatingMargin.toFixed(0)}${isExpiryDay ? ` (${expiryMult}x expiry)` : ""} > available ₹${remaining.toFixed(0)}`;
           console.log(`[PFL] ⛔ ${msg}`);
           logPFL(plan, bc.brokerName, webhookData, "skipped", msg, { resolvedAction: signalContext?.resolvedAction, ticker: plan.ticker || "", exchange: plan.exchange || "" });
           groupResults.push({ success: false, action: "hold", broker: bc.brokerName, planId: plan.id, message: msg });
