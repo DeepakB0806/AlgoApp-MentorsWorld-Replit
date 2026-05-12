@@ -1101,6 +1101,9 @@ export function BrokerLinking() {
                       <span className="font-semibold text-amber-400">
                         Margin Amt: ₹{Number(plan.estimatedMargin).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
+                      {plan.isExpiryMargin && (
+                        <Badge className="text-[9px] px-1 py-0 h-4 bg-orange-500/20 text-orange-400 border-orange-400/30 font-semibold">Expiry Day</Badge>
+                      )}
                       <span className="text-muted-foreground/50">|</span>
                       <span className="text-muted-foreground">
                         Margin Validity: {scripStatus?.intradayIntervalMins > 0

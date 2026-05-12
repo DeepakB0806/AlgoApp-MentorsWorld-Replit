@@ -255,3 +255,18 @@ if (symbol && ltp !== undefined) {
 2. On expiry day, successful plans should consume `estimatedMargin × 1.25` from `remaining` — check by comparing `remaining` before and after a plan fires
 3. If plans are incorrectly skipped on expiry day, `SELECT index_name, expiry_multiplier FROM index_margin_settings WHERE index_name = 'NIFTY'` — confirm value is as configured
 4. If `expiryMultiplierByIndex` is empty (all plans fall back to 1.25), check `storage.getAllIndexMarginSettings()` — table may be empty or DB unreachable at signal time
+
+### [MILESTONE] Expiry Day badge on broker-linking strategy card — verified 2026-05-12
+
+**Task:** #257 — Expiry Day badge on strategy card
+
+**What changed:** The strategy card in the Broker Linking view now shows an orange "Expiry Day" badge inline with the "Margin Amt" row whenever `plan.isExpiryMargin = true`. Previously the badge only appeared in the Capital Gating Status table in Settings.
+
+**Key files:**
+- `artifacts/mentors-world/src/components/broker-linking.tsx:1107-1109` — added `{plan.isExpiryMargin && <Badge ...>Expiry Day</Badge>}` directly after the Margin Amt span, matching the exact className from the Settings table badge (`bg-orange-500/20 text-orange-400 border-orange-400/30`)
+
+**How it works:** `plan.isExpiryMargin` is a boolean column on `strategy_plans` (added in Task #251) that the margin calc sets to `true` when it runs on an expiry day. The flag persists in the DB until the next margin calc. The badge renders when the flag is true and the plan has an estimated margin — no new queries.
+
+**Diagnostic — if this breaks, check:**
+1. Badge missing on expiry day → check `SELECT is_expiry_margin, margin_calculated_at FROM strategy_plans WHERE name ILIKE '%nifty%'` — if `false`, margin calc ran before expiry day or on a non-expiry day
+2. Badge shows on non-expiry day → `is_expiry_margin` is stale from a previous expiry — will clear on next daily margin calc
