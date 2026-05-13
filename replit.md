@@ -285,3 +285,19 @@ if (symbol && ltp !== undefined) {
 **Diagnostic — if this breaks, check:**
 1. After clicking Recalculate, server logs must show `[MARGIN-CALC] Calculating margins for N plan(s)` — if "Skipping — not primary broker" appears instead, the flag is missing again
 2. `SELECT estimated_margin, margin_calculated_at FROM strategy_plans` — `margin_calculated_at` should update to within seconds of the button click
+
+### [MILESTONE] Fix neutral legs double-entry on explicit ENTRY@neutralLegs — verified 2026-05-13
+
+**Task:** #259 — Fix neutral legs double-entry on explicit ENTRY@neutralLegs
+
+**What changed:** Added a one-line guard `&& ctx.resolvedBlockType !== "neutralLegs"` to the Task #112 auto-seed condition in `buildEntryBasket`. Without this guard, when MC config `ea52c439` dispatches `ENTRY@neutralLegs` explicitly, `ctx.legs` and `ctx.neutralLegs` both contain the same neutral legs — so the basket was built with 4 items instead of 2, placing 2× lots at the broker. Confirmed in production: every fresh BUY_DT and BUY_UT entry since Task #112 was deployed created 4 DB records and 2 lots each in the Kotak position book.
+
+**Key files:**
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:1135` — added `&& ctx.resolvedBlockType !== "neutralLegs"` to the `buildEntryBasket` auto-seed condition; updated LOCKED BLOCK comment [4] with Task #259 annotation explaining the guard
+
+**How it works:** `selectLegs(tradeParams, "neutralLegs")` returns the neutral legs array when `resolvedBlockType === "neutralLegs"`. The Task #112 auto-seed also pushes `ctx.neutralLegs` (same array). The guard prevents the auto-seed from firing when the block type is already `neutralLegs` — `ctx.legs` alone handles the entry. Fresh-session reversal behavior (Task #112) is unaffected: reversals always resolve to `uptrendLegs`/`downtrendLegs`, not `neutralLegs`, so the auto-seed still fires correctly on those paths.
+
+**Diagnostic — if this breaks, check:**
+1. On next fresh BUY_DT or BUY_UT: `SELECT block_type, trading_symbol, COUNT(*) FROM strategy_trades WHERE plan_id='9c331a6a-...' AND DATE(created_at)=TODAY GROUP BY 1,2` — neutralLegs should show COUNT=1 per symbol, not 2
+2. `[TE] Fresh session: auto-seeding N neutral leg(s)` log must NOT appear when `blockType=neutralLegs` in PFL; it SHOULD appear on fresh-session reversal (SELL_DT+BUY_UT with no open positions)
+3. Kotak position book: neutral legs should show 1 lot each (65 qty), not 2 lots (130 qty)

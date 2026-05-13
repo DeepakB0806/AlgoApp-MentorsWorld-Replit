@@ -1120,11 +1120,16 @@ async function executeLegBasket(
 // TASK #112: Auto-seeds neutral legs on fresh sessions (no open neutral) before the
 // directional block — prevents margin rejection on SELL without hedge.
 // Safe during reversals: neutral remains in currentOpen (remainingOpen) → hasOpenNeutral=true → skipped.
+// TASK #259: resolvedBlockType !== "neutralLegs" guard is MANDATORY. When the MC dispatcher
+// sends ENTRY@neutralLegs explicitly, ctx.legs === ctx.neutralLegs (selectLegs returns neutralLegs).
+// Without this guard both are pushed → 4 broker orders instead of 2 (confirmed 2× lots in production).
+// Do NOT remove this guard. Fresh-session reversal behavior (Task #112) is unaffected — reversals
+// always resolve to uptrendLegs/downtrendLegs, never neutralLegs.
 function buildEntryBasket(ctx: TradeContext, currentOpen: StrategyTrade[]): BasketItem[] {
   const items: BasketItem[] = [];
 
   const hasOpenNeutral = currentOpen.some(t => t.blockType === "neutralLegs");
-  if (!hasOpenNeutral && ctx.neutralLegs.length > 0) {
+  if (!hasOpenNeutral && ctx.neutralLegs.length > 0 && ctx.resolvedBlockType !== "neutralLegs") {
     console.log(`[TE] Fresh session: auto-seeding ${ctx.neutralLegs.length} neutral leg(s) before directional entry.`);
     ctx.neutralLegs.forEach((leg, i) => items.push({ leg, blockType: "neutralLegs", legIndex: i }));
   }

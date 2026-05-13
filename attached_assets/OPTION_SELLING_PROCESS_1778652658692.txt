@@ -1,0 +1,17 @@
+OPTION SELLING PROCESS
+
+BUY UPTREND
+BUY_UT = Sell DT leg + Buy Neutral Legs (CE+PE)
+SELL_UT = Buy DT (same option) leg + Sell Neutral Legs (CE+PE)
+
+BUY DOWNTREND
+BUY_DT = Sell DT leg + Buy Neutral Legs (CE+PE)
+SELL_UT = Buy DT (same option) leg + Sell Neutral Legs (CE+PE)
+
+SELL_UT + BUY_DT
+SELL_UT = Buy DT (same option) leg + Hold Sell Neutral Legs (CE+PE)
+BUY_DT = Sell DT leg
+
+SELL_DT + BUY_UT
+SELL_UT = Buy DT (same option) leg + Sell Neutral Legs (CE+PE)
+BUY_UT = Sell DT leg

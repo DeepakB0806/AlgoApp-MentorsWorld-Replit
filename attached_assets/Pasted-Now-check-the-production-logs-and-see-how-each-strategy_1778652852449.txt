@@ -1,0 +1,178 @@
+Now check the production logs and see how each strategy traded.
+This is very crucial, and I found NIFTY 50 OTM 1 SELL + OTM 12 BUY OPTION SELLING entered with 2 neutral legs.
+NIFTY OTM 12 LONG TERM - Entered and exited.
+NIFTY50 OTM 5 STRATEGY - Though margin shortfall showing entered trade.
+
+1 day ago
+
+Show less
+
+Analyzing trade entry conditions
+Let me pull the production logs and look at each strategy's trade activity.
+
+
+2 actions
+Let me get deeper context around each issue — the neutral legs entry, the OTM 12 exit, and the OTM 5 margin shortfall entry.
+
+
+2 actions
+Let me pull targeted logs for the OTM 5 margin shortfall entry, the OTM 12 MTM breach, and the full neutral-legs entry sequence.
+
+
+2 actions
+Let me pull the OTM 5 entry sequence and OTM 12 entry details simultaneously.
+
+
+2 actions
+I have enough from the logs. Let me give you a clear, per-issue breakdown of exactly what happened.
+
+What happened today — per strategy
+Issue 1 — NIFTY 50 OTM 1 SELL + OTM 12 BUY: "Entered with 2 neutral legs"
+What the logs show:
+
+At 4:03 AM, webhook BUY_DT fired for this plan via config ea52c439. The log clearly says:
+
+[TE] Skipping empty neutralLegs block (no legs configured)
+
+So today's ENTRY did NOT place any neutral legs — the neutral block was genuinely empty in the config.
+
+Only downtrendLegs was entered: sold NIFTY2651223650CE (1 leg).
+
+Then 3 minutes later, SELL_DT fired and the system found 2 legs in neutralLegs for this plan:
+
+[PFL] Plan "NIFTY 50 OTM 1 SELL + OTM 12 BUY OPTION SELLING" — 2 leg(s) found for neutralLegs
+
+It then closed them: sold NIFTY2651224200CE @ ₹0.05 and sold NIFTY2651223000PE @ ₹0.05.
+
+Root cause: Those 2 neutral legs were stale open trades from a prior session — still sitting in the strategy_trades table as open/active for this plan's neutralLegs block. Today's ENTRY never touched them, but the EXIT picked them up because it queries all unclosed trades for that block. They closed at ₹0.05 (effectively worthless) — so no material financial harm, but the exits were spurious.
+
+What needs fixing: The system needs a way to clean up or detect orphan open trades that belong to a previous session before a new entry fires.
+
+Issue 2 — NIFTY OTM 12 LONG TERM: "Entered and exited"
+What the logs show:
+
+This plan was already active with open positions before the BUY_DT signal. When BUY_DT fired and the new downtrend leg was placed, the MTM monitor ticked within ~2 seconds and detected:
+
+[MTM-MONITOR] MTM stoploss breached for plan "NIFTY OTM 12 LONG TERM" — MTM=-1532326, threshold=-500
+
+PersistentSquareOff immediately fired and closed 1 unclosed leg: NIFTY2651923000PE (May 19 expiry, market sell).
+
+Two separate concerns here:
+
+MTM value looks anomalous — MTM=-1532326 with a threshold of -500 is suspicious. If MTM is in rupees, that's ₹15.3 lakh in loss, which is extreme. If the MTM is being calculated in paise or as a raw integer from broker P&L fields, there may be a unit mismatch in the MTM calculation. This needs to be verified — at the time of squareoff, what were the actual open positions and their real P&L?
+
+The plan was already open (active status, had existing May 19 PE position). The BUY_DT signal added a new leg and the MTM monitor caught it immediately — but the MTM value seems far too large for newly entered positions worth a few hundred rupees. The pre-existing positions must have already been deeply in the red before today's signal fired.
+
+Issue 3 — NIFTY50 OTM 5 STRATEGY: "Margin shortfall showing but entered"
+What the logs show:
+
+At 3:43 AM the fit check ran and found all 3 plans fit:
+
+[FIT-CHECK] Done — fit=3, notFit=0
+[FIT-CHECK] UCC 2KVW9: 3 plans checked, capital=₹120909.85
+
+Margins at that time:
+
+Plan	Est. Margin
+OTM 1 SELL + OTM 12 BUY	₹66,875
+OTM 12 LONG TERM	₹5,180
+OTM 5 STRATEGY	₹11,719
+Total	₹83,774
+Capital: ₹120,909 — all plans cleared with ₹37k to spare.
+
+At entry time (4:03 AM), capital snapshot was ₹120,388 — no shortfall. OTM 5 entered legitimately.
+
+Where the "shortfall" you're seeing comes from: After the trades, the 4:14 AM margin recalc raised OTM 5's figure to ₹13,325 (was ₹11,719). At the same time, OTM 1's margin jumped to ₹66,914 and OTM 12 to ₹5,850. Total post-trade = ₹86,089. The UI likely shows the new (higher) margin figures against the post-trade capital snapshot (₹112,048), which still clears — but if the capital display hasn't refreshed, it might show red.
+
+No actual margin shortfall occurred at entry. The "shortfall" you see in the UI is a display artifact from the margin recalc running after the trades were already placed.
+
+Summary table
+Strategy	What happened	Root cause
+OTM 1 SELL + OTM 12 BUY	Exited 2 stale neutral legs it didn't enter today	Orphan open trades from prior session in strategy_trades, never cleaned up
+OTM 12 LONG TERM	Entered, then instantly square-offed by MTM monitor	MTM=-1,532,326 vs threshold=-500 — likely unit mismatch or pre-existing deep-loss position; threshold also appears very tight at ₹500
+OTM 5 STRATEGY	Entered fine; UI shows "shortfall" after	Post-trade margin recalc raised margin figures; not a real shortfall at entry time
+The OTM 12 MTM value is the most urgent thing to investigate — if that number is being computed in the wrong units (paise vs rupees, or using a raw broker integer field), it could trigger unintended squareoffs on every cycle. Want me to trace the MTM calculation code to find where that number comes from?
+
+
+Worked for 3 minutes
+Root cause: Those 2 neutral legs were stale open trades from a prior session — still sitting in the strategy_trades table as open/active for this plan's neutralLegs block. Today's ENTRY never touched them, but the EXIT picked them up because it queries all unclosed trades for that block. They closed at ₹0.05 (effectively worthless) — so no material financial harm, but the exits were spurious. - How this can happen when it was squared off yesterday? Check yesterday log and see the square off.
+
+[MTM-MONITOR] MTM stoploss breached for plan "NIFTY OTM 12 LONG TERM" — MTM=-1532326, threshold=-500 - It means the HSM is not getting the right price or calculation of that option.
+
+Rest issues I will update later
+
+1 day ago
+
+Show less
+
+Analyzing trade square-off logs (8 seconds)
+Good points — let me check yesterday's logs for the neutral leg squareoff, and simultaneously look at how MTM is computed to confirm the HSM price issue.
+
+
+2 actions
+Deployment logs don't go back to yesterday. Let me search the current logs for any earlier squareoff of those neutral leg symbols and simultaneously read the MTM monitor code to understand how that -1,532,326 figure is computed.
+
+
+2 actions
+Let me read the MTM monitor code to trace how -1,532,326 is calculated, and look at the trade execution code to understand how stale open trades are queried.
+
+
+3 actions
+Let me read the critical sections of the trade execution code — the fresh-session neutral seed logic and how trades get closed in the DB — plus getUnclosedTradesByPlan in storage.
+
+
+7 actions
+Let me read the close/squareoff logic in detail and the getPrice fallback to confirm the zero-price MTM hypothesis.
+
+
+3 actions
+I now have what I need from the code and logs. Both root causes are clear.
+
+Root Cause #1 — Stale neutral legs surviving into today
+Why deployment logs don't have yesterday: Production log retention is limited. But the code tells the full story.
+
+Looking at what happened at the start of today's session — right before the webhook fired, there were back-to-back DB connection errors:
+
+[Error] [PLAN-MONITOR] Tick error: Failed query — cause: terminating connection due to administrator command
+[Error] [SE] Sweep error — cause: terminating connection due to administrator command
+
+Now look at closeTrade in te-kotak-neo-v3.ts. The sequence is:
+
+Place the exit order at the broker → succeeds (Kotak confirms the order)
+Call getFillPrice → get actual fill from order history
+storage.updateStrategyTrade(trade.id, { status: "closed" ... }) → this DB write can silently fail
+If step 3 hits a DB connection error, the broker position is physically closed, but the strategy_trades record stays as status = "open". The trade is an orphan — real world: position gone, database: still open.
+
+Yesterday's squareoff of those two neutral legs (NIFTY2651224200CE + NIFTY2651223000PE) almost certainly hit exactly this scenario. The broker cleared the positions, but the DB write to mark them closed failed. Nothing in the current code retries or verifies the DB close write against broker reality.
+
+Today's entry: [TE] Skipping empty neutralLegs block (no legs configured) — correct, today's ENTRY created nothing. But getOpenTradesByPlan still found the two stale records from yesterday → EXIT closed them again at ₹0.05. Since these were worthless expired-day options, no real harm — but the exit was spurious.
+
+Root Cause #2 — MTM = -1,532,326 with threshold -500
+The user is correct — HSM price is the proximate cause, but the deeper issue is the fill price stored at entry.
+
+Trace through computePlanMTM:
+
+const legMTM = trade.action === "BUY"
+  ? (ltp - entryPrice) * qty    // ← ltp from HSM/getPrice
+  : (entryPrice - ltp) * qty;
+
+For MTM = -1,532,326 with qty = 65:
+
+(ltp − entryPrice) × 65 = −1,532,326
+→ (ltp − entryPrice) = −23,574
+
+The only way this number appears: entryPrice stored in the DB is the NIFTY underlying spot price (~23,624.5) rather than the option premium (~50–240 rupees).
+
+This happens through getFillPrice's fallback chain in te-kotak-neo-v3.ts. When EL.getOrderHistory is empty or fails (we see getOrderHistory empty for ... retrying in 1s... in the logs repeatedly), the fill price falls back to currentPrice — which is the NIFTY index spot price from the webhook signal payload (price=23624.5). That spot price gets stored in strategy_trades.price as the "entry price" of the option leg.
+
+So for NIFTY2651923000PE (May 19 PE), the stored entry price is ₹23,624 instead of, say, ₹50. When the MTM monitor fetches the actual option LTP (say ₹50 from HSM or REST quote):
+
+MTM = (50 − 23,624) × 65 = −23,574 × 65 = −1,532,310  ≈ −1,532,326
+
+That's the exact number in the log. The HSM price is correct for the option — it's the stored entry price that is wrong (spot price used as fill price fallback).
+
+Summary of both bugs
+#	Bug	Trigger	Effect
+1	DB write after squareoff not retried on connection failure	DB connection drop during updateStrategyTrade({ status: "closed" })	Broker position closed but trade stays "open" in DB → re-exits next day as spurious neutral leg
+2	getFillPrice falls back to underlying spot price when order history is empty	getOrderHistory empty/race condition → uses webhook price field as fallback	Option entry price stored as ₹23,624 (spot) not ₹50 (premium) → MTM monitor computes ₹−1.5M loss → immediate spurious squareoff
+Both are related — the order history race (getOrderHistory empty for ... retrying in 1s...) is the common thread. When order history lookup fails, the wrong price goes into the DB. If that plan also has a ₹500 MTM stoploss configured, it fires instantly on the next MTM tick.
