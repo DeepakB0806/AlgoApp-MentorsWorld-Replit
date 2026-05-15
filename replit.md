@@ -391,3 +391,19 @@ if (symbol && ltp !== undefined) {
 2. In browser DevTools → Network → `/api/sse/feed` (EventStream tab): after 09:12 IST, an event `margin_calc_complete` should appear in the stream
 3. Strategy card "Date: … IST" should update to today's date within seconds of the SSE event — if still showing yesterday's date, the `invalidateQueries` for `/api/strategy-plans` is not firing (check the `addEventListener("margin_calc_complete")` call in broker-linking.tsx)
 4. `fit_check_complete` fires from two places — the scheduled `runAndRescheduleFitCheck` and the chain inside `runAndRescheduleMarginCalc`; if one is missing, only one path emits
+
+### [MILESTONE] Keep legs intact on config change — verified 2026-05-15
+
+**Task:** #263 — Keep legs intact on config change
+
+**What changed:** Changing the Parent Configuration dropdown in the Trade Planning plan form (create or edit) no longer wipes execution legs, stoploss, profit target, trailing SL, or time logic. Users can now seamlessly switch between configs (e.g. 3-min vs 5-min timeframe variants of the same strategy) without rebuilding legs from scratch.
+
+**Key files:**
+- `artifacts/mentors-world/src/components/trade-planning.tsx:324` — `onValueChange` handler on the Parent Configuration `Select` reduced to `setConfigId(v)` only; all seven downstream reset calls (`setUptrendLegs([])`, `setDowntrendLegs([])`, `setNeutralLegs([])`, `setStoploss(...)`, `setProfitTarget(...)`, `setTrailingSL(...)`, `setTimeLogic(...)`) removed
+
+**How it works:** Legs, stoploss, and time logic are instrument-agnostic — they store strike type, direction, quantity, and risk values, none of which are config-specific. The existing `useEffect` (line 113–119) already handles the only things that genuinely need to refresh on config change: indicator badge selections (reset to new config's signal list) and exchange/ticker auto-fill (when blank). No other state needs resetting.
+
+**Diagnostic — if this breaks, check:**
+1. Open New Plan → select Config A → add legs → change to Config B → legs must still be present
+2. Open Edit Plan → change config → legs must be preserved and save correctly with the new configId
+3. Closing the dialog (Cancel or X) must still fully reset legs — `closeDialog()` is untouched and still calls all reset setters

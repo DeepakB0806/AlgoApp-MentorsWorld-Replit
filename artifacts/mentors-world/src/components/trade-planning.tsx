@@ -318,7 +318,7 @@ export function TradePlanning() {
           <div className="space-y-4">
             <div>
               <Label>Parent Configuration</Label>
-              <Select value={configId} onValueChange={(v) => { setConfigId(v); setUptrendLegs([]); setDowntrendLegs([]); setNeutralLegs([]); setStoploss({ enabled: false, mode: "amount", value: 0 }); setProfitTarget({ enabled: false, mode: "amount", value: 0 }); setTrailingSL({ enabled: false, activateAt: 0, lockProfitAt: 0, whenProfitIncreaseBy: 0, increaseTslBy: 0 }); setTimeLogic({ exitTime: "", exitOnExpiry: false, exitAfterDays: 0 }); }}>
+              <Select value={configId} onValueChange={(v) => { setConfigId(v); }}>
                 <SelectTrigger data-testid="select-plan-config">
                   <SelectValue placeholder="Select configuration" />
                 </SelectTrigger>
