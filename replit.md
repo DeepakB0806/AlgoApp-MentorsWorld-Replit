@@ -348,3 +348,20 @@ if (symbol && ltp !== undefined) {
 3. Margin recalc log: `[MARGIN-CALC] Plan "X" — status=Traded, skipping recalculation` must appear for any plan currently in trade during the daily 09:12 run
 4. UI: Broker Linking page → any plan with an active basket must show "● Traded" (blue) in its capital row; all others "○ Not Traded"
 5. If `tradedStatus` column is missing after deploy: run `pnpm --filter @workspace/db run push` — the column has `DEFAULT 'not_traded'` so it is safe to add to a populated table
+
+### [MILESTONE] Recalculate button also refreshes Available Funds — verified 2026-05-15
+
+**Task:** #261 — Recalculate button also refreshes Available Funds
+
+**What changed:** Clicking ↻ Recalculate now atomically recalculates margins AND refreshes the Available Funds capital snapshot in one action. Previously the user had to separately hit the funds refresh button to see updated capital after recalculating margins.
+
+**Key files:**
+- `artifacts/api-server/src/routes/broker-routes.ts:164-167` — after `calculatePlanMargins` completes, calls `refreshCapitalForBrokerConfig(storage, config.id)` and returns the snapshot in the response body alongside `{ success: true }`
+- `artifacts/mentors-world/src/components/broker-linking.tsx:597-598` — `onSuccess` of `recalculateMarginMutation` now invalidates both `["/api/strategy-plans"]` (margin figures) and `["/api/broker-capital-snapshots"]` (Available Funds)
+
+**How it works:** The backend does the capital refresh synchronously before responding, so by the time the frontend mutation resolves, the DB already holds a fresh snapshot. The two `invalidateQueries` calls then trigger React Query refetches for both data sets, causing the UI to display updated margin figures and Available Funds without any further user action. The standalone funds-refresh button is unchanged.
+
+**Diagnostic — if this breaks, check:**
+1. After clicking Recalculate, server logs must show `[CAPITAL-MGR] Manual refresh UCC X: ₹N` immediately after the `[MARGIN-CALC]` lines — if missing, `refreshCapitalForBrokerConfig` call was removed from the endpoint
+2. Available Funds figure in Broker Linking must update within 1-2s of the toast — if still stale, check that `queryKey: ["/api/broker-capital-snapshots"]` invalidation is present in `onSuccess`
+3. If the broker is not connected, `refreshCapitalForBrokerConfig` returns `reason: "broker not connected"` — margins are still recalculated; only the capital figure stays as-is (expected behaviour)

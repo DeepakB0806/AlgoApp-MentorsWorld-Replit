@@ -590,7 +590,9 @@ export function BrokerLinking() {
       return apiRequest("POST", `/api/broker-configs/${brokerConfigId}/calculate-margins`);
     },
     onSuccess: () => {
+      // #261: invalidate both plans (margin figures) and capital snapshots (Available Funds)
       queryClient.invalidateQueries({ queryKey: ["/api/strategy-plans"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-capital-snapshots"] });
       toast({ title: "Margins recalculated" });
     },
     onError: () => {

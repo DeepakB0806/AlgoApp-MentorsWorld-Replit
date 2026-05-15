@@ -159,7 +159,9 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       const config = await storage.getBrokerConfig(req.params.id);
       if (!config) return res.status(404).json({ error: "Broker config not found" });
       await calculatePlanMargins(storage, config, { skipPrimaryGuard: true });
-      res.json({ success: true });
+      // #261: also refresh Available Funds so the frontend doesn't need a separate manual step
+      const capitalResult = await refreshCapitalForBrokerConfig(storage, config.id);
+      res.json({ success: true, capital: capitalResult.snapshot ?? null });
     } catch (error) {
       res.status(500).json({ error: "Failed to calculate margins" });
     }
