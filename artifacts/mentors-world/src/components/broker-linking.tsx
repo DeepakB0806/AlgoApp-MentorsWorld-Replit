@@ -522,6 +522,42 @@ function DailyPnlLogSheet({ plan, isOpen, onOpenChange }: { plan: StrategyPlan; 
 export function BrokerLinking() {
   const { toast } = useToast();
 
+  // #262: listen for scheduled margin calc / fit check SSE events and refresh cards live
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      es = new EventSource("/api/sse/feed");
+
+      const handleMarginCalc = () => {
+        queryClient.invalidateQueries({ queryKey: ["/api/strategy-plans"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/broker-capital-snapshots"] });
+        toast({ title: "Margins refreshed", description: "Strategy cards updated with today's margin figures." });
+      };
+
+      const handleFitCheck = () => {
+        queryClient.invalidateQueries({ queryKey: ["/api/strategy-plans"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/broker-capital-snapshots"] });
+      };
+
+      es.addEventListener("margin_calc_complete", handleMarginCalc);
+      es.addEventListener("fit_check_complete", handleFitCheck);
+
+      es.onerror = () => {
+        es?.close();
+        retryTimeout = setTimeout(connect, 5000);
+      };
+    };
+
+    connect();
+
+    return () => {
+      es?.close();
+      if (retryTimeout) clearTimeout(retryTimeout);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const { data: plans = [], isLoading } = useQuery<StrategyPlan[]>({
     queryKey: ["/api/strategy-plans"],
     refetchInterval: 60_000,

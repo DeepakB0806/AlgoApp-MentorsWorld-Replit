@@ -365,3 +365,29 @@ if (symbol && ltp !== undefined) {
 1. After clicking Recalculate, server logs must show `[CAPITAL-MGR] Manual refresh UCC X: ₹N` immediately after the `[MARGIN-CALC]` lines — if missing, `refreshCapitalForBrokerConfig` call was removed from the endpoint
 2. Available Funds figure in Broker Linking must update within 1-2s of the toast — if still stale, check that `queryKey: ["/api/broker-capital-snapshots"]` invalidation is present in `onSuccess`
 3. If the broker is not connected, `refreshCapitalForBrokerConfig` returns `reason: "broker not connected"` — margins are still recalculated; only the capital figure stays as-is (expected behaviour)
+
+### [MILESTONE] Auto-refresh strategy cards on scheduled margin calc — verified 2026-05-15
+
+**Task:** #262 — Auto-refresh strategy cards on scheduled margin calc
+
+**What changed:** When the 09:12 IST scheduled margin calc fires (or the 09:15 fit check), connected browser tabs on the Broker Linking page now automatically refresh their strategy cards — margin figures, "Date: … IST" timestamps, and Available Funds — without any page reload. A "Margins refreshed" toast appears after the margin calc event so the user knows fresh data has arrived.
+
+**Key files:**
+- `artifacts/api-server/src/cm-kotak-neo-v3.ts:32` — added `import { broadcast } from "./sse-hub"`
+- `artifacts/api-server/src/cm-kotak-neo-v3.ts:719-720` — in `runAndRescheduleMarginCalc`, emits `broadcast("margin_calc_complete", { t })` immediately after `runMarginCalcForAllBrokers` returns
+- `artifacts/api-server/src/cm-kotak-neo-v3.ts:758-759` — in the 30s chain catch-up path inside `runAndRescheduleMarginCalc`, emits `broadcast("fit_check_complete", { t })` after the chained `runDailyFitCheck`
+- `artifacts/api-server/src/cm-kotak-neo-v3.ts:828-829` — in `runAndRescheduleFitCheck` (scheduled path), emits `broadcast("fit_check_complete", { t })` after `runDailyFitCheck`
+- `artifacts/mentors-world/src/components/broker-linking.tsx:529-562` — added `useEffect` in `BrokerLinking` that opens an `EventSource` to `/api/sse/feed`, listens for `margin_calc_complete` (invalidates plans + capital, shows toast) and `fit_check_complete` (invalidates plans + capital silently), with 5s reconnect on error and cleanup on unmount
+
+**How it works:**
+- The existing `broadcast()` hub in `sse-hub.ts` fans out SSE events to all connected clients over the `/api/sse/feed` endpoint
+- `margin_calc_complete` fires once per scheduled margin calc run (after `runMarginCalcForAllBrokers` returns)
+- `fit_check_complete` fires from both the scheduled path (`runAndRescheduleFitCheck`) and the 30s chain catch-up path inside `runAndRescheduleMarginCalc`
+- On either event, React Query invalidates `["/api/strategy-plans"]` and `["/api/broker-capital-snapshots"]`, triggering refetches that re-render the strategy card margin amounts, timestamps, and Available Funds
+- The `marginCalculatedAt` field is already included in the plans API response, so the "Date: … IST" label updates automatically from the refreshed plan data
+
+**Diagnostic — if this breaks, check:**
+1. Server logs at 09:12 IST must show `[MARGIN-SCHED] … running calculatePlanMargins` followed by no `broadcast` error — if missing, `import { broadcast }` may have been removed from cm-kotak-neo-v3.ts
+2. In browser DevTools → Network → `/api/sse/feed` (EventStream tab): after 09:12 IST, an event `margin_calc_complete` should appear in the stream
+3. Strategy card "Date: … IST" should update to today's date within seconds of the SSE event — if still showing yesterday's date, the `invalidateQueries` for `/api/strategy-plans` is not firing (check the `addEventListener("margin_calc_complete")` call in broker-linking.tsx)
+4. `fit_check_complete` fires from two places — the scheduled `runAndRescheduleFitCheck` and the chain inside `runAndRescheduleMarginCalc`; if one is missing, only one path emits

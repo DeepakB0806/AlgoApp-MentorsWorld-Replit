@@ -26,6 +26,7 @@ import {
   isOptionExchange,
 } from "./option-symbol-builder";
 import { tradingCache } from "./cache";
+import { broadcast } from "./sse-hub";
 
 const LOG = "[CAPITAL-MGR]";
 const BATCH_SIZE = 10;
@@ -712,6 +713,8 @@ async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
   const timeStr = setting?.value || "09:12";
 
   await runMarginCalcForAllBrokers(storage, timeStr);
+  // #262: notify connected browser tabs so strategy cards refresh without a page reload
+  broadcast("margin_calc_complete", { t: Date.now() });
 
   // Persist fast-cache guard ONLY if data confirms plans were actually updated today.
   // This prevents guard from being set when no primary/no connected broker existed.
@@ -749,6 +752,8 @@ async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
     // fit_check_time already past and not yet run today — chain as catch-up
     console.log(`[MARGIN-SCHED] ${fitTimeStr} IST already passed, fit check not yet run — chaining now (catch-up)`);
     await runDailyFitCheck(storage).catch(err => console.error(`[FIT-CHECK] Chain error: ${err}`));
+    // #262: notify browser tabs after chained fit check
+    broadcast("fit_check_complete", { t: Date.now() });
     await storage.setSetting("fit_check_last_run", istDateStr()).catch(() => null);
   }, 30 * 1000);
 
@@ -817,6 +822,8 @@ async function runAndRescheduleFitCheck(storage: IStorage): Promise<void> {
     return;
   }
   try { await runDailyFitCheck(storage); } catch (err) { console.error(`[FIT-CHECK] Error: ${err}`); }
+  // #262: notify browser tabs so strategy cards refresh without a page reload
+  broadcast("fit_check_complete", { t: Date.now() });
   await storage.setSetting("fit_check_last_run", istDateStr()).catch(() => null);
   await scheduleFitCheck(storage);
 }
