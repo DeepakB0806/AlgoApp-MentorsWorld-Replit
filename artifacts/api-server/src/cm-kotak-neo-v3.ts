@@ -713,8 +713,6 @@ async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
   const timeStr = setting?.value || "09:12";
 
   await runMarginCalcForAllBrokers(storage, timeStr);
-  // #262: notify connected browser tabs so strategy cards refresh without a page reload
-  broadcast("margin_calc_complete", { t: Date.now() });
 
   // Persist fast-cache guard ONLY if data confirms plans were actually updated today.
   // This prevents guard from being set when no primary/no connected broker existed.
@@ -722,6 +720,8 @@ async function runAndRescheduleMarginCalc(storage: IStorage): Promise<void> {
   if (calcRanToday) {
     await storage.setSetting("margin_calc_last_run", istDateStr()).catch(() => null);
     console.log(`[MARGIN-SCHED] Margins verified via marginCalculatedAt — guard persisted for today`);
+    // #262: notify browser tabs only when plans were actually updated today
+    broadcast("margin_calc_complete", { t: Date.now() });
   } else {
     console.log(`[MARGIN-SCHED] No plans updated today (no primary broker or no active plans) — scheduling tomorrow`);
   }
