@@ -301,3 +301,22 @@ if (symbol && ltp !== undefined) {
 1. On next fresh BUY_DT or BUY_UT: `SELECT block_type, trading_symbol, COUNT(*) FROM strategy_trades WHERE plan_id='9c331a6a-...' AND DATE(created_at)=TODAY GROUP BY 1,2` — neutralLegs should show COUNT=1 per symbol, not 2
 2. `[TE] Fresh session: auto-seeding N neutral leg(s)` log must NOT appear when `blockType=neutralLegs` in PFL; it SHOULD appear on fresh-session reversal (SELL_DT+BUY_UT with no open positions)
 3. Kotak position book: neutral legs should show 1 lot each (65 qty), not 2 lots (130 qty)
+
+### [MILESTONE] Fill price REST retry — schema-based configurable settings — verified 2026-05-15
+
+**Task:** #260 — Wire fill-price REST retry to Trade Execution settings
+
+**What changed:** `getFillPrice`'s REST fallback no longer has hardcoded retry behaviour (1 retry, 1000ms delay). It now reads two new `app_settings` keys — `fill_price_rest_retry_count` (default 3) and `fill_price_rest_retry_delay_ms` (default 2000ms) — seeded at startup in `index.ts` and configurable from the Trade Execution section of the Settings page. Both call sites of `getFillPrice` now pass `storage` so the settings can be read.
+
+**Key files:**
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:53` — `getFillPrice` signature gained `storage: IStorage` param; REST fallback block (lines ~75–130) replaced hardcoded single-retry with a settings-driven loop logging `[TE] REST fill retry N/M for {orderId} — waiting {delay}ms`
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:918,1576` — both call sites updated to pass `storage` as first argument
+- `artifacts/api-server/src/index.ts:250-253` — seeded `fill_price_rest_retry_count="3"` and `fill_price_rest_retry_delay_ms="2000"` with `if (!existing)` guards
+- `artifacts/mentors-world/src/pages/settings.tsx` — added queries, state, useEffects, mutations, and two UI blocks ("Fill Price REST Retry Attempts" and "Fill Price REST Retry Delay") in the Trading Execution card, following the identical pattern as existing retry settings
+
+**How it works:** On each HSI timeout, `getFillPrice` reads the two settings keys once via `storage.getSetting()`. It then loops up to `retryCount` times, waiting `retryDelayMs` ms between each attempt. The first attempt fires immediately (no pre-delay). If any attempt returns a non-empty order history with a positive fill price, it returns that fill price and exits early. If all attempts are exhausted, ₹0 is returned as before (MTM guard skips those legs). Default 3 × 2000ms = up to 6 seconds of REST polling after HSI timeout — well inside Kotak's typical 2–5s history lag.
+
+**Diagnostic — if this breaks, check:**
+1. On HSI timeout, logs must show `[TE] WARN: HSI fill confirmation timeout for {orderId} — falling back to REST getOrderHistory` followed by `[TE] REST fill retry 2/3 for {orderId} — waiting 2000ms` (attempt 1 is immediate, retries log from attempt 2)
+2. If ₹0 is stored despite a valid fill, check `SELECT value FROM app_settings WHERE key IN ('fill_price_rest_retry_count','fill_price_rest_retry_delay_ms')` — if rows are missing, the seed in `index.ts` did not run (restart server)
+3. Settings UI: General Settings → Trading Execution → "Fill Price REST Retry Attempts" and "Fill Price REST Retry Delay" fields should show 3 and 2000 respectively after first server boot

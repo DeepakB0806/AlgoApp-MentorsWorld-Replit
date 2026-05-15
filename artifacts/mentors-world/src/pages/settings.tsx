@@ -547,6 +547,8 @@ function GeneralTradingSettings() {
   const [intradayIntervalValue, setIntradayIntervalValue] = useState<string>("0");
   const [marginCalcTimeValue, setMarginCalcTimeValue] = useState<string>("09:12");
   const [fitCheckTimeValue, setFitCheckTimeValue] = useState<string>("09:15");
+  const [fillRetryCount, setFillRetryCount] = useState<string>("3");
+  const [fillRetryDelayMs, setFillRetryDelayMs] = useState<string>("2000");
   const { toast } = useToast();
 
   const { data: setting, isLoading } = useQuery<{ key: string; value: string | null }>({
@@ -587,6 +589,14 @@ function GeneralTradingSettings() {
 
   const { data: fitCheckTimeSetting, isLoading: fitCheckTimeLoading } = useQuery<{ key: string; value: string | null }>({
     queryKey: ["/api/settings/fit_check_time"],
+  });
+
+  const { data: fillRetryCountSetting, isLoading: fillRetryCountLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/fill_price_rest_retry_count"],
+  });
+
+  const { data: fillRetryDelaySetting, isLoading: fillRetryDelayLoading } = useQuery<{ key: string; value: string | null }>({
+    queryKey: ["/api/settings/fill_price_rest_retry_delay_ms"],
   });
 
   useEffect(() => {
@@ -666,6 +676,22 @@ function GeneralTradingSettings() {
       setFitCheckTimeValue("09:15");
     }
   }, [fitCheckTimeSetting, fitCheckTimeLoading]);
+
+  useEffect(() => {
+    if (fillRetryCountSetting?.value !== undefined && fillRetryCountSetting?.value !== null) {
+      setFillRetryCount(fillRetryCountSetting.value);
+    } else if (!fillRetryCountLoading) {
+      setFillRetryCount("3");
+    }
+  }, [fillRetryCountSetting, fillRetryCountLoading]);
+
+  useEffect(() => {
+    if (fillRetryDelaySetting?.value !== undefined && fillRetryDelaySetting?.value !== null) {
+      setFillRetryDelayMs(fillRetryDelaySetting.value);
+    } else if (!fillRetryDelayLoading) {
+      setFillRetryDelayMs("2000");
+    }
+  }, [fillRetryDelaySetting, fillRetryDelayLoading]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -823,6 +849,38 @@ function GeneralTradingSettings() {
     },
   });
 
+  const saveFillRetryCountMutation = useMutation({
+    mutationFn: async () => {
+      const count = parseInt(fillRetryCount, 10);
+      if (isNaN(count) || count < 1) throw new Error("Enter a valid number (minimum 1)");
+      const res = await apiRequest("POST", "/api/settings/fill_price_rest_retry_count", { value: String(count) });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/fill_price_rest_retry_count"] });
+      toast({ title: "Saved", description: "Fill price REST retry count updated." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const saveFillRetryDelayMutation = useMutation({
+    mutationFn: async () => {
+      const ms = parseInt(fillRetryDelayMs, 10);
+      if (isNaN(ms) || ms < 0) throw new Error("Enter a valid non-negative number");
+      const res = await apiRequest("POST", "/api/settings/fill_price_rest_retry_delay_ms", { value: String(ms) });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/fill_price_rest_retry_delay_ms"] });
+      toast({ title: "Saved", description: "Fill price REST retry delay updated." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   return (
     <Card data-testid="card-general-trading-settings">
       <CardHeader>
@@ -835,7 +893,7 @@ function GeneralTradingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isLoading || shortfallLoading || rollbackLoading || maxCloseRetryLoading || bufferLoading || orderDelayLoading || syncClockLoading || intradayIntervalLoading || marginCalcTimeLoading || fitCheckTimeLoading ? (
+        {isLoading || shortfallLoading || rollbackLoading || maxCloseRetryLoading || bufferLoading || orderDelayLoading || syncClockLoading || intradayIntervalLoading || marginCalcTimeLoading || fitCheckTimeLoading || fillRetryCountLoading || fillRetryDelayLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
           <>
@@ -960,6 +1018,68 @@ function GeneralTradingSettings() {
                 disabled={saveMaxCloseRetryMutation.isPending}
               >
                 {saveMaxCloseRetryMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="input-fill-retry-count">
+                Fill Price REST Retry Attempts
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                When HSI is down, the engine falls back to querying Kotak's order history API to get the fill price. This sets how many times to attempt that REST lookup before giving up and storing ₹0. Increase if Kotak's history API lags more than a few seconds after execution.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Input
+                  id="input-fill-retry-count"
+                  data-testid="input-fill-retry-count"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={fillRetryCount}
+                  onChange={(e) => setFillRetryCount(e.target.value)}
+                  placeholder="3"
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">attempts</span>
+              </div>
+              <p className="text-xs text-muted-foreground">Default 3. Each attempt is separated by the delay below. A ₹0 fill is stored only after all attempts are exhausted.</p>
+              <Button
+                data-testid="button-save-fill-retry-count"
+                onClick={() => saveFillRetryCountMutation.mutate()}
+                disabled={saveFillRetryCountMutation.isPending}
+              >
+                {saveFillRetryCountMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t">
+              <Label htmlFor="input-fill-retry-delay">
+                Fill Price REST Retry Delay (ms)
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Delay between each fill price REST retry attempt. Kotak's order history API typically reflects a completed order within 2–5 seconds. Set this to cover that lag window.
+              </p>
+              <div className="flex items-center gap-3 max-w-xs">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">Kotak Neo</span>
+                <Input
+                  id="input-fill-retry-delay"
+                  data-testid="input-fill-retry-delay"
+                  type="number"
+                  min="0"
+                  step="500"
+                  value={fillRetryDelayMs}
+                  onChange={(e) => setFillRetryDelayMs(e.target.value)}
+                  placeholder="2000"
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">ms</span>
+              </div>
+              <p className="text-xs text-muted-foreground">Default 2000ms. e.g. 3 attempts × 2000ms = up to 6s of REST polling after HSI timeout.</p>
+              <Button
+                data-testid="button-save-fill-retry-delay"
+                onClick={() => saveFillRetryDelayMutation.mutate()}
+                disabled={saveFillRetryDelayMutation.isPending}
+              >
+                {saveFillRetryDelayMutation.isPending ? "Saving..." : "Save"}
               </Button>
             </div>
 

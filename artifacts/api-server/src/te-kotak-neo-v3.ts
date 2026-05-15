@@ -46,7 +46,8 @@ import { registerOrderCallback, deregisterOrderCallback, registerExitOrder } fro
 // ═══════════════════════════════════════════════════════════════════════════════
 // Build #253: getFillPrice — HSI primary (real-time avgPrc via WS event), REST fallback, 0 last resort.
 // Never returns the raw fallback/ctx.price on total failure — prevents index spot price stored as option fill price.
-async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, _fallback: number): Promise<{ fillPrice: number; status: string; reason: string; filledQty: number }> {
+// Build #260: REST retry count and delay read from app_settings (fill_price_rest_retry_count, fill_price_rest_retry_delay_ms).
+async function getFillPrice(storage: IStorage, brokerConfig: BrokerConfig, orderId: string, _fallback: number): Promise<{ fillPrice: number; status: string; reason: string; filledQty: number }> {
   // ── Step 1: Await HSI order-confirmation (primary path) ────────────────────
   const hsiResult = await new Promise<{ avgPrc: number; source: string } | null>((resolve) => {
     const timeout = setTimeout(() => {
@@ -68,21 +69,27 @@ async function getFillPrice(brokerConfig: BrokerConfig, orderId: string, _fallba
   // ── Step 2: REST fallback — HSI disconnected or timed out ──────────────────
   console.warn(`[TE] WARN: HSI fill confirmation timeout for ${orderId.slice(0, 8)} — falling back to REST getOrderHistory`);
   try {
-    const histResult = await EL.getOrderHistory(brokerConfig, orderId);
+    // Build #260: retry count and delay driven by app_settings (configurable from Settings UI)
+    const retryCountRaw = await storage.getSetting("fill_price_rest_retry_count");
+    const retryDelayRaw = await storage.getSetting("fill_price_rest_retry_delay_ms");
+    const retryCount = Math.max(1, parseInt(retryCountRaw?.value ?? "3", 10) || 3);
+    const retryDelayMs = Math.max(0, parseInt(retryDelayRaw?.value ?? "2000", 10) || 2000);
 
-    // TASK #119: Retry once after 1s if history is empty (race condition after placement)
-    if (!histResult.success || !Array.isArray(histResult.data) || histResult.data.length === 0) {
-      console.log(`[TE] getOrderHistory empty for ${orderId} — retrying in 1s...`);
-      await new Promise(r => setTimeout(r, 1000));
-      const retry = await EL.getOrderHistory(brokerConfig, orderId);
-      if (!retry.success || !Array.isArray(retry.data) || retry.data.length === 0) {
-        console.warn(`[TE] REST fill lookup failed after retry for ${orderId.slice(0, 8)} — returning 0`);
-        return { fillPrice: 0, status: "UNKNOWN", reason: "History empty after retry", filledQty: 0 };
+    for (let attempt = 1; attempt <= retryCount; attempt++) {
+      if (attempt > 1) {
+        console.log(`[TE] REST fill retry ${attempt}/${retryCount} for ${orderId.slice(0, 8)} — waiting ${retryDelayMs}ms`);
+        await new Promise(r => setTimeout(r, retryDelayMs));
       }
-      Object.assign(histResult, retry);
-    }
 
-    if (histResult.success && Array.isArray(histResult.data) && histResult.data.length > 0) {
+      const histResult = await EL.getOrderHistory(brokerConfig, orderId);
+
+      if (!histResult.success || !Array.isArray(histResult.data) || histResult.data.length === 0) {
+        if (attempt === retryCount) {
+          console.warn(`[TE] REST fill lookup failed after ${retryCount} attempt(s) for ${orderId.slice(0, 8)} — returning 0`);
+        }
+        continue;
+      }
+
       // TASK #119: Raw debug log — reveals actual Kotak field names and array order in production
       const firstElem = histResult.data[0] as any;
       const lastElem = histResult.data[histResult.data.length - 1] as any;
@@ -905,7 +912,7 @@ async function executeLegBasket(
           orderId = orderResult.data?.orderNo;
           productType = resolved.productCode;
           if (orderId) {
-            const statusObj = await getFillPrice(brokerConfig, orderId, ctx.price);
+            const statusObj = await getFillPrice(storage, brokerConfig, orderId, ctx.price);
             fillPrice = statusObj.fillPrice;
             orderStatus = statusObj.status;
             orderReason = statusObj.reason;
@@ -1563,7 +1570,7 @@ async function closeTrade(
       // Build #253: register exit order in HSI registry BEFORE awaiting getFillPrice,
       // so HSI can close the trade proactively even if this call path is interrupted.
       registerExitOrder(closeOrderId, trade.id);
-      const fill = (await getFillPrice(brokerConfig, closeOrderId, exitPrice)).fillPrice;
+      const fill = (await getFillPrice(storage, brokerConfig, closeOrderId, exitPrice)).fillPrice;
       if (fill > 0) exitPrice = fill;
     }
   }

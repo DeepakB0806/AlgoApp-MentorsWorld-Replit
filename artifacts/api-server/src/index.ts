@@ -244,6 +244,10 @@ app.get("/api/health", (_req, res) => {
     if (!existingMarginCalcTime) await storage.setSetting("margin_calc_time", "09:12");
     const existingFitCheckTime = await storage.getSetting("fit_check_time");
     if (!existingFitCheckTime) await storage.setSetting("fit_check_time", "09:15");
+    const existingFillRetryCount = await storage.getSetting("fill_price_rest_retry_count");
+    if (!existingFillRetryCount) await storage.setSetting("fill_price_rest_retry_count", "3");
+    const existingFillRetryDelay = await storage.getSetting("fill_price_rest_retry_delay_ms");
+    if (!existingFillRetryDelay) await storage.setSetting("fill_price_rest_retry_delay_ms", "2000");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
   }
