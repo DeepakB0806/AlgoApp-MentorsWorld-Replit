@@ -524,6 +524,13 @@ export async function calculatePlanMargins(
     // autoResume is a fit-check flag only — all non-draft plans need current margin figures.
     const plansToCalc = allPlans
       .filter(p => p.deploymentStatus === "active" || p.deploymentStatus === "deployed" || p.deploymentStatus === "paused")
+      .filter(p => {
+        if (p.tradedStatus === "traded") {
+          console.log(`${MLOG} Plan "${p.name}" — status=Traded, skipping recalculation`);
+          return false;
+        }
+        return true;
+      })
       .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
 
     if (plansToCalc.length === 0) {

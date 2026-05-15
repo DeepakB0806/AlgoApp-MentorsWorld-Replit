@@ -604,7 +604,7 @@ export function BrokerLinking() {
   // sort gateable plans by rank, deduct estimatedMargin (expiryMultiplier× on expiry day) per plan.
   // Returns map: planId -> { remainingAfter, fits, gatingMargin, isExpiryDay, expiryMultiplier, brokerConfigId }
   const fundsByPlan = (() => {
-    const out = new Map<string, { remainingAfter: number; fits: boolean; gatingMargin: number; isExpiryDay: boolean; expiryMultiplier: number; brokerConfigId: string }>();
+    const out = new Map<string, { remainingAfter: number; fits: boolean; gatingMargin: number; isExpiryDay: boolean; expiryMultiplier: number; brokerConfigId: string; isTraded: boolean }>();
     const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
     const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
     const today = dayNames[istNow.getDay()];
@@ -638,9 +638,11 @@ export function BrokerLinking() {
         // #254 Read expiryMultiplier from schema (keyed by ticker e.g. "NIFTY"); default 1.25
         const expiryMultiplier = isExpiryDay ? (multiplierByIndex.get(p.ticker ?? "") ?? 1.25) : 1;
         const gatingMargin = est * expiryMultiplier;
-        const fits = gatingMargin <= remaining;
-        if (fits) remaining -= gatingMargin;
-        out.set(p.id, { remainingAfter: remaining, fits, gatingMargin, isExpiryDay, expiryMultiplier, brokerConfigId: bcId });
+        // #240: Traded plans always fit (margin already reflected in broker capital); skip deduction
+        const isTraded = p.tradedStatus === "traded";
+        const fits = isTraded || gatingMargin <= remaining;
+        if (fits && !isTraded) remaining -= gatingMargin;
+        out.set(p.id, { remainingAfter: remaining, fits, gatingMargin, isExpiryDay, expiryMultiplier, brokerConfigId: bcId, isTraded });
       }
     }
     return out;
@@ -1086,6 +1088,11 @@ export function BrokerLinking() {
                           <span className="text-emerald-400">✓ fits</span>
                         ) : (
                           <span className="text-red-400">⛔ skip — needs ₹{fp.gatingMargin.toLocaleString("en-IN", { maximumFractionDigits: 0 })}{fp.isExpiryDay ? ` (${fp.expiryMultiplier}x expiry)` : ""}</span>
+                        )}
+                        {fp.isTraded ? (
+                          <span className="text-blue-400 font-semibold">● Traded</span>
+                        ) : (
+                          <span className="text-muted-foreground/60">○ Not Traded</span>
                         )}
                       </div>
                     );

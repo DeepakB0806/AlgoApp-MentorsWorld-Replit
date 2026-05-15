@@ -1219,10 +1219,12 @@ async function executeBuySignal(
 
   tradingCache.invalidateOpenTrades(plan.id);
 
-  if (plan.awaitingCleanEntry) {
-    await storage.updateStrategyPlan(plan.id, { awaitingCleanEntry: false });
-    if (plan.configId) tradingCache.invalidatePlans(plan.configId);
-  }
+  // #240: Mark plan as traded unconditionally on entry; clear awaitingCleanEntry in same call
+  await storage.updateStrategyPlan(plan.id, {
+    tradedStatus: "traded",
+    ...(plan.awaitingCleanEntry ? { awaitingCleanEntry: false } : {}),
+  });
+  if (plan.configId) tradingCache.invalidatePlans(plan.configId);
 
   return { success: true, action: "open", broker, planId: plan.id, trade: result.trades[0], orderId: result.orderIds[0], message: `ENTRY success`, executionTimeMs: Date.now() - ctx.startTime };
 }
@@ -1311,10 +1313,12 @@ async function executeSellSignal(
 
   tradingCache.invalidateOpenTrades(plan.id);
 
-  if (plan.awaitingCleanEntry) {
-    await storage.updateStrategyPlan(plan.id, { awaitingCleanEntry: false });
-    if (plan.configId) tradingCache.invalidatePlans(plan.configId);
-  }
+  // #240: Mark plan as traded unconditionally on entry; clear awaitingCleanEntry in same call
+  await storage.updateStrategyPlan(plan.id, {
+    tradedStatus: "traded",
+    ...(plan.awaitingCleanEntry ? { awaitingCleanEntry: false } : {}),
+  });
+  if (plan.configId) tradingCache.invalidatePlans(plan.configId);
 
   return { success: true, action: "open", broker, planId: plan.id, trade: result.trades[0], orderId: result.orderIds[0], pnl: closePnl, message: `ENTRY success`, executionTimeMs: Date.now() - ctx.startTime };
 }
@@ -1610,7 +1614,8 @@ async function closeTrade(
 
   const remainingOpen = await storage.getOpenTradesByPlan(trade.planId);
   if (remainingOpen.length === 0) {
-    await storage.updateStrategyPlan(trade.planId, { awaitingCleanEntry: true });
+    // #240: Clear traded status when last leg closes
+    await storage.updateStrategyPlan(trade.planId, { awaitingCleanEntry: true, tradedStatus: "not_traded" });
     const plan = await storage.getStrategyPlan(trade.planId);
     if (plan?.configId) tradingCache.invalidatePlans(plan.configId);
   }

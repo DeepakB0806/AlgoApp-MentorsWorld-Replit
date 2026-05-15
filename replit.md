@@ -320,3 +320,31 @@ if (symbol && ltp !== undefined) {
 1. On HSI timeout, logs must show `[TE] WARN: HSI fill confirmation timeout for {orderId} — falling back to REST getOrderHistory` followed by `[TE] REST fill retry 2/3 for {orderId} — waiting 2000ms` (attempt 1 is immediate, retries log from attempt 2)
 2. If ₹0 is stored despite a valid fill, check `SELECT value FROM app_settings WHERE key IN ('fill_price_rest_retry_count','fill_price_rest_retry_delay_ms')` — if rows are missing, the seed in `index.ts` did not run (restart server)
 3. Settings UI: General Settings → Trading Execution → "Fill Price REST Retry Attempts" and "Fill Price REST Retry Delay" fields should show 3 and 2000 respectively after first server boot
+
+### [MILESTONE] tradedStatus field — entry/exit hooks, margin skip, UI badge — verified 2026-05-15
+
+**Task:** #240 — Add `tradedStatus` to `strategy_plans`; wire TE entry/exit; skip margin recalc; show badge
+
+**What changed:** Added `traded_status text NOT NULL DEFAULT 'not_traded'` column to `strategy_plans`. The Trade Executor sets it to `"traded"` on every successful entry basket (both BUY and SELL signal paths), and clears it back to `"not_traded"` when the last open leg closes. The margin calculator skips plans where `tradedStatus === "traded"` to avoid overwriting margin figures while a basket is live. The Broker Linking UI shows a blue "● Traded" or muted "○ Not Traded" indicator inline with each plan's capital gating row, and the capital simulation treats traded plans as always-fitting (no deduction) since their margin is already deployed.
+
+**Key files:**
+- `lib/db/src/schema/schema.ts:186` — added `tradedStatus: text("traded_status").notNull().default("not_traded")` to `strategyPlans` pgTable
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:1225-1230` — executeBuySignal: replaced `if (awaitingCleanEntry)` block with unconditional `updateStrategyPlan({ tradedStatus: "traded", ...(awaitingCleanEntry ? { awaitingCleanEntry: false } : {}) })`
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:1319-1324` — executeSellSignal leg-interchange path: same unconditional entry hook
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:1621` — closeTrade exit choke-point: added `tradedStatus: "not_traded"` alongside `awaitingCleanEntry: true` in the `remainingOpen.length === 0` block
+- `artifacts/api-server/src/cm-kotak-neo-v3.ts:530-536` — `calculatePlanMargins` filter: `.filter(p => p.tradedStatus !== "traded")` added; skipped plans are logged at `[MARGIN-CALC]`
+- `artifacts/mentors-world/src/components/broker-linking.tsx:644-648` — capital simulation: `isTraded = p.tradedStatus === "traded"`, `fits = isTraded || gatingMargin <= remaining`, deduction skipped for traded plans; `isTraded` added to `out` map type
+- `artifacts/mentors-world/src/components/broker-linking.tsx:1095-1099` — UI: added "● Traded" (blue) / "○ Not Traded" (muted) badge inline in the capital gating row
+
+**How it works:**
+- **Entry**: After `executeLegBasket` returns without error in both BUY and SELL execution paths, a single `updateStrategyPlan` call sets `tradedStatus: "traded"` and conditionally clears `awaitingCleanEntry` in the same DB round-trip. No separate update needed.
+- **Exit**: `closeTrade` already calls `updateStrategyPlan({ awaitingCleanEntry: true })` when `remainingOpen.length === 0`. `tradedStatus: "not_traded"` is now included in that same call.
+- **Margin skip**: The `plansToCalc` filter chain in `calculatePlanMargins` now has a second `.filter()` that drops any plan with `tradedStatus === "traded"`, preventing overwrite of a live basket's margin figure.
+- **Capital sim**: Traded plans contribute `fits=true` but do not reduce `remaining` — the broker's capital already reflects the deployed margin, so simulating a deduction would incorrectly block lower-ranked plans.
+
+**Diagnostic — if this breaks, check:**
+1. After a BUY entry fires: `SELECT traded_status FROM strategy_plans WHERE id='<plan-id>'` must be `"traded"` within seconds
+2. After square-off (all legs closed): same query must return `"not_traded"`
+3. Margin recalc log: `[MARGIN-CALC] Plan "X" — status=Traded, skipping recalculation` must appear for any plan currently in trade during the daily 09:12 run
+4. UI: Broker Linking page → any plan with an active basket must show "● Traded" (blue) in its capital row; all others "○ Not Traded"
+5. If `tradedStatus` column is missing after deploy: run `pnpm --filter @workspace/db run push` — the column has `DEFAULT 'not_traded'` so it is safe to add to a populated table

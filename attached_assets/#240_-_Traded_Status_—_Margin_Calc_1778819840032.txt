@@ -1,0 +1,26 @@
+#240 - Traded Status — Margin Calc & UI
+
+What & Why
+tradedStatus is a field on strategy_plans that tracks whether the whole strategy basket is currently in trade. The TE sets it when the basket enters (first leg opens) and clears it when the basket exits (last leg closes). The CM reads this field directly from the plan — no extra DB query — and skips recalculation for plans marked "traded". The Broker Linking UI shows "Traded" or "Not Traded" beside the fits/skip indicator.
+
+Done looks like
+Each strategy plan in Broker Linking shows "Traded" (blue badge) or "Not Traded" (muted) beside the margin fits/skip line
+"Traded" appears as soon as the TE opens the first leg; reverts to "Not Traded" when the last leg of the basket closes
+The CM reads plan.tradedStatus from the plan object it already holds — no extra query — and skips plans marked "traded" with a log: Plan "X" — status=Traded, skipping recalculation
+The frontend capital simulation skips deducting estimatedMargin from remaining for "traded" plans (their margin is already reflected in the broker's available capital snapshot), but still shows them as fits: true in the UI
+Out of scope
+Changing the stored estimatedMargin value for traded plans (keep last calculated value)
+Any changes to the TSL / MTM / order execution paths
+Steps
+Schema — Add tradedStatus text("traded_status").notNull().default("not_traded") to strategy_plans in both lib/db/src/schema/schema.ts and artifacts/mentors-world/src/shared/schema.ts. Run pnpm --filter @workspace/db run push to apply.
+TE — ENTRY hook — After executeLegBasket succeeds in executeBuySignal (line ~1172) and in the leg-interchange path of executeSellSignal (line ~1264), set tradedStatus: "traded" unconditionally. Combine with the existing awaitingCleanEntry update into a single updateStrategyPlan call to avoid a double write. Must be outside/before the awaitingCleanEntry guard.
+TE — EXIT hook — At the existing remainingOpen.length === 0 check (line ~1537), add tradedStatus: "not_traded" to the existing updateStrategyPlan call alongside awaitingCleanEntry: true. This is the single choke-point for all close paths.
+Margin calculator — After the existing deploymentStatus filter, add .filter(p => p.tradedStatus !== "traded") on the plansToCalc chain. Log skipped plans. No extra DB query needed — p.tradedStatus is already on the plan object from storage.getStrategyPlans().
+Frontend capital simulation — In fundsByPlan, for "traded" plans: fits = true, skip remaining -= gatingMargin. Correct logic: const isTraded = p.tradedStatus === "traded"; const fits = isTraded || gatingMargin <= remaining; if (fits && !isTraded) remaining -= gatingMargin;
+Frontend UI — Beside the fits/skip text in the margin info row, render "Traded" (blue) or "Not Traded" (muted) based on plan.tradedStatus.
+Relevant files
+lib/db/src/schema/schema.ts:153-186
+artifacts/mentors-world/src/shared/schema.ts:153-186
+artifacts/api-server/src/te-kotak-neo-v3.ts:1107-1179,1240-1271,1530-1541
+artifacts/api-server/src/cm-kotak-neo-v3.ts:516-527
+artifacts/mentors-world/src/components/broker-linking.tsx:596-637,1070-1082
