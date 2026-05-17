@@ -392,6 +392,24 @@ if (symbol && ltp !== undefined) {
 3. Strategy card "Date: … IST" should update to today's date within seconds of the SSE event — if still showing yesterday's date, the `invalidateQueries` for `/api/strategy-plans` is not firing (check the `addEventListener("margin_calc_complete")` call in broker-linking.tsx)
 4. `fit_check_complete` fires from two places — the scheduled `runAndRescheduleFitCheck` and the chain inside `runAndRescheduleMarginCalc`; if one is missing, only one path emits
 
+### [MILESTONE] Fix two silent storage.ts bugs — verified 2026-05-17
+
+**Task:** #267 — Fix two silent storage bugs
+
+**What changed:** Three `lt()` comparisons against text-typed `createdAt` columns now pass `.toISOString()` strings instead of `Date` objects (fixes TS2769 and ensures correct lexicographic comparison in Postgres). `addProcessFlowLogToDB` now generates and injects `id: randomUUID()` at insert time — previously every process flow log insert was silently failing because the PK column has no DB default.
+
+**Key files:**
+- `artifacts/api-server/src/storage.ts:1078` — `deleteStrategyTradesByPlan`: `cutoff` → `cutoff.toISOString()`
+- `artifacts/api-server/src/storage.ts:1096` — `deleteStrategyTradesOlderThan`: `cutoff` → `cutoff.toISOString()`
+- `artifacts/api-server/src/storage.ts:1624` — `addProcessFlowLogToDB`: `values(log)` → `values({ ...log, id: randomUUID() })`
+
+**How it works:** All `createdAt` columns in `strategy_trades` store ISO-8601 strings (e.g. `"2026-05-17 14:16:20"`). Passing a JS `Date` to Drizzle's `lt()` would cause a type error and potentially wrong results. `.toISOString()` produces a comparable string. For process flow logs: `process_flow_logs.id` is a `varchar(36) PRIMARY KEY` with no `DEFAULT` — Postgres would reject any insert without an explicit id value, silently eating the error in the calling code's try/catch.
+
+**Diagnostic — if this breaks, check:**
+1. `SELECT COUNT(*) FROM process_flow_logs` — should grow after any trade signal fires; if still zero, check `addProcessFlowLogToDB` call sites for a try/catch swallowing errors
+2. Data retention logs: after the daily job runs, `[DATA-RETENTION]` should show a non-zero deleted count if old trades exist
+3. `pnpm --filter @workspace/api-server run typecheck 2>&1 | grep storage.ts` should return empty (no matches)
+
 ### [MILESTONE] SL / PT / TSL promoted to strategy_plans schema columns — verified 2026-05-17
 
 **Task:** #264 — Promote SL, Profit Target, and TSL to schema columns

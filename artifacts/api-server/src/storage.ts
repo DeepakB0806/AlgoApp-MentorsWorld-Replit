@@ -1075,7 +1075,7 @@ export class DatabaseStorage implements IStorage {
     if (olderThanDays) {
       const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
       const result = await db.delete(strategyTrades)
-        .where(and(eq(strategyTrades.planId, planId), lt(strategyTrades.createdAt, cutoff)))
+        .where(and(eq(strategyTrades.planId, planId), lt(strategyTrades.createdAt, cutoff.toISOString())))
         .returning();
       return result.length;
     }
@@ -1090,7 +1090,7 @@ export class DatabaseStorage implements IStorage {
   async deleteStrategyTradesOlderThan(days: number): Promise<number> {
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const result = await db.delete(strategyTrades)
-      .where(lt(strategyTrades.createdAt, cutoff))
+      .where(lt(strategyTrades.createdAt, cutoff.toISOString()))
       .returning();
     return result.length;
   }
@@ -1618,7 +1618,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async addProcessFlowLogToDB(log: InsertProcessFlowLog): Promise<ProcessFlowLog> {
-    const [result] = await db.insert(processFlowLogs).values(log).returning();
+    const [result] = await db.insert(processFlowLogs).values({ ...log, id: randomUUID() }).returning();
     return result;
   }
 
