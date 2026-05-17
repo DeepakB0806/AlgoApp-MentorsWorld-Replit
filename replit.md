@@ -392,6 +392,31 @@ if (symbol && ltp !== undefined) {
 3. Strategy card "Date: … IST" should update to today's date within seconds of the SSE event — if still showing yesterday's date, the `invalidateQueries` for `/api/strategy-plans` is not firing (check the `addEventListener("margin_calc_complete")` call in broker-linking.tsx)
 4. `fit_check_complete` fires from two places — the scheduled `runAndRescheduleFitCheck` and the chain inside `runAndRescheduleMarginCalc`; if one is missing, only one path emits
 
+### [MILESTONE] SL / PT / TSL promoted to strategy_plans schema columns — verified 2026-05-17
+
+**Task:** #264 — Promote SL, Profit Target, and TSL to schema columns
+
+**What changed:** Stoploss, profit target, and trailing SL configuration moved from the `trade_params` JSON blob to 12 dedicated columns on `strategy_plans`. The Broker Linking card now reads `stoplossValue` directly (fixing the stale `deploy_stoploss` display bug). MTM monitor and Trade Executor read from schema columns with JSON fallback for any unmigrated plans. A one-time startup backfill migrated all 6 existing plans.
+
+**Key files:**
+- `lib/db/src/schema/schema.ts:187-199` — 12 new columns added: `stoploss_enabled/mode/value`, `profit_target_enabled/mode/value`, `trailing_sl_enabled/type/activate_at/lock_profit_at/when_profit_increase_by/increase_tsl_by`
+- `artifacts/api-server/src/index.ts:258-290` — startup backfill: scans plans where `stoplossValue IS NULL`, parses `trade_params`, writes all 12 columns
+- `artifacts/mentors-world/src/components/trade-planning.tsx:261-273` — `handleSave` payload now includes all 12 schema fields
+- `artifacts/mentors-world/src/components/broker-linking.tsx:822-853` — `initDeployConfig` reads schema columns first; `effectiveSL`/`effectivePT` use `stoplossValue`/`profitTargetValue` (no longer `deployStoploss`)
+- `artifacts/api-server/src/mtm-monitor.ts:84-103` — reads `stoplossEnabled/Value/Mode` and `profitTargetEnabled/Value/Mode` from plan columns; falls back to JSON only if schema values are 0/false
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:1053-1070` — reads TSL config from `plan.trailingSLEnabled/Type/ActivateAt/…`; falls back to JSON only if schema column is null
+
+**How it works:**
+- **Backfill guard**: `stoplossValue IS NULL` identifies pre-migration plans (all rows populated with defaults on db:push, so `== null` in JS catches both null and undefined). Backfill runs once on startup; subsequent restarts skip (all plans will have non-null `stoplossValue` after first run).
+- **Read priority**: schema column → JSON fallback. For MTM monitor: if `stoplossEnabled===false && value===0`, falls through to JSON parse for backward compat. For TE: if `trailingSLEnabled` column is null (truly unmigrated), reads JSON.
+- **Display fix**: `effectiveSL` badge on Broker Linking card now shows `plan.stoplossValue` (source of truth from Trade Planning save) rather than `plan.deployStoploss` (was stale in production: 500 vs actual 1200).
+
+**Diagnostic — if this breaks, check:**
+1. On startup: `[STARTUP] #264 backfill: migrated N plan(s)` or `already have SL/PT/TSL schema columns` — if missing, the backfill block errored; check `[STARTUP] #264 backfill error:`
+2. After saving a plan in Trade Planning, `SELECT stoploss_enabled, stoploss_value, trailing_sl_enabled FROM strategy_plans WHERE name = '...'` — must reflect the form values
+3. Broker Linking SL badge: if still shows stale value, check `plan.stoplossValue` in the `/api/strategy-plans` response — if null, the save didn't include the new fields (check `handleSave` payload)
+4. MTM stoploss trigger: if plans with SL stop triggering, `stoplossEnabled` column may be false while JSON has it true — force a save from Trade Planning to re-sync
+
 ### [MILESTONE] Keep legs intact on config change — verified 2026-05-15
 
 **Task:** #263 — Keep legs intact on config change

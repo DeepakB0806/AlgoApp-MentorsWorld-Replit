@@ -817,14 +817,19 @@ export function BrokerLinking() {
   };
 
   const initDeployConfig = (plan: StrategyPlan) => {
+    // #264: schema columns are authoritative; fall back to trade_params JSON for unmigrated plans
     const tp = plan.tradeParams ? parseJsonSafe<TradeParams>(plan.tradeParams, { legs: [] }) : { legs: [] };
-    const baseSL = tp.stoploss?.enabled ? (tp.stoploss?.value || 0) : 0;
-    const basePT = tp.profitTarget?.enabled ? (tp.profitTarget?.value || 0) : 0;
-    const tsl = (tp as TradeParams).trailingSL;
-    const baseAct  = tsl?.activateAt            || 0;
-    const baseLock = tsl?.lockProfitAt          || 0;
-    const baseStep = tsl?.whenProfitIncreaseBy  || 0;
-    const baseInc  = tsl?.increaseTslBy         || 0;
+    const tslJson = (tp as TradeParams).trailingSL;
+    const slEnabled = plan.stoplossEnabled ?? tp.stoploss?.enabled ?? false;
+    const baseSL = slEnabled ? (plan.stoplossValue ?? tp.stoploss?.value ?? 0) : 0;
+    const ptEnabled = plan.profitTargetEnabled ?? tp.profitTarget?.enabled ?? false;
+    const basePT = ptEnabled ? (plan.profitTargetValue ?? tp.profitTarget?.value ?? 0) : 0;
+    const tslEnabled = plan.trailingSLEnabled ?? tslJson?.enabled ?? false;
+    const tslType = plan.trailingSLType ?? tslJson?.tslType ?? "none";
+    const baseAct  = plan.trailingSLActivateAt           ?? tslJson?.activateAt           ?? 0;
+    const baseLock = plan.trailingSLLockProfitAt         ?? tslJson?.lockProfitAt         ?? 0;
+    const baseStep = plan.trailingSLWhenProfitIncreaseBy ?? tslJson?.whenProfitIncreaseBy ?? 0;
+    const baseInc  = plan.trailingSLIncreaseTslBy        ?? tslJson?.increaseTslBy        ?? 0;
     setDeployConfig((prev) => ({
       ...prev,
       [plan.id]: {
@@ -834,8 +839,8 @@ export function BrokerLinking() {
         baseStoploss: baseSL,
         baseProfitTarget: basePT,
         brokerConfigId: plan.brokerConfigId || "",
-        tslEnabled: tsl?.enabled ?? false,
-        tslType: tsl?.tslType ?? "none",
+        tslEnabled,
+        tslType,
         tslActivateAt: baseAct, tslLockProfitAt: baseLock,
         tslWhenProfitIncreaseBy: baseStep, tslIncreaseTslBy: baseInc,
         baseTslActivateAt: baseAct, baseTslLockProfitAt: baseLock,
@@ -1048,8 +1053,13 @@ export function BrokerLinking() {
               ...(tp.neutralLegs || []).length > 0 ? [{ label: "Neutral", legs: tp.neutralLegs!, color: "text-blue-400", productMode: tp.neutralConfig?.productMode || "MIS", priceMode: (tp.neutralConfig?.priceMode || "LMT") as "LMT" | "MKT" }] : [],
               ...((tp.legs || []).length > 0 && !((tp.uptrendLegs || []).length > 0) ? [{ label: "Legs", legs: tp.legs, color: "text-muted-foreground", productMode: "MIS" as const, priceMode: "LMT" as const }] : []),
             ];
-            const effectiveSL = tp.stoploss?.enabled ? (plan.deployStoploss ?? tp.stoploss.value ?? null) : null;
-            const effectivePT = tp.profitTarget?.enabled ? (plan.deployProfitTarget ?? tp.profitTarget.value ?? null) : null;
+            // #264: schema columns are authoritative for SL/PT display (deploy_stoploss was stale-prone)
+            const effectiveSL = (plan.stoplossEnabled ?? tp.stoploss?.enabled)
+              ? (plan.stoplossValue ?? tp.stoploss?.value ?? null)
+              : null;
+            const effectivePT = (plan.profitTargetEnabled ?? tp.profitTarget?.enabled)
+              ? (plan.profitTargetValue ?? tp.profitTarget?.value ?? null)
+              : null;
             const effectiveMultiplier = plan.lotMultiplier || 1;
             const borderCls = ({ active: "border-l-emerald-500", paused: "border-l-amber-400", squared_off: "border-l-red-400", deployed: "border-l-blue-500" } as Record<string, string>)[depStatus] ?? "border-l-border/30";
             const badgeCls = ({ active: "bg-emerald-500 text-white border-transparent", paused: "bg-amber-400 text-black border-transparent", squared_off: "bg-red-500 text-white border-transparent", deployed: "bg-blue-500 text-white border-transparent" } as Record<string, string>)[depStatus] ?? "";

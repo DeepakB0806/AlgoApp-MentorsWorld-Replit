@@ -1,0 +1,34 @@
+#212 - Fix TE: TSL variable scope + NRML gate regression
+What & Why
+Two bugs were introduced into server/te-kotak-neo-v3.ts during the Trailing Stop Loss (TSL) feature work yesterday. Both are regressions against the pre-TSL version of the file.
+
+Bug 1 — Critical, production crash (line 991): Inside executeLegBasket, the code references tradeParams which is NOT in scope. tradeParams is declared in the outer processTradeSignal function (line 495) but is never passed to executeLegBasket. This causes a ReferenceError: tradeParams is not defined on every ENTRY execution, crashing the trade engine mid-basket. Confirmed in production logs (4:54 AM IST today).
+
+Fix: Replace (tradeParams as any)?.trailingSL with (parseTradeParams(plan) as any)?.trailingSL. parseTradeParams is already defined in the same file and accepts plan which IS in scope inside executeLegBasket.
+
+Bug 2 — Behavioral regression (line 1015): The condition gating TSL/SL fields on the staged trade record changed from:
+
+productType === "NRML" && initialSl !== null
+
+to:
+
+initialSl !== null || trailingStepVal !== null
+
+The original intentionally restricted SL/TSL field writes to NRML orders only — MIS/CNC positions are auto-squared by the broker at EOD and don't need TSL tracking. The new condition strips that gate, causing MIS trades to have TSL fields (tslType, tslLockProfit, tslProfitStep, currentSlPrice, highWaterMark) unnecessarily written. Restore the productType === "NRML" guard while still writing the new TSL-specific fields (tslType, tslLockProfit, tslProfitStep) when tslEnabled is true.
+
+Done looks like
+ENTRY signals no longer crash with ReferenceError: tradeParams is not defined
+TSL config is correctly read from parseTradeParams(plan).trailingSL inside executeLegBasket
+MIS/CNC trades do NOT get TSL/SL fields written; NRML trades do
+Redeploy triggered; production confirmed clean
+Out of scope
+TSL engine logic itself (tsl-kotak-neo-v3.ts)
+Any other TE functionality
+The SELL signal not executing (separate operational issue — plan deploymentStatus)
+Steps
+Fix Bug 1 — In executeLegBasket at the trailingSLCfg declaration (line 991), replace (tradeParams as any) with (parseTradeParams(plan) as any).
+Fix Bug 2 — Restore the productType === "NRML" guard on the stagedTrade TSL spread. The new TSL fields (tslType, tslLockProfit, tslProfitStep) should only be included when both productType === "NRML" and tslEnabled is true (not when just trailingStepVal !== null).
+Redeploy — Trigger a production redeploy and confirm no ReferenceError in the next ENTRY signal.
+Relevant files
+server/te-kotak-neo-v3.ts:985-1025
+attached_assets/te-kotak-neo-v3_1777872980571.ts:860-885

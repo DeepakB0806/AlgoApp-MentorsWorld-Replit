@@ -1048,15 +1048,23 @@ async function executeLegBasket(
       }
 
       // FIX 3a: Immediate DB write as "pending_basket" — leg gets a real ID before any rollback can occur
-      const trailingSLCfg = (parseTradeParams(plan) as any)?.trailingSL;
-      const tslEnabled = trailingSLCfg?.enabled === true && trailingSLCfg?.tslType !== "none";
-      const tslType: string = trailingSLCfg?.tslType ?? "none";
+      // #264: read TSL from schema columns; fall back to trade_params JSON for unmigrated plans
+      const tslSchemaEnabled = plan.trailingSLEnabled;
+      const tslJsonCfg = tslSchemaEnabled == null ? (parseTradeParams(plan) as any)?.trailingSL : null;
+      const tslEnabled = tslSchemaEnabled != null
+        ? tslSchemaEnabled === true && (plan.trailingSLType ?? "none") !== "none"
+        : tslJsonCfg?.enabled === true && tslJsonCfg?.tslType !== "none";
+      const tslType: string = plan.trailingSLType ?? tslJsonCfg?.tslType ?? "none";
       const lotMult = (plan as any).lotMultiplier || 1;
       const isAmtTsl = tslType === "amount";
-      const resolvedActivateAt: number | null = tslEnabled ? (Number(trailingSLCfg.activateAt) * (isAmtTsl ? lotMult : 1) || null) : null;
-      const resolvedLockProfit: number | null = tslEnabled ? (Number(trailingSLCfg.lockProfitAt) * (isAmtTsl ? lotMult : 1) || null) : null;
-      const resolvedProfitStep: number | null = tslEnabled ? (Number(trailingSLCfg.whenProfitIncreaseBy) * (isAmtTsl ? lotMult : 1) || null) : null;
-      const resolvedTrailingStep: number | null = tslEnabled ? (Number(trailingSLCfg.increaseTslBy) * (isAmtTsl ? lotMult : 1) || null) : null;
+      const tslActivateAt    = plan.trailingSLActivateAt            ?? tslJsonCfg?.activateAt;
+      const tslLockProfitAt  = plan.trailingSLLockProfitAt          ?? tslJsonCfg?.lockProfitAt;
+      const tslWhenStep      = plan.trailingSLWhenProfitIncreaseBy  ?? tslJsonCfg?.whenProfitIncreaseBy;
+      const tslIncreaseBy    = plan.trailingSLIncreaseTslBy         ?? tslJsonCfg?.increaseTslBy;
+      const resolvedActivateAt: number | null = tslEnabled ? (Number(tslActivateAt) * (isAmtTsl ? lotMult : 1) || null) : null;
+      const resolvedLockProfit: number | null = tslEnabled ? (Number(tslLockProfitAt) * (isAmtTsl ? lotMult : 1) || null) : null;
+      const resolvedProfitStep: number | null = tslEnabled ? (Number(tslWhenStep) * (isAmtTsl ? lotMult : 1) || null) : null;
+      const resolvedTrailingStep: number | null = tslEnabled ? (Number(tslIncreaseBy) * (isAmtTsl ? lotMult : 1) || null) : null;
       const initialSl: number | null =
         (leg as any).initialSl
         ?? (ctx.blockConfig as any)?.initialSl

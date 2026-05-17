@@ -255,6 +255,19 @@ export function TradePlanning() {
       status: planStatus,
       exchange: planExchange || null,
       ticker: planTicker || null,
+      // #264: persist SL/PT/TSL to schema columns
+      stoplossEnabled: stoploss.enabled ?? false,
+      stoplossMode: stoploss.mode ?? "amount",
+      stoplossValue: (stoploss.value ?? 0) > 0 ? stoploss.value : 0,
+      profitTargetEnabled: profitTarget.enabled ?? false,
+      profitTargetMode: profitTarget.mode ?? "amount",
+      profitTargetValue: (profitTarget.value ?? 0) > 0 ? profitTarget.value : 0,
+      trailingSLEnabled: trailingSL.enabled ?? false,
+      trailingSLType: trailingSL.tslType ?? "none",
+      trailingSLActivateAt: trailingSL.activateAt ?? 0,
+      trailingSLLockProfitAt: trailingSL.lockProfitAt ?? 0,
+      trailingSLWhenProfitIncreaseBy: trailingSL.whenProfitIncreaseBy ?? 0,
+      trailingSLIncreaseTslBy: trailingSL.increaseTslBy ?? 0,
     };
     if (editingPlan) {
       updateMutation.mutate({ id: editingPlan.id, data: payload });

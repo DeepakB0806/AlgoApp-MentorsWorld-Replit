@@ -1,0 +1,102 @@
+#215 - Fix TSL: Activate At ignored + scale-grade WS price feed
+Pre-Build Architecture Checklist
+Q1 — New data fields? YES. tslActivateAt must be persisted to strategy_trades so the TSL engine survives restarts.
+
+Q2 — New persisted fields:
+
+Field name	DB table	Drizzle column type	Nullable?
+tslActivateAt	strategy_trades	real("tsl_activate_at")	yes
+Q3 — Schema change execution order:
+
+Add tslActivateAt: real("tsl_activate_at") to strategyTrades in shared/schema.ts
+Run npm run db:push
+ONLY THEN update TE, TSL engine, HSM, MTM
+Q4 — Type updates:
+
+TrailingStoplossConfig (schema.ts ~line 88) already has activateAt: number — no change
+TslState interface in tsl-kotak-neo-v3.ts — add tslActivateAt: number | null and tslActivated: boolean manually
+StrategyTrade and insertStrategyTradeSchema auto-derived — no manual change
+Q5 — Existing queries/writes:
+
+TE stagedTrade spread: add tslActivateAt field, remove wrong activateAt→initialSl fallback
+registerNewTrail: read trade.tslActivateAt; update symbol index on register/deregister
+MTM monitor Part A (TSL REST polling): remove entirely — replaced by HSM WS feed
+Q6 — External spec? No.
+
+Sign-off: Schema change needed: YES. New columns: [tslActivateAt]. Migration: db:push.
+
+Schema verification (pre-build checklist completed)
+Existing strategy_trades TSL columns confirmed: initialSlPrice, trailingStep, currentSlPrice, highWaterMark, tslType, tslLockProfit, tslProfitStep. tslActivateAt does NOT exist — must be added.
+
+UCC-based process already in place: brokerCapitalSnapshots keyed by UCC; TE groups plans by brokerConfigId with runWithConcurrency. HSM is instantiated per broker (UCC) — wiring processTick from HSM automatically handles 1000+ users with zero extra design: each UCC's HSM feeds only its own symbols into TSL, no central polling loop needed.
+
+What & Why
+Two compounding bugs are making TSL dangerous in production and unscalable:
+
+Bug 1 — activateAt misused as initial SL price (confirmed production loss): In te-kotak-neo-v3.ts line 996, trailingSLCfg.activateAt (= 1000, the profit threshold before trailing begins) was used as the fallback initialSlPrice. An option bought at 143.50 got sl=1000 registered. On the first tick (ltp=149.5), the TSL check ltp <= sl → 149.5 <= 1000 → true → immediate forced sell. Confirmed in production: order 260504000332058 (BUY 143.50) immediately closed by TSL at 150.25.
+
+Bug 2 — TSL is blind between 5-second MTM polls, and does not scale: TSL currently gets prices exclusively from MTM monitor Part A — a REST API call per open trade every 5 seconds. For 1000+ users this means thousands of broker REST calls every 5 seconds. HSM already receives live WebSocket LTP ticks for every subscribed symbol at zero extra cost — but none of those ticks are wired to processTick. TSL is blind between polls.
+
+Bug 3 — processTick is O(n_trails) — does not scale: Every processTick(symbol, ltp) call iterates ALL open trails linearly (for...of trails) and skips non-matching symbols. With 10,000 open trails across users, each symbol tick does 10,000 iterations. Must be O(1) via symbol index.
+
+Locked blocks requiring user permission (granted — "changes must work for 1000+ users"):
+HSM-1 [hsm-kotak-neo-v3.ts lines 135–228]: Add processTick + updateLastWsTick after marketData.updatePrice
+HSI-1 [hsi-kotak-neo-v3.ts lines 114–244]: Extract LTP from trade/position events; call processTick + updateLastWsTick if present
+TSL-1 [tsl-kotak-neo-v3.ts lines 41–128]: Add tslActivated gate; change symbol lookup to use index
+TSL-2 [tsl-kotak-neo-v3.ts lines 131–151]: Update registerNewTrail to populate symbol index; handle null initialSlPrice for pure-TSL trades; read tslActivateAt
+TSL-3 [tsl-kotak-neo-v3.ts lines 154–175]: Update flushDirtyTrails to iterate trails Map (no change if symbol index is a parallel structure)
+Done looks like
+BUY trade is placed and held — TSL does NOT fire until profit per lot reaches activateAt
+Once profit >= activateAt, trailing begins using increaseTslBy / whenProfitIncreaseBy
+TSL receives LTP on every HSM WebSocket tick — no polling lag, no REST calls for price
+processTick lookup is O(1) via symbol index regardless of number of open trades
+MTM Part A (TSL REST polling) is removed — MTM Part B (plan-level stoploss/profit target) is untouched
+tslActivateAt stored on trade record, survives server restart and rehydration
+No initialSlPrice is set from activateAt — only from explicit leg.initialSl or blockConfig.initialSl
+Out of scope
+MTM Part B (plan-level stoploss/profit target) — untouched, it's correct
+MIS trades — TSL only applies to NRML
+lockProfitAt / tslLockProfit logic — already correct, do not touch
+Any other locked block invariants (relay fallback, reconnect backoff, heartbeat intervals)
+Steps
+Schema — Add tslActivateAt: real("tsl_activate_at") to strategyTrades in shared/schema.ts. Run npm run db:push.
+
+Fix TE (te-kotak-neo-v3.ts):
+
+Remove the activateAt fallback for initialSl (line 996). initialSl must only come from leg.initialSl or ctx.blockConfig.initialSl. No fallback to TSL config.
+In the NRML+tslEnabled stagedTrade spread, add tslActivateAt: trailingSLCfg.activateAt ? Number(trailingSLCfg.activateAt) : null.
+Fix TSL engine (tsl-kotak-neo-v3.ts) — all locked blocks require permission (granted):
+
+Add trailsBySymbol: Map<string, Set<string>> as a parallel symbol→tradeId index alongside trails.
+TslState: add tslActivateAt: number | null and tslActivated: boolean.
+registerNewTrail [TSL-2]: accept trade with null initialSlPrice when tslType !== "none". Set currentSlPrice from trade.currentSlPrice ?? trade.initialSlPrice ?? (isBuy ? 0 : Infinity) (0 for BUY means no SL breach possible until activated). Read tslActivateAt. Set tslActivated: false when tslActivateAt > 0, else true. Add entry to trailsBySymbol.
+processTick [TSL-1]: replace linear for...of trails with O(1) lookup via trailsBySymbol.get(symbol) → iterate only matching tradeIds. Add activation gate: if !state.tslActivated, compute profit; if profit >= tslActivateAt, set tslActivated = true, init highWaterMark = ltp. Skip trailing and SL check until activated. When tslActivateAt is null/0, treat as already activated.
+On trail deletion (trails.delete), also remove from trailsBySymbol.
+flushDirtyTrails [TSL-3]: no structural change needed if trails Map is retained.
+Wire HSM → TSL (hsm-kotak-neo-v3.ts) [HSM-1 locked block]:
+
+Import processTick and updateLastWsTick from tsl-kotak-neo-v3.
+After marketData.updatePrice(symbol, Number(ltp)) (line 207), add processTick(symbol, Number(ltp)); updateLastWsTick();.
+processTick is synchronous — zero async overhead on the WS hot path.
+Wire HSI → TSL (hsi-kotak-neo-v3.ts) [HSI-1 locked block]:
+
+On trade/position events (line 196–198), extract LTP: const trdLtp = d.ltp ?? d.lp; const trdSym = d.trdSym || d.ts;
+If both present: processTick(trdSym, Number(trdLtp)); updateLastWsTick();.
+These events are low-frequency (on order fills/position changes) — supplementary to HSM ticks.
+Remove MTM Part A (mtm-monitor.ts):
+
+Delete the entire TSL tick polling block (lines 54–83: // Part A: Drive TSL ticks at 5s cadence).
+Remove the processTick import from mtm-monitor.ts.
+MTM Part B (plan-level stoploss/profit target) is untouched.
+Verify in production logs:
+
+Next BUY_DT ENTRY: trade placed, [TSL] Registered trail appears, no immediate SL breach.
+HSM ticks: [TSL] trail updates appear in sync with market movement, not on 5s boundaries.
+After profit reaches activateAt: [TSL] Trail activated log (add this log), trailing begins.
+Relevant files
+shared/schema.ts:85-95,225-235
+server/te-kotak-neo-v3.ts:993-1028
+server/tsl-kotak-neo-v3.ts (full file — 198 lines)
+server/hsm-kotak-neo-v3.ts:135-228 (HSM-1 locked block)
+server/hsi-kotak-neo-v3.ts:114-244 (HSI-1 locked block)
+server/mtm-monitor.ts:54-83 (TSL polling — remove)

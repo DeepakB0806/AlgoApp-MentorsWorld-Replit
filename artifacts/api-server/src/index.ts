@@ -13,7 +13,7 @@ import { startCapitalManager, calculatePlanMargins } from "./cm-kotak-neo-v3";
 import { rescheduleScripMasterSync, scheduleScripSyncRetry, scheduleStartupScripSyncRetry, startIntradayScripRefresh } from "./scrip-sync-scheduler";
 import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
-import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback, closeTradeById } from "./te-kotak-neo-v3";
+import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback, closeTradeById, parseTradeParams } from "./te-kotak-neo-v3";
 import { startMarketDataManager } from "./md-kotak-neo-v3";
 import { startWsGateway } from "./hsm-kotak-neo-v3";
 import { startHsiGateway } from "./hsi-kotak-neo-v3";
@@ -250,6 +250,40 @@ app.get("/api/health", (_req, res) => {
     if (!existingFillRetryDelay) await storage.setSetting("fill_price_rest_retry_delay_ms", "2000");
   } catch (err) {
     log(`[STARTUP] Default settings seed warning: ${err}`);
+  }
+
+  // #264: one-time backfill — promote SL/PT/TSL from trade_params JSON to schema columns
+  try {
+    const allPlans = await storage.getStrategyPlans();
+    const toMigrate = allPlans.filter(p => p.stoplossValue == null && p.tradeParams);
+    let migrated = 0;
+    for (const plan of toMigrate) {
+      try {
+        const tp = parseTradeParams(plan);
+        if (!tp) continue;
+        await storage.updateStrategyPlan(plan.id, {
+          stoplossEnabled: tp.stoploss?.enabled ?? false,
+          stoplossMode: tp.stoploss?.mode ?? "amount",
+          stoplossValue: tp.stoploss?.value ?? 0,
+          profitTargetEnabled: tp.profitTarget?.enabled ?? false,
+          profitTargetMode: tp.profitTarget?.mode ?? "amount",
+          profitTargetValue: tp.profitTarget?.value ?? 0,
+          trailingSLEnabled: tp.trailingSL?.enabled ?? false,
+          trailingSLType: tp.trailingSL?.tslType ?? "none",
+          trailingSLActivateAt: tp.trailingSL?.activateAt ?? 0,
+          trailingSLLockProfitAt: tp.trailingSL?.lockProfitAt ?? 0,
+          trailingSLWhenProfitIncreaseBy: tp.trailingSL?.whenProfitIncreaseBy ?? 0,
+          trailingSLIncreaseTslBy: tp.trailingSL?.increaseTslBy ?? 0,
+        });
+        migrated++;
+      } catch (err) {
+        log(`[STARTUP] #264 backfill failed for plan ${plan.id}: ${err}`);
+      }
+    }
+    if (migrated > 0) log(`[STARTUP] #264 backfill: migrated ${migrated} plan(s) SL/PT/TSL → schema columns`);
+    else log(`[STARTUP] #264 backfill: all plans already have SL/PT/TSL schema columns`);
+  } catch (err) {
+    log(`[STARTUP] #264 backfill error: ${err}`);
   }
 
   try {

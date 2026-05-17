@@ -78,11 +78,27 @@ async function runMtmCycle(storage: IStorage): Promise<void> {
         }
         if (!mtmMarketHoursCache.get(planExchange)) continue;
 
-        const tp = parseTradeParams(plan);
-        if (!tp) continue;
+        // #264: read SL/PT from schema columns; fall back to trade_params JSON for unmigrated plans
+        const slEnabled = plan.stoplossEnabled === true && (plan.stoplossValue ?? 0) > 0;
+        const ptEnabled = plan.profitTargetEnabled === true && (plan.profitTargetValue ?? 0) > 0;
+        let stoplossEnabled = slEnabled;
+        let stoplossValue = plan.stoplossValue ?? 0;
+        let stoplossMode = plan.stoplossMode ?? "amount";
+        let profitEnabled = ptEnabled;
+        let profitTargetValue = plan.profitTargetValue ?? 0;
+        let profitTargetMode = plan.profitTargetMode ?? "amount";
 
-        const stoplossEnabled = tp.stoploss?.enabled === true && (tp.stoploss?.value ?? 0) > 0;
-        const profitEnabled = tp.profitTarget?.enabled === true && (tp.profitTarget?.value ?? 0) > 0;
+        if (!stoplossEnabled && !profitEnabled) {
+          const tp = parseTradeParams(plan);
+          if (!tp) continue;
+          stoplossEnabled = tp.stoploss?.enabled === true && (tp.stoploss?.value ?? 0) > 0;
+          stoplossValue = tp.stoploss?.value ?? 0;
+          stoplossMode = tp.stoploss?.mode ?? "amount";
+          profitEnabled = tp.profitTarget?.enabled === true && (tp.profitTarget?.value ?? 0) > 0;
+          profitTargetValue = tp.profitTarget?.value ?? 0;
+          profitTargetMode = tp.profitTarget?.mode ?? "amount";
+        }
+
         if (!stoplossEnabled && !profitEnabled) continue;
 
         const unclosedTrades = await storage.getUnclosedTradesByPlan(plan.id);
@@ -91,7 +107,7 @@ async function runMtmCycle(storage: IStorage): Promise<void> {
         const { mtm, capital } = await computePlanMTM(unclosedTrades, storage, plan.brokerConfigId, plan.id);
 
         if (stoplossEnabled) {
-          const slThreshold = resolveThreshold(tp.stoploss.value, tp.stoploss.mode ?? "amount", capital);
+          const slThreshold = resolveThreshold(stoplossValue, stoplossMode, capital);
           if (mtm <= -slThreshold) {
             const bc = await storage.getBrokerConfig(plan.brokerConfigId!);
             if (!bc) continue;
@@ -104,7 +120,7 @@ async function runMtmCycle(storage: IStorage): Promise<void> {
               resolvedAction: "CLOSE",
               blockType: "mtm_monitor",
               actionTaken: "auto_square_off",
-              message: `MTM stoploss: plan MTM ${mtm.toFixed(0)} ≤ -${slThreshold.toFixed(0)} (${tp.stoploss.mode} ${tp.stoploss.value}). Persistent exit started.`,
+              message: `MTM stoploss: plan MTM ${mtm.toFixed(0)} ≤ -${slThreshold.toFixed(0)} (${stoplossMode} ${stoplossValue}). Persistent exit started.`,
               broker: bc.brokerName,
             });
             startPersistentSquareOff(storage, plan.id, bc);
@@ -113,7 +129,7 @@ async function runMtmCycle(storage: IStorage): Promise<void> {
         }
 
         if (profitEnabled) {
-          const ptThreshold = resolveThreshold(tp.profitTarget.value, tp.profitTarget.mode ?? "amount", capital);
+          const ptThreshold = resolveThreshold(profitTargetValue, profitTargetMode, capital);
           if (mtm >= ptThreshold) {
             const bc = await storage.getBrokerConfig(plan.brokerConfigId!);
             if (!bc) continue;
@@ -126,7 +142,7 @@ async function runMtmCycle(storage: IStorage): Promise<void> {
               resolvedAction: "CLOSE",
               blockType: "mtm_monitor",
               actionTaken: "auto_square_off",
-              message: `MTM profit target: plan MTM ${mtm.toFixed(0)} ≥ ${ptThreshold.toFixed(0)} (${tp.profitTarget.mode} ${tp.profitTarget.value}). Persistent exit started.`,
+              message: `MTM profit target: plan MTM ${mtm.toFixed(0)} ≥ ${ptThreshold.toFixed(0)} (${profitTargetMode} ${profitTargetValue}). Persistent exit started.`,
               broker: bc.brokerName,
             });
             startPersistentSquareOff(storage, plan.id, bc);
