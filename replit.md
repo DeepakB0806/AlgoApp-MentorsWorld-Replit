@@ -392,6 +392,26 @@ if (symbol && ltp !== undefined) {
 3. Strategy card "Date: … IST" should update to today's date within seconds of the SSE event — if still showing yesterday's date, the `invalidateQueries` for `/api/strategy-plans` is not firing (check the `addEventListener("margin_calc_complete")` call in broker-linking.tsx)
 4. `fit_check_complete` fires from two places — the scheduled `runAndRescheduleFitCheck` and the chain inside `runAndRescheduleMarginCalc`; if one is missing, only one path emits
 
+### [MILESTONE] Deploy form pre-fill + summary chip read from schema columns — verified 2026-05-17
+
+**Tasks:** #265 (deploy form pre-fill) + #266 (summary chip schema reads)
+
+**What changed:** Two broker-linking.tsx cleanups after #264 promoted SL/PT/TSL to schema columns.
+
+(#265) `initDeployConfig` was pre-filling the deploy form stoploss/profitTarget from `plan.deployStoploss || baseSL` and `plan.deployProfitTarget || basePT`. If `deploy_stoploss` was stale (plan SL changed in Trade Planning after last deployment), the form opened with the old value. Now uses `baseSL` / `basePT` directly — both already read from `stoplossValue` / `profitTargetValue` schema columns with JSON fallback.
+
+(#266) The collapsed strategy summary chip and the expanded config panel SL/PT chips were still reading `tp.stoploss.enabled` / `tp.stoploss.value` / `tp.stoploss.mode` from the JSON blob. Updated to `plan.stoplossEnabled ?? tp.stoploss?.enabled` etc., matching the schema-column-first pattern used everywhere else in the file after #264.
+
+**Key files:**
+- `artifacts/mentors-world/src/components/broker-linking.tsx:840-841` — `initDeployConfig`: `stoploss: baseSL`, `profitTarget: basePT` (removed stale `plan.deployStoploss` / `plan.deployProfitTarget` fallback)
+- `artifacts/mentors-world/src/components/broker-linking.tsx:1088` — summary chip: schema-column reads with JSON fallback
+- `artifacts/mentors-world/src/components/broker-linking.tsx:1254-1255` — expanded config panel SL/PT chips: schema-column reads with JSON fallback
+
+**Diagnostic:**
+1. Open Broker Linking → click Deploy on any plan → SL field should show the current `stoplossValue` (not an older deployment's override)
+2. Collapsed summary chip should show `SL: N` reading from `plan.stoplossValue`
+3. TSL chip (line 1256) still reads from `tp.trailingSL` JSON — intentional, `tslChipLabel()` needs the full config object and JSON is always in sync
+
 ### [MILESTONE] Fix two silent storage.ts bugs — verified 2026-05-17
 
 **Task:** #267 — Fix two silent storage bugs

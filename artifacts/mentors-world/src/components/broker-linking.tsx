@@ -834,8 +834,8 @@ export function BrokerLinking() {
       ...prev,
       [plan.id]: {
         lotMultiplier: plan.lotMultiplier || 1,
-        stoploss: plan.deployStoploss || baseSL,
-        profitTarget: plan.deployProfitTarget || basePT,
+        stoploss: baseSL,
+        profitTarget: basePT,
         baseStoploss: baseSL,
         baseProfitTarget: basePT,
         brokerConfigId: plan.brokerConfigId || "",
@@ -1082,7 +1082,7 @@ export function BrokerLinking() {
             const chainTps = plan.uniqueCode ?? null;
             const strategyConfigSummary = [
               blockGroups.length > 0 ? `${blockGroups.length} block${blockGroups.length > 1 ? "s" : ""}` : null,
-              tp.stoploss?.enabled ? `SL: ${tp.stoploss.value}${tp.stoploss.mode === "percentage" ? "%" : ""}` : null,
+              (plan.stoplossEnabled ?? tp.stoploss?.enabled) ? `SL: ${plan.stoplossValue ?? tp.stoploss?.value}${(plan.stoplossMode ?? tp.stoploss?.mode) === "percentage" ? "%" : ""}` : null,
               tl.exitTime ? `Exit ${tl.exitTime}` : null,
               (tl.exitOnExpiry || !!tl.expiryType) ? expiryLabel : null,
               (tl.exitAfterDays ?? 0) > 0 ? `Exit +${tl.exitAfterDays}d` : null,
@@ -1248,8 +1248,8 @@ export function BrokerLinking() {
                           </div>
                           {(tp.stoploss?.enabled || tp.profitTarget?.enabled || tp.trailingSL?.enabled || tl.exitTime || (tl.exitAfterDays ?? 0) > 0 || tl.exitOnExpiry || !!tl.expiryType) && (
                             <div className="flex flex-wrap gap-1.5">
-                              {tp.stoploss?.enabled && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">SL: {tp.stoploss.value}{tp.stoploss.mode === "percentage" ? "%" : ""}</span>}
-                              {tp.profitTarget?.enabled && <span className="text-xs text-emerald-400 bg-emerald-400/10 rounded px-2 py-0.5">Target: {tp.profitTarget.value}{tp.profitTarget.mode === "percentage" ? "%" : " INR"}</span>}
+                              {(plan.stoplossEnabled ?? tp.stoploss?.enabled) && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">SL: {plan.stoplossValue ?? tp.stoploss?.value}{(plan.stoplossMode ?? tp.stoploss?.mode) === "percentage" ? "%" : ""}</span>}
+                              {(plan.profitTargetEnabled ?? tp.profitTarget?.enabled) && <span className="text-xs text-emerald-400 bg-emerald-400/10 rounded px-2 py-0.5">Target: {plan.profitTargetValue ?? tp.profitTarget?.value}{(plan.profitTargetMode ?? tp.profitTarget?.mode) === "percentage" ? "%" : " INR"}</span>}
                               {tp.trailingSL?.enabled && <span className="text-xs text-blue-400 bg-blue-400/10 rounded px-2 py-0.5">{tslChipLabel(tp.trailingSL)}</span>}
                               {tl.exitTime && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">Exit @ {tl.exitTime}</span>}
                               {(tl.exitOnExpiry || !!tl.expiryType) && <span className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-0.5">{expiryLabel}</span>}
