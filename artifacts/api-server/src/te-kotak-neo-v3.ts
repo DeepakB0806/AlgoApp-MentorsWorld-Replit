@@ -164,7 +164,7 @@ async function getFillPrice(storage: IStorage, brokerConfig: BrokerConfig, order
   // order as rejected. MTM monitor skips price=0 legs to prevent false SL/PT triggers.
   if (restAuthError !== null) {
     console.warn(`[TE] WARN: Order ${orderId.slice(0, 8)} placed but UNCONFIRMED — session/auth error: "${restAuthError}" — will write open with price=0 for manual review`);
-    return { fillPrice: 0, status: "UNCONFIRMED", reason: `session_error: ${restAuthError}`, filledQty: 0 };
+    return { fillPrice: 0, status: "UNCONFIRMED", reason: `fill_unconfirmed_session_error | ${restAuthError}`, filledQty: 0 };
   }
 
   // ── Step 3: Total failure — return 0, never ctx.price ─────────────────────
