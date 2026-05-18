@@ -109,7 +109,7 @@ The platform is designed to scale to multiple brokers without changing the core 
 
 **Diagnostic — if this breaks, check:**
 1. On HSI timeout, logs must show `[TE] WARN: HSI fill confirmation timeout for {orderId} — falling back to REST getOrderHistory` followed by `[TE] REST fill retry 2/3 for {orderId} — waiting 2000ms` (attempt 1 is immediate, retries log from attempt 2)
-2. If ₹0ais stored despite a valid fill, check `SELECT value FROM app_settings WHERE key IN ('fill_price_rest_retry_count','fill_price_rest_retry_delay_ms')` — if rows are missing, the seed in `index.ts` did not run (restart server)
+2. If ₹0 is stored despite a valid fill, check `SELECT value FROM app_settings WHERE key IN ('fill_price_rest_retry_count','fill_price_rest_retry_delay_ms')` — if rows are missing, the seed in `index.ts` did not run (restart server)
 3. Settings UI: General Settings → Trading Execution → "Fill Price REST Retry Attempts" and "Fill Price REST Retry Delay" fields should show 3 and 2000 respectively after first server boot
 
 ### [MILESTONE] tradedStatus field — entry/exit hooks, margin skip, UI badge — verified 2026-05-15
