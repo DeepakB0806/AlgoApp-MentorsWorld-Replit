@@ -10,7 +10,7 @@ Skip no question. If the answer is unclear, read the relevant files until it is 
 
 ---
 
-## Q1 — Does this feature introduce new data fields?
+## Q1 — Does this feature introduce new data fields or it has to read from existing data field?
 
 For every new field visible in the UI or processed by the backend, ask:
 - Is this field persisted to the database?
