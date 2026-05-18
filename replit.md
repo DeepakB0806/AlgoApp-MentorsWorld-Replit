@@ -517,3 +517,25 @@ if (symbol && ltp !== undefined) {
 1. Open New Plan → select Config A → add legs → change to Config B → legs must still be present
 2. Open Edit Plan → change config → legs must be preserved and save correctly with the new configId
 3. Closing the dialog (Cancel or X) must still fully reset legs — `closeDialog()` is untouched and still calls all reset setters
+
+### [MILESTONE] Distinguish UNKNOWN order: session expiry vs genuine rejection — verified 2026-05-18
+
+**Task:** #272 — Distinguish UNKNOWN order status: session expiry vs genuine rejection
+
+**What changed:** When both HSI and REST fill confirmation fail, the system now distinguishes between two causes: (1) session/auth error (orders placed at broker but fill unconfirmed) → trade written as `open` with `price=0` for manual review; (2) genuine order-not-found failure → existing UNKNOWN → rejection branch unchanged. MTM monitor now also skips NFO/BFO legs with `entryPrice === 0` to prevent false SL/PT triggers.
+
+**Key files:**
+- `artifacts/api-server/src/te-kotak-neo-v3.ts` — `getFillPrice`: hoisted `restAuthError` variable above `try/catch`; REST retry loop detects auth keywords in error message (session, token, unauthorized, unauthenticated, authentication) → sets `restAuthError` and breaks; after catch, if `restAuthError` is set returns `{ status: "UNCONFIRMED" }` instead of `"UNKNOWN"`. New `UNCONFIRMED` branch before rejection block logs warning and lets execution fall through to basket success path (trade written `open` with `price=0`, `rejectedReason` stores auth error detail).
+- `artifacts/api-server/src/mtm-monitor.ts` — sanity guard: after `> 5000` check, added `=== 0` check — skips NFO/BFO legs with zero entry price, preventing false SL/profit-target exits on unconfirmed positions.
+
+**How it works:**
+- **Auth detection**: `histResult.error` from `EL.getOrderHistory` is lowercased and checked for auth keywords. If matched → `restAuthError` is set and the retry loop breaks immediately (no point retrying a session error).
+- **UNCONFIRMED path**: `getFillPrice` returns `{ fillPrice: 0, status: "UNCONFIRMED", reason: "session_error: ..." }`. The `UNCONFIRMED` block in `executeLegBasket` logs `[TE] WARN: Order XXXXXXXX placed but UNCONFIRMED` and does NOT set `attemptFailed`. Execution continues to `stagedTrade` write (with `price=0` and `rejectedReason = session error message`), then basket success promotes to `status="open"`.
+- **MTM guard**: `entryPrice === 0` on NFO/BFO → skip with `WARN: entry price is ₹0 (fill unconfirmed — requires manual review)`. These trades stay open for human review/square-off; no automated exit fires.
+- **UNKNOWN unchanged**: non-auth REST failures still reach `return { status: "UNKNOWN" }` → existing rejection branch.
+
+**Diagnostic — if this breaks, check:**
+1. On session expiry + order placement: logs must show `[TE] REST fill lookup: session/auth error for XXXXXXXX — "..." — skipping retries` followed by `[TE] WARN: Order XXXXXXXX placed but UNCONFIRMED`
+2. Trade must appear in DB as `open` with `price=0` and `rejected_reason` containing `session_error:` — check `SELECT id, status, price, rejected_reason FROM strategy_trades WHERE price = 0`
+3. MTM monitor must log `WARN: skipping ... — entry price is ₹0` for the unconfirmed trade — if not, the `=== 0` guard is not firing (check `entryPrice` is actually `0` and not `null`)
+4. Genuine REJECTED orders still must NOT create open trades — verify by checking that `status: "REJECTED"` from HSI still enters the rejection branch (HSI rejection path is unchanged at line ~77)

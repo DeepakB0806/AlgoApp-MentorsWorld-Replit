@@ -86,12 +86,16 @@ async function getFillPrice(storage: IStorage, brokerConfig: BrokerConfig, order
 
   // ── Step 2: REST fallback — HSI disconnected or timed out ──────────────────
   console.warn(`[TE] WARN: HSI fill confirmation timeout for ${orderId.slice(0, 8)} — falling back to REST getOrderHistory`);
+  // Build #272: hoisted above try/catch so it's visible in the UNCONFIRMED check after the catch block
+  let restAuthError: string | null = null;
   try {
     // Build #260: retry count and delay driven by app_settings (configurable from Settings UI)
     const retryCountRaw = await storage.getSetting("fill_price_rest_retry_count");
     const retryDelayRaw = await storage.getSetting("fill_price_rest_retry_delay_ms");
     const retryCount = Math.max(1, parseInt(retryCountRaw?.value ?? "3", 10) || 3);
     const retryDelayMs = Math.max(0, parseInt(retryDelayRaw?.value ?? "2000", 10) || 2000);
+
+    // Build #272: detect auth/session errors separately from order-not-found failures
 
     for (let attempt = 1; attempt <= retryCount; attempt++) {
       if (attempt > 1) {
@@ -102,6 +106,15 @@ async function getFillPrice(storage: IStorage, brokerConfig: BrokerConfig, order
       const histResult = await EL.getOrderHistory(brokerConfig, orderId);
 
       if (!histResult.success || !Array.isArray(histResult.data) || histResult.data.length === 0) {
+        // Build #272: detect session/auth errors — no point retrying if the session is expired
+        if (!histResult.success) {
+          const errLower = (histResult.error || "").toLowerCase();
+          if (errLower.includes("session") || errLower.includes("token") || errLower.includes("unauthorized") || errLower.includes("unauthenticated") || errLower.includes("authentication")) {
+            restAuthError = histResult.error || "session/auth error";
+            console.warn(`[TE] REST fill lookup: session/auth error for ${orderId.slice(0, 8)} — "${histResult.error}" — skipping retries`);
+            break;
+          }
+        }
         if (attempt === retryCount) {
           console.warn(`[TE] REST fill lookup failed after ${retryCount} attempt(s) for ${orderId.slice(0, 8)} — returning 0`);
         }
@@ -144,6 +157,14 @@ async function getFillPrice(storage: IStorage, brokerConfig: BrokerConfig, order
     }
   } catch (err: any) {
     console.error(`[TE] REST getOrderHistory error for ${orderId}:`, err);
+  }
+
+  // Build #272: session/auth error detected in REST — order was placed but fill is unconfirmed.
+  // Return UNCONFIRMED so the basket writes an open trade with price=0 rather than treating the
+  // order as rejected. MTM monitor skips price=0 legs to prevent false SL/PT triggers.
+  if (restAuthError !== null) {
+    console.warn(`[TE] WARN: Order ${orderId.slice(0, 8)} placed but UNCONFIRMED — session/auth error: "${restAuthError}" — will write open with price=0 for manual review`);
+    return { fillPrice: 0, status: "UNCONFIRMED", reason: `session_error: ${restAuthError}`, filledQty: 0 };
   }
 
   // ── Step 3: Total failure — return 0, never ctx.price ─────────────────────
@@ -964,8 +985,18 @@ async function executeLegBasket(
         orderId = `PT-${Date.now()}-L${legIndex}`;
       }
 
+      // Build #272: UNCONFIRMED = order was placed at broker but fill could not be confirmed due to
+      // session/auth expiry. Write as open with price=0 so manual square-off is possible. The MTM
+      // monitor skips price=0 legs, preventing false SL/PT exits.
+      if (orderStatus === "UNCONFIRMED") {
+        console.warn(`[TE] WARN: Order ${orderId?.slice(0, 8)} placed but UNCONFIRMED (${orderReason}) — writing as open with price=0 for manual review`);
+        logPFL(plan, broker, ctx.data, "warn", `[UNCONFIRMED] ${orderId || "N/A"} → ${resolved.tradingSymbol} — session error, fill unconfirmed, open with price=0`);
+        // orderReason is stored in rejectedReason field via stagedTrade below — no further action needed.
+        // Do NOT set attemptFailed — basket success path will promote this leg to "open".
+      }
+
       // Rejection handling with Enterprise State Machine Rollback
-      // Build #268: UNKNOWN means both HSI and REST failed — treat as rejection
+      // Build #268: UNKNOWN means both HSI and REST failed (non-auth) — treat as rejection
       // to prevent orphan open trades from appearing in square-off.
       if (orderStatus === "REJECTED" || orderStatus === "CANCELLED" || orderStatus === "UNKNOWN") {
         const lowerReason = orderReason.toLowerCase();

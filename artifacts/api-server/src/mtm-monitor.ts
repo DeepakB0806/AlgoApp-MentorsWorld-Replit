@@ -39,6 +39,14 @@ async function computePlanMTM(
       continue;
     }
 
+    // Build #272 — MTM sanity guard: skip legs where entryPrice is 0 — fill was unconfirmed due to
+    // session/auth error at entry time. These trades are open for manual review; skipping them here
+    // prevents false SL/profit-target triggers on a position whose real fill price is unknown.
+    if ((exch === "NFO" || exch === "BFO") && entryPrice === 0) {
+      console.warn(`${LOG_PREFIX} WARN: skipping ${trade.tradingSymbol} — entry price is ₹0 (fill unconfirmed — requires manual review) (tradeId=${trade.id})`);
+      continue;
+    }
+
     capital += entryPrice * qty;
 
     const token = brokerSymbolToTokenMap.get(trade.tradingSymbol);
