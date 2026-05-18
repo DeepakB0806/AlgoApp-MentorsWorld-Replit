@@ -62,10 +62,6 @@ The platform is designed to scale to multiple brokers without changing the core 
 - **To onboard a new broker** — add a new section under Broker API alongside the existing Kotak Neo section. Each broker gets its own connection flow, credential management, margin engine, and capital snapshot. No changes needed to strategies, webhooks, fit-check, or TSL/SL logic — they already key off `brokerConfigId`.
 - **UI pattern** — the Broker API page will grow one link/tab per broker (e.g. Kotak Neo | Zerodha | …). Each tab manages connections for that broker only.
 
-## Milestones
-
-> Milestones before 2026-05-13 archived to `.local/milestone-history.md`
-
 ## Gotchas
 
 - Do NOT run `pnpm dev` at workspace root — use `restart_workflow` instead
@@ -76,6 +72,10 @@ The platform is designed to scale to multiple brokers without changing the core 
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+
+## Milestones
+
+> Milestones before 2026-05-13 archived to `.local/milestone-history.md`
 
 ### [MILESTONE] Fix neutral legs double-entry on explicit ENTRY@neutralLegs — verified 2026-05-13
 
@@ -183,46 +183,52 @@ The platform is designed to scale to multiple brokers without changing the core 
 3. Strategy card "Date: … IST" should update to today's date within seconds of the SSE event — if still showing yesterday's date, the `invalidateQueries` for `/api/strategy-plans` is not firing (check the `addEventListener("margin_calc_complete")` call in broker-linking.tsx)
 4. `fit_check_complete` fires from two places — the scheduled `runAndRescheduleFitCheck` and the chain inside `runAndRescheduleMarginCalc`; if one is missing, only one path emits
 
-### [MILESTONE] Keep legs intact on config change — verified 2026-05-15
+### [MILESTONE] TSL wired into live trade execution — verified 2026-05-18
 
-**Task:** #263 — Keep legs intact on config change
+**Task:** #270 — Fix TSL not activating for trades opened during a live session
 
-**What changed:** Changing the Parent Configuration dropdown in the Trade Planning plan form (create or edit) no longer wipes execution legs, stoploss, profit target, trailing SL, or time logic. Users can now seamlessly switch between configs (e.g. 3-min vs 5-min timeframe variants of the same strategy) without rebuilding legs from scratch.
+**What changed:** Two gaps closed. TSL was completely inactive for any trade opened after server startup. The 2026-05-18 production incident (user forced to manually square off NIFTY50 OTM 5 STRATEGY) was caused by both bugs firing together.
 
-**Key files:**
-- `artifacts/mentors-world/src/components/trade-planning.tsx:324` — `onValueChange` handler on the Parent Configuration `Select` reduced to `setConfigId(v)` only; all seven downstream reset calls (`setUptrendLegs([])`, `setDowntrendLegs([])`, `setNeutralLegs([])`, `setStoploss(...)`, `setProfitTarget(...)`, `setTrailingSL(...)`, `setTimeLogic(...)`) removed
+**Bug 1 (CRITICAL):** `executeLegBasket` in the TE promoted trades to `status="open"` but never called `registerNewTrail`. The in-memory TSL engine (`trailsBySymbol` map) only rehydrates at startup from DB. Every trade opened during a live session was invisible to TSL.
 
-**How it works:** Legs, stoploss, and time logic are instrument-agnostic — they store strike type, direction, quantity, and risk values, none of which are config-specific. The existing `useEffect` (line 113–119) already handles the only things that genuinely need to refresh on config change: indicator badge selections (reset to new config's signal list) and exchange/ticker auto-fill (when blank). No other state needs resetting.
-
-**Diagnostic — if this breaks, check:**
-1. Open New Plan → select Config A → add legs → change to Config B → legs must still be present
-2. Open Edit Plan → change config → legs must be preserved and save correctly with the new configId
-3. Closing the dialog (Cancel or X) must still fully reset legs — `closeDialog()` is untouched and still calls all reset setters
-
-### [MILESTONE] SL / PT / TSL promoted to strategy_plans schema columns — verified 2026-05-17
-
-**Task:** #264 — Promote SL, Profit Target, and TSL to schema columns
-
-**What changed:** Stoploss, profit target, and trailing SL configuration moved from the `trade_params` JSON blob to 12 dedicated columns on `strategy_plans`. The Broker Linking card now reads `stoplossValue` directly (fixing the stale `deploy_stoploss` display bug). MTM monitor and Trade Executor read from schema columns with JSON fallback for any unmigrated plans. A one-time startup backfill migrated all 6 existing plans.
+**Bug 2 (SECONDARY):** `startWsGateway` filtered `openTrades.filter(t => t.productType === "NRML")` before seeding `subscriptions`. MIS open trades were silently excluded — HSM sent zero subscriptions for them on restart, so no live ticks flowed.
 
 **Key files:**
-- `lib/db/src/schema/schema.ts:187-199` — 12 new columns added: `stoploss_enabled/mode/value`, `profit_target_enabled/mode/value`, `trailing_sl_enabled/type/activate_at/lock_profit_at/when_profit_increase_by/increase_tsl_by`
-- `artifacts/api-server/src/index.ts:258-290` — startup backfill: scans plans where `stoplossValue IS NULL`, parses `trade_params`, writes all 12 columns
-- `artifacts/mentors-world/src/components/trade-planning.tsx:261-273` — `handleSave` payload now includes all 12 schema fields
-- `artifacts/mentors-world/src/components/broker-linking.tsx:822-853` — `initDeployConfig` reads schema columns first; `effectiveSL`/`effectivePT` use `stoplossValue`/`profitTargetValue` (no longer `deployStoploss`)
-- `artifacts/api-server/src/mtm-monitor.ts:84-103` — reads `stoplossEnabled/Value/Mode` and `profitTargetEnabled/Value/Mode` from plan columns; falls back to JSON only if schema values are 0/false
-- `artifacts/api-server/src/te-kotak-neo-v3.ts:1053-1070` — reads TSL config from `plan.trailingSLEnabled/Type/ActivateAt/…`; falls back to JSON only if schema column is null
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:33-34` — added imports: `hsmSubscribe` from hsm, `registerNewTrail` from tsl
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:1135-1143` — after basket success, loop `finalTrades`: call `registerNewTrail(t)` when `trailingStep > 0`, call `hsmSubscribe(t.tradingSymbol)` for all
+- `artifacts/api-server/src/hsm-kotak-neo-v3.ts:524-530` — removed NRML filter; all open trades pre-subscribed at startup
 
-**How it works:**
-- **Backfill guard**: `stoplossValue IS NULL` identifies pre-migration plans (all rows populated with defaults on db:push, so `== null` in JS catches both null and undefined). Backfill runs once on startup; subsequent restarts skip (all plans will have non-null `stoplossValue` after first run).
-- **Read priority**: schema column → JSON fallback. For MTM monitor: if `stoplossEnabled===false && value===0`, falls through to JSON parse for backward compat. For TE: if `trailingSLEnabled` column is null (truly unmigrated), reads JSON.
-- **Display fix**: `effectiveSL` badge on Broker Linking card now shows `plan.stoplossValue` (source of truth from Trade Planning save) rather than `plan.deployStoploss` (was stale in production: 500 vs actual 1200).
+**Verified at restart:** `[HSM] Pre-subscribed 1 open trade symbol(s)` (was `NRML symbols`). `[TSL] TSL Engine started` visible.
+
+**Diagnostic — if TSL still silent after a trade opens:**
+1. `[TSL] Registered trail for {symbol} ...` must appear within seconds of order fill — if missing, check `openTrade.trailingStep` value in DB (`SELECT trading_symbol, trailing_step, tsl_activate_at FROM strategy_trades WHERE status='open'`)
+2. TSL fields only written when `productType = NRML` — MIS trades still have null `trailingStep` → TSL won't register (separate task #271)
+3. `[HSM] Pre-subscribed N open trade symbol(s)` at startup — N must match count of open trades
+
+### [MILESTONE] HSI rejection wired into fill price pipeline — verified 2026-05-18
+
+**Task:** #268 — Wire HSI rejection into fill price pipeline
+
+**What changed:** Three connected fixes so a Kotak RMS rejection (API-accepted but internally rejected) no longer creates an orphan open trade that triggers a spurious square-off.
+
+1. **`orderRejectRegistry` added to HSI** — mirrors `orderConfirmRegistry`. `registerOrderRejectCallback`/`deregisterOrderRejectCallback` exported. The existing HSI `rejected`/`cancelled` event handler now calls the reject callback immediately when it fires.
+2. **`getFillPrice` races confirm + reject** — registers both callbacks in the HSI race block. On rejection, resolves immediately with `{ rejected: true, rejReason }` — no 10s timeout, no REST round-trip. Returns `{ fillPrice: 0, status: "REJECTED" }` at once.
+3. **TE rejection branch extended to `"UNKNOWN"`** — when both HSI and REST fail (status="UNKNOWN"), the order now enters the rejection branch instead of falling through to a `status="open"` DB write. Prevents orphan trades even when HSI is down and REST is also unreachable.
+
+**Root cause of 2026-05-18 incident:** NIFTY 23450 CE SELL was RMS-rejected. HSI fired a rejection event but it had no path back to `getFillPrice`. That callback timed out → REST also failed → `status="UNKNOWN"` → trade written as open → square-off bought the CE at ₹108.15 → user had to manually sell at ₹101.95 (₹403 loss).
+
+**Key files:**
+- `artifacts/api-server/src/hsi-kotak-neo-v3.ts:58-66` — `orderRejectRegistry`, `registerOrderRejectCallback`, `deregisterOrderRejectCallback`
+- `artifacts/api-server/src/hsi-kotak-neo-v3.ts:338-349` — rejection event handler calls `rejectCb(rejRsn)`
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:32` — import of new reject callbacks
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:57-81` — `getFillPrice` races both callbacks; early return on reject
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:971` — rejection branch condition adds `|| orderStatus === "UNKNOWN"`
 
 **Diagnostic — if this breaks, check:**
-1. On startup: `[STARTUP] #264 backfill: migrated N plan(s)` or `already have SL/PT/TSL schema columns` — if missing, the backfill block errored; check `[STARTUP] #264 backfill error:`
-2. After saving a plan in Trade Planning, `SELECT stoploss_enabled, stoploss_value, trailing_sl_enabled FROM strategy_plans WHERE name = '...'` — must reflect the form values
-3. Broker Linking SL badge: if still shows stale value, check `plan.stoplossValue` in the `/api/strategy-plans` response — if null, the save didn't include the new fields (check `handleSave` payload)
-4. MTM stoploss trigger: if plans with SL stop triggering, `stoplossEnabled` column may be false while JSON has it true — force a save from Trade Planning to re-sync
+1. On any rejected entry order: `[TE] Order XXXXXXXX REJECTED via HSI: <reason>` must appear in logs within < 1s of order placement — no 10s timeout log
+2. `[HSI] Order REJECTED: <orderId> reason="..."` must appear first (HSI fires the event)
+3. No orphan open trade in DB: `SELECT symbol, status, price FROM strategy_trades WHERE status='open' AND price=0` should be empty after any rejection
+4. If HSI is down and REST also fails → `status="UNKNOWN"` → rejection branch fires → `[ORDER] N/A → UNKNOWN | symbol: ...` in PFL → no DB write as open
 
 ### [MILESTONE] Deploy form pre-fill + summary chip read from schema columns — verified 2026-05-17
 
@@ -262,52 +268,46 @@ The platform is designed to scale to multiple brokers without changing the core 
 2. Data retention logs: after the daily job runs, `[DATA-RETENTION]` should show a non-zero deleted count if old trades exist
 3. `pnpm --filter @workspace/api-server run typecheck 2>&1 | grep storage.ts` should return empty (no matches)
 
-### [MILESTONE] HSI rejection wired into fill price pipeline — verified 2026-05-18
+### [MILESTONE] SL / PT / TSL promoted to strategy_plans schema columns — verified 2026-05-17
 
-**Task:** #268 — Wire HSI rejection into fill price pipeline
+**Task:** #264 — Promote SL, Profit Target, and TSL to schema columns
 
-**What changed:** Three connected fixes so a Kotak RMS rejection (API-accepted but internally rejected) no longer creates an orphan open trade that triggers a spurious square-off.
-
-1. **`orderRejectRegistry` added to HSI** — mirrors `orderConfirmRegistry`. `registerOrderRejectCallback`/`deregisterOrderRejectCallback` exported. The existing HSI `rejected`/`cancelled` event handler now calls the reject callback immediately when it fires.
-2. **`getFillPrice` races confirm + reject** — registers both callbacks in the HSI race block. On rejection, resolves immediately with `{ rejected: true, rejReason }` — no 10s timeout, no REST round-trip. Returns `{ fillPrice: 0, status: "REJECTED" }` at once.
-3. **TE rejection branch extended to `"UNKNOWN"`** — when both HSI and REST fail (status="UNKNOWN"), the order now enters the rejection branch instead of falling through to a `status="open"` DB write. Prevents orphan trades even when HSI is down and REST is also unreachable.
-
-**Root cause of 2026-05-18 incident:** NIFTY 23450 CE SELL was RMS-rejected. HSI fired a rejection event but it had no path back to `getFillPrice`. That callback timed out → REST also failed → `status="UNKNOWN"` → trade written as open → square-off bought the CE at ₹108.15 → user had to manually sell at ₹101.95 (₹403 loss).
+**What changed:** Stoploss, profit target, and trailing SL configuration moved from the `trade_params` JSON blob to 12 dedicated columns on `strategy_plans`. The Broker Linking card now reads `stoplossValue` directly (fixing the stale `deploy_stoploss` display bug). MTM monitor and Trade Executor read from schema columns with JSON fallback for any unmigrated plans. A one-time startup backfill migrated all 6 existing plans.
 
 **Key files:**
-- `artifacts/api-server/src/hsi-kotak-neo-v3.ts:58-66` — `orderRejectRegistry`, `registerOrderRejectCallback`, `deregisterOrderRejectCallback`
-- `artifacts/api-server/src/hsi-kotak-neo-v3.ts:338-349` — rejection event handler calls `rejectCb(rejRsn)`
-- `artifacts/api-server/src/te-kotak-neo-v3.ts:32` — import of new reject callbacks
-- `artifacts/api-server/src/te-kotak-neo-v3.ts:57-81` — `getFillPrice` races both callbacks; early return on reject
-- `artifacts/api-server/src/te-kotak-neo-v3.ts:971` — rejection branch condition adds `|| orderStatus === "UNKNOWN"`
+- `lib/db/src/schema/schema.ts:187-199` — 12 new columns added: `stoploss_enabled/mode/value`, `profit_target_enabled/mode/value`, `trailing_sl_enabled/type/activate_at/lock_profit_at/when_profit_increase_by/increase_tsl_by`
+- `artifacts/api-server/src/index.ts:258-290` — startup backfill: scans plans where `stoplossValue IS NULL`, parses `trade_params`, writes all 12 columns
+- `artifacts/mentors-world/src/components/trade-planning.tsx:261-273` — `handleSave` payload now includes all 12 schema fields
+- `artifacts/mentors-world/src/components/broker-linking.tsx:822-853` — `initDeployConfig` reads schema columns first; `effectiveSL`/`effectivePT` use `stoplossValue`/`profitTargetValue` (no longer `deployStoploss`)
+- `artifacts/api-server/src/mtm-monitor.ts:84-103` — reads `stoplossEnabled/Value/Mode` and `profitTargetEnabled/Value/Mode` from plan columns; falls back to JSON only if schema values are 0/false
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:1053-1070` — reads TSL config from `plan.trailingSLEnabled/Type/ActivateAt/…`; falls back to JSON only if schema column is null
+
+**How it works:**
+- **Backfill guard**: `stoplossValue IS NULL` identifies pre-migration plans (all rows populated with defaults on db:push, so `== null` in JS catches both null and undefined). Backfill runs once on startup; subsequent restarts skip (all plans will have non-null `stoplossValue` after first run).
+- **Read priority**: schema column → JSON fallback. For MTM monitor: if `stoplossEnabled===false && value===0`, falls through to JSON parse for backward compat. For TE: if `trailingSLEnabled` column is null (truly unmigrated), reads JSON.
+- **Display fix**: `effectiveSL` badge on Broker Linking card now shows `plan.stoplossValue` (source of truth from Trade Planning save) rather than `plan.deployStoploss` (was stale in production: 500 vs actual 1200).
 
 **Diagnostic — if this breaks, check:**
-1. On any rejected entry order: `[TE] Order XXXXXXXX REJECTED via HSI: <reason>` must appear in logs within < 1s of order placement — no 10s timeout log
-2. `[HSI] Order REJECTED: <orderId> reason="..."` must appear first (HSI fires the event)
-3. No orphan open trade in DB: `SELECT symbol, status, price FROM strategy_trades WHERE status='open' AND price=0` should be empty after any rejection
-4. If HSI is down and REST also fails → `status="UNKNOWN"` → rejection branch fires → `[ORDER] N/A → UNKNOWN | symbol: ...` in PFL → no DB write as open
+1. On startup: `[STARTUP] #264 backfill: migrated N plan(s)` or `already have SL/PT/TSL schema columns` — if missing, the backfill block errored; check `[STARTUP] #264 backfill error:`
+2. After saving a plan in Trade Planning, `SELECT stoploss_enabled, stoploss_value, trailing_sl_enabled FROM strategy_plans WHERE name = '...'` — must reflect the form values
+3. Broker Linking SL badge: if still shows stale value, check `plan.stoplossValue` in the `/api/strategy-plans` response — if null, the save didn't include the new fields (check `handleSave` payload)
+4. MTM stoploss trigger: if plans with SL stop triggering, `stoplossEnabled` column may be false while JSON has it true — force a save from Trade Planning to re-sync
 
-### [MILESTONE] TSL wired into live trade execution — verified 2026-05-18
+### [MILESTONE] Keep legs intact on config change — verified 2026-05-15
 
-**Task:** #270 — Fix TSL not activating for trades opened during a live session
+**Task:** #263 — Keep legs intact on config change
 
-**What changed:** Two gaps closed. TSL was completely inactive for any trade opened after server startup. The 2026-05-18 production incident (user forced to manually square off NIFTY50 OTM 5 STRATEGY) was caused by both bugs firing together.
-
-**Bug 1 (CRITICAL):** `executeLegBasket` in the TE promoted trades to `status="open"` but never called `registerNewTrail`. The in-memory TSL engine (`trailsBySymbol` map) only rehydrates at startup from DB. Every trade opened during a live session was invisible to TSL.
-
-**Bug 2 (SECONDARY):** `startWsGateway` filtered `openTrades.filter(t => t.productType === "NRML")` before seeding `subscriptions`. MIS open trades were silently excluded — HSM sent zero subscriptions for them on restart, so no live ticks flowed.
+**What changed:** Changing the Parent Configuration dropdown in the Trade Planning plan form (create or edit) no longer wipes execution legs, stoploss, profit target, trailing SL, or time logic. Users can now seamlessly switch between configs (e.g. 3-min vs 5-min timeframe variants of the same strategy) without rebuilding legs from scratch.
 
 **Key files:**
-- `artifacts/api-server/src/te-kotak-neo-v3.ts:33-34` — added imports: `hsmSubscribe` from hsm, `registerNewTrail` from tsl
-- `artifacts/api-server/src/te-kotak-neo-v3.ts:1135-1143` — after basket success, loop `finalTrades`: call `registerNewTrail(t)` when `trailingStep > 0`, call `hsmSubscribe(t.tradingSymbol)` for all
-- `artifacts/api-server/src/hsm-kotak-neo-v3.ts:524-530` — removed NRML filter; all open trades pre-subscribed at startup
+- `artifacts/mentors-world/src/components/trade-planning.tsx:324` — `onValueChange` handler on the Parent Configuration `Select` reduced to `setConfigId(v)` only; all seven downstream reset calls (`setUptrendLegs([])`, `setDowntrendLegs([])`, `setNeutralLegs([])`, `setStoploss(...)`, `setProfitTarget(...)`, `setTrailingSL(...)`, `setTimeLogic(...)`) removed
 
-**Verified at restart:** `[HSM] Pre-subscribed 1 open trade symbol(s)` (was `NRML symbols`). `[TSL] TSL Engine started` visible.
+**How it works:** Legs, stoploss, and time logic are instrument-agnostic — they store strike type, direction, quantity, and risk values, none of which are config-specific. The existing `useEffect` (line 113–119) already handles the only things that genuinely need to refresh on config change: indicator badge selections (reset to new config's signal list) and exchange/ticker auto-fill (when blank). No other state needs resetting.
 
-**Diagnostic — if TSL still silent after a trade opens:**
-1. `[TSL] Registered trail for {symbol} ...` must appear within seconds of order fill — if missing, check `openTrade.trailingStep` value in DB (`SELECT trading_symbol, trailing_step, tsl_activate_at FROM strategy_trades WHERE status='open'`)
-2. TSL fields only written when `productType = NRML` — MIS trades still have null `trailingStep` → TSL won't register (separate task #271)
-3. `[HSM] Pre-subscribed N open trade symbol(s)` at startup — N must match count of open trades
+**Diagnostic — if this breaks, check:**
+1. Open New Plan → select Config A → add legs → change to Config B → legs must still be present
+2. Open Edit Plan → change config → legs must be preserved and save correctly with the new configId
+3. Closing the dialog (Cancel or X) must still fully reset legs — `closeDialog()` is untouched and still calls all reset setters
 
 ### [MILESTONE] Distinguish UNKNOWN order: session expiry vs genuine rejection — verified 2026-05-18
 
@@ -348,11 +348,11 @@ The platform is designed to scale to multiple brokers without changing the core 
 
 **Task:** #276 — Archive older milestones from replit.md to keep it lean
 
-**What changed:** 10 milestone blocks verified before 2026-05-13 (Tasks #251, #253, #254, #256, #257, #258, #245, #247, HSM single-source finding, and Agent skills setup) moved from `replit.md` to `.local/milestone-history.md`. The archive note was added to `## Milestones` section. No section ordering or milestone text was changed.
+**What changed:** 10 milestone blocks verified before 2026-05-13 (Tasks #251, #253, #254, #256, #257, #258, #245, #247, HSM single-source finding, and Agent skills setup) moved from `replit.md` to `.local/milestone-history.md`. Archive note added immediately above the remaining milestone list under `## Milestones`.
 
 **Key files:**
-- `replit.md` — removed 10 pre-2026-05-13 milestone blocks from `## Milestones` and the misplaced blocks under `## Pointers`; added `> Milestones before 2026-05-13 archived to \`.local/milestone-history.md\`` note
-- `.local/milestone-history.md` — created (gitignored); holds the 10 archived milestone blocks verbatim for reference
+- `replit.md` — removed 10 pre-2026-05-13 milestone blocks; added `> Milestones before 2026-05-13 archived to \`.local/milestone-history.md\`` note; all retained milestones now live directly under `## Milestones`
+- `.local/milestone-history.md` — created (gitignored); holds the 10 archived milestone blocks verbatim
 
 **How it works:** No runtime behaviour changed — documentation reorganisation only. `replit.md` drops from 555 lines to ~370 lines, reducing token load on every future agent session. `.local/` is gitignored so the archive file is workspace-local only.
 
