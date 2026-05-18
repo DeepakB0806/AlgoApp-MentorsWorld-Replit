@@ -539,3 +539,16 @@ if (symbol && ltp !== undefined) {
 2. Trade must appear in DB as `open` with `price=0` and `rejected_reason` containing `session_error:` — check `SELECT id, status, price, rejected_reason FROM strategy_trades WHERE price = 0`
 3. MTM monitor must log `WARN: skipping ... — entry price is ₹0` for the unconfirmed trade — if not, the `=== 0` guard is not firing (check `entryPrice` is actually `0` and not `null`)
 4. Genuine REJECTED orders still must NOT create open trades — verify by checking that `status: "REJECTED"` from HSI still enters the rejection branch (HSI rejection path is unchanged at line ~77)
+
+### [MILESTONE] Fix HSI startup log to show correct UCC — verified 2026-05-18
+
+**Task:** #275 — Fix HSI startup log to use correct UCC field from schema
+
+**What changed:** One-line fix — `config.clientId ?? config.id` → `config.ucc ?? config.id` in the HSI startup log.
+
+**Key files:**
+- `artifacts/api-server/src/hsi-kotak-neo-v3.ts:489` — log now reads `config.ucc` (schema's `ucc: text("ucc")` column) instead of `config.clientId` (a different Kotak login field)
+
+**How it works:** `config.ucc` is the broker's Unique Client Code stored in `broker_configs.ucc`. It is used consistently everywhere else that identifies a broker by its trading identity. Falls back to `config.id` (internal UUID) only if `ucc` is null.
+
+**Diagnostic:** On startup, logs must show `[HSI] Starting HSI instance for UCC=2KVW9 URL=...` with the actual Kotak UCC, not an internal UUID.
