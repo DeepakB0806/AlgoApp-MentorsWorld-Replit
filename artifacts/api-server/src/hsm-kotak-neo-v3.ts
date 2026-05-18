@@ -519,12 +519,11 @@ export async function startWsGateway(storage: IStorage): Promise<void> {
     activeConfig = config;
 
     const openTrades = await storage.getTradesByStatuses(["open"]);
-    const nrmlTrades = openTrades.filter(t => t.productType === "NRML");
-    for (const trade of nrmlTrades) {
+    for (const trade of openTrades) {
       subscriptions.set(trade.tradingSymbol, true);
     }
-    if (nrmlTrades.length > 0) {
-      console.log(`${LOG_PREFIX} Pre-subscribed ${nrmlTrades.length} NRML symbols`);
+    if (openTrades.length > 0) {
+      console.log(`${LOG_PREFIX} Pre-subscribed ${openTrades.length} open trade symbol(s)`);
     }
 
     connect(config);

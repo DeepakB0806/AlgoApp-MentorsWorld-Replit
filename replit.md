@@ -392,6 +392,28 @@ if (symbol && ltp !== undefined) {
 3. Strategy card "Date: … IST" should update to today's date within seconds of the SSE event — if still showing yesterday's date, the `invalidateQueries` for `/api/strategy-plans` is not firing (check the `addEventListener("margin_calc_complete")` call in broker-linking.tsx)
 4. `fit_check_complete` fires from two places — the scheduled `runAndRescheduleFitCheck` and the chain inside `runAndRescheduleMarginCalc`; if one is missing, only one path emits
 
+### [MILESTONE] TSL wired into live trade execution — verified 2026-05-18
+
+**Task:** #270 — Fix TSL not activating for trades opened during a live session
+
+**What changed:** Two gaps closed. TSL was completely inactive for any trade opened after server startup. The 2026-05-18 production incident (user forced to manually square off NIFTY50 OTM 5 STRATEGY) was caused by both bugs firing together.
+
+**Bug 1 (CRITICAL):** `executeLegBasket` in the TE promoted trades to `status="open"` but never called `registerNewTrail`. The in-memory TSL engine (`trailsBySymbol` map) only rehydrates at startup from DB. Every trade opened during a live session was invisible to TSL.
+
+**Bug 2 (SECONDARY):** `startWsGateway` filtered `openTrades.filter(t => t.productType === "NRML")` before seeding `subscriptions`. MIS open trades were silently excluded — HSM sent zero subscriptions for them on restart, so no live ticks flowed.
+
+**Key files:**
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:33-34` — added imports: `hsmSubscribe` from hsm, `registerNewTrail` from tsl
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:1135-1143` — after basket success, loop `finalTrades`: call `registerNewTrail(t)` when `trailingStep > 0`, call `hsmSubscribe(t.tradingSymbol)` for all
+- `artifacts/api-server/src/hsm-kotak-neo-v3.ts:524-530` — removed NRML filter; all open trades pre-subscribed at startup
+
+**Verified at restart:** `[HSM] Pre-subscribed 1 open trade symbol(s)` (was `NRML symbols`). `[TSL] TSL Engine started` visible.
+
+**Diagnostic — if TSL still silent after a trade opens:**
+1. `[TSL] Registered trail for {symbol} ...` must appear within seconds of order fill — if missing, check `openTrade.trailingStep` value in DB (`SELECT trading_symbol, trailing_step, tsl_activate_at FROM strategy_trades WHERE status='open'`)
+2. TSL fields only written when `productType = NRML` — MIS trades still have null `trailingStep` → TSL won't register (separate task #271)
+3. `[HSM] Pre-subscribed N open trade symbol(s)` at startup — N must match count of open trades
+
 ### [MILESTONE] HSI rejection wired into fill price pipeline — verified 2026-05-18
 
 **Task:** #268 — Wire HSI rejection into fill price pipeline

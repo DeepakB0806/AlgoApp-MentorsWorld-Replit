@@ -27,6 +27,8 @@ import {
 } from "./option-symbol-builder";
 import { liveContractCache, brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 import { registerOrderCallback, deregisterOrderCallback, registerExitOrder, registerOrderRejectCallback, deregisterOrderRejectCallback } from "./hsi-kotak-neo-v3";
+import { subscribe as hsmSubscribe } from "./hsm-kotak-neo-v3";
+import { registerNewTrail } from "./tsl-kotak-neo-v3";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -1126,6 +1128,15 @@ async function executeLegBasket(
       for (const landed of landedLegs) {
         const updated = await storage.updateStrategyTrade(landed.id, { status: "open", updatedAt: ctx.now });
         finalTrades.push(updated || landed);
+      }
+      // Wire each newly-opened trade into TSL engine + HSM subscriptions.
+      // registerNewTrail is a no-op when trailingStep is null/zero (MIS trades).
+      // hsmSubscribe is idempotent — safe to call even if already subscribed.
+      for (const openTrade of finalTrades) {
+        if (openTrade.trailingStep && openTrade.trailingStep > 0) {
+          registerNewTrail(openTrade);
+        }
+        hsmSubscribe(openTrade.tradingSymbol);
       }
       finalOrderIds = attemptOrderIds;
       return { trades: finalTrades, orderIds: finalOrderIds };
