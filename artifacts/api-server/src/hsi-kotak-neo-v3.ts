@@ -483,7 +483,7 @@ export async function startHsiGateway(storage: IStorage): Promise<void> {
       if (hsiInstances.has(config.id)) continue; // already running
       const state = createHsiState(config, storage);
       hsiInstances.set(config.id, state);
-      console.log(`${LOG_PREFIX} Starting HSI instance for UCC=${config.ucc ?? config.id} URL=${state.hsiUrl}`);
+      console.log(`${LOG_PREFIX} Starting HSI instance for UCC=${config.clientId ?? config.id} URL=${state.hsiUrl}`);
       connect(config, state);
       startHsiHeartbeat(state);
       startHsiStatusTracking(state);

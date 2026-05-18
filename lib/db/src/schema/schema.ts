@@ -481,6 +481,9 @@ export const brokerConfigs = pgTable("broker_configs", {
   mpin: text("mpin"), // 6-digit MPIN for Kotak Neo
   environment: text("environment").default("prod"), // "uat" or "prod"
   
+  // Client ID — Kotak Neo client identifier (used for HSI instance logging)
+  clientId: text("client_id"),
+
   // Primary flag — used for exchange-level scrip master downloads (Phase A)
   isPrimary: boolean("is_primary").notNull().default(false),
 
