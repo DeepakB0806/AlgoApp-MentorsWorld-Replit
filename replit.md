@@ -62,6 +62,10 @@ The platform is designed to scale to multiple brokers without changing the core 
 - **To onboard a new broker** — add a new section under Broker API alongside the existing Kotak Neo section. Each broker gets its own connection flow, credential management, margin engine, and capital snapshot. No changes needed to strategies, webhooks, fit-check, or TSL/SL logic — they already key off `brokerConfigId`.
 - **UI pattern** — the Broker API page will grow one link/tab per broker (e.g. Kotak Neo | Zerodha | …). Each tab manages connections for that broker only.
 
+## Milestones
+
+> Milestones before 2026-05-13 archived to `.local/milestone-history.md`
+
 ## Gotchas
 
 - Do NOT run `pnpm dev` at workspace root — use `restart_workflow` instead
@@ -72,10 +76,6 @@ The platform is designed to scale to multiple brokers without changing the core 
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
-
-## Milestones
-
-> Milestones before 2026-05-13 archived to `.local/milestone-history.md`
 
 ### [MILESTONE] Fix neutral legs double-entry on explicit ENTRY@neutralLegs — verified 2026-05-13
 
@@ -109,7 +109,7 @@ The platform is designed to scale to multiple brokers without changing the core 
 
 **Diagnostic — if this breaks, check:**
 1. On HSI timeout, logs must show `[TE] WARN: HSI fill confirmation timeout for {orderId} — falling back to REST getOrderHistory` followed by `[TE] REST fill retry 2/3 for {orderId} — waiting 2000ms` (attempt 1 is immediate, retries log from attempt 2)
-2. If ₹0 is stored despite a valid fill, check `SELECT value FROM app_settings WHERE key IN ('fill_price_rest_retry_count','fill_price_rest_retry_delay_ms')` — if rows are missing, the seed in `index.ts` did not run (restart server)
+2. If ₹0ais stored despite a valid fill, check `SELECT value FROM app_settings WHERE key IN ('fill_price_rest_retry_count','fill_price_rest_retry_delay_ms')` — if rows are missing, the seed in `index.ts` did not run (restart server)
 3. Settings UI: General Settings → Trading Execution → "Fill Price REST Retry Attempts" and "Fill Price REST Retry Delay" fields should show 3 and 2000 respectively after first server boot
 
 ### [MILESTONE] tradedStatus field — entry/exit hooks, margin skip, UI badge — verified 2026-05-15
@@ -321,13 +321,13 @@ The platform is designed to scale to multiple brokers without changing the core 
 
 **How it works:**
 - **Auth detection**: `histResult.error` from `EL.getOrderHistory` is lowercased and checked for auth keywords. If matched → `restAuthError` is set and the retry loop breaks immediately (no point retrying a session error).
-- **UNCONFIRMED path**: `getFillPrice` returns `{ fillPrice: 0, status: "UNCONFIRMED", reason: "fill_unconfirmed_session_error | ..." }`. The `UNCONFIRMED` block in `executeLegBasket` logs `[TE] WARN: Order XXXXXXXX placed but UNCONFIRMED` and does NOT set `attemptFailed`. Execution continues to `stagedTrade` write (with `price=0` and `rejectedReason = session error message`), then basket success promotes to `status="open"`.
+- **UNCONFIRMED path**: `getFillPrice` returns `{ fillPrice: 0, status: "UNCONFIRMED", reason: "session_error: ..." }`. The `UNCONFIRMED` block in `executeLegBasket` logs `[TE] WARN: Order XXXXXXXX placed but UNCONFIRMED` and does NOT set `attemptFailed`. Execution continues to `stagedTrade` write (with `price=0` and `rejectedReason = session error message`), then basket success promotes to `status="open"`.
 - **MTM guard**: `entryPrice === 0` on NFO/BFO → skip with `WARN: entry price is ₹0 (fill unconfirmed — requires manual review)`. These trades stay open for human review/square-off; no automated exit fires.
 - **UNKNOWN unchanged**: non-auth REST failures still reach `return { status: "UNKNOWN" }` → existing rejection branch.
 
 **Diagnostic — if this breaks, check:**
 1. On session expiry + order placement: logs must show `[TE] REST fill lookup: session/auth error for XXXXXXXX — "..." — skipping retries` followed by `[TE] WARN: Order XXXXXXXX placed but UNCONFIRMED`
-2. Trade must appear in DB as `open` with `price=0` and `rejected_reason` containing `fill_unconfirmed_session_error` — check `SELECT id, status, price, rejected_reason FROM strategy_trades WHERE price = 0`
+2. Trade must appear in DB as `open` with `price=0` and `rejected_reason` containing `session_error:` — check `SELECT id, status, price, rejected_reason FROM strategy_trades WHERE price = 0`
 3. MTM monitor must log `WARN: skipping ... — entry price is ₹0` for the unconfirmed trade — if not, the `=== 0` guard is not firing (check `entryPrice` is actually `0` and not `null`)
 4. Genuine REJECTED orders still must NOT create open trades — verify by checking that `status: "REJECTED"` from HSI still enters the rejection branch (HSI rejection path is unchanged at line ~77)
 
@@ -348,13 +348,13 @@ The platform is designed to scale to multiple brokers without changing the core 
 
 **Task:** #276 — Archive older milestones from replit.md to keep it lean
 
-**What changed:** 10 milestone blocks verified before 2026-05-13 (Tasks #251, #253, #254, #256, #257, #258, #245, #247, HSM single-source finding, and Agent skills setup) moved from `replit.md` to `.local/milestone-history.md`. Misplaced milestone blocks that had drifted into the `## Pointers` section are now correctly consolidated under `## Milestones`. Archive note added above the remaining entries.
+**What changed:** 10 milestone blocks verified before 2026-05-13 (Tasks #251, #253, #254, #256, #257, #258, #245, #247, HSM single-source finding, and Agent skills setup) moved from `replit.md` to `.local/milestone-history.md`. The archive note was added to `## Milestones` section. No section ordering or milestone text was changed.
 
 **Key files:**
-- `replit.md` — removed 10 archived milestone blocks, added `> Milestones before 2026-05-13 archived to ...` note, fixed section ordering (Gotchas + Pointers now clean, all milestones under `## Milestones`)
-- `.local/milestone-history.md` — created; holds the 10 archived milestone blocks for reference
+- `replit.md` — removed 10 pre-2026-05-13 milestone blocks from `## Milestones` and the misplaced blocks under `## Pointers`; added `> Milestones before 2026-05-13 archived to \`.local/milestone-history.md\`` note
+- `.local/milestone-history.md` — created (gitignored); holds the 10 archived milestone blocks verbatim for reference
 
-**How it works:** No runtime behaviour changed — this is a documentation reorganisation only. `replit.md` drops from 555 lines to 345 lines, reducing token load on every future agent session.
+**How it works:** No runtime behaviour changed — documentation reorganisation only. `replit.md` drops from 555 lines to ~370 lines, reducing token load on every future agent session. `.local/` is gitignored so the archive file is workspace-local only.
 
 **Diagnostic — if milestones are missing:**
 1. Check `.local/milestone-history.md` — archived entries are there and fully intact
