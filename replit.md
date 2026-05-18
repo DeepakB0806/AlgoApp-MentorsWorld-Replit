@@ -392,6 +392,31 @@ if (symbol && ltp !== undefined) {
 3. Strategy card "Date: … IST" should update to today's date within seconds of the SSE event — if still showing yesterday's date, the `invalidateQueries` for `/api/strategy-plans` is not firing (check the `addEventListener("margin_calc_complete")` call in broker-linking.tsx)
 4. `fit_check_complete` fires from two places — the scheduled `runAndRescheduleFitCheck` and the chain inside `runAndRescheduleMarginCalc`; if one is missing, only one path emits
 
+### [MILESTONE] HSI rejection wired into fill price pipeline — verified 2026-05-18
+
+**Task:** #268 — Wire HSI rejection into fill price pipeline
+
+**What changed:** Three connected fixes so a Kotak RMS rejection (API-accepted but internally rejected) no longer creates an orphan open trade that triggers a spurious square-off.
+
+1. **`orderRejectRegistry` added to HSI** — mirrors `orderConfirmRegistry`. `registerOrderRejectCallback`/`deregisterOrderRejectCallback` exported. The existing HSI `rejected`/`cancelled` event handler now calls the reject callback immediately when it fires.
+2. **`getFillPrice` races confirm + reject** — registers both callbacks in the HSI race block. On rejection, resolves immediately with `{ rejected: true, rejReason }` — no 10s timeout, no REST round-trip. Returns `{ fillPrice: 0, status: "REJECTED" }` at once.
+3. **TE rejection branch extended to `"UNKNOWN"`** — when both HSI and REST fail (status="UNKNOWN"), the order now enters the rejection branch instead of falling through to a `status="open"` DB write. Prevents orphan trades even when HSI is down and REST is also unreachable.
+
+**Root cause of 2026-05-18 incident:** NIFTY 23450 CE SELL was RMS-rejected. HSI fired a rejection event but it had no path back to `getFillPrice`. That callback timed out → REST also failed → `status="UNKNOWN"` → trade written as open → square-off bought the CE at ₹108.15 → user had to manually sell at ₹101.95 (₹403 loss).
+
+**Key files:**
+- `artifacts/api-server/src/hsi-kotak-neo-v3.ts:58-66` — `orderRejectRegistry`, `registerOrderRejectCallback`, `deregisterOrderRejectCallback`
+- `artifacts/api-server/src/hsi-kotak-neo-v3.ts:338-349` — rejection event handler calls `rejectCb(rejRsn)`
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:32` — import of new reject callbacks
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:57-81` — `getFillPrice` races both callbacks; early return on reject
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:971` — rejection branch condition adds `|| orderStatus === "UNKNOWN"`
+
+**Diagnostic — if this breaks, check:**
+1. On any rejected entry order: `[TE] Order XXXXXXXX REJECTED via HSI: <reason>` must appear in logs within < 1s of order placement — no 10s timeout log
+2. `[HSI] Order REJECTED: <orderId> reason="..."` must appear first (HSI fires the event)
+3. No orphan open trade in DB: `SELECT symbol, status, price FROM strategy_trades WHERE status='open' AND price=0` should be empty after any rejection
+4. If HSI is down and REST also fails → `status="UNKNOWN"` → rejection branch fires → `[ORDER] N/A → UNKNOWN | symbol: ...` in PFL → no DB write as open
+
 ### [MILESTONE] Deploy form pre-fill + summary chip read from schema columns — verified 2026-05-17
 
 **Tasks:** #265 (deploy form pre-fill) + #266 (summary chip schema reads)

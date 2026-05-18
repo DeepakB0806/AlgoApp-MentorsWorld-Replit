@@ -52,6 +52,19 @@ export function deregisterOrderCallback(orderId: string): void {
   orderConfirmRegistry.delete(orderId);
 }
 
+// ── Order rejection registry (Build #268) ────────────────────────────────────
+// Mirrors orderConfirmRegistry for rejection events. getFillPrice registers here
+// so a Kotak RMS rejection resolves the HSI race immediately (no 10s timeout).
+type OrderRejectCallback = (reason: string) => void;
+const orderRejectRegistry = new Map<string, OrderRejectCallback>();
+
+export function registerOrderRejectCallback(orderId: string, cb: OrderRejectCallback): void {
+  orderRejectRegistry.set(orderId, cb);
+}
+export function deregisterOrderRejectCallback(orderId: string): void {
+  orderRejectRegistry.delete(orderId);
+}
+
 // ── Exit order registry (Build #253) ─────────────────────────────────────────
 // Maps closeOrderId → tradeId — registered by closeTrade, consumed by HSI handler.
 const exitOrderRegistry = new Map<string, string>();
@@ -322,6 +335,15 @@ function connect(config: BrokerConfig, state: HsiState): void {
         } else if (ordSt === "rejected" || ordSt === "cancelled") {
           const rejRsn: string = (d.rejRsn || "").toLowerCase();
           console.warn(`${LOG_PREFIX} Order ${ordSt.toUpperCase()}: ${nOrdNo} reason="${rejRsn}"`);
+          // Build #268: resolve pending getFillPrice reject callback immediately so
+          // the TE does not wait 10s before detecting the rejection.
+          if (nOrdNo) {
+            const rejectCb = orderRejectRegistry.get(nOrdNo);
+            if (rejectCb) {
+              orderRejectRegistry.delete(nOrdNo);
+              rejectCb(rejRsn);
+            }
+          }
           if (rejRsn && rejRsn !== "--") {
             state.activeStorage.getActiveErrorRoutes().then((routes) => {
               for (const route of routes) {

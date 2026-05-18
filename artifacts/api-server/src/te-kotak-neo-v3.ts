@@ -26,7 +26,7 @@ import {
   getTargetExpiry,
 } from "./option-symbol-builder";
 import { liveContractCache, brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
-import { registerOrderCallback, deregisterOrderCallback, registerExitOrder } from "./hsi-kotak-neo-v3";
+import { registerOrderCallback, deregisterOrderCallback, registerExitOrder, registerOrderRejectCallback, deregisterOrderRejectCallback } from "./hsi-kotak-neo-v3";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -49,17 +49,33 @@ import { registerOrderCallback, deregisterOrderCallback, registerExitOrder } fro
 // Build #260: REST retry count and delay read from app_settings (fill_price_rest_retry_count, fill_price_rest_retry_delay_ms).
 async function getFillPrice(storage: IStorage, brokerConfig: BrokerConfig, orderId: string, _fallback: number): Promise<{ fillPrice: number; status: string; reason: string; filledQty: number }> {
   // ── Step 1: Await HSI order-confirmation (primary path) ────────────────────
-  const hsiResult = await new Promise<{ avgPrc: number; source: string } | null>((resolve) => {
+  // Build #268: race both confirm and reject callbacks so an RMS rejection
+  // resolves immediately instead of waiting the full 10s timeout.
+  const hsiResult = await new Promise<{ avgPrc: number; source: string; rejected?: true; rejReason?: string } | null>((resolve) => {
     const timeout = setTimeout(() => {
       deregisterOrderCallback(orderId);
+      deregisterOrderRejectCallback(orderId);
       resolve(null);
     }, 10_000);
     registerOrderCallback(orderId, (result) => {
       clearTimeout(timeout);
       deregisterOrderCallback(orderId);
+      deregisterOrderRejectCallback(orderId);
       resolve(result);
     });
+    registerOrderRejectCallback(orderId, (reason) => {
+      clearTimeout(timeout);
+      deregisterOrderCallback(orderId);
+      deregisterOrderRejectCallback(orderId);
+      resolve({ avgPrc: 0, source: "rejected", rejected: true, rejReason: reason });
+    });
   });
+
+  // Build #268: HSI rejection resolves immediately — skip REST, return REJECTED status.
+  if (hsiResult?.rejected) {
+    console.warn(`[TE] Order ${orderId.slice(0, 8)} REJECTED via HSI: ${hsiResult.rejReason}`);
+    return { fillPrice: 0, status: "REJECTED", reason: hsiResult.rejReason || "", filledQty: 0 };
+  }
 
   if (hsiResult && hsiResult.avgPrc > 0) {
     console.log(`[TE] Fill price from HSI (${orderId.slice(0, 8)}): ${hsiResult.avgPrc} [${hsiResult.source}]`);
@@ -947,7 +963,9 @@ async function executeLegBasket(
       }
 
       // Rejection handling with Enterprise State Machine Rollback
-      if (orderStatus === "REJECTED" || orderStatus === "CANCELLED") {
+      // Build #268: UNKNOWN means both HSI and REST failed — treat as rejection
+      // to prevent orphan open trades from appearing in square-off.
+      if (orderStatus === "REJECTED" || orderStatus === "CANCELLED" || orderStatus === "UNKNOWN") {
         const lowerReason = orderReason.toLowerCase();
 
         // ── Entry guard: check routing switchboard before margin step-down ──────
