@@ -109,17 +109,24 @@ async function runMtmCycle(storage: IStorage): Promise<void> {
 
         if (!stoplossEnabled && !profitEnabled) continue;
 
+        // #278: SL/PT amount values are per-lot; scale by lotMultiplier before threshold check.
+        // Percentage mode is unaffected (capital already reflects total deployed qty × lotMultiplier).
+        const lotMultiplier = (plan as any).lotMultiplier || 1;
+        const scaledSlValue = stoplossMode === "amount" ? stoplossValue * lotMultiplier : stoplossValue;
+        const scaledPtValue = profitTargetMode === "amount" ? profitTargetValue * lotMultiplier : profitTargetValue;
+
         const unclosedTrades = await storage.getUnclosedTradesByPlan(plan.id);
         if (unclosedTrades.length === 0) continue;
 
         const { mtm, capital } = await computePlanMTM(unclosedTrades, storage, plan.brokerConfigId, plan.id);
 
         if (stoplossEnabled) {
-          const slThreshold = resolveThreshold(stoplossValue, stoplossMode, capital);
+          const slThreshold = resolveThreshold(scaledSlValue, stoplossMode, capital);
           if (mtm <= -slThreshold) {
             const bc = await storage.getBrokerConfig(plan.brokerConfigId!);
             if (!bc) continue;
-            console.log(`${LOG_PREFIX} MTM stoploss breached for plan "${plan.name}" — MTM=${mtm.toFixed(0)}, threshold=-${slThreshold.toFixed(0)}`);
+            const slLotNote = stoplossMode === "amount" && lotMultiplier > 1 ? ` (${stoplossValue} × ${lotMultiplier} lots)` : "";
+            console.log(`${LOG_PREFIX} MTM stoploss breached for plan "${plan.name}" — MTM=${mtm.toFixed(0)}, threshold=-${slThreshold.toFixed(0)}${slLotNote}`);
             addProcessFlowLog({
               planId: plan.id,
               planName: plan.name,
@@ -128,7 +135,7 @@ async function runMtmCycle(storage: IStorage): Promise<void> {
               resolvedAction: "CLOSE",
               blockType: "mtm_monitor",
               actionTaken: "auto_square_off",
-              message: `MTM stoploss: plan MTM ${mtm.toFixed(0)} ≤ -${slThreshold.toFixed(0)} (${stoplossMode} ${stoplossValue}). Persistent exit started.`,
+              message: `MTM stoploss: plan MTM ${mtm.toFixed(0)} ≤ -${slThreshold.toFixed(0)} (${stoplossMode} ${stoplossValue}${lotMultiplier > 1 ? ` × ${lotMultiplier} lots` : ""}). Persistent exit started.`,
               broker: bc.brokerName,
             });
             startPersistentSquareOff(storage, plan.id, bc);
@@ -137,11 +144,12 @@ async function runMtmCycle(storage: IStorage): Promise<void> {
         }
 
         if (profitEnabled) {
-          const ptThreshold = resolveThreshold(profitTargetValue, profitTargetMode, capital);
+          const ptThreshold = resolveThreshold(scaledPtValue, profitTargetMode, capital);
           if (mtm >= ptThreshold) {
             const bc = await storage.getBrokerConfig(plan.brokerConfigId!);
             if (!bc) continue;
-            console.log(`${LOG_PREFIX} MTM profit target reached for plan "${plan.name}" — MTM=${mtm.toFixed(0)}, threshold=${ptThreshold.toFixed(0)}`);
+            const ptLotNote = profitTargetMode === "amount" && lotMultiplier > 1 ? ` (${profitTargetValue} × ${lotMultiplier} lots)` : "";
+            console.log(`${LOG_PREFIX} MTM profit target reached for plan "${plan.name}" — MTM=${mtm.toFixed(0)}, threshold=${ptThreshold.toFixed(0)}${ptLotNote}`);
             addProcessFlowLog({
               planId: plan.id,
               planName: plan.name,
@@ -150,7 +158,7 @@ async function runMtmCycle(storage: IStorage): Promise<void> {
               resolvedAction: "CLOSE",
               blockType: "mtm_monitor",
               actionTaken: "auto_square_off",
-              message: `MTM profit target: plan MTM ${mtm.toFixed(0)} ≥ ${ptThreshold.toFixed(0)} (${profitTargetMode} ${profitTargetValue}). Persistent exit started.`,
+              message: `MTM profit target: plan MTM ${mtm.toFixed(0)} ≥ ${ptThreshold.toFixed(0)} (${profitTargetMode} ${profitTargetValue}${lotMultiplier > 1 ? ` × ${lotMultiplier} lots` : ""}). Persistent exit started.`,
               broker: bc.brokerName,
             });
             startPersistentSquareOff(storage, plan.id, bc);

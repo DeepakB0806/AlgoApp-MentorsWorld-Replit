@@ -360,3 +360,22 @@ The platform is designed to scale to multiple brokers without changing the core 
 1. Check `.local/milestone-history.md` — archived entries are there and fully intact
 2. `grep "### \[MILESTONE\]" replit.md` — should list 14 entries (2026-05-13 through 2026-05-18)
 3. `grep "### \[MILESTONE\]" .local/milestone-history.md` — should list 10 entries (all pre-2026-05-13)
+
+### [MILESTONE] SL / TSL per-lot scaling fix — verified 2026-05-20
+
+**Task:** #278 — SL / TSL per-lot scaling fix
+
+**What changed:** Two bugs fixed where configured "per lot" values were applied at the wrong scale. (1) MTM monitor now multiplies `stoplossValue` and `profitTargetValue` by `plan.lotMultiplier` before the threshold check when mode is "amount" — a plan with `lotMultiplier=3` and SL=₹500 now correctly stops at ₹1,500 total MTM loss. (2) TE now stores TSL amount-type thresholds (`tslActivateAt`, `tslLockProfit`, `tslProfitStep`, `trailingStep`) in per-unit price terms by dividing by `lotSize × leg.lots`, matching the `ltp - entryPrice` unit that `processTick` (locked block) uses for comparison — TSL was previously using raw rupee amounts against per-unit price differences, so it could never activate.
+
+**Key files:**
+- `artifacts/api-server/src/mtm-monitor.ts:115-169` — added `lotMultiplier` scaling for amount-mode SL/PT; updated log lines to show `× N lots` annotation when multiplier > 1
+- `artifacts/api-server/src/te-kotak-neo-v3.ts:1112-1126` — removed `× lotMult` multiplier; added `tslUnitDivisor = lotSize × tslLegLots` divisor; all four resolved TSL thresholds now stored as per-unit price (₹/unit)
+
+**How it works:**
+- **MTM (Bug 1):** `scaledSlValue = stoplossValue × lotMultiplier` (amount mode only); passed to `resolveThreshold` in place of raw value. Percentage mode unaffected — capital already reflects total qty × lotMultiplier.
+- **TSL (Bug 2):** For a NIFTY trade (lotSize=65, leg.lots=1), user-configured `tslActivateAt=₹2,000/lot` → stored as `2000/65 = ₹30.77/unit`. `processTick` fires when `ltp - entryPrice ≥ 30.77` (= ₹2,000 profit on 65 qty). `lotMult` cancels out and was removed. The locked block (`processTick`, `registerNewTrail`, `flushDirtyTrails`) has zero edits.
+
+**Diagnostic — if this breaks, check:**
+1. MTM SL log must show `threshold=-1000 (amount 500 × 2 lots)` for a plan with `lotMultiplier=2`, SL=₹500 — if still shows `-500`, the `scaledSlValue` computation was removed
+2. On new trade entry (NRML, amount TSL), `SELECT tsl_activate_at FROM strategy_trades WHERE id='...'` must be a small decimal (e.g., 30.77 for NIFTY ₹2000 config), not a large rupee amount (e.g., 2000) — large value means the fix wasn't applied
+3. Existing open trades from before this deploy will still have wrong TSL thresholds stored — they need re-entry or the Task #279 backfill to correct them

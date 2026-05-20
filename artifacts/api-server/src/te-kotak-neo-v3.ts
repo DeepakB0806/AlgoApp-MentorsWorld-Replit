@@ -1106,16 +1106,21 @@ async function executeLegBasket(
         ? tslSchemaEnabled === true && (plan.trailingSLType ?? "none") !== "none"
         : tslJsonCfg?.enabled === true && tslJsonCfg?.tslType !== "none";
       const tslType: string = plan.trailingSLType ?? tslJsonCfg?.tslType ?? "none";
-      const lotMult = (plan as any).lotMultiplier || 1;
       const isAmtTsl = tslType === "amount";
       const tslActivateAt    = plan.trailingSLActivateAt            ?? tslJsonCfg?.activateAt;
       const tslLockProfitAt  = plan.trailingSLLockProfitAt          ?? tslJsonCfg?.lockProfitAt;
       const tslWhenStep      = plan.trailingSLWhenProfitIncreaseBy  ?? tslJsonCfg?.whenProfitIncreaseBy;
       const tslIncreaseBy    = plan.trailingSLIncreaseTslBy         ?? tslJsonCfg?.increaseTslBy;
-      const resolvedActivateAt: number | null = tslEnabled ? (Number(tslActivateAt) * (isAmtTsl ? lotMult : 1) || null) : null;
-      const resolvedLockProfit: number | null = tslEnabled ? (Number(tslLockProfitAt) * (isAmtTsl ? lotMult : 1) || null) : null;
-      const resolvedProfitStep: number | null = tslEnabled ? (Number(tslWhenStep) * (isAmtTsl ? lotMult : 1) || null) : null;
-      const resolvedTrailingStep: number | null = tslEnabled ? (Number(tslIncreaseBy) * (isAmtTsl ? lotMult : 1) || null) : null;
+      // #278: TSL amount values are configured in ₹ per lot (lotSize units). processTick compares
+      // them against (ltp - entryPrice) which is a per-unit price move, so divide by lotSize × leg.lots
+      // to convert to a per-unit price threshold. lotMultiplier cancels out and is not needed here.
+      // percentage_of_capital type is handled entirely inside the locked processTick block — no stored threshold.
+      const tslLegLots = (leg as any).lots || 1;
+      const tslUnitDivisor = isAmtTsl ? (lotSize * tslLegLots) : 1;
+      const resolvedActivateAt: number | null = tslEnabled ? (Number(tslActivateAt) / tslUnitDivisor || null) : null;
+      const resolvedLockProfit: number | null = tslEnabled ? (Number(tslLockProfitAt) / tslUnitDivisor || null) : null;
+      const resolvedProfitStep: number | null = tslEnabled ? (Number(tslWhenStep) / tslUnitDivisor || null) : null;
+      const resolvedTrailingStep: number | null = tslEnabled ? (Number(tslIncreaseBy) / tslUnitDivisor || null) : null;
       const initialSl: number | null =
         (leg as any).initialSl
         ?? (ctx.blockConfig as any)?.initialSl
