@@ -1115,8 +1115,9 @@ async function executeLegBasket(
       // them against (ltp - entryPrice) which is a per-unit price move, so divide by lotSize × leg.lots
       // to convert to a per-unit price threshold. lotMultiplier cancels out and is not needed here.
       // percentage_of_capital type is handled entirely inside the locked processTick block — no stored threshold.
+      const tslLotSize = ctx.idxMarginSetting?.lotSize ?? ctx.instrumentConfig?.lotSize ?? 1;
       const tslLegLots = (leg as any).lots || 1;
-      const tslUnitDivisor = isAmtTsl ? (lotSize * tslLegLots) : 1;
+      const tslUnitDivisor = isAmtTsl ? (tslLotSize * tslLegLots) : 1;
       const resolvedActivateAt: number | null = tslEnabled ? (Number(tslActivateAt) / tslUnitDivisor || null) : null;
       const resolvedLockProfit: number | null = tslEnabled ? (Number(tslLockProfitAt) / tslUnitDivisor || null) : null;
       const resolvedProfitStep: number | null = tslEnabled ? (Number(tslWhenStep) / tslUnitDivisor || null) : null;
