@@ -575,15 +575,26 @@ export async function calculatePlanMargins(
         const instrumentConfig = await storage.getInstrumentConfig(ticker, exchange);
 
         // 3. Resolve target expiry (respects expiryWeekOffset)
-        const timeLogic        = tradeParams.timeLogic as { expiryType?: string; expiryWeekOffset?: number } | undefined;
+        const timeLogic        = tradeParams.timeLogic as { expiryType?: string; expiryWeekOffset?: number; weeklyEndDay?: string } | undefined;
         const expiryType       = timeLogic?.expiryType || "weekly";
         const weekOffset       = timeLogic?.expiryWeekOffset || 0;
+        const weeklyEndDay     = timeLogic?.weeklyEndDay;
         const targetDate       = getTargetExpiry(expiryDay, expiryType, weekOffset);
         const targetExpiryDate = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, "0")}-${String(targetDate.getDate()).padStart(2, "0")}`;
         console.log(`${MLOG} Plan "${plan.name}" — expiry: ${expiryDay} ${expiryType} offset=${weekOffset} → ${targetExpiryDate}`);
 
         // 4. Expiry-day multiplier applied once before calling the block (SEBI ELM)
-        const isExpiry          = cmIsExpiryDay(targetExpiryDate);
+        // #277: For weekly offset-0 strategies, only apply the multiplier when the strategy's
+        // weeklyEndDay matches the index expiryDay. A Monday-exit NIFTY plan should never get
+        // the Tuesday-expiry multiplier. Monthly/custom/next-week paths are already correct.
+        const exitDayMatchesExpiry =
+          expiryType === "weekly" && weekOffset === 0 && weeklyEndDay
+            ? weeklyEndDay === expiryDay
+            : true;
+        if (!exitDayMatchesExpiry) {
+          console.log(`${MLOG} Plan "${plan.name}" — weeklyEndDay (${weeklyEndDay}) ≠ expiryDay (${expiryDay}), skipping expiry multiplier`);
+        }
+        const isExpiry          = exitDayMatchesExpiry && cmIsExpiryDay(targetExpiryDate);
         const effectiveSpanRate = baseSpanRate * (isExpiry ? expiryMultiplier : 1);
         if (isExpiry) console.log(`${MLOG} Plan "${plan.name}" — EXPIRY DAY: spanRate ×${expiryMultiplier} → ${(effectiveSpanRate * 100).toFixed(2)}%`);
 

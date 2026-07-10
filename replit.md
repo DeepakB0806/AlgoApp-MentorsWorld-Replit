@@ -379,3 +379,19 @@ The platform is designed to scale to multiple brokers without changing the core 
 1. MTM SL log must show `threshold=-1000 (amount 500 × 2 lots)` for a plan with `lotMultiplier=2`, SL=₹500 — if still shows `-500`, the `scaledSlValue` computation was removed
 2. On new trade entry (NRML, amount TSL), `SELECT tsl_activate_at FROM strategy_trades WHERE id='...'` must be a small decimal (e.g., 30.77 for NIFTY ₹2000 config), not a large rupee amount (e.g., 2000) — large value means the fix wasn't applied
 3. Existing open trades from before this deploy will still have wrong TSL thresholds stored — they need re-entry or the Task #279 backfill to correct them
+
+### [MILESTONE] Expiry multiplier exit-day gate — verified 2026-07-10
+
+**Task:** #277 — Expiry multiplier exit-day gate
+
+**What changed:** For weekly offset-0 strategies, the SEBI ELM Expiry X margin multiplier is now only applied when the strategy's configured `weeklyEndDay` matches the index's actual expiry day (from `index_margin_settings`). Previously, any plan whose target contract expired today received the multiplier regardless of whether the strategy exits before that expiry. A Monday-exit NIFTY plan was incorrectly getting the Tuesday-expiry multiplier. Monthly, custom, and next-week (offset ≥ 1) strategies are unaffected.
+
+**Key files:**
+- `artifacts/api-server/src/cm-kotak-neo-v3.ts:581-602` — added `weeklyEndDay` to `timeLogic` cast; computed `exitDayMatchesExpiry` flag; gated `isExpiry` on the flag; added log line when gate blocks the multiplier
+
+**How it works:** `exitDayMatchesExpiry` is `true` for all strategy types except weekly offset-0 with a known `weeklyEndDay`. For that case it is `weeklyEndDay === expiryDay`. The final `isExpiry = exitDayMatchesExpiry && cmIsExpiryDay(targetExpiryDate)` — so a Monday-exit strategy on NIFTY (expiryDay=Thursday) yields `false && <whatever>` = `false`, leaving `effectiveSpanRate` at the base rate. When `weeklyEndDay` is not set in `timeLogic` (legacy plans), the condition falls through to `true` (safe default — existing behaviour preserved).
+
+**Diagnostic — if this breaks, check:**
+1. On expiry day, server logs must show `[MARGIN-CALC] Plan "X" — weeklyEndDay (Monday) ≠ expiryDay (Thursday), skipping expiry multiplier` for any plan whose exit day differs from the index expiry day
+2. Plans whose `weeklyEndDay` matches `expiryDay` must still log `EXPIRY DAY: spanRate ×1.25` as before
+3. If `weeklyEndDay` is missing from `timeLogic` JSON for a plan, the gate defaults to `true` (multiplier applied) — check `SELECT trade_params->>'timeLogic' FROM strategy_plans WHERE id='...'` to confirm the field is present
