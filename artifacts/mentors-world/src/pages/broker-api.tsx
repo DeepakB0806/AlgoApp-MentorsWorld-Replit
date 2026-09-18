@@ -4048,7 +4048,7 @@ export default function BrokerApi() {
               <h3 className="text-lg font-semibold mb-2">No Broker Configurations</h3>
               <p className="text-muted-foreground mb-4">Add your first broker configuration to get started</p>
               <Button
-                onClick={handleAddBrokerConfig}
+                onClick={() => handleAddBrokerConfig()}
                 disabled={createMutation.isPending}
                 data-testid="button-add-first-broker"
               >

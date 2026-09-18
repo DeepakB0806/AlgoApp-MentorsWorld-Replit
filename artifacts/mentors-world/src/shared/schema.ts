@@ -1,6 +1,6 @@
 import { pgTable, text, varchar, integer, bigint, real, boolean, timestamp, jsonb, index, uniqueIndex, serial, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 // ====== PREDEFINED INDICATORS ======
 export const PREDEFINED_INDICATORS = [
@@ -180,6 +180,20 @@ export const strategyPlans = pgTable("strategy_plans", {
   consecutiveCapitalSkips: integer("consecutive_capital_skips").default(0).notNull(),
   autoPauseReason: text("auto_pause_reason"),
   autoPausedAt: text("auto_paused_at"),
+  tradedStatus: text("traded_status").notNull().default("not_traded"),
+  // SL / PT / TSL values promoted from trade_params JSON to schema columns.
+  stoplossEnabled: boolean("stoploss_enabled").default(false),
+  stoplossMode: text("stoploss_mode").default("amount"),
+  stoplossValue: real("stoploss_value"),
+  profitTargetEnabled: boolean("profit_target_enabled").default(false),
+  profitTargetMode: text("profit_target_mode").default("amount"),
+  profitTargetValue: real("profit_target_value"),
+  trailingSLEnabled: boolean("trailing_sl_enabled").default(false),
+  trailingSLType: text("trailing_sl_type").default("none"),
+  trailingSLActivateAt: real("trailing_sl_activate_at"),
+  trailingSLLockProfitAt: real("trailing_sl_lock_profit_at"),
+  trailingSLWhenProfitIncreaseBy: real("trailing_sl_when_profit_increase_by"),
+  trailingSLIncreaseTslBy: real("trailing_sl_increase_tsl_by"),
 }, (table) => [
   index("idx_strategy_plans_config_id").on(table.configId),
   index("idx_strategy_plans_broker_config_id").on(table.brokerConfigId),

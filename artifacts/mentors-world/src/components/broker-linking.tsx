@@ -1161,8 +1161,8 @@ export function BrokerLinking() {
                       )}
                       <span className="text-muted-foreground/50">|</span>
                       <span className="text-muted-foreground">
-                        Margin Validity: {scripStatus?.intradayIntervalMins > 0
-                          ? `${scripStatus.intradayIntervalMins} mins`
+                        Margin Validity: {(scripStatus?.intradayIntervalMins ?? 0) > 0
+                          ? `${scripStatus?.intradayIntervalMins} mins`
                           : "until next daily sync"}
                       </span>
                       {isSuperAdmin && linkedBroker && (

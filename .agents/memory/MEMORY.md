@@ -1,0 +1,1 @@
+- [Drizzle-Zod compatibility](zod-drizzle-compatibility.md) — Drizzle-derived schemas must use the Zod v4 entrypoint for type compatibility.
