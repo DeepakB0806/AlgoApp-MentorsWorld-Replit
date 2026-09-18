@@ -3993,7 +3993,7 @@ export default function BrokerApi() {
 
   return (
     <div
-      className="h-screen overflow-y-auto overscroll-y-contain bg-background"
+      className="min-h-screen overflow-y-auto overscroll-y-contain bg-background"
       data-testid="broker-api-scroll-container"
     >
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">

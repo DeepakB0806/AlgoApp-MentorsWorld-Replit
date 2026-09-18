@@ -61,22 +61,25 @@ test("every authenticated page keeps the shared footer", async () => {
   }
 });
 
-test("authenticated page roots remain vertically scrollable", async () => {
+test("authenticated page roots share a vertical scroll contract", async () => {
   for (const fileName of authenticatedPages) {
     const source = await readSource(join("pages", fileName));
     const rootClass = rootClassName(source, fileName);
 
     assert.match(rootClass, /\b(?:min-h-screen|min-h-dvh|h-screen)\b/, `${fileName} needs a viewport-height root`);
+    assert.match(rootClass, /\boverflow-y-auto\b/, `${fileName} needs an explicit vertical scroll region`);
+    assert.match(rootClass, /\boverscroll-y-contain\b/, `${fileName} needs contained vertical overscroll`);
+    assert.doesNotMatch(rootClass, /(?:^|\s)h-screen(?:\s|$)/, `${fileName} must not lock page content to a fixed viewport height`);
     assert.doesNotMatch(rootClass, /\boverflow-hidden\b/, `${fileName} must not lock its page root`);
   }
 });
 
-test("Broker API keeps its dedicated scroll container", async () => {
+test("Broker API keeps its scroll-container marker", async () => {
   const source = await readSource("pages/broker-api.tsx");
   assert.match(
     source,
-    /className="h-screen overflow-y-auto overscroll-y-contain bg-background"/,
-    "Broker API must have an explicit vertical scroll region",
+    /className="min-h-screen overflow-y-auto overscroll-y-contain bg-background"/,
+    "Broker API must use the shared page scroll contract",
   );
   assert.match(source, /data-testid="broker-api-scroll-container"/);
 });

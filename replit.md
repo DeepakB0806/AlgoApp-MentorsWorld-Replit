@@ -432,3 +432,26 @@ The platform is designed to scale to multiple brokers without changing the core 
 1. Run `pnpm --filter @workspace/mentors-world run test:layout` and identify the named contract that failed
 2. For footer or root failures, check the page's top-level wrapper and `<PageFooter />` placement
 3. For responsive failures, preserve wrapping, breakpoint, grid, and horizontal table overflow behavior instead of weakening the assertion
+
+### [MILESTONE] Authenticated page footer scrolling — verified 2026-09-18
+
+**Task:** #286 — Restore authenticated page scrolling to the shared footer
+
+**What changed:** Applied one consistent vertical scroll contract to every authenticated page and removed Broker API's fixed viewport-height root. The shared footer remains in normal page flow and can be reached by scrolling through each route's content.
+
+**Key files:**
+- `artifacts/mentors-world/src/pages/user-home.tsx` — added the shared vertical scroll and overscroll classes to the authenticated home root
+- `artifacts/mentors-world/src/pages/dashboard.tsx` — added the shared vertical scroll contract to the dashboard root
+- `artifacts/mentors-world/src/pages/strategies.tsx` — added the shared vertical scroll contract to the strategies root
+- `artifacts/mentors-world/src/pages/webhooks.tsx` — added the shared vertical scroll contract to the webhooks root
+- `artifacts/mentors-world/src/pages/broker-api.tsx` — replaced fixed `h-screen` sizing with `min-h-screen` while retaining vertical scrolling
+- `artifacts/mentors-world/src/pages/user-management.tsx` — added the shared vertical scroll contract to the user-management root
+- `artifacts/mentors-world/src/pages/settings.tsx` — added the shared vertical scroll contract to the settings root
+- `artifacts/mentors-world/tests/layout-regressions.test.mjs` — requires every authenticated root to use vertical scrolling without a standalone fixed `h-screen` lock
+
+**How it works:** Each authenticated page keeps a minimum viewport height but explicitly allows vertical scrolling with contained overscroll. Content-heavy pages grow naturally, while a constrained preview can scroll the page root directly; intentional table, log, sheet, and dialog scroll areas remain unchanged.
+
+**Diagnostic — if this breaks, check:**
+1. Run `pnpm --filter @workspace/mentors-world run test:layout` and confirm every authenticated root has `overflow-y-auto overscroll-y-contain`
+2. Check that a page root still uses `min-h-screen` or `min-h-dvh` and does not reintroduce standalone `h-screen`
+3. Confirm `<PageFooter />` remains inside the page root after all page content

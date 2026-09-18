@@ -20,7 +20,7 @@ export default function Strategies() {
   const [activeTab, setActiveTab] = useState("configurator");
 
   return (
-    <div className="min-h-dvh bg-background">
+    <div className="min-h-dvh overflow-y-auto overscroll-y-contain bg-background">
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center gap-4 flex-wrap">
