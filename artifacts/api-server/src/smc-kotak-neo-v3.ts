@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@workspace/db";
-import EL from "./el-kotak-neo-v3";
+import EL from "./kotak-api-adapter";
 import { tradingCache } from "./cache";
 import { isOptionExchange } from "./option-symbol-builder";
 import { calculatePlanMargins } from "./cm-kotak-neo-v3";

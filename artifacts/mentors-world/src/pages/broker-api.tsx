@@ -2606,6 +2606,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
   const [formData, setFormData] = useState<Partial<InsertBrokerConfig>>({
     name: config?.name || defaultName,
     brokerName: brokerName,
+    apiVersion: config?.apiVersion || "v3_current",
     consumerKey: config?.consumerKey || "",
     consumerSecret: config?.consumerSecret || "",
     mobileNumber: config?.mobileNumber || "",
@@ -2670,6 +2671,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
       setFormData({
         name: config.name || defaultName,
         brokerName: config.brokerName || "kotak_neo",
+        apiVersion: config.apiVersion || "v3_current",
         consumerKey: config.consumerKey || "",
         consumerSecret: config.consumerSecret || "",
         mobileNumber: config.mobileNumber || "",
@@ -2834,6 +2836,28 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
     }
   };
 
+  const handleSaveApiVersion = async () => {
+    if (!config || !isKotakNeo) return;
+    try {
+      await apiRequest("PATCH", `/api/broker-configs/${config.id}`, {
+        apiVersion: formData.apiVersion || "v3_current",
+      });
+      setTotp("");
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-session-status"] });
+      toast({
+        title: "Kotak API version saved",
+        description: "The previous session was disconnected. Enter a fresh TOTP to login with the selected version.",
+      });
+    } catch (error) {
+      toast({
+        title: "Failed to update Kotak API version",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleSaveAndLogin = async () => {
     if (!isBinance && totp.length !== 6) {
       toast({ title: "Please enter 6-digit TOTP", variant: "destructive" });
@@ -2943,6 +2967,11 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                     <Badge variant={config.isConnected ? "default" : "secondary"}>
                       {config.isConnected ? "Active" : "Saved"}
                     </Badge>
+                    {isKotakNeo && (
+                      <Badge variant="outline" data-testid={`badge-kotak-api-version-${config.id}`}>
+                        {(config.apiVersion || "v3_current") === "v2_legacy" ? "API v2 Legacy" : "API v3 Current"}
+                      </Badge>
+                    )}
                     {config.isPrimary && (
                       <Badge variant="outline" className="text-xs border-amber-500/60 text-amber-500 bg-amber-500/10" data-testid={`badge-primary-${config.id}`}>
                         Primary
@@ -3201,6 +3230,87 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
             </div>
           ) : (
           <div className="grid gap-3">
+            {isKotakNeo && (
+              <Card className="border-blue-500/30 bg-blue-500/5" data-testid={`card-kotak-api-version-${config?.id || "new"}`}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <ArrowRightLeft className="h-4 w-4 text-blue-400" />
+                        Kotak Neo API Version
+                      </CardTitle>
+                      <CardDescription>
+                        Shared Kotak broker identity with a version-specific login and trading profile.
+                      </CardDescription>
+                    </div>
+                    <Badge variant={config?.isConnected ? "default" : "secondary"}>
+                      {config?.isConnected ? "Session active" : "Login required"}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, apiVersion: "v2_legacy" })}
+                      className={`rounded-md border p-3 text-left transition-colors ${
+                        (formData.apiVersion || "v3_current") === "v2_legacy"
+                          ? "border-amber-500 bg-amber-500/10"
+                          : "border-border hover:bg-muted/40"
+                      }`}
+                      data-testid={`button-kotak-api-v2-${config?.id || "new"}`}
+                    >
+                      <div className="font-medium">Legacy v2</div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        Compatibility profile for the previous Kotak behavior.
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, apiVersion: "v3_current" })}
+                      className={`rounded-md border p-3 text-left transition-colors ${
+                        (formData.apiVersion || "v3_current") === "v3_current"
+                          ? "border-emerald-500 bg-emerald-500/10"
+                          : "border-border hover:bg-muted/40"
+                      }`}
+                      data-testid={`button-kotak-api-v3-${config?.id || "new"}`}
+                    >
+                      <div className="flex items-center gap-2 font-medium">
+                        Current v3
+                        <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/50">Recommended</Badge>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        Strict canonical order validation with the current Kotak API.
+                      </div>
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 flex-wrap text-xs text-muted-foreground">
+                    <span>
+                      Last successful login: {config?.lastConnected
+                        ? new Date(config.lastConnected.replace(" ", "T") + "Z").toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
+                        : "Never"}
+                    </span>
+                    {config && (formData.apiVersion || "v3_current") !== (config.apiVersion || "v3_current") && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleSaveApiVersion}
+                        data-testid={`button-save-kotak-api-version-${config.id}`}
+                      >
+                        Save Version & Disconnect
+                      </Button>
+                    )}
+                  </div>
+                  <Alert className="border-amber-500/30 bg-amber-500/5">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    <AlertDescription className="text-xs">
+                      Changing versions clears the current session and requires a fresh TOTP login. Bangalore relay routing remains unchanged.
+                    </AlertDescription>
+                  </Alert>
+                </CardContent>
+              </Card>
+            )}
             <div>
               <Label className="mb-1 block text-xs text-muted-foreground">Environment</Label>
               <div className="flex items-center gap-3 flex-wrap" data-testid={`container-environment-toggle-${config?.id || "new"}`}>
@@ -3876,6 +3986,7 @@ export default function BrokerApi() {
     createMutation.mutate({
       name: defaultName,
       brokerName: "kotak_neo",
+      apiVersion: "v3_current",
       environment: defaultEnv,
     });
   };

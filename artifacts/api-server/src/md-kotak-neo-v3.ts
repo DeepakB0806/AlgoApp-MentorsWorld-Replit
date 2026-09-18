@@ -1,4 +1,4 @@
-import EL from "./el-kotak-neo-v3";
+import EL from "./kotak-api-adapter";
 import type { BrokerConfig } from "@workspace/db";
 import { broadcast } from "./sse-hub";
 

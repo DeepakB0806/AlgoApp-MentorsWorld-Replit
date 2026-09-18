@@ -14,7 +14,7 @@ import type {
   ErrorRouting,
 } from "@workspace/db";
 import { tradingCache } from "./cache";
-import EL from "./el-kotak-neo-v3";
+import EL from "./kotak-api-adapter";
 import { addProcessFlowLog } from "./process-flow-log";
 import TL from "./tl-kotak-neo-v3";
 import {

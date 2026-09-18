@@ -474,6 +474,7 @@ export const brokerConfigs = pgTable("broker_configs", {
   id: varchar("id", { length: 36 }).primaryKey(),
   name: text("name").default("Kotak Neo Credentials"),
   brokerName: text("broker_name").notNull(), // "kotak_neo", "binance", "zerodha", "angel"
+  apiVersion: text("api_version").notNull().default("v3_current"), // Kotak compatibility profile; ignored by other brokers
   consumerKey: text("consumer_key"),
   consumerSecret: text("consumer_secret"),
   mobileNumber: text("mobile_number"),

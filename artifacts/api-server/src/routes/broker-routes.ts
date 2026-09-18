@@ -8,7 +8,11 @@ import { insertBrokerConfigSchema, webhookStatusLogs, brokerTestLogs, brokerSess
 import { tradingCache } from "../cache";
 import { db } from "../db";
 import { desc, eq, sql, or } from "drizzle-orm";
-import EL from "../el-kotak-neo-v3";
+import EL, {
+  getKotakApiProfileInfo,
+  isKotakApiVersion,
+  normalizeKotakApiVersion,
+} from "../kotak-api-adapter";
 import { startPersistentSquareOff } from "../te-kotak-neo-v3";
 import { refreshConfig as hsmRefreshConfig } from "../hsm-kotak-neo-v3";
 import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo-v3";
@@ -69,6 +73,9 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       if (!parsed.success) {
         return res.status(400).json({ error: "Invalid broker config data", details: parsed.error });
       }
+      if (parsed.data.brokerName === "kotak_neo" && !isKotakApiVersion(parsed.data.apiVersion ?? "v3_current")) {
+        return res.status(400).json({ error: "Invalid Kotak API version" });
+      }
       const config = await storage.createBrokerConfig(parsed.data);
       res.status(201).json(config);
     } catch (error) {
@@ -82,9 +89,41 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       if (!parsed.success) {
         return res.status(400).json({ error: "Invalid broker config data", details: parsed.error });
       }
-      const config = await storage.updateBrokerConfig(req.params.id, parsed.data);
+      const existing = await storage.getBrokerConfig(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Broker config not found" });
+      }
+      if (existing.brokerName === "kotak_neo" && parsed.data.apiVersion !== undefined && !isKotakApiVersion(parsed.data.apiVersion)) {
+        return res.status(400).json({ error: "Invalid Kotak API version" });
+      }
+
+      const versionChanged =
+        existing.brokerName === "kotak_neo" &&
+        parsed.data.apiVersion !== undefined &&
+        normalizeKotakApiVersion(existing.apiVersion) !== parsed.data.apiVersion;
+      const update = versionChanged
+        ? {
+            ...parsed.data,
+            isConnected: false,
+            accessToken: null,
+            sessionId: null,
+            baseUrl: null,
+            dataCenter: null,
+            viewToken: null,
+            sidView: null,
+            lastTotpUsed: null,
+            lastTotpTime: null,
+            connectionError: `API version changed to ${getKotakApiProfileInfo(parsed.data.apiVersion).label}. Fresh login required.`,
+            updatedAt: new Date().toISOString().replace("T", " ").slice(0, 19),
+          }
+        : parsed.data;
+      const config = await storage.updateBrokerConfig(req.params.id, update);
       if (!config) {
         return res.status(404).json({ error: "Broker config not found" });
+      }
+      if (versionChanged) {
+        hsmRefreshConfig(config);
+        hsiRefreshConfig(config);
       }
       tradingCache.invalidateBrokerConfig(req.params.id);
       res.json(config);
@@ -189,6 +228,11 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
           });
         }
         result = await EL.testConnectivity(config.consumerKey);
+        const profile = getKotakApiProfileInfo(config.apiVersion);
+        result = {
+          ...result,
+          message: `[${profile.label}] ${result.message || (result.success ? "Connection successful" : "Connection failed")}`,
+        };
       } else if (config.brokerName === "binance") {
         const isTestnet = config.environment !== "prod";
         result = await testBinanceConnectivity(config.consumerKey || "", config.consumerSecret || "", isTestnet);
@@ -199,9 +243,14 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       const responseTime = Date.now() - startTime;
 
       if (result.success || config.brokerName === "kotak_neo" || config.brokerName === "binance" || config.brokerName === "paper_trade") {
+        const isAuthenticatedKotakSession =
+          config.brokerName === "kotak_neo" &&
+          config.isConnected &&
+          !!config.accessToken &&
+          !!config.sessionId;
         const updated = await storage.updateBrokerConfig(req.params.id, {
-          isConnected: result.success,
-          lastConnected: result.success ? now : config.lastConnected,
+          isConnected: config.brokerName === "kotak_neo" ? isAuthenticatedKotakSession : result.success,
+          lastConnected: config.brokerName !== "kotak_neo" && result.success ? now : config.lastConnected,
           connectionError: result.success ? null : result.error,
           lastTestTime: now,
           lastTestResult: result.success ? "success" : "failed",
@@ -349,6 +398,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: "TOTP is required for authentication" });
       }
 
+      const profile = getKotakApiProfileInfo(config.apiVersion);
       const result = await EL.authenticate(config, totp);
 
       let sessionExpiry: string | null = null;
@@ -392,7 +442,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       await storage.createBrokerSessionLog({
         brokerConfigId: req.params.id,
         status: result.success ? "success" : "failed",
-        message: result.message || null,
+        message: `[${profile.label}] ${result.message || (result.success ? "Login successful" : "Login failed")}`,
         errorMessage: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
         totpUsed: totp,
         accessToken: result.data?.sessionToken || null,
@@ -404,7 +454,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
 
       res.json({ 
         success: result.success, 
-        message: result.message,
+        message: `[${profile.label}] ${result.message || (result.success ? "Login successful" : "Login failed")}`,
         error: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
         sessionExpiry,
         config: updated 

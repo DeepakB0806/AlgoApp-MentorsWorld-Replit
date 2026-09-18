@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { IStorage } from "../storage";
 import TL from "../tl-kotak-neo-v3";
-import EL from "../el-kotak-neo-v3";
+import EL from "../kotak-api-adapter";
 
 export function registerFieldMappingRoutes(app: Express, storage: IStorage) {
   app.get("/api/el/kotak_neo_v3/status", async (_req, res) => {

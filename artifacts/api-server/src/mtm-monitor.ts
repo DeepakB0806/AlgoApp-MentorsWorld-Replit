@@ -4,7 +4,7 @@ import { getPrice } from "./md-kotak-neo-v3";
 import { startPersistentSquareOff, persistentSquareOffActive, parseTradeParams } from "./te-kotak-neo-v3";
 import { brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
 import { addProcessFlowLog } from "./process-flow-log";
-import EL from "./el-kotak-neo-v3";
+import EL from "./kotak-api-adapter";
 import { isWithinMarketHours, getISTDatetimeNow } from "./market-calendar";
 
 const LOG_PREFIX = "[MTM-MONITOR]";

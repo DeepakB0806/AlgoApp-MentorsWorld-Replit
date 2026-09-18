@@ -729,6 +729,7 @@ export class DatabaseStorage implements IStorage {
     const [config] = await db.insert(brokerConfigs).values({
       id,
       brokerName: insertConfig.brokerName,
+      apiVersion: insertConfig.apiVersion ?? "v3_current",
       consumerKey: insertConfig.consumerKey ?? null,
       consumerSecret: insertConfig.consumerSecret ?? null,
       mobileNumber: insertConfig.mobileNumber ?? null,

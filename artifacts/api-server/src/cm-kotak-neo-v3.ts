@@ -17,7 +17,7 @@ import fs from "fs";
 import path from "path";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@workspace/db";
-import EL from "./el-kotak-neo-v3";
+import EL from "./kotak-api-adapter";
 import {
   getTargetExpiry,
   parseStrikeSpec,

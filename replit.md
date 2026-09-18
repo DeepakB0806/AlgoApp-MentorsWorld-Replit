@@ -395,3 +395,23 @@ The platform is designed to scale to multiple brokers without changing the core 
 1. On expiry day, server logs must show `[MARGIN-CALC] Plan "X" — weeklyEndDay (Monday) ≠ expiryDay (Thursday), skipping expiry multiplier` for any plan whose exit day differs from the index expiry day
 2. Plans whose `weeklyEndDay` matches `expiryDay` must still log `EXPIRY DAY: spanRate ×1.25` as before
 3. If `weeklyEndDay` is missing from `timeLogic` JSON for a plan, the gate defaults to `true` (multiplier applied) — check `SELECT trade_params->>'timeLogic' FROM strategy_plans WHERE id='...'` to confirm the field is present
+
+### [MILESTONE] Kotak Neo v3 compatibility hardening — verified 2026-09-18
+
+**Task:** #280 — Kotak Neo v3 Compatibility Hardening
+
+**What changed:** Added a persisted per-configuration Kotak API profile (`v3_current` by default, `v2_legacy` for compatibility), an explicit Broker API version selector, and a shared adapter that routes Kotak operations through the existing relay-backed Execution Layer. Version changes now invalidate all session state and require fresh authentication; v3 adds strict order validation and fixed ALL/ALL/ALL limits semantics.
+
+**Key files:**
+- `lib/db/src/schema/schema.ts` — added the persisted `broker_configs.api_version` profile with a safe v3 default
+- `artifacts/api-server/src/kotak-api-adapter.ts` — added profile normalization, version routing, v3 order guards, and v3 limits behavior
+- `artifacts/api-server/src/routes/broker-routes.ts` — validates profiles, atomically clears sessions on changes, and records profile diagnostics
+- `artifacts/mentors-world/src/pages/broker-api.tsx` — added the Kotak API Version card, status, warning, and explicit save/disconnect action
+
+**How it works:** All discovered API-server callers import the version façade instead of the raw EL singleton. Both profiles retain the proven TOTP→MPIN transport because Kotak's migration guide states that authentication flow is unchanged; v3 adds compatibility validation before entering the existing locked order block. The façade delegates network work to the unchanged EL, so Bangalore relay headers, targets, and request dispatch remain intact. Saving a different profile clears connected state, tokens, session IDs, URLs, data-center metadata, and intermediate login tokens before HSM/HSI refresh.
+
+**Diagnostic — if this breaks, check:**
+1. Confirm `broker_configs.api_version` exists, is non-null, and defaults to `v3_current`
+2. On a version switch, confirm `is_connected=false` and all access/session/base URL/data-center/view token fields are null before login
+3. Confirm Kotak callers import `kotak-api-adapter.ts`; only that adapter should import `el-kotak-neo-v3.ts`
+4. Confirm the locked relay, authenticate, and order-management blocks in `el-kotak-neo-v3.ts` have no edits

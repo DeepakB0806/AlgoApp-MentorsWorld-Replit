@@ -3,7 +3,7 @@ import type { BrokerConfig, StrategyTrade } from "@workspace/db";
 import { getPrice } from "./md-kotak-neo-v3";
 import { isWithinMarketHours, getISTDatetimeNow } from "./market-calendar";
 import { brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
-import EL from "./el-kotak-neo-v3";
+import EL from "./kotak-api-adapter";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.

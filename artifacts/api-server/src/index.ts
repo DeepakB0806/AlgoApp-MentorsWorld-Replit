@@ -6,7 +6,7 @@ import { storage } from "./storage";
 import { registerRoutes } from "./routes";
 import { tradingCache } from "./cache";
 import TL from "./tl-kotak-neo-v3";
-import EL from "./el-kotak-neo-v3";
+import EL from "./kotak-api-adapter";
 import { ensureBrokerEndpoints } from "./seed-broker-el";
 import { runScripMasterSync, loadScripMasterFromDisk, runScripMasterSyncPhaseB } from "./smc-kotak-neo-v3";
 import { startCapitalManager, calculatePlanMargins } from "./cm-kotak-neo-v3";

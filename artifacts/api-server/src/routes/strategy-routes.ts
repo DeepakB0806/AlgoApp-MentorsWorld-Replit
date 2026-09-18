@@ -356,7 +356,7 @@ export function registerStrategyRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: "Broker not connected. Please login first." });
       }
 
-      const { default: EL } = await import("../el-kotak-neo-v3");
+      const { default: EL } = await import("../kotak-api-adapter");
       const filePathsResult = await EL.getScripMasterFilePaths(brokerConfig);
       if (!filePathsResult.success) {
         return res.status(502).json({ error: filePathsResult.error || "Failed to get file paths" });
