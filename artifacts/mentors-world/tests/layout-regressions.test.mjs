@@ -36,7 +36,9 @@ test("every authenticated page keeps the shared footer", async () => {
 
 test("authenticated pages use the shared scroll shell", async () => {
   const shell = await readSource("components/authenticated-page-shell.tsx");
-  assert.match(shell, /min-h-screen/);
+  assert.match(shell, /h-screen/);
+  assert.match(shell, /h-dvh/);
+  assert.match(shell, /min-h-0/);
   assert.match(shell, /overflow-y-auto/);
   assert.match(shell, /overscroll-y-contain/);
   assert.match(shell, /bg-background/);

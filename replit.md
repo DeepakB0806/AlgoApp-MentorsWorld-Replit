@@ -77,7 +77,7 @@ The platform is designed to scale to multiple brokers without changing the core 
 
 When changing any frontend page, card, table, text block, dialog, sheet, preview, sticky header, Tailwind breakpoint, or authenticated route:
 
-- Keep protected pages inside `AuthenticatedPageShell`; it owns the page minimum height, vertical scrolling, overscroll behavior, background, and main scroll container.
+- Keep protected pages inside `AuthenticatedPageShell`; it owns the dynamic viewport height, vertical scrolling, overscroll behavior, background, and main scroll container.
 - Do not introduce fixed-height clipping or page-level `overflow-hidden` to solve a local layout issue.
 - Check narrow and wide layouts for wrapping, stacking, horizontal overflow, and intentional inner scrolling for tables, logs, sheets, and previews.
 - Run `pnpm --filter @workspace/mentors-world run test:ui-layout`, `pnpm --filter @workspace/mentors-world run typecheck`, and the correctly configured production build.

@@ -9,7 +9,7 @@ interface AuthenticatedPageShellProps {
 export function AuthenticatedPageShell({ children, testId }: AuthenticatedPageShellProps) {
   return (
     <div
-      className={cn("min-h-screen overflow-y-auto overscroll-y-contain bg-background")}
+      className={cn("h-screen h-dvh min-h-0 w-full overflow-y-auto overscroll-y-contain bg-background")}
       data-testid={testId ?? "authenticated-page-shell"}
     >
       {children}
