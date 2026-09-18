@@ -15,6 +15,7 @@ import {
 import { Link } from "wouter";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import { PageFooter } from "@/components/page-footer";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import {
   Dialog,
   DialogContent,
@@ -195,7 +196,7 @@ export default function UserManagement() {
   };
 
   return (
-    <div className="min-h-screen overflow-y-auto overscroll-y-contain bg-background">
+    <AuthenticatedPageShell>
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center gap-4">
@@ -455,6 +456,6 @@ export default function UserManagement() {
         </div>
       </div>
       <PageFooter />
-    </div>
+    </AuthenticatedPageShell>
   );
 }

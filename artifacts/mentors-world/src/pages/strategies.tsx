@@ -3,6 +3,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import { Loader2 } from "lucide-react";
 import { PageFooter } from "@/components/page-footer";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 
 const MotherConfigurator = lazy(() => import("@/components/strategy-config").then(m => ({ default: m.MotherConfigurator })));
 const TradePlanning = lazy(() => import("@/components/trade-planning").then(m => ({ default: m.TradePlanning })));
@@ -20,7 +21,7 @@ export default function Strategies() {
   const [activeTab, setActiveTab] = useState("configurator");
 
   return (
-    <div className="min-h-dvh overflow-y-auto overscroll-y-contain bg-background">
+    <AuthenticatedPageShell>
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center gap-4 flex-wrap">
@@ -62,6 +63,6 @@ export default function Strategies() {
         </Suspense>
         <PageFooter />
       </div>
-    </div>
+    </AuthenticatedPageShell>
   );
 }

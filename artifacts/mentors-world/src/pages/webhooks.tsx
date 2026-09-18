@@ -20,6 +20,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Webhook as WebhookType, InsertWebhook, Strategy, WebhookStatusLog, AppSetting, WebhookData } from "@shared/schema";
 import { PageFooter } from "@/components/page-footer";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 
 type WebhookStats = {
   total: number;
@@ -579,7 +580,7 @@ export default function Webhooks() {
   };
 
   return (
-    <div className="min-h-screen overflow-y-auto overscroll-y-contain bg-background">
+    <AuthenticatedPageShell>
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center gap-4 flex-wrap">
@@ -1396,7 +1397,7 @@ export default function Webhooks() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </AuthenticatedPageShell>
   );
 }
 

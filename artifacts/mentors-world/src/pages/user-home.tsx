@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
 import { PageFooter } from "@/components/page-footer";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 
 interface BrokerConfig {
   id: string;
@@ -60,7 +61,7 @@ export default function UserHome() {
   };
 
   return (
-    <div className="min-h-screen overflow-y-auto overscroll-y-contain bg-background">
+    <AuthenticatedPageShell>
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center gap-4">
@@ -282,6 +283,6 @@ export default function UserHome() {
       </div>
 
       <PageFooter />
-    </div>
+    </AuthenticatedPageShell>
   );
 }

@@ -21,6 +21,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { PageFooter } from "@/components/page-footer";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 
 interface TestResult {
   success: boolean;
@@ -3992,10 +3993,7 @@ export default function BrokerApi() {
   };
 
   return (
-    <div
-      className="min-h-screen overflow-y-auto overscroll-y-contain bg-background"
-      data-testid="broker-api-scroll-container"
-    >
+    <AuthenticatedPageShell testId="broker-api-scroll-container">
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center gap-4 flex-wrap">
@@ -4198,6 +4196,6 @@ export default function BrokerApi() {
         </Alert>
       </div>
       <PageFooter />
-    </div>
+    </AuthenticatedPageShell>
   );
 }

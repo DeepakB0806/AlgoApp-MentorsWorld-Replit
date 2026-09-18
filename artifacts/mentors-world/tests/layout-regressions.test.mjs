@@ -34,25 +34,6 @@ async function readSource(relativePath) {
   return readFile(join(sourceRoot, relativePath), "utf8");
 }
 
-function pageComponentSource(source, fileName) {
-  const componentName = fileName.replace(".tsx", "").split("-").map((part) => (
-    part.charAt(0).toUpperCase() + part.slice(1)
-  )).join("");
-  const marker = `export default function ${componentName}`;
-  const start = source.indexOf(marker);
-  assert.notEqual(start, -1, `Could not locate ${marker} in ${fileName}`);
-  return source.slice(start);
-}
-
-function rootClassName(source, fileName) {
-  const componentSource = pageComponentSource(source, fileName);
-  const rootMatch = componentSource.match(
-    /return\s*\(\s*<div[\s\S]{0,300}?className="([^"]+)"/,
-  );
-  assert.ok(rootMatch, `Could not locate the page root class in ${fileName}`);
-  return rootMatch[1];
-}
-
 test("every authenticated page keeps the shared footer", async () => {
   for (const fileName of authenticatedPages) {
     const source = await readSource(join("pages", fileName));
@@ -61,27 +42,27 @@ test("every authenticated page keeps the shared footer", async () => {
   }
 });
 
-test("authenticated page roots share a vertical scroll contract", async () => {
+test("authenticated pages use the shared scroll shell", async () => {
+  const shell = await readSource("components/authenticated-page-shell.tsx");
+  assert.match(shell, /min-h-screen/);
+  assert.match(shell, /overflow-y-auto/);
+  assert.match(shell, /overscroll-y-contain/);
+  assert.match(shell, /bg-background/);
+
   for (const fileName of authenticatedPages) {
     const source = await readSource(join("pages", fileName));
-    const rootClass = rootClassName(source, fileName);
-
-    assert.match(rootClass, /\b(?:min-h-screen|min-h-dvh|h-screen)\b/, `${fileName} needs a viewport-height root`);
-    assert.match(rootClass, /\boverflow-y-auto\b/, `${fileName} needs an explicit vertical scroll region`);
-    assert.match(rootClass, /\boverscroll-y-contain\b/, `${fileName} needs contained vertical overscroll`);
-    assert.doesNotMatch(rootClass, /(?:^|\s)h-screen(?:\s|$)/, `${fileName} must not lock page content to a fixed viewport height`);
-    assert.doesNotMatch(rootClass, /\boverflow-hidden\b/, `${fileName} must not lock its page root`);
+    assert.match(
+      source,
+      /import\s+\{\s*AuthenticatedPageShell\s*\}\s+from\s+"@\/components\/authenticated-page-shell"/,
+      `${fileName} must import the shared page shell`,
+    );
+    assert.match(source, /<AuthenticatedPageShell(?:\s[^>]*)?>/, `${fileName} must render the shared page shell`);
   }
 });
 
 test("Broker API keeps its scroll-container marker", async () => {
   const source = await readSource("pages/broker-api.tsx");
-  assert.match(
-    source,
-    /className="min-h-screen overflow-y-auto overscroll-y-contain bg-background"/,
-    "Broker API must use the shared page scroll contract",
-  );
-  assert.match(source, /data-testid="broker-api-scroll-container"/);
+  assert.match(source, /<AuthenticatedPageShell testId="broker-api-scroll-container">/);
 });
 
 test("shared styles do not introduce a global scroll lock", async () => {

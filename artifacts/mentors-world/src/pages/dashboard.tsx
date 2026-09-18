@@ -14,6 +14,7 @@ import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import type { Position, Order, Holding, PortfolioSummary, StrategyPlan, StrategyConfig, BrokerConfig, StrategyTrade } from "@shared/schema";
 import { Target } from "lucide-react";
 import { PageFooter } from "@/components/page-footer";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 
 interface BrokerSessionStatus {
   isAuthenticated: boolean;
@@ -202,7 +203,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen overflow-y-auto overscroll-y-contain bg-background">
+    <AuthenticatedPageShell>
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-3">
           <div className="flex justify-between items-center gap-4 flex-wrap">
@@ -705,7 +706,7 @@ export default function Dashboard() {
         </Tabs>
       </div>
       <PageFooter />
-    </div>
+    </AuthenticatedPageShell>
   );
 }
 

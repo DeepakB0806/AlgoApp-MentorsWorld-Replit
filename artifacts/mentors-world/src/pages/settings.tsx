@@ -21,6 +21,7 @@ import { PageBreadcrumbs } from "@/components/page-breadcrumbs";
 import mwLogo from "@/assets/images/mw-logo.png";
 import type { BrokerConfig, ErrorRouting, ExchangeSetting, IndexMarginSetting, MarketHoliday, StrategyPlan } from "@shared/schema";
 import { PageFooter } from "@/components/page-footer";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 
 function getBrokerInitial(brokerName?: string | null): string {
   const map: Record<string, string> = { kotak_neo: "KN", binance: "B", zerodha: "Z", angel: "A", paper_trade: "PT" };
@@ -2281,7 +2282,7 @@ export default function Settings() {
   ];
 
   return (
-    <div className="min-h-screen overflow-y-auto overscroll-y-contain bg-background">
+    <AuthenticatedPageShell>
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center gap-4">
@@ -2342,6 +2343,6 @@ export default function Settings() {
         </main>
       </div>
       <PageFooter />
-    </div>
+    </AuthenticatedPageShell>
   );
 }
