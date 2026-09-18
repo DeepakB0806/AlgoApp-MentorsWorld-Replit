@@ -1,0 +1,58 @@
+Yes. The best approach is to combine shared layout rules, automated checks, and an agent coding checklist.
+
+1. Keep the shared page shell
+All authenticated pages should continue using AuthenticatedPageShell. This prevents each page from inventing its own scrolling behavior.
+
+The shell should remain responsible for:
+
+Minimum viewport height
+Page-level vertical scrolling
+Overscroll behavior
+Page background
+The main scroll container
+New cards, text, forms, and sections should be added inside the shell—not by replacing or constraining it.
+
+2. Run layout checks for every UI change
+The agent should automatically run the layout test whenever it changes:
+
+A page
+A card or table
+Shared layout components
+Tailwind classes
+Dialogs, sheets, previews, or sticky headers
+Responsive breakpoints
+The current checks should continue verifying:
+
+Every authenticated route uses the shared shell.
+Every authenticated route contains the shared footer.
+No global overflow: hidden lock is introduced.
+Responsive classes such as wrapping, stacking, and table overflow remain present.
+3. Add browser-level checks
+The existing tests inspect source code. To catch actual rendered problems, we should also add browser smoke tests that:
+
+Log in with a test account.
+Open every authenticated route.
+Test mobile, tablet, and desktop widths.
+Scroll to the bottom and confirm the footer is reachable.
+Check that the page does not have unexpected horizontal overflow.
+Verify that tables, logs, sheets, and previews still scroll internally where intended.
+This is the most important missing layer because source tests cannot detect every real CSS interaction.
+
+4. Make new routes fail until they are covered
+The authenticated route list should be checked against the application router. If a new authenticated route is added without being included in the layout test matrix, the test should fail.
+
+That prevents a future page from silently bypassing the scrolling and responsive checks.
+
+5. Add this to the agent’s working checklist
+For every future UI upgrade, the agent should verify:
+
+Which element owns page scrolling?
+Does the page still use AuthenticatedPageShell?
+Could the change introduce fixed-height clipping?
+Could new content create horizontal overflow?
+Do controls wrap at narrow widths?
+Are tables and logs still intentionally scrollable?
+Is the footer still inside the page flow?
+Run layout tests, typecheck, and build.
+Preview the affected page at mobile and desktop sizes.
+Report any authenticated-preview limitation instead of assuming the page is correct.
