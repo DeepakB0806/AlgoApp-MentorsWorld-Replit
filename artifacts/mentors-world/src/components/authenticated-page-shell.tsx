@@ -10,7 +10,7 @@ export function AuthenticatedPageShell({ children, testId }: AuthenticatedPageSh
   return (
     <div
       className={cn("min-h-screen overflow-y-auto overscroll-y-contain bg-background")}
-      data-testid={testId}
+      data-testid={testId ?? "authenticated-page-shell"}
     >
       {children}
     </div>

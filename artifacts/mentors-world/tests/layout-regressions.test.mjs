@@ -3,19 +3,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { getProtectedRouteInventory } from "./route-inventory.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = join(here, "..", "src");
-
-const authenticatedPages = [
-  "user-home.tsx",
-  "dashboard.tsx",
-  "strategies.tsx",
-  "webhooks.tsx",
-  "broker-api.tsx",
-  "user-management.tsx",
-  "settings.tsx",
-];
 
 const responsiveContracts = {
   "user-home.tsx": [
@@ -35,7 +26,8 @@ async function readSource(relativePath) {
 }
 
 test("every authenticated page keeps the shared footer", async () => {
-  for (const fileName of authenticatedPages) {
+  const routes = await getProtectedRouteInventory();
+  for (const { pageFile: fileName } of routes) {
     const source = await readSource(join("pages", fileName));
     assert.match(source, /import\s+\{\s*PageFooter\s*\}\s+from\s+"@\/components\/page-footer"/, fileName);
     assert.match(source, /<PageFooter\s*\/>/, `${fileName} must render PageFooter`);
@@ -49,7 +41,8 @@ test("authenticated pages use the shared scroll shell", async () => {
   assert.match(shell, /overscroll-y-contain/);
   assert.match(shell, /bg-background/);
 
-  for (const fileName of authenticatedPages) {
+  const routes = await getProtectedRouteInventory();
+  for (const { pageFile: fileName } of routes) {
     const source = await readSource(join("pages", fileName));
     assert.match(
       source,
@@ -74,6 +67,14 @@ test("shared styles do not introduce a global scroll lock", async () => {
 });
 
 test("representative pages retain their responsive layout contracts", async () => {
+  const routes = await getProtectedRouteInventory();
+  const routePageFiles = new Set(routes.map(({ pageFile }) => pageFile));
+  assert.deepEqual(
+    new Set(Object.keys(responsiveContracts)),
+    routePageFiles,
+    "Every protected route must have an explicit responsive contract",
+  );
+
   for (const [fileName, requiredClasses] of Object.entries(responsiveContracts)) {
     const source = await readSource(join("pages", fileName));
     for (const requiredClass of requiredClasses) {

@@ -73,6 +73,17 @@ The platform is designed to scale to multiple brokers without changing the core 
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
 
+## Frontend UI layout crosscheck
+
+When changing any frontend page, card, table, text block, dialog, sheet, preview, sticky header, Tailwind breakpoint, or authenticated route:
+
+- Keep protected pages inside `AuthenticatedPageShell`; it owns the page minimum height, vertical scrolling, overscroll behavior, background, and main scroll container.
+- Do not introduce fixed-height clipping or page-level `overflow-hidden` to solve a local layout issue.
+- Check narrow and wide layouts for wrapping, stacking, horizontal overflow, and intentional inner scrolling for tables, logs, sheets, and previews.
+- Run `pnpm --filter @workspace/mentors-world run test:ui-layout`, `pnpm --filter @workspace/mentors-world run typecheck`, and the correctly configured production build.
+- For authenticated browser checks, run `LAYOUT_TEST_STORAGE_STATE=/path/to/super-admin-storage-state.json LAYOUT_TEST_BASE_URL=http://127.0.0.1:18772 pnpm --filter @workspace/mentors-world run test:layout:browser`.
+- The browser check requires a Playwright-compatible storage-state JSON for a super-admin test session; never commit credentials or weaken production authentication to create one. If it is unavailable, report that limitation explicitly rather than treating the public landing page as authenticated verification.
+
 ## Milestones
 
 > Milestones before 2026-05-13 archived to `.local/milestone-history.md`
@@ -455,3 +466,24 @@ The platform is designed to scale to multiple brokers without changing the core 
 1. Run `pnpm --filter @workspace/mentors-world run test:layout` and confirm every authenticated root has `overflow-y-auto overscroll-y-contain`
 2. Check that a page root still uses `min-h-screen` or `min-h-dvh` and does not reintroduce standalone `h-screen`
 3. Confirm `<PageFooter />` remains inside the page root after all page content
+
+### [MILESTONE] UI scrolling and responsiveness crosscheck — verified 2026-09-18
+
+**Task:** #288 — Protect UI scrolling and responsiveness during future upgrades
+
+**What changed:** Made protected-route layout coverage derive from the application router, added authenticated browser smoke coverage for footer reachability and horizontal overflow at mobile, tablet, and desktop sizes, registered a named `ui-layout` validation, and documented the required agent crosscheck for future UI upgrades.
+
+**Key files:**
+- `artifacts/mentors-world/src/App.tsx` — centralized the seven protected routes into one router-driven inventory while preserving their existing access rules
+- `artifacts/mentors-world/tests/route-inventory.mjs` — derives protected page files from the router inventory for shared test coverage
+- `artifacts/mentors-world/tests/layout-regressions.test.mjs` — verifies every protected route has footer, shell, and responsive coverage
+- `artifacts/mentors-world/tests/layout-browser-smoke.test.mjs` — checks authenticated route footer reachability, page overflow, and inner-scroll CSS across three viewport sizes using system Chromium
+- `artifacts/mentors-world/package.json` — added `test:layout:browser` and combined `test:ui-layout` commands
+- `replit.md` — added the frontend UI layout crosscheck and authenticated storage-state instructions
+
+**How it works:** The source-level suite parses protected routes from `App.tsx`, so a new protected route must be added to the responsive contract map or validation fails. The browser suite consumes a Playwright-compatible super-admin storage-state file when supplied, launches system Chromium through the DevTools protocol, visits every protected route at three viewport sizes, scrolls the shared shell to the footer, and fails on login redirects, clipped footers, or page-level horizontal overflow. Without that state file it skips explicitly rather than treating public-page rendering as authenticated evidence.
+
+**Diagnostic — if this breaks, check:**
+1. Run `pnpm --filter @workspace/mentors-world run test:ui-layout` and identify whether the router inventory, shell, footer, or responsive contract failed
+2. For authenticated browser coverage, provide `LAYOUT_TEST_STORAGE_STATE` for a non-production super-admin session and set `LAYOUT_TEST_BASE_URL` to the running frontend
+3. Check `artifacts/mentors-world/src/App.tsx` protected route definitions and `tests/route-inventory.mjs` parsing if a new route is not discovered

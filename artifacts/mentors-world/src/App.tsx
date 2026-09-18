@@ -1,4 +1,4 @@
-import { lazy, Suspense, Component, type ReactNode } from "react";
+import { lazy, Suspense, Component, type ComponentType, type ReactNode } from "react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { queryClient, apiRequest } from "./lib/queryClient";
 import { QueryClientProvider, useQuery, useMutation } from "@tanstack/react-query";
@@ -54,6 +54,26 @@ const TotpSetup = lazy(() => import("@/pages/totp-setup"));
 const UserManagement = lazy(() => import("@/pages/user-management"));
 const Settings = lazy(() => import("@/pages/settings"));
 
+type UserRole = "super_admin" | "team_member" | "customer";
+type ProtectedRouteDefinition = {
+  path: string;
+  page: ComponentType;
+  access: {
+    allowedRoles?: UserRole[];
+    requiredRole?: UserRole;
+  };
+};
+
+const protectedRoutes: ProtectedRouteDefinition[] = [
+  { path: "/user-home", page: UserHome, access: { allowedRoles: ["super_admin", "team_member", "customer"] } },
+  { path: "/dashboard", page: Dashboard, access: { allowedRoles: ["super_admin", "team_member", "customer"] } },
+  { path: "/strategies", page: Strategies, access: { allowedRoles: ["super_admin", "team_member"] } },
+  { path: "/webhooks", page: Webhooks, access: { allowedRoles: ["super_admin", "team_member"] } },
+  { path: "/broker-api", page: BrokerApi, access: { allowedRoles: ["super_admin", "team_member", "customer"] } },
+  { path: "/user-management", page: UserManagement, access: { requiredRole: "super_admin" } },
+  { path: "/settings", page: Settings, access: { requiredRole: "super_admin" } },
+];
+
 function PageLoader() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background" data-testid="page-loader">
@@ -77,44 +97,13 @@ function Router() {
         <Route path="/totp-setup">
           <TotpSetup />
         </Route>
-        
-        <Route path="/user-home">
-          <ProtectedRoute allowedRoles={["super_admin", "team_member", "customer"]}>
-            <UserHome />
-          </ProtectedRoute>
-        </Route>
-        <Route path="/dashboard">
-          <ProtectedRoute allowedRoles={["super_admin", "team_member", "customer"]}>
-            <Dashboard />
-          </ProtectedRoute>
-        </Route>
-        <Route path="/strategies">
-          <ProtectedRoute allowedRoles={["super_admin", "team_member"]}>
-            <Strategies />
-          </ProtectedRoute>
-        </Route>
-        <Route path="/webhooks">
-          <ProtectedRoute allowedRoles={["super_admin", "team_member"]}>
-            <Webhooks />
-          </ProtectedRoute>
-        </Route>
-        <Route path="/broker-api">
-          <ProtectedRoute allowedRoles={["super_admin", "team_member", "customer"]}>
-            <BrokerApi />
-          </ProtectedRoute>
-        </Route>
-        
-        <Route path="/user-management">
-          <ProtectedRoute requiredRole="super_admin">
-            <UserManagement />
-          </ProtectedRoute>
-        </Route>
-        <Route path="/settings">
-          <ProtectedRoute requiredRole="super_admin">
-            <Settings />
-          </ProtectedRoute>
-        </Route>
-        
+        {protectedRoutes.map(({ path, page: Page, access }) => (
+          <Route key={path} path={path}>
+            <ProtectedRoute {...access}>
+              <Page />
+            </ProtectedRoute>
+          </Route>
+        ))}
         <Route component={NotFound} />
       </Switch>
     </Suspense>
