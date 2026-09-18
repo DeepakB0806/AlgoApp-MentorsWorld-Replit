@@ -415,3 +415,20 @@ The platform is designed to scale to multiple brokers without changing the core 
 2. On a version switch, confirm `is_connected=false` and all access/session/base URL/data-center/view token fields are null before login
 3. Confirm Kotak callers import `kotak-api-adapter.ts`; only that adapter should import `el-kotak-neo-v3.ts`
 4. Confirm the locked relay, authenticate, and order-management blocks in `el-kotak-neo-v3.ts` have no edits
+
+### [MILESTONE] Layout regression guards — verified 2026-09-18
+
+**Task:** #283 — Add scroll and responsive layout regression guards
+
+**What changed:** Added a dependency-free automated layout suite that protects shared footer coverage, vertical page scrolling, the Broker API scroll container, global overflow safety, viewport metadata, and representative responsive layout contracts.
+
+**Key files:**
+- `artifacts/mentors-world/tests/layout-regressions.test.mjs` — added five Node test groups covering authenticated pages and shared layout invariants
+- `artifacts/mentors-world/package.json` — added the `test:layout` command
+
+**How it works:** The suite uses Node's built-in test runner to inspect the current React page sources and shared styles. It fails when an authenticated page loses its footer or viewport-height root, when a global scroll lock is introduced, when Broker API loses its explicit vertical scroll region, or when key mobile/tablet responsive classes disappear.
+
+**Diagnostic — if this breaks, check:**
+1. Run `pnpm --filter @workspace/mentors-world run test:layout` and identify the named contract that failed
+2. For footer or root failures, check the page's top-level wrapper and `<PageFooter />` placement
+3. For responsive failures, preserve wrapping, breakpoint, grid, and horizontal table overflow behavior instead of weakening the assertion
