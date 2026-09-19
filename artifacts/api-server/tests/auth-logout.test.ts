@@ -162,7 +162,8 @@ test("logout routes local sessions before provider logout", async () => {
   assert.match(source, /app\.get\("\/api\/auth\/logout"/);
   assert.match(source, /if \(req\.teamUser\)/);
   assert.match(source, /res\.redirect\(302, returnTo\)/);
-  assert.match(source, /res\.redirect\(302, `\/api\/logout\?\$\{query\}`\)/);
+  assert.match(source, /return handleOidcLogout\(req, res, returnTo\)/);
+  assert.doesNotMatch(source, /\/api\/logout\?\$\{query\}/);
 });
 
 test("logout cleanup failures stop before OIDC redirect", async () => {
@@ -173,4 +174,5 @@ test("logout cleanup failures stop before OIDC redirect", async () => {
 
   assert.match(source, /cleanup\.logoutError \|\| cleanup\.sessionError/);
   assert.match(source, /return res\.status\(500\)\.json\(\{ message: "Unable to complete logout cleanup" \}\)/);
+  assert.match(source, /app\.get\("\/api\/logout", async \(req, res\) => \{\s*return handleOidcLogout\(req, res\);/s);
 });

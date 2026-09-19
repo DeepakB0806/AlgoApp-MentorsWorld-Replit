@@ -85,6 +85,32 @@ async function upsertUser(claims: any) {
   });
 }
 
+export async function handleOidcLogout(
+  req: any,
+  res: any,
+  returnToValue: unknown = req.query.returnTo,
+) {
+  const config = await getOidcConfig();
+  const parameters = getEndSessionParameters(
+    req,
+    returnToValue,
+    process.env.REPL_ID!,
+    req.user?.id_token,
+  );
+  const endSessionUrl = client.buildEndSessionUrl(config, parameters);
+  const cleanup = await clearLocalAuthSession(req, res);
+
+  if (cleanup.logoutError || cleanup.sessionError) {
+    console.error("OIDC logout cleanup failed; provider logout was not started", {
+      logoutError: cleanup.logoutError,
+      sessionError: cleanup.sessionError,
+    });
+    return res.status(500).json({ message: "Unable to complete logout cleanup" });
+  }
+
+  return res.redirect(endSessionUrl.href);
+}
+
 export async function setupAuth(app: Express) {
   app.set("trust proxy", 1);
   app.use(getSession());
@@ -144,24 +170,7 @@ export async function setupAuth(app: Express) {
   });
 
   app.get("/api/logout", async (req, res) => {
-    const parameters = getEndSessionParameters(
-      req,
-      req.query.returnTo,
-      process.env.REPL_ID!,
-      (req.user as any)?.id_token,
-    );
-    const endSessionUrl = client.buildEndSessionUrl(config, parameters);
-    const cleanup = await clearLocalAuthSession(req, res);
-
-    if (cleanup.logoutError || cleanup.sessionError) {
-      console.error("OIDC logout cleanup failed; provider logout was not started", {
-        logoutError: cleanup.logoutError,
-        sessionError: cleanup.sessionError,
-      });
-      return res.status(500).json({ message: "Unable to complete logout cleanup" });
-    }
-
-    return res.redirect(endSessionUrl.href);
+    return handleOidcLogout(req, res);
   });
 }
 

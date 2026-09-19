@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { authStorage } from "./storage";
-import { isAuthenticated } from "./replitAuth";
+import { handleOidcLogout, isAuthenticated } from "./replitAuth";
 import { getSafeReturnTo } from "./logout";
 import { db } from "../../db";
 import { users, invitations } from "../../models/auth";
@@ -158,8 +158,7 @@ export function registerAuthRoutes(app: Express): void {
       }
     }
 
-    const query = new URLSearchParams({ returnTo }).toString();
-    return res.redirect(302, `/api/logout?${query}`);
+    return handleOidcLogout(req, res, returnTo);
   });
   
   // Get current authenticated user (supports both Replit Auth and team member auth)
