@@ -1,1 +1,2 @@
 - [Drizzle-Zod compatibility](zod-drizzle-compatibility.md) — Drizzle-derived schemas must use the Zod v4 entrypoint for type compatibility.
+- [Auth session routing](auth-session-routing.md) — Customer/team cookies and Replit OIDC sessions require different logout flows.

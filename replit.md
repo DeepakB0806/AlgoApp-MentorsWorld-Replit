@@ -526,3 +526,22 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 2. Inspect the `/api/logout` 302 `Location` header; `post_logout_redirect_uri` must decode to the environment's public home URL with a trailing slash
 3. Confirm both `connect.sid` and `team_session` are expired by the logout response
 4. For a fresh Replit-authenticated session, confirm the OIDC end-session URL includes `id_token_hint` and returns to the public home page
+
+### [MILESTONE] Session-aware logout routing — verified 2026-09-19
+
+**Task:** #300 — Route logout by session type
+
+**What changed:** Customer and team sessions now report whether local logout handled an active `team_session`. The browser returns directly to the public home page for that branch and only starts Replit OIDC logout when no local team session was active.
+
+**Key files:**
+- `artifacts/api-server/src/replit_integrations/auth/routes.ts` — reports the session type handled by the existing local logout endpoint
+- `artifacts/mentors-world/src/hooks/use-auth.tsx` — routes local sessions directly home and preserves the OIDC path for Replit sessions
+- `artifacts/api-server/tests/auth-logout.test.ts` — covers the session-aware response and both client redirect branches
+
+**How it works:** The client calls local logout while the `team_session` cookie is still present. The server validates and clears that session, returns `teamSession:true`, and the client navigates directly to the artifact base path. A Replit-authenticated browser receives `teamSession:false` and continues through the hardened `/api/logout` OIDC flow.
+
+**Diagnostic — if this breaks, check:**
+1. Run `pnpm --filter @workspace/api-server run test:auth` and confirm all eight auth tests pass
+2. Inspect the local logout response; an active customer/team session must return `teamSession:true`
+3. Confirm the browser only requests `/api/logout` when `teamSession` is false
+4. Confirm the production build includes the updated frontend bundle before testing a customer sign-out

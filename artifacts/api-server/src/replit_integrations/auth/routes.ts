@@ -178,7 +178,9 @@ export function registerAuthRoutes(app: Express): void {
   // Team member logout
   app.post("/api/auth/team/logout", async (req: any, res) => {
     try {
-      if (req.teamUser) {
+      const hadTeamSession = Boolean(req.teamUser);
+
+      if (hadTeamSession) {
         // Clear session from database
         await db.update(users)
           .set({ sessionToken: null, sessionExpires: null })
@@ -186,7 +188,10 @@ export function registerAuthRoutes(app: Express): void {
       }
       
       res.clearCookie("team_session");
-      res.json({ message: "Logged out successfully" });
+      res.json({
+        message: "Logged out successfully",
+        teamSession: hadTeamSession,
+      });
     } catch (error) {
       console.error("Error logging out:", error);
       res.status(500).json({ message: "Failed to logout" });

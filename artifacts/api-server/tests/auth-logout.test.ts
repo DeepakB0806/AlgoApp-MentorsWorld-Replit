@@ -148,6 +148,19 @@ test("web logout sends the artifact base path to the server", async () => {
     "utf8",
   );
 
-  assert.match(source, /searchParams\.set\("returnTo", import\.meta\.env\.BASE_URL \|\| "\/"\)/);
+  assert.match(source, /result\.teamSession === true/);
+  assert.match(source, /window\.location\.assign\(new URL\(returnTo, window\.location\.origin\)\.toString\(\)\)/);
+  assert.match(source, /const returnTo = import\.meta\.env\.BASE_URL \|\| "\/";/);
+  assert.match(source, /searchParams\.set\("returnTo", returnTo\)/);
   assert.match(source, /window\.location\.assign\(logoutUrl\.toString\(\)\)/);
+});
+
+test("team logout reports whether it cleared a local team session", async () => {
+  const source = await readFile(
+    new URL("../src/replit_integrations/auth/routes.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /const hadTeamSession = Boolean\(req\.teamUser\)/);
+  assert.match(source, /teamSession: hadTeamSession/);
 });

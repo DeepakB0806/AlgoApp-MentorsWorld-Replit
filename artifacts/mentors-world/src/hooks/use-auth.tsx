@@ -37,19 +37,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isTeamMember = user?.role === "team_member";
 
   const logout = async () => {
+    let hadTeamSession = false;
+
     try {
-      // Try team logout first (clears cookie)
-      await apiRequest("POST", "/api/auth/team/logout");
+      // Clear a customer/team session first. The response tells us whether
+      // this browser was using that session type, so it can skip OIDC logout.
+      const response = await apiRequest("POST", "/api/auth/team/logout");
+      const result = await response.json() as { teamSession?: boolean };
+      hadTeamSession = result.teamSession === true;
     } catch (e) {
       // Ignore errors, continue with logout
     }
     
     // Clear query cache
     queryClient.clear();
+
+    const returnTo = import.meta.env.BASE_URL || "/";
+    if (hadTeamSession) {
+      window.location.assign(new URL(returnTo, window.location.origin).toString());
+      return;
+    }
     
     // Complete provider logout and return to this artifact's public home path.
     const logoutUrl = new URL("/api/logout", window.location.origin);
-    logoutUrl.searchParams.set("returnTo", import.meta.env.BASE_URL || "/");
+    logoutUrl.searchParams.set("returnTo", returnTo);
     window.location.assign(logoutUrl.toString());
   };
 
