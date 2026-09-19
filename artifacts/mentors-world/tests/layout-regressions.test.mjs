@@ -76,6 +76,15 @@ test("Broker API keeps its scroll-container marker", async () => {
   assert.match(source, /<AuthenticatedPageShell testId="broker-api-scroll-container">/);
 });
 
+test("Broker API health cards keep separate Kotak API version visibility", async () => {
+  const source = await readSource("pages/broker-api.tsx");
+  assert.match(source, /status-by-version/);
+  assert.match(source, /history-by-version/);
+  assert.match(source, /Legacy v2/);
+  assert.match(source, /Current v3/);
+  assert.match(source, /data-testid=\{`panel-\$\{prefix\}`\}/);
+});
+
 test("shared styles do not introduce a global scroll lock", async () => {
   const css = await readFile(join(sourceRoot, "index.css"), "utf8");
   assert.doesNotMatch(css, /(?:html|body|#root)[^{]*\{[^}]*overflow(?:-[xy])?\s*:\s*(?:hidden|clip)/s);

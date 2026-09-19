@@ -4,8 +4,21 @@ import { sendEmail } from "../services/email";
 import { rescheduleScripMasterSync } from "../scrip-sync-scheduler";
 import { insertErrorRoutingSchema } from "@workspace/db";
 import { resetTradingHaltCache } from "./webhook-routes";
-import { getHsiStatus, getHsiHistory, forceReconnect as forceHsiReconnect } from "../hsi-kotak-neo-v3";
-import { getHsmStatus, getHsmHistory, forceReconnect as forceHsmReconnect } from "../hsm-kotak-neo-v3";
+import {
+  getHsiStatus,
+  getHsiStatuses,
+  getHsiHistory,
+  getHsiHistories,
+  forceReconnect as forceHsiReconnect,
+} from "../hsi-kotak-neo-v3";
+import {
+  getHsmStatus,
+  getHsmStatuses,
+  getHsmHistory,
+  getHsmHistories,
+  forceReconnect as forceHsmReconnect,
+} from "../hsm-kotak-neo-v3";
+import { isKotakApiVersion } from "../kotak-api-adapter";
 import { runProbe, runProbeForBoth, getLastProbeResults } from "../kotak-probe";
 
 export function registerAdminRoutes(app: Express, storage: IStorage) {
@@ -238,9 +251,18 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.get("/api/admin/hsi/status-by-version", async (_req, res) => {
+    try {
+      res.json(getHsiStatuses(await storage.getBrokerConfigs()));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/admin/hsi/reconnect", (_req, res) => {
     try {
-      const result = forceHsiReconnect();
+      const apiVersion = isKotakApiVersion(_req.body?.apiVersion) ? _req.body.apiVersion : undefined;
+      const result = forceHsiReconnect(apiVersion);
       res.status(result.ok ? 200 : 400).json(result);
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });
@@ -255,6 +277,14 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.get("/api/admin/hsi/history-by-version", (_req, res) => {
+    try {
+      res.json(getHsiHistories());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/admin/hsm/status", (_req, res) => {
     try {
       res.json(getHsmStatus());
@@ -263,9 +293,18 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.get("/api/admin/hsm/status-by-version", async (_req, res) => {
+    try {
+      res.json(getHsmStatuses(await storage.getBrokerConfigs()));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/admin/hsm/reconnect", (_req, res) => {
     try {
-      const result = forceHsmReconnect();
+      const apiVersion = isKotakApiVersion(_req.body?.apiVersion) ? _req.body.apiVersion : undefined;
+      const result = forceHsmReconnect(apiVersion);
       res.status(result.ok ? 200 : 400).json(result);
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });
@@ -275,6 +314,14 @@ export function registerAdminRoutes(app: Express, storage: IStorage) {
   app.get("/api/admin/hsm/history", (_req, res) => {
     try {
       res.json(getHsmHistory());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/hsm/history-by-version", (_req, res) => {
+    try {
+      res.json(getHsmHistories());
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

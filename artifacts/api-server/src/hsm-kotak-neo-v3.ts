@@ -5,6 +5,12 @@ import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@workspace/db";
 import { runProbe, getProbeThreshold } from "./kotak-probe";
 import { processTick, updateLastWsTick } from "./tsl-kotak-neo-v3";
+import {
+  getKotakApiProfileInfo,
+  KOTAK_API_VERSIONS,
+  normalizeKotakApiVersion,
+  type KotakApiVersion,
+} from "./kotak-api-adapter";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -54,6 +60,28 @@ let hsmLastDisconnectedAt: Date | null = null;
 interface ConnectionEvent { type: "connected" | "disconnected"; timestamp: string; }
 const MAX_HISTORY = 20;
 const hsmConnectionHistory: ConnectionEvent[] = [];
+type GatewayLifecycle = "running" | "not_running" | "not_configured";
+
+export interface HsmVersionStatus {
+  apiVersion: KotakApiVersion;
+  apiVersionLabel: string;
+  lifecycle: GatewayLifecycle;
+  configuredCount: number;
+  runningInstanceCount: number;
+  connectedInstanceCount: number;
+  authenticatedInstanceCount: number;
+  connected: boolean;
+  reconnecting: boolean;
+  authOk: boolean;
+  connectionMode: "relay" | "direct";
+  reconnectAttempts: number;
+  reconnectDelayMs: number;
+  lastConnectedAt: string | null;
+  lastHeartbeatAt: string | null;
+  lastDisconnectedAt: string | null;
+  hsmUrl: string;
+  subscriptionCount: number;
+}
 function pushHsmEvent(type: "connected" | "disconnected"): void {
   hsmConnectionHistory.push({ type, timestamp: new Date().toISOString() });
   if (hsmConnectionHistory.length > MAX_HISTORY) hsmConnectionHistory.shift();
@@ -91,6 +119,8 @@ export function getHsmStatus() {
     : 0;
   const usingRelay = !relayFailed && !!(process.env.RELAY_TARGET_URL && process.env.RELAY_SECRET_KEY);
   return {
+    apiVersion: activeConfig ? normalizeKotakApiVersion(activeConfig.apiVersion) : null,
+    brokerConfigId: activeConfig?.id ?? null,
     connected: isConnected,
     reconnecting: isReconnecting,
     connectionMode: usingRelay ? "relay" : "direct",
@@ -105,8 +135,57 @@ export function getHsmStatus() {
   };
 }
 
+export function getHsmStatuses(configs: BrokerConfig[] = []): HsmVersionStatus[] {
+  const kotakConfigs = configs.filter(config => config.brokerName === "kotak_neo" && config.isConnected);
+  const activeVersion = activeConfig ? normalizeKotakApiVersion(activeConfig.apiVersion) : null;
+  const { apiVersion: _activeApiVersion, brokerConfigId: _brokerConfigId, ...activeStatus } = getHsmStatus();
+
+  return KOTAK_API_VERSIONS.map((apiVersion) => {
+    const configuredCount = kotakConfigs.filter(
+      config => normalizeKotakApiVersion(config.apiVersion) === apiVersion,
+    ).length;
+    const isRunning = activeVersion === apiVersion;
+    const hasConfiguredVersion = configuredCount > 0 || isRunning;
+    return {
+      ...activeStatus,
+      apiVersion,
+      apiVersionLabel: getKotakApiProfileInfo(apiVersion).label,
+      lifecycle: isRunning
+        ? "running"
+        : hasConfiguredVersion
+        ? "not_running"
+        : "not_configured",
+      configuredCount: configuredCount || (isRunning ? 1 : 0),
+      runningInstanceCount: isRunning ? 1 : 0,
+      connectedInstanceCount: isRunning && activeStatus.connected ? 1 : 0,
+      authenticatedInstanceCount: isRunning && activeStatus.authOk ? 1 : 0,
+      connected: isRunning && activeStatus.connected,
+      reconnecting: isRunning && activeStatus.reconnecting,
+      authOk: isRunning && activeStatus.authOk,
+      connectionMode: (isRunning ? activeStatus.connectionMode : "direct") as "relay" | "direct",
+      reconnectAttempts: isRunning ? activeStatus.reconnectAttempts : 0,
+      reconnectDelayMs: isRunning ? activeStatus.reconnectDelayMs : 1_000,
+      lastConnectedAt: isRunning ? activeStatus.lastConnectedAt : null,
+      lastHeartbeatAt: isRunning ? activeStatus.lastHeartbeatAt : null,
+      lastDisconnectedAt: isRunning ? activeStatus.lastDisconnectedAt : null,
+      hsmUrl: isRunning ? activeStatus.hsmUrl : HSM_URL,
+      subscriptionCount: isRunning ? activeStatus.subscriptionCount : 0,
+    };
+  });
+}
+
 export function getHsmHistory(): ConnectionEvent[] {
   return [...hsmConnectionHistory].reverse();
+}
+
+export function getHsmHistories(): Record<KotakApiVersion, ConnectionEvent[]> {
+  const histories = Object.fromEntries(
+    KOTAK_API_VERSIONS.map(apiVersion => [apiVersion, [] as ConnectionEvent[]]),
+  ) as Record<KotakApiVersion, ConnectionEvent[]>;
+  if (activeConfig) {
+    histories[normalizeKotakApiVersion(activeConfig.apiVersion)] = getHsmHistory();
+  }
+  return histories;
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -488,12 +567,16 @@ export function refreshConfig(config: BrokerConfig): void {
   startHsmStatusTracking();
 }
 
-export function forceReconnect(): { ok: boolean; message: string } {
+export function forceReconnect(apiVersion?: KotakApiVersion): { ok: boolean; message: string } {
   if (!activeConfig) {
     return { ok: false, message: "No active broker config — HSM was never started" };
   }
+  if (apiVersion && normalizeKotakApiVersion(activeConfig.apiVersion) !== apiVersion) {
+    return { ok: false, message: `HSM ${getKotakApiProfileInfo(apiVersion).label} is not running` };
+  }
   refreshConfig(activeConfig);
-  return { ok: true, message: "HSM reconnect triggered" };
+  const label = apiVersion ? getKotakApiProfileInfo(apiVersion).label : "active";
+  return { ok: true, message: `HSM ${label} reconnect triggered` };
 }
 
 export function subscribe(symbol: string): void {

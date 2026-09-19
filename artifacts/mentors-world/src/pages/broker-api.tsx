@@ -2182,6 +2182,333 @@ interface HsmStatusData {
   subscriptionCount: number;
 }
 
+type GatewayApiVersion = "v2_legacy" | "v3_current";
+type GatewayLifecycle = "running" | "not_running" | "not_configured";
+
+interface VersionedGatewayStatus {
+  apiVersion: GatewayApiVersion;
+  apiVersionLabel: string;
+  lifecycle: GatewayLifecycle;
+  configuredCount: number;
+  runningInstanceCount: number;
+  connectedInstanceCount: number;
+  authenticatedInstanceCount: number;
+  connected: boolean;
+  reconnecting: boolean;
+  authOk: boolean;
+  connectionMode: "relay" | "direct";
+  reconnectAttempts: number;
+  reconnectDelayMs: number;
+  lastConnectedAt: string | null;
+  lastHeartbeatAt: string | null;
+  lastDisconnectedAt: string | null;
+  hsiUrl?: string;
+  hsmUrl?: string;
+  zombieCount?: number;
+  subscriptionCount?: number;
+}
+
+const gatewayVersions: GatewayApiVersion[] = ["v2_legacy", "v3_current"];
+
+function gatewayVersionLabel(apiVersion: GatewayApiVersion): string {
+  return apiVersion === "v2_legacy" ? "Legacy v2" : "Current v3";
+}
+
+function gatewayStatusLabel(status: VersionedGatewayStatus | undefined, isLoading: boolean): string {
+  if (isLoading) return "Checking…";
+  if (!status || status.lifecycle === "not_configured") return "Not configured";
+  if (status.lifecycle === "not_running") return "Not running";
+  if (status.connected && status.authOk) return "Auth OK";
+  if (status.connected && !status.authOk) return "No Auth";
+  if (status.reconnecting) return "Reconnecting";
+  return "Failed";
+}
+
+function gatewayStatusColor(status: VersionedGatewayStatus | undefined, isLoading: boolean): string {
+  if (isLoading) return "bg-muted text-muted-foreground";
+  if (!status || status.lifecycle === "not_configured" || status.lifecycle === "not_running") {
+    return "bg-muted text-muted-foreground border-border";
+  }
+  if (status.connected && status.authOk) {
+    return "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30";
+  }
+  if (status.connected && !status.authOk || status.reconnecting) {
+    return "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30";
+  }
+  return "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30";
+}
+
+function gatewayStatusIcon(status: VersionedGatewayStatus | undefined, isLoading: boolean) {
+  if (isLoading) return Loader2;
+  if (status?.connected && status.authOk) return ShieldCheck;
+  if (status?.connected && !status.authOk) return AlertTriangle;
+  if (status?.reconnecting) return RefreshCw;
+  return WifiOff;
+}
+
+function formatGatewayExact(iso: string | null): string {
+  if (!iso) return "—";
+  try {
+    const date = new Date(iso);
+    if (isNaN(date.getTime())) return "—";
+    return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+  } catch {
+    return "—";
+  }
+}
+
+function formatGatewayRelative(iso: string | null): string {
+  if (!iso) return "—";
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 5) return "just now";
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  return `${Math.floor(diff / 3600)}h ago`;
+}
+
+function emptyVersionedGatewayStatus(apiVersion: GatewayApiVersion): VersionedGatewayStatus {
+  return {
+    apiVersion,
+    apiVersionLabel: gatewayVersionLabel(apiVersion),
+    lifecycle: "not_configured",
+    configuredCount: 0,
+    runningInstanceCount: 0,
+    connectedInstanceCount: 0,
+    authenticatedInstanceCount: 0,
+    connected: false,
+    reconnecting: false,
+    authOk: false,
+    connectionMode: "direct",
+    reconnectAttempts: 0,
+    reconnectDelayMs: 1_000,
+    lastConnectedAt: null,
+    lastHeartbeatAt: null,
+    lastDisconnectedAt: null,
+  };
+}
+
+function VersionedGatewayPanel({
+  gateway,
+  status,
+  history,
+  isLoading,
+  reconnecting,
+  onReconnect,
+}: {
+  gateway: "hsi" | "hsm";
+  status: VersionedGatewayStatus;
+  history: ConnectionEvent[];
+  isLoading: boolean;
+  reconnecting: boolean;
+  onReconnect: (apiVersion: GatewayApiVersion) => void;
+}) {
+  const StatusIcon = gatewayStatusIcon(status, isLoading);
+  const statusLabel = gatewayStatusLabel(status, isLoading);
+  const isRunning = status.lifecycle === "running";
+  const endpoint = status.hsiUrl ?? status.hsmUrl ?? "—";
+  const prefix = `${gateway}-${status.apiVersion}`;
+
+  return (
+    <div className="rounded-lg border border-border/60 bg-muted/10 p-3" data-testid={`panel-${prefix}`}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div>
+          <p className="font-semibold text-sm">{status.apiVersionLabel || gatewayVersionLabel(status.apiVersion)}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {status.configuredCount > 0 ? `${status.configuredCount} configured` : "No connected broker configuration"}
+          </p>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${gatewayStatusColor(status, isLoading)}`}
+          data-testid={`badge-${prefix}-status`}
+        >
+          <StatusIcon className={`h-3 w-3 ${isLoading || status.reconnecting ? "animate-spin" : ""}`} />
+          {statusLabel}
+        </span>
+      </div>
+
+      <div className="rounded-md border border-border/50 bg-muted/20 divide-y divide-border/40 text-xs">
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="text-muted-foreground">Connection Mode</span>
+          <span className="font-medium capitalize" data-testid={`text-${prefix}-mode`}>
+            {isLoading || !isRunning ? "—" : status.connectionMode}
+          </span>
+        </div>
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="text-muted-foreground">Auth Status</span>
+          <span
+            className={`font-medium ${isLoading || !isRunning ? "" : status.authOk ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}
+            data-testid={`text-${prefix}-auth`}
+          >
+            {isLoading ? "—" : !isRunning ? statusLabel : status.authOk ? "Confirmed" : "Pending / not confirmed"}
+          </span>
+        </div>
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="text-muted-foreground">Connected Instances</span>
+          <span data-testid={`text-${prefix}-instances`}>
+            {isLoading ? "—" : `${status.connectedInstanceCount}/${status.runningInstanceCount}`}
+          </span>
+        </div>
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="text-muted-foreground">Last Heartbeat</span>
+          <span className="font-mono" data-testid={`text-${prefix}-heartbeat`}>
+            {isLoading || !isRunning ? "—" : formatGatewayExact(status.lastHeartbeatAt)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="text-muted-foreground">Last Connected At</span>
+          <span className="font-mono" data-testid={`text-${prefix}-connected`}>
+            {isLoading || !isRunning ? "—" : formatGatewayExact(status.lastConnectedAt)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="text-muted-foreground">Last Disconnected At</span>
+          <span className="font-mono" data-testid={`text-${prefix}-disconnected`}>
+            {isLoading || !isRunning ? "—" : formatGatewayExact(status.lastDisconnectedAt)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="text-muted-foreground">Reconnect Attempts</span>
+          <span
+            className={`font-medium ${status.reconnectAttempts >= 3 ? "text-amber-600 dark:text-amber-400" : ""}`}
+            data-testid={`text-${prefix}-reconnect-attempts`}
+          >
+            {isLoading || !isRunning ? "—" : status.reconnectAttempts}
+          </span>
+        </div>
+        {gateway === "hsi" && (
+          <div className="flex items-center justify-between px-3 py-2">
+            <span className="text-muted-foreground">Zombie Count</span>
+            <span
+              className={`font-medium ${(status.zombieCount ?? 0) > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
+              data-testid={`text-${prefix}-zombie-count`}
+            >
+              {isLoading || !isRunning ? "—" : status.zombieCount ?? 0}
+            </span>
+          </div>
+        )}
+        {gateway === "hsm" && (
+          <div className="flex items-center justify-between px-3 py-2">
+            <span className="text-muted-foreground">Active Subscriptions</span>
+            <span data-testid={`text-${prefix}-subscription-count`}>
+              {isLoading || !isRunning ? "—" : status.subscriptionCount ?? 0}
+            </span>
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-2 px-3 py-2">
+          <span className="text-muted-foreground">WebSocket URL</span>
+          <span className="font-mono truncate max-w-[220px]" data-testid={`text-${prefix}-url`}>
+            {isLoading || !isRunning ? "—" : endpoint}
+          </span>
+        </div>
+      </div>
+
+      {history.length > 0 && (
+        <div className="mt-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+          <p className="text-[11px] font-medium text-muted-foreground mb-1.5">Connection History</p>
+          <div className="space-y-1" data-testid={`list-${prefix}-history`}>
+            {history.slice(0, 6).map((event, i) => (
+              <div key={`${event.timestamp}-${i}`} className="flex items-center gap-2 text-[11px]">
+                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${event.type === "connected" ? "bg-green-500" : "bg-red-500"}`} />
+                <span className="font-mono text-muted-foreground">{formatGatewayExact(event.timestamp)}</span>
+                <span className={event.type === "connected" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                  {event.type === "connected" ? "Connected" : "Disconnected"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!isLoading && isRunning && (!status.connected || !status.authOk) && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full gap-2 mt-2"
+          disabled={status.reconnecting || reconnecting}
+          onClick={() => onReconnect(status.apiVersion)}
+          data-testid={`button-${prefix}-reconnect`}
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${reconnecting ? "animate-spin" : ""}`} />
+          {reconnecting ? "Reconnecting…" : status.connected && !status.authOk ? "Re-authenticate" : "Reconnect Now"}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function VersionedGatewayStatusCard({ gateway }: { gateway: "hsi" | "hsm" }) {
+  const isHsi = gateway === "hsi";
+  const statusPath = `/api/admin/${gateway}/status-by-version`;
+  const historyPath = `/api/admin/${gateway}/history-by-version`;
+  const { data: statuses = [], isLoading, dataUpdatedAt, refetch } = useQuery<VersionedGatewayStatus[]>({
+    queryKey: [statusPath],
+    refetchInterval: 10_000,
+  });
+  const { data: histories = {} as Record<GatewayApiVersion, ConnectionEvent[]> } = useQuery<Record<GatewayApiVersion, ConnectionEvent[]>>({
+    queryKey: [historyPath],
+    refetchInterval: 10_000,
+  });
+  const [expanded, setExpanded] = useState(false);
+  const reconnectMutation = useMutation({
+    mutationFn: (apiVersion: GatewayApiVersion) => apiRequest("POST", `/api/admin/${gateway}/reconnect`, { apiVersion }),
+    onSuccess: () => {
+      setTimeout(() => refetch(), 2000);
+    },
+  });
+  const statusByVersion = gatewayVersions.map(apiVersion =>
+    statuses.find(status => status.apiVersion === apiVersion) ?? emptyVersionedGatewayStatus(apiVersion),
+  );
+  const summary = statusByVersion.map(status => `${status.apiVersion === "v2_legacy" ? "v2" : "v3"} ${gatewayStatusLabel(status, isLoading)}`).join(" · ");
+  const title = isHsi ? "HSI Connection Health" : "HSM Connection Health";
+  const description = isHsi ? "Kotak Neo order feed status by API version" : "Kotak Neo market data feed status by API version";
+
+  return (
+    <Card>
+      <CardHeader
+        className="cursor-pointer select-none"
+        onClick={() => setExpanded(value => !value)}
+        data-testid={`button-toggle-${gateway}-status`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              {isHsi ? <Radio className="h-4 w-4 text-primary" /> : <Activity className="h-4 w-4 text-primary" />}
+            </div>
+            <div>
+              <CardTitle className="text-base">{title}</CardTitle>
+              <CardDescription className="text-xs">{description}</CardDescription>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-muted-foreground hidden sm:inline">{isLoading ? "Checking…" : summary}</span>
+            {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+          </div>
+        </div>
+      </CardHeader>
+      {expanded && <CardContent className="pt-0">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {statusByVersion.map(status => (
+            <VersionedGatewayPanel
+              key={status.apiVersion}
+              gateway={gateway}
+              status={status}
+              history={histories[status.apiVersion] ?? []}
+              isLoading={isLoading}
+              reconnecting={reconnectMutation.isPending && reconnectMutation.variables === status.apiVersion}
+              onReconnect={apiVersion => reconnectMutation.mutate(apiVersion)}
+            />
+          ))}
+        </div>
+        {dataUpdatedAt > 0 && (
+          <p className="text-[11px] text-muted-foreground mt-2 text-right">
+            Updated {formatGatewayRelative(new Date(dataUpdatedAt).toISOString())} · auto-refreshes every 10s
+          </p>
+        )}
+      </CardContent>}
+    </Card>
+  );
+}
+
 function HsiStatusCard() {
   const { data, isLoading, dataUpdatedAt, refetch } = useQuery<HsiStatusData>({
     queryKey: ["/api/admin/hsi/status"],
@@ -4065,13 +4392,13 @@ export default function BrokerApi() {
 
         {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
           <div className="mt-6">
-            <HsiStatusCard />
+            <VersionedGatewayStatusCard gateway="hsi" />
           </div>
         )}
 
         {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
           <div className="mt-6">
-            <HsmStatusCard />
+            <VersionedGatewayStatusCard gateway="hsm" />
           </div>
         )}
 

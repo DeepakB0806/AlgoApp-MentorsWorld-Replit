@@ -1,6 +1,12 @@
 import WebSocket from "ws";
 import type { IStorage } from "./storage";
 import type { BrokerConfig } from "@workspace/db";
+import {
+  getKotakApiProfileInfo,
+  KOTAK_API_VERSIONS,
+  normalizeKotakApiVersion,
+  type KotakApiVersion,
+} from "./kotak-api-adapter";
 import { runProbe, getProbeThreshold } from "./kotak-probe";
 import { processTick, updateLastWsTick } from "./tsl-kotak-neo-v3";
 
@@ -144,6 +150,28 @@ async function handleOrderConfirm(
 // ── HSI Status tracking (outside locked blocks) ──────────────────────────────
 interface ConnectionEvent { type: "connected" | "disconnected"; timestamp: string; }
 const MAX_HISTORY = 20;
+type GatewayLifecycle = "running" | "not_running" | "not_configured";
+
+export interface HsiVersionStatus {
+  apiVersion: KotakApiVersion;
+  apiVersionLabel: string;
+  lifecycle: GatewayLifecycle;
+  configuredCount: number;
+  runningInstanceCount: number;
+  connectedInstanceCount: number;
+  authenticatedInstanceCount: number;
+  connected: boolean;
+  reconnecting: boolean;
+  authOk: boolean;
+  connectionMode: "relay" | "direct";
+  reconnectAttempts: number;
+  reconnectDelayMs: number;
+  lastConnectedAt: string | null;
+  lastHeartbeatAt: string | null;
+  lastDisconnectedAt: string | null;
+  hsiUrl: string;
+  zombieCount: number;
+}
 
 function pushHsiEvent(state: HsiState, type: "connected" | "disconnected"): void {
   state.connectionHistory.push({ type, timestamp: new Date().toISOString() });
@@ -162,6 +190,30 @@ function startHsiStatusTracking(state: HsiState): void {
   }, 20_000);
 }
 
+function getHsiStatusForState(state: HsiState) {
+  const isConnected = state.ws !== null && state.ws.readyState === WebSocket.OPEN;
+  const isReconnecting = !isConnected && state.reconnectTimer !== null;
+  const reconnectAttempts = state.reconnectDelay > 1_000
+    ? Math.round(Math.log2(state.reconnectDelay / 1_000))
+    : 0;
+  const usingRelay = !state.relayFailed && !!(process.env.RELAY_TARGET_URL && process.env.RELAY_SECRET_KEY);
+  return {
+    apiVersion: normalizeKotakApiVersion(state.activeConfig.apiVersion),
+    brokerConfigId: state.activeConfig.id,
+    connected: isConnected,
+    reconnecting: isReconnecting,
+    authOk: state.hsiAuthOkInSession,
+    connectionMode: usingRelay ? "relay" as const : "direct" as const,
+    reconnectAttempts,
+    reconnectDelayMs: state.reconnectDelay,
+    lastConnectedAt: state.hsiLastConnectedAt?.toISOString() ?? null,
+    lastHeartbeatAt: state.hsiLastHeartbeatAt?.toISOString() ?? null,
+    lastDisconnectedAt: state.hsiLastDisconnectedAt?.toISOString() ?? null,
+    hsiUrl: state.hsiUrl,
+    zombieCount: state.zombieCount,
+  };
+}
+
 // getHsiStatus / getHsiHistory read from the first registered instance for backward-compat
 // with existing /api/admin/hsi/status routes (Build #253: multi-instance, primary-first).
 export function getHsiStatus() {
@@ -174,31 +226,71 @@ export function getHsiStatus() {
       hsiUrl: "", zombieCount: 0,
     };
   }
-  const isConnected = state.ws !== null && state.ws.readyState === WebSocket.OPEN;
-  const isReconnecting = !isConnected && state.reconnectTimer !== null;
-  const reconnectAttempts = state.reconnectDelay > 1_000
-    ? Math.round(Math.log2(state.reconnectDelay / 1_000))
-    : 0;
-  const usingRelay = !state.relayFailed && !!(process.env.RELAY_TARGET_URL && process.env.RELAY_SECRET_KEY);
-  return {
-    connected: isConnected,
-    reconnecting: isReconnecting,
-    authOk: state.hsiAuthOkInSession,
-    connectionMode: usingRelay ? "relay" : "direct",
-    reconnectAttempts,
-    reconnectDelayMs: state.reconnectDelay,
-    lastConnectedAt: state.hsiLastConnectedAt?.toISOString() ?? null,
-    lastHeartbeatAt: state.hsiLastHeartbeatAt?.toISOString() ?? null,
-    lastDisconnectedAt: state.hsiLastDisconnectedAt?.toISOString() ?? null,
-    hsiUrl: state.hsiUrl,
-    zombieCount: state.zombieCount,
-  };
+  return getHsiStatusForState(state);
+}
+
+export function getHsiStatuses(configs: BrokerConfig[] = []): HsiVersionStatus[] {
+  const kotakConfigs = configs.filter(config => config.brokerName === "kotak_neo" && config.isConnected);
+  const states = [...hsiInstances.values()];
+
+  return KOTAK_API_VERSIONS.map((apiVersion) => {
+    const versionConfigs = kotakConfigs.filter(
+      config => normalizeKotakApiVersion(config.apiVersion) === apiVersion,
+    );
+    const versionStates = states.filter(
+      state => normalizeKotakApiVersion(state.activeConfig.apiVersion) === apiVersion,
+    );
+    const primaryState = versionStates.find(state => state.ws?.readyState === WebSocket.OPEN)
+      ?? versionStates[0];
+    const base = primaryState ? getHsiStatusForState(primaryState) : {
+      connected: false,
+      reconnecting: false,
+      authOk: false,
+      connectionMode: "direct" as const,
+      reconnectAttempts: 0,
+      reconnectDelayMs: 1_000,
+      lastConnectedAt: null,
+      lastHeartbeatAt: null,
+      lastDisconnectedAt: null,
+      hsiUrl: "",
+      zombieCount: 0,
+    };
+
+    return {
+      ...base,
+      apiVersion,
+      apiVersionLabel: getKotakApiProfileInfo(apiVersion).label,
+      lifecycle: versionStates.length > 0
+        ? "running"
+        : versionConfigs.length > 0
+        ? "not_running"
+        : "not_configured",
+      configuredCount: versionConfigs.length || versionStates.length,
+      runningInstanceCount: versionStates.length,
+      connectedInstanceCount: versionStates.filter(state => state.ws?.readyState === WebSocket.OPEN).length,
+      authenticatedInstanceCount: versionStates.filter(state => state.hsiAuthOkInSession).length,
+    };
+  });
 }
 
 export function getHsiHistory(): ConnectionEvent[] {
   const state = hsiInstances.values().next().value as HsiState | undefined;
   if (!state) return [];
   return [...state.connectionHistory].reverse();
+}
+
+export function getHsiHistories(): Record<KotakApiVersion, ConnectionEvent[]> {
+  const histories = Object.fromEntries(
+    KOTAK_API_VERSIONS.map(apiVersion => [apiVersion, [] as ConnectionEvent[]]),
+  ) as Record<KotakApiVersion, ConnectionEvent[]>;
+  for (const state of hsiInstances.values()) {
+    const apiVersion = normalizeKotakApiVersion(state.activeConfig.apiVersion);
+    histories[apiVersion].push(...state.connectionHistory);
+  }
+  for (const apiVersion of KOTAK_API_VERSIONS) {
+    histories[apiVersion].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  }
+  return histories;
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -462,13 +554,16 @@ export function refreshConfig(config: BrokerConfig): void {
   startHsiStatusTracking(state);
 }
 
-export function forceReconnect(): { ok: boolean; message: string } {
-  const state = hsiInstances.values().next().value as HsiState | undefined;
-  if (!state) {
+export function forceReconnect(apiVersion?: KotakApiVersion): { ok: boolean; message: string } {
+  const states = [...hsiInstances.values()].filter(state =>
+    !apiVersion || normalizeKotakApiVersion(state.activeConfig.apiVersion) === apiVersion,
+  );
+  if (states.length === 0) {
     return { ok: false, message: "No active broker config — HSI was never started" };
   }
-  refreshConfig(state.activeConfig);
-  return { ok: true, message: "HSI reconnect triggered" };
+  for (const state of states) refreshConfig(state.activeConfig);
+  const label = apiVersion ? getKotakApiProfileInfo(apiVersion).label : "active";
+  return { ok: true, message: `HSI ${label} reconnect triggered` };
 }
 
 export async function startHsiGateway(storage: IStorage): Promise<void> {

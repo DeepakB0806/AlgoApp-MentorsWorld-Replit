@@ -546,3 +546,25 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 2. Inspect the local logout response; an active customer/team session must return `teamSession:true`
 3. Confirm the browser only requests `/api/logout` when `teamSession` is false
 4. Confirm the production build includes the updated frontend bundle before testing a customer sign-out
+
+### [MILESTONE] Versioned HSI/HSM health cards — verified 2026-09-19
+
+**Task:** #305 — Show HSI HSM Health By Version
+
+**What changed:** Broker API health now exposes Legacy v2 and Current v3 HSI/HSM status independently, including lifecycle state, authentication, connection details, timestamps, reconnect data, and version-specific history/reconnect actions.
+
+**Key files:**
+- `artifacts/api-server/src/hsi-kotak-neo-v3.ts` — aggregates HSI gateway instances by API version while preserving the existing primary status endpoint.
+- `artifacts/api-server/src/hsm-kotak-neo-v3.ts` — labels the active HSM gateway by API version and reports configured-but-not-running versions honestly.
+- `artifacts/api-server/src/routes/admin-routes.ts` — adds versioned status/history endpoints and version-targeted reconnect requests.
+- `artifacts/mentors-world/src/pages/broker-api.tsx` — renders separate Legacy v2 and Current v3 HSI/HSM panels.
+- `artifacts/api-server/tests/kotak-compatibility.test.ts` — verifies both profiles and avoids cross-reporting.
+- `artifacts/mentors-world/tests/layout-regressions.test.mjs` — protects the versioned health-card UI contract.
+
+**How it works:** The API derives version labels from each connected Kotak broker configuration and in-memory gateway state. The frontend fetches stable two-entry status/history collections, shows `Not configured` versus `Not running`, and posts the selected API version when reconnecting.
+
+**Diagnostic — if this breaks, check:**
+1. `GET /api/admin/hsi/status-by-version` and `GET /api/admin/hsm/status-by-version` must return `v2_legacy` and `v3_current` entries.
+2. Confirm the entry’s `lifecycle`, `authOk`, and `connected` values match the gateway logs for that version.
+3. Run `pnpm --filter @workspace/api-server run test:kotak` and `pnpm --filter @workspace/mentors-world run test:layout`.
+4. Verify reconnect requests include `{ apiVersion: "v2_legacy" }` or `{ apiVersion: "v3_current" }` for the selected panel.
