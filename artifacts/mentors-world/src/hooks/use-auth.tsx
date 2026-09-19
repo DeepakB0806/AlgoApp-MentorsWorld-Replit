@@ -42,7 +42,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const returnTo = import.meta.env.BASE_URL || "/";
     const logoutUrl = new URL("/api/auth/logout", window.location.origin);
     logoutUrl.searchParams.set("returnTo", returnTo);
-    window.location.assign(logoutUrl.toString());
+
+    void fetch(logoutUrl.toString(), {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Logout failed with status ${response.status}`);
+        }
+
+        const payload = await response.json() as { redirectTo?: unknown };
+        const destination = typeof payload.redirectTo === "string"
+          ? payload.redirectTo
+          : returnTo;
+        window.location.assign(destination);
+      })
+      .catch(() => {
+        // Never leave the user on an API error/redirect document.
+        window.location.assign(returnTo);
+      });
   };
 
   return (

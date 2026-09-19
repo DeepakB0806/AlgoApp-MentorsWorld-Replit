@@ -1,6 +1,8 @@
-import type { Request } from "express";
+import type { Request, Response } from "express";
 
 type RequestOriginSource = Pick<Request, "headers" | "protocol" | "get">;
+type LogoutDestinationRequest = Pick<Request, "get">;
+type LogoutDestinationResponse = Pick<Response, "json" | "redirect" | "status">;
 
 interface LogoutSessionRequest {
   logout(callback: (error?: unknown) => void): void;
@@ -55,6 +57,20 @@ export function getSafeReturnTo(value: unknown): string {
   }
 
   return value;
+}
+
+export function sendLogoutDestination(
+  req: LogoutDestinationRequest,
+  res: LogoutDestinationResponse,
+  destination: string,
+) {
+  const accept = req.get("accept") ?? "";
+
+  if (accept.includes("application/json")) {
+    return res.status(200).json({ redirectTo: destination });
+  }
+
+  return res.redirect(302, destination);
 }
 
 export function getPostLogoutRedirectUri(

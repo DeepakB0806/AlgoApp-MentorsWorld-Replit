@@ -10,6 +10,7 @@ import { authStorage } from "./storage";
 import {
   clearLocalAuthSession,
   getEndSessionParameters,
+  sendLogoutDestination,
 } from "./logout";
 
 const getOidcConfig = memoize(
@@ -108,7 +109,7 @@ export async function handleOidcLogout(
     return res.status(500).json({ message: "Unable to complete logout cleanup" });
   }
 
-  return res.redirect(endSessionUrl.href);
+  return sendLogoutDestination(req, res, endSessionUrl.href);
 }
 
 export async function setupAuth(app: Express) {

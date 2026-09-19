@@ -14,3 +14,9 @@ The browser should enter logout through one server-owned route. That route clear
 **Why:** A client-side “clear local session, then decide whether to visit OIDC” flow can misroute when the local cleanup request fails or when auth state changes between the two requests.
 
 **How to apply:** Keep the local/provider decision on the server, and make authenticated browser logout tests assert both the home redirect and the absence of provider navigation.
+
+The app-owned logout caller requests a JSON destination and performs the final browser navigation itself; direct endpoint requests may still use ordinary HTTP redirects.
+
+**Why:** Express redirect bodies were becoming the visible page instead of the browser completing navigation to home.
+
+**How to apply:** Preserve content negotiation when changing logout routes so the UI never treats an API redirect response as its final document.

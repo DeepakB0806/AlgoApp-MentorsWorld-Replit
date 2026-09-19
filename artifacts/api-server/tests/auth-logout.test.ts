@@ -7,6 +7,7 @@ import {
   getPostLogoutRedirectUri,
   getRequestOrigin,
   getSafeReturnTo,
+  sendLogoutDestination,
 } from "../src/replit_integrations/auth/logout";
 
 function createRequest({
@@ -64,6 +65,56 @@ test("logout rejects external and protocol-relative return targets", () => {
   assert.equal(getSafeReturnTo("//attacker.example"), "/");
   assert.equal(getSafeReturnTo(["/unexpected-array"]), "/");
   assert.equal(getSafeReturnTo("/safe/path"), "/safe/path");
+});
+
+test("logout destination returns JSON for app-owned browser navigation", () => {
+  const calls: unknown[] = [];
+  const response = {
+    status(code: number) {
+      calls.push(["status", code]);
+      return this;
+    },
+    json(payload: unknown) {
+      calls.push(["json", payload]);
+      return payload;
+    },
+    redirect(code: number, destination: string) {
+      calls.push(["redirect", code, destination]);
+      return destination;
+    },
+  };
+
+  sendLogoutDestination(
+    { get: () => "text/html, application/json" },
+    response,
+    "/",
+  );
+
+  assert.deepEqual(calls, [
+    ["status", 200],
+    ["json", { redirectTo: "/" }],
+  ]);
+});
+
+test("logout destination keeps direct browser requests as redirects", () => {
+  const calls: unknown[] = [];
+  const response = {
+    status() {
+      return this;
+    },
+    json(payload: unknown) {
+      calls.push(["json", payload]);
+      return payload;
+    },
+    redirect(code: number, destination: string) {
+      calls.push(["redirect", code, destination]);
+      return destination;
+    },
+  };
+
+  sendLogoutDestination({ get: () => "text/html" }, response, "/");
+
+  assert.deepEqual(calls, [["redirect", 302, "/"]]);
 });
 
 test("end-session parameters include the exact return URL and ID token hint", () => {
@@ -150,6 +201,9 @@ test("web logout sends the artifact base path to the server", async () => {
 
   assert.match(source, /const returnTo = import\.meta\.env\.BASE_URL \|\| "\/";/);
   assert.match(source, /new URL\("\/api\/auth\/logout", window\.location\.origin\)/);
+  assert.match(source, /Accept: "application\/json"/);
+  assert.match(source, /window\.location\.assign\(destination\)/);
+  assert.match(source, /window\.location\.assign\(returnTo\)/);
   assert.doesNotMatch(source, /apiRequest/);
 });
 
@@ -161,7 +215,7 @@ test("logout routes local sessions before provider logout", async () => {
 
   assert.match(source, /app\.get\("\/api\/auth\/logout"/);
   assert.match(source, /if \(req\.teamUser\)/);
-  assert.match(source, /res\.redirect\(302, returnTo\)/);
+  assert.match(source, /sendLogoutDestination\(req, res, returnTo\)/);
   assert.match(source, /return handleOidcLogout\(req, res, returnTo\)/);
   assert.doesNotMatch(source, /\/api\/logout\?\$\{query\}/);
 });

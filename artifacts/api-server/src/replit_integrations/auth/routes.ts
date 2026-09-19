@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { authStorage } from "./storage";
 import { handleOidcLogout, isAuthenticated } from "./replitAuth";
-import { getSafeReturnTo } from "./logout";
+import { getSafeReturnTo, sendLogoutDestination } from "./logout";
 import { db } from "../../db";
 import { users, invitations } from "../../models/auth";
 import { eq, and } from "drizzle-orm";
@@ -151,7 +151,7 @@ export function registerAuthRoutes(app: Express): void {
     if (req.teamUser) {
       try {
         await clearTeamSession(req, res);
-        return res.redirect(302, returnTo);
+        return sendLogoutDestination(req, res, returnTo);
       } catch (error) {
         console.error("Error logging out local team session:", error);
         return res.status(500).json({ message: "Unable to complete local logout" });
