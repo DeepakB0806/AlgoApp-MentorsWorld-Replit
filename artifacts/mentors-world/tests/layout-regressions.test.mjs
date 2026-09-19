@@ -55,6 +55,22 @@ test("authenticated pages use the shared scroll shell", async () => {
   }
 });
 
+test("public home page owns a production-safe scroll shell", async () => {
+  const source = await readSource("pages/home.tsx");
+
+  assert.match(source, /data-testid="home-scroll-container"/);
+  assert.match(source, /h-screen/);
+  assert.match(source, /h-dvh/);
+  assert.match(source, /min-h-0/);
+  assert.match(source, /overflow-x-hidden/);
+  assert.match(source, /overflow-y-auto/);
+  assert.match(source, /overscroll-y-contain/);
+  assert.match(source, /<header[^>]+sticky top-0/s);
+  assert.match(source, /href="#how-it-works"/);
+  assert.match(source, /id="how-it-works"/);
+  assert.match(source, /<PageFooter\s*\/>/);
+});
+
 test("Broker API keeps its scroll-container marker", async () => {
   const source = await readSource("pages/broker-api.tsx");
   assert.match(source, /<AuthenticatedPageShell testId="broker-api-scroll-container">/);

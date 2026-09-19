@@ -161,6 +161,88 @@ async function navigate(page, url, viewport) {
 const browserTest = storageStatePath && existsSync(resolve(storageStatePath))
   ? test
   : test.skip;
+const publicBrowserTest = process.env.LAYOUT_TEST_BASE_URL
+  ? test
+  : test.skip;
+
+publicBrowserTest("public home route scrolls to its footer at supported viewport sizes", async () => {
+  const { browser, browserCdp, page } = await launchBrowser();
+
+  try {
+    for (const viewport of viewports) {
+      await navigate(page, new URL(".", baseUrl).href, viewport);
+      const initial = await evaluate(page, `(() => {
+        const shell = document.querySelector('[data-testid="home-scroll-container"]');
+        const footer = shell?.querySelector("footer");
+        const anchor = shell?.querySelector('a[href="#how-it-works"]');
+        const target = shell?.querySelector('#how-it-works');
+        const styles = shell ? getComputedStyle(shell) : null;
+        return {
+          pathname: location.pathname,
+          hasShell: Boolean(shell),
+          hasFooter: Boolean(footer),
+          hasAnchor: Boolean(anchor),
+          hasTarget: Boolean(target),
+          canScroll: Boolean(shell && shell.scrollHeight > shell.clientHeight),
+          overflowY: styles?.overflowY,
+          viewportHeight: window.innerHeight,
+          shellHeight: shell?.clientHeight,
+          pageOverflow: document.documentElement.scrollWidth > window.innerWidth + 1 || document.body.scrollWidth > window.innerWidth + 1,
+        };
+      })()`);
+
+      assert.equal(initial.hasShell, true, `Home is missing its scroll shell at ${viewport.name}`);
+      assert.equal(initial.hasFooter, true, `Home is missing its footer at ${viewport.name}`);
+      assert.equal(initial.hasAnchor, true, `Home is missing its how-it-works link at ${viewport.name}`);
+      assert.equal(initial.hasTarget, true, `Home is missing its how-it-works target at ${viewport.name}`);
+      assert.equal(initial.canScroll, true, `Home does not overflow its viewport at ${viewport.name}`);
+      assert.equal(initial.overflowY, "auto", `Home scroll shell is not vertically scrollable at ${viewport.name}`);
+      assert.equal(initial.shellHeight, initial.viewportHeight, `Home scroll shell does not match the viewport at ${viewport.name}`);
+      assert.equal(initial.pageOverflow, false, `Home has unexpected horizontal overflow at ${viewport.name}`);
+
+      const anchorResult = await evaluate(page, `(async () => {
+        const shell = document.querySelector('[data-testid="home-scroll-container"]');
+        const anchor = shell?.querySelector('a[href="#how-it-works"]');
+        anchor?.click();
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+        const target = shell?.querySelector('#how-it-works');
+        const targetRect = target?.getBoundingClientRect();
+        return {
+          hash: location.hash,
+          moved: Boolean(shell && shell.scrollTop > 0),
+          targetVisible: Boolean(targetRect && targetRect.top >= 0 && targetRect.top < window.innerHeight),
+        };
+      })()`);
+
+      assert.equal(anchorResult.hash, "#how-it-works", `Home anchor did not update the URL at ${viewport.name}`);
+      assert.equal(anchorResult.moved, true, `Home anchor did not move the scroll shell at ${viewport.name}`);
+      assert.equal(anchorResult.targetVisible, true, `How It Works section is not visible after anchor navigation at ${viewport.name}`);
+
+      const footerResult = await evaluate(page, `(() => {
+        const shell = document.querySelector('[data-testid="home-scroll-container"]');
+        const footer = shell?.querySelector("footer");
+        if (shell) shell.scrollTop = shell.scrollHeight;
+        const footerRect = footer?.getBoundingClientRect();
+        const headerRect = shell?.querySelector("header")?.getBoundingClientRect();
+        return {
+          footerReachable: Boolean(footerRect && footerRect.top >= -4 && footerRect.bottom <= window.innerHeight + 4),
+          headerSticky: Boolean(headerRect && Math.abs(headerRect.top) <= 4),
+        };
+      })()`);
+
+      assert.equal(footerResult.footerReachable, true, `Home footer is not reachable at ${viewport.name}`);
+      assert.equal(footerResult.headerSticky, true, `Home header is not sticky at ${viewport.name}`);
+    }
+  } finally {
+    await page.close();
+    await browserCdp.close();
+    browser.kill("SIGTERM");
+  }
+}, {
+  skip: !process.env.LAYOUT_TEST_BASE_URL
+    ? "Set LAYOUT_TEST_BASE_URL to run the public home browser check"
+    : false,
+});
 
 browserTest("authenticated routes reach the footer at supported viewport sizes", async () => {
   const storageState = JSON.parse(await readFile(resolve(storageStatePath), "utf8"));

@@ -487,3 +487,21 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 1. Run `pnpm --filter @workspace/mentors-world run test:ui-layout` and identify whether the router inventory, shell, footer, or responsive contract failed
 2. For authenticated browser coverage, provide `LAYOUT_TEST_STORAGE_STATE` for a non-production super-admin session and set `LAYOUT_TEST_BASE_URL` to the running frontend
 3. Check `artifacts/mentors-world/src/App.tsx` protected route definitions and `tests/route-inventory.mjs` parsing if a new route is not discovered
+
+### [MILESTONE] Production home-page scrolling — verified 2026-09-19
+
+**Task:** #294 — Restore production home scrolling
+
+**What changed:** The public home page now owns a viewport-height vertical scroll container instead of depending on document/body scrolling in production. Added static and real-browser regression checks for scrolling through the footer, section-anchor navigation, sticky header behavior, and horizontal overflow at mobile, tablet, and desktop widths.
+
+**Key files:**
+- `artifacts/mentors-world/src/pages/home.tsx` — added the route-local viewport scroll shell and suppressed horizontal overflow
+- `artifacts/mentors-world/tests/layout-regressions.test.mjs` — protects the public home scroll, anchor, sticky-header, and footer source contracts
+- `artifacts/mentors-world/tests/layout-browser-smoke.test.mjs` — verifies the rendered home page scrolls to its footer across supported viewport sizes
+
+**How it works:** The home root is fixed to the current viewport with `h-screen h-dvh`, then owns vertical scrolling through `overflow-y-auto`; `overflow-x-hidden` prevents a mobile horizontal scrollbar from reducing the usable height. The sticky header and `#how-it-works` target remain inside the same scroll container, so native anchor navigation and sticky positioning continue to work.
+
+**Diagnostic — if this breaks, check:**
+1. Run `pnpm --filter @workspace/mentors-world run test:layout` and confirm the public home scroll-shell contract passes
+2. Run `LAYOUT_TEST_BASE_URL="<running frontend URL>" pnpm --filter @workspace/mentors-world run test:layout:browser` and confirm the public home test passes at all three viewport sizes
+3. Inspect `[data-testid="home-scroll-container"]`; its client height should match the viewport, `overflow-y` should be `auto`, and it should have no horizontal scrollbar
