@@ -47,8 +47,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Clear query cache
     queryClient.clear();
     
-    // Redirect to login or Replit logout
-    window.location.href = "/api/logout";
+    // Complete provider logout and return to this artifact's public home path.
+    const logoutUrl = new URL("/api/logout", window.location.origin);
+    logoutUrl.searchParams.set("returnTo", import.meta.env.BASE_URL || "/");
+    window.location.assign(logoutUrl.toString());
   };
 
   return (

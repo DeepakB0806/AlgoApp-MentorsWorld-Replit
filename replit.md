@@ -505,3 +505,24 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 1. Run `pnpm --filter @workspace/mentors-world run test:layout` and confirm the public home scroll-shell contract passes
 2. Run `LAYOUT_TEST_BASE_URL="<running frontend URL>" pnpm --filter @workspace/mentors-world run test:layout:browser` and confirm the public home test passes at all three viewport sizes
 3. Inspect `[data-testid="home-scroll-container"]`; its client height should match the viewport, `overflow-y` should be `auto`, and it should have no horizontal scrollbar
+
+### [MILESTONE] Production logout redirect — verified 2026-09-19
+
+**Task:** #297 — Fix production logout redirect
+
+**What changed:** Logout now sends a validated artifact return path, produces an exact canonical post-logout URL with a trailing slash, supplies the OIDC ID-token hint when available, destroys the local Passport session, and clears both application auth cookies before leaving the app.
+
+**Key files:**
+- `artifacts/api-server/src/replit_integrations/auth/logout.ts` — added safe origin/return-path handling, OIDC end-session parameters, and resilient local session cleanup
+- `artifacts/api-server/src/replit_integrations/auth/replitAuth.ts` — retains the ID token and uses the hardened logout flow
+- `artifacts/mentors-world/src/hooks/use-auth.tsx` — sends the artifact base path as the intended post-logout destination
+- `artifacts/api-server/tests/auth-logout.test.ts` — covers custom-domain and preview redirects, open-redirect rejection, ID-token parameters, and cleanup failures
+- `artifacts/api-server/package.json` — added the focused auth regression command
+
+**How it works:** The browser navigates to `/api/logout` with a same-origin relative `returnTo`. The server accepts only local paths, resolves them against the trusted proxied origin, includes the stored ID token in the provider logout request when available, and completes local session/cookie cleanup even if Passport or the session store reports an error.
+
+**Diagnostic — if this breaks, check:**
+1. Run `pnpm --filter @workspace/api-server run test:auth` and confirm all logout redirect and cleanup cases pass
+2. Inspect the `/api/logout` 302 `Location` header; `post_logout_redirect_uri` must decode to the environment's public home URL with a trailing slash
+3. Confirm both `connect.sid` and `team_session` are expired by the logout response
+4. For a fresh Replit-authenticated session, confirm the OIDC end-session URL includes `id_token_hint` and returns to the public home page

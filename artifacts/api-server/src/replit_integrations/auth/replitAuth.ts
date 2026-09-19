@@ -7,6 +7,10 @@ import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { authStorage } from "./storage";
+import {
+  clearLocalAuthSession,
+  getEndSessionParameters,
+} from "./logout";
 
 const getOidcConfig = memoize(
   async () => {
@@ -66,6 +70,9 @@ function updateUserSession(
   user.access_token = tokens.access_token;
   user.refresh_token = tokens.refresh_token;
   user.expires_at = user.claims?.exp;
+  if (tokens.id_token) {
+    user.id_token = tokens.id_token;
+  }
 }
 
 async function upsertUser(claims: any) {
@@ -136,15 +143,24 @@ export async function setupAuth(app: Express) {
     })(req, res, next);
   });
 
-  app.get("/api/logout", (req, res) => {
-    req.logout(() => {
-      res.redirect(
-        client.buildEndSessionUrl(config, {
-          client_id: process.env.REPL_ID!,
-          post_logout_redirect_uri: `${req.protocol}://${req.hostname}`,
-        }).href
-      );
-    });
+  app.get("/api/logout", async (req, res) => {
+    const parameters = getEndSessionParameters(
+      req,
+      req.query.returnTo,
+      process.env.REPL_ID!,
+      (req.user as any)?.id_token,
+    );
+    const endSessionUrl = client.buildEndSessionUrl(config, parameters);
+    const cleanup = await clearLocalAuthSession(req, res);
+
+    if (cleanup.logoutError) {
+      console.warn("Passport logout reported an error; local cookies were still cleared");
+    }
+    if (cleanup.sessionError) {
+      console.warn("Session destruction reported an error; local cookies were still cleared");
+    }
+
+    res.redirect(endSessionUrl.href);
   });
 }
 
