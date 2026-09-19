@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:layout": "node --test tests/layout-regressions.test.mjs",
     "test:layout:browser": "node --test tests/layout-browser-smoke.test.mjs",
-    "test:ui-layout": "pnpm run test:layout && pnpm run test:layout:browser"
+    "test:auth:browser": "node --test tests/auth-logout-browser.test.mjs",
+    "test:ui-layout": "pnpm run test:layout && pnpm run test:layout:browser && pnpm run test:auth:browser"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

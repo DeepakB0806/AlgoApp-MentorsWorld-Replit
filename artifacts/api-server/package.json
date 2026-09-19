@@ -8,7 +8,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:auth": "pnpm exec tsx --test tests/auth-logout.test.ts"
+    "test:auth": "pnpm exec tsx --test tests/auth-logout.test.ts",
+    "test:kotak": "pnpm exec tsx --test tests/kotak-compatibility.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

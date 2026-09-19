@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { authStorage } from "./storage";
 import { isAuthenticated } from "./replitAuth";
+import { getSafeReturnTo } from "./logout";
 import { db } from "../../db";
 import { users, invitations } from "../../models/auth";
 import { eq, and } from "drizzle-orm";
@@ -124,10 +125,42 @@ async function validateTeamSession(req: Request, res: Response, next: any) {
   }
 }
 
+async function clearTeamSession(req: any, res: Response): Promise<boolean> {
+  const hadTeamSession = Boolean(req.teamUser);
+
+  if (hadTeamSession) {
+    await db.update(users)
+      .set({ sessionToken: null, sessionExpires: null })
+      .where(eq(users.id, req.teamUser.id));
+  }
+
+  res.clearCookie("team_session");
+  return hadTeamSession;
+}
+
 // Register auth-specific routes
 export function registerAuthRoutes(app: Express): void {
   // Apply team session validation middleware to all routes
   app.use(validateTeamSession);
+
+  // Unified browser logout entry point. Team sessions are handled locally;
+  // only requests without a validated local session continue to OIDC logout.
+  app.get("/api/auth/logout", async (req: any, res) => {
+    const returnTo = getSafeReturnTo(req.query.returnTo);
+
+    if (req.teamUser) {
+      try {
+        await clearTeamSession(req, res);
+        return res.redirect(302, returnTo);
+      } catch (error) {
+        console.error("Error logging out local team session:", error);
+        return res.status(500).json({ message: "Unable to complete local logout" });
+      }
+    }
+
+    const query = new URLSearchParams({ returnTo }).toString();
+    return res.redirect(302, `/api/logout?${query}`);
+  });
   
   // Get current authenticated user (supports both Replit Auth and team member auth)
   app.get("/api/auth/user", async (req: any, res) => {
@@ -178,16 +211,7 @@ export function registerAuthRoutes(app: Express): void {
   // Team member logout
   app.post("/api/auth/team/logout", async (req: any, res) => {
     try {
-      const hadTeamSession = Boolean(req.teamUser);
-
-      if (hadTeamSession) {
-        // Clear session from database
-        await db.update(users)
-          .set({ sessionToken: null, sessionExpires: null })
-          .where(eq(users.id, req.teamUser.id));
-      }
-      
-      res.clearCookie("team_session");
+      const hadTeamSession = await clearTeamSession(req, res);
       res.json({
         message: "Logged out successfully",
         teamSession: hadTeamSession,

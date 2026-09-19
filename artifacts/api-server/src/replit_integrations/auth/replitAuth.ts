@@ -153,14 +153,15 @@ export async function setupAuth(app: Express) {
     const endSessionUrl = client.buildEndSessionUrl(config, parameters);
     const cleanup = await clearLocalAuthSession(req, res);
 
-    if (cleanup.logoutError) {
-      console.warn("Passport logout reported an error; local cookies were still cleared");
-    }
-    if (cleanup.sessionError) {
-      console.warn("Session destruction reported an error; local cookies were still cleared");
+    if (cleanup.logoutError || cleanup.sessionError) {
+      console.error("OIDC logout cleanup failed; provider logout was not started", {
+        logoutError: cleanup.logoutError,
+        sessionError: cleanup.sessionError,
+      });
+      return res.status(500).json({ message: "Unable to complete logout cleanup" });
     }
 
-    res.redirect(endSessionUrl.href);
+    return res.redirect(endSessionUrl.href);
   });
 }
 

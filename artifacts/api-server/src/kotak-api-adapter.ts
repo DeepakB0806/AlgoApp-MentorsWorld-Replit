@@ -31,7 +31,10 @@ export function isKotakApiVersion(value: unknown): value is KotakApiVersion {
 }
 
 export function normalizeKotakApiVersion(value: unknown): KotakApiVersion {
-  return isKotakApiVersion(value) ? value : "v3_current";
+  // Unknown/missing values must preserve the legacy contract. New records
+  // receive v3 explicitly at creation time; runtime reads must not silently
+  // migrate an existing broker into a stricter profile.
+  return isKotakApiVersion(value) ? value : "v2_legacy";
 }
 
 export function getKotakApiProfileInfo(value: unknown): KotakApiProfileInfo {
@@ -42,7 +45,7 @@ function invalid(error: string) {
   return Promise.resolve({ success: false as const, error });
 }
 
-function validateV3Order(
+export function validateV3Order(
   params: Record<string, any>,
   operation: "place" | "modify",
 ): string | null {

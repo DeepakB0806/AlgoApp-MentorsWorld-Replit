@@ -1,7 +1,6 @@
 import { createContext, useContext, ReactNode, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { apiRequest } from "../lib/queryClient";
 
 interface AuthUser {
   id: string;
@@ -36,30 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isSuperAdmin = user?.role === "super_admin";
   const isTeamMember = user?.role === "team_member";
 
-  const logout = async () => {
-    let hadTeamSession = false;
-
-    try {
-      // Clear a customer/team session first. The response tells us whether
-      // this browser was using that session type, so it can skip OIDC logout.
-      const response = await apiRequest("POST", "/api/auth/team/logout");
-      const result = await response.json() as { teamSession?: boolean };
-      hadTeamSession = result.teamSession === true;
-    } catch (e) {
-      // Ignore errors, continue with logout
-    }
-    
+  const logout = () => {
     // Clear query cache
     queryClient.clear();
 
     const returnTo = import.meta.env.BASE_URL || "/";
-    if (hadTeamSession) {
-      window.location.assign(new URL(returnTo, window.location.origin).toString());
-      return;
-    }
-    
-    // Complete provider logout and return to this artifact's public home path.
-    const logoutUrl = new URL("/api/logout", window.location.origin);
+    const logoutUrl = new URL("/api/auth/logout", window.location.origin);
     logoutUrl.searchParams.set("returnTo", returnTo);
     window.location.assign(logoutUrl.toString());
   };

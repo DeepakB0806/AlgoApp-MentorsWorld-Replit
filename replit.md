@@ -83,6 +83,7 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 - Run `pnpm --filter @workspace/mentors-world run test:ui-layout`, `pnpm --filter @workspace/mentors-world run typecheck`, and the correctly configured production build.
 - For authenticated browser checks, run `LAYOUT_TEST_STORAGE_STATE=/path/to/super-admin-storage-state.json LAYOUT_TEST_BASE_URL=http://127.0.0.1:18772 pnpm --filter @workspace/mentors-world run test:layout:browser`.
 - The browser check requires a Playwright-compatible storage-state JSON for a super-admin test session; never commit credentials or weaken production authentication to create one. If it is unavailable, report that limitation explicitly rather than treating the public landing page as authenticated verification.
+- For the full release gate, run `pnpm run test:regression-gates`. This always runs auth, Kotak compatibility, and UI source checks. Add `REGRESSION_GATE_BROWSER=required AUTH_LOGOUT_TEST_STORAGE_STATE=/path/to/disposable-local-session.json AUTH_LOGOUT_TEST_BASE_URL=http://127.0.0.1:18772` to make authenticated layout and local-logout browser checks blocking.
 
 ## Milestones
 

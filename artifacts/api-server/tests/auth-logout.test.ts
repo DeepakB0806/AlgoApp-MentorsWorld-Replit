@@ -148,19 +148,29 @@ test("web logout sends the artifact base path to the server", async () => {
     "utf8",
   );
 
-  assert.match(source, /result\.teamSession === true/);
-  assert.match(source, /window\.location\.assign\(new URL\(returnTo, window\.location\.origin\)\.toString\(\)\)/);
   assert.match(source, /const returnTo = import\.meta\.env\.BASE_URL \|\| "\/";/);
-  assert.match(source, /searchParams\.set\("returnTo", returnTo\)/);
-  assert.match(source, /window\.location\.assign\(logoutUrl\.toString\(\)\)/);
+  assert.match(source, /new URL\("\/api\/auth\/logout", window\.location\.origin\)/);
+  assert.doesNotMatch(source, /apiRequest/);
 });
 
-test("team logout reports whether it cleared a local team session", async () => {
+test("logout routes local sessions before provider logout", async () => {
   const source = await readFile(
     new URL("../src/replit_integrations/auth/routes.ts", import.meta.url),
     "utf8",
   );
 
-  assert.match(source, /const hadTeamSession = Boolean\(req\.teamUser\)/);
-  assert.match(source, /teamSession: hadTeamSession/);
+  assert.match(source, /app\.get\("\/api\/auth\/logout"/);
+  assert.match(source, /if \(req\.teamUser\)/);
+  assert.match(source, /res\.redirect\(302, returnTo\)/);
+  assert.match(source, /res\.redirect\(302, `\/api\/logout\?\$\{query\}`\)/);
+});
+
+test("logout cleanup failures stop before OIDC redirect", async () => {
+  const source = await readFile(
+    new URL("../src/replit_integrations/auth/replitAuth.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /cleanup\.logoutError \|\| cleanup\.sessionError/);
+  assert.match(source, /return res\.status\(500\)\.json\(\{ message: "Unable to complete logout cleanup" \}\)/);
 });
