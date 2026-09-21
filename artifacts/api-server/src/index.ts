@@ -16,7 +16,7 @@ import { startDataRetentionJob } from "./data-retention";
 import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback, closeTradeById, parseTradeParams } from "./te-kotak-neo-v3";
 import { startMarketDataManager } from "./md-kotak-neo-v3";
 import { startWsGateway } from "./hsm-kotak-neo-v3";
-import { startHsiGateway } from "./hsi-kotak-neo-v3";
+import { startHsiGateway } from "./hsi-kotak-neo";
 import { startSettlementEngine } from "./se-kotak-neo-v3";
 import { startTslEngine } from "./tsl-kotak-neo-v3";
 import { startMtmMonitor } from "./mtm-monitor";

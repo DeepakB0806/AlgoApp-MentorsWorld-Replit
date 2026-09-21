@@ -1,2 +1,3 @@
 - [Drizzle-Zod compatibility](zod-drizzle-compatibility.md) — Drizzle-derived schemas must use the Zod v4 entrypoint for type compatibility.
 - [Auth session routing](auth-session-routing.md) — Customer/team cookies and Replit OIDC sessions require different logout flows.
+- [Kotak HSI version boundary](kotak-hsi-version-boundary.md) — The v3-suffixed HSI gateway is protected Legacy v2; Current v3 uses the isolated v4-suffixed gateway.

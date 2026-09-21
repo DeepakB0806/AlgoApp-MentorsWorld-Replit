@@ -10,7 +10,7 @@ import {
   getHsiHistory,
   getHsiHistories,
   forceReconnect as forceHsiReconnect,
-} from "../hsi-kotak-neo-v3";
+} from "../hsi-kotak-neo";
 import {
   getHsmStatus,
   getHsmStatuses,

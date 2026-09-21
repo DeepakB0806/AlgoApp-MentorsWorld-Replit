@@ -26,7 +26,13 @@ import {
   getTargetExpiry,
 } from "./option-symbol-builder";
 import { liveContractCache, brokerSymbolToTokenMap } from "./smc-kotak-neo-v3";
-import { registerOrderCallback, deregisterOrderCallback, registerExitOrder, registerOrderRejectCallback, deregisterOrderRejectCallback } from "./hsi-kotak-neo-v3";
+import {
+  registerOrderCallbackForConfig,
+  deregisterOrderCallbackForConfig,
+  registerExitOrderForConfig,
+  registerOrderRejectCallbackForConfig,
+  deregisterOrderRejectCallbackForConfig,
+} from "./hsi-kotak-neo";
 import { subscribe as hsmSubscribe } from "./hsm-kotak-neo-v3";
 import { registerNewTrail } from "./tsl-kotak-neo-v3";
 
@@ -55,20 +61,20 @@ async function getFillPrice(storage: IStorage, brokerConfig: BrokerConfig, order
   // resolves immediately instead of waiting the full 10s timeout.
   const hsiResult = await new Promise<{ avgPrc: number; source: string; rejected?: true; rejReason?: string } | null>((resolve) => {
     const timeout = setTimeout(() => {
-      deregisterOrderCallback(orderId);
-      deregisterOrderRejectCallback(orderId);
+      deregisterOrderCallbackForConfig(brokerConfig, orderId);
+      deregisterOrderRejectCallbackForConfig(brokerConfig, orderId);
       resolve(null);
     }, 10_000);
-    registerOrderCallback(orderId, (result) => {
+    registerOrderCallbackForConfig(brokerConfig, orderId, (result) => {
       clearTimeout(timeout);
-      deregisterOrderCallback(orderId);
-      deregisterOrderRejectCallback(orderId);
+      deregisterOrderCallbackForConfig(brokerConfig, orderId);
+      deregisterOrderRejectCallbackForConfig(brokerConfig, orderId);
       resolve(result);
     });
-    registerOrderRejectCallback(orderId, (reason) => {
+    registerOrderRejectCallbackForConfig(brokerConfig, orderId, (reason) => {
       clearTimeout(timeout);
-      deregisterOrderCallback(orderId);
-      deregisterOrderRejectCallback(orderId);
+      deregisterOrderCallbackForConfig(brokerConfig, orderId);
+      deregisterOrderRejectCallbackForConfig(brokerConfig, orderId);
       resolve({ avgPrc: 0, source: "rejected", rejected: true, rejReason: reason });
     });
   });
@@ -1647,7 +1653,7 @@ async function closeTrade(
     if (closeOrderId) {
       // Build #253: register exit order in HSI registry BEFORE awaiting getFillPrice,
       // so HSI can close the trade proactively even if this call path is interrupted.
-      registerExitOrder(closeOrderId, trade.id);
+      registerExitOrderForConfig(brokerConfig, closeOrderId, trade.id);
       const fill = (await getFillPrice(storage, brokerConfig, closeOrderId, exitPrice)).fillPrice;
       if (fill > 0) exitPrice = fill;
     }

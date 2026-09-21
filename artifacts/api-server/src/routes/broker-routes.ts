@@ -15,7 +15,7 @@ import EL, {
 } from "../kotak-api-adapter";
 import { startPersistentSquareOff } from "../te-kotak-neo-v3";
 import { refreshConfig as hsmRefreshConfig } from "../hsm-kotak-neo-v3";
-import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo-v3";
+import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo";
 import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
 import { calculatePlanMargins, refreshCapitalForBrokerConfig } from "../cm-kotak-neo-v3";
 import { getScripSyncStatus } from "../scrip-sync-scheduler";

@@ -568,3 +568,26 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 2. Confirm the entry’s `lifecycle`, `authOk`, and `connected` values match the gateway logs for that version.
 3. Run `pnpm --filter @workspace/api-server run test:kotak` and `pnpm --filter @workspace/mentors-world run test:layout`.
 4. Verify reconnect requests include `{ apiVersion: "v2_legacy" }` or `{ apiVersion: "v3_current" }` for the selected panel.
+
+### [MILESTONE] Current v3 HSI isolation with Legacy v2 freeze — verified 2026-09-21
+
+**Task:** #293 — Make Current v3 HSI operational
+
+**What changed:** Added an isolated v4-suffixed Current v3 HSI gateway and version router for startup, refresh, status, reconnect, and trade-confirmation callbacks. The existing Legacy v2 HSI gateway file and its locked behavior were left unchanged.
+
+**Key files:**
+- `artifacts/api-server/src/hsi-kotak-neo-v4.ts` — isolated Current v3 HSI lifecycle, credentials, socket state, heartbeat, reconnect, status history, and callbacks
+- `artifacts/api-server/src/hsi-kotak-neo.ts` — routes Legacy v2 and Current v3 to separate HSI implementations
+- `artifacts/api-server/src/index.ts` — starts the version router instead of starting the shared gateway directly
+- `artifacts/api-server/src/routes/admin-routes.ts` — exposes aggregated version-specific HSI status, history, and reconnect behavior
+- `artifacts/api-server/src/routes/broker-routes.ts` — refreshes the correct HSI implementation and ignores disconnected credential-reset records
+- `artifacts/api-server/src/te-kotak-neo-v3.ts` — routes fill, rejection, and exit callbacks by broker API version
+- `artifacts/api-server/tests/kotak-hsi-router.test.ts` — protects version-specific status and disconnected-reset behavior
+
+**How it works:** `v2_legacy` continues through the existing v3-suffixed gateway, while `v3_current` uses the new v4-suffixed gateway. Each gateway owns its own WebSocket, credentials, heartbeat, reconnect timer, authentication state, history, and callback registries. The runtime endpoint confirms separate Legacy v2 and Current v3 status entries.
+
+**Diagnostic — if this breaks, check:**
+1. Confirm `git diff -- artifacts/api-server/src/hsi-kotak-neo-v3.ts` is empty; that file is the protected Legacy v2 baseline.
+2. Run `pnpm --filter @workspace/api-server exec tsx --test tests/kotak-compatibility.test.ts tests/kotak-hsi-router.test.ts`.
+3. Check `GET /api/admin/hsi/status-by-version` and verify the two entries retain their correct logical API versions.
+4. If Current v3 reaches Kotak and is rejected before `cn ok`, re-authenticate the Current v3 broker configuration; the verified development session was expired, while Legacy v2 code was not changed.
