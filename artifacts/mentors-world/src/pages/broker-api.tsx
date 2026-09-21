@@ -2458,7 +2458,6 @@ function VersionedGatewayStatusCard({ gateway }: { gateway: "hsi" | "hsm" }) {
   const statusByVersion = gatewayVersions.map(apiVersion =>
     statuses.find(status => status.apiVersion === apiVersion) ?? emptyVersionedGatewayStatus(apiVersion),
   );
-  const summary = statusByVersion.map(status => `${status.apiVersion === "v2_legacy" ? "v2" : "v3"} ${gatewayStatusLabel(status, isLoading)}`).join(" · ");
   const title = isHsi ? "HSI Connection Health" : "HSM Connection Health";
   const description = isHsi ? "Kotak Neo order feed status by API version" : "Kotak Neo market data feed status by API version";
 
@@ -2480,7 +2479,20 @@ function VersionedGatewayStatusCard({ gateway }: { gateway: "hsi" | "hsm" }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-muted-foreground hidden sm:inline">{isLoading ? "Checking…" : summary}</span>
+            <span className="text-[11px] hidden sm:inline">
+              {isLoading ? (
+                <span className="text-muted-foreground">Checking…</span>
+              ) : (
+                statusByVersion.map((status, index) => (
+                  <span key={status.apiVersion}>
+                    {index > 0 && <span className="text-muted-foreground"> · </span>}
+                    <span className={status.connected && status.authOk ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}>
+                      {status.apiVersion === "v2_legacy" ? "v2" : "v3"} {gatewayStatusLabel(status, isLoading)}
+                    </span>
+                  </span>
+                ))
+              )}
+            </span>
             {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
           </div>
         </div>
