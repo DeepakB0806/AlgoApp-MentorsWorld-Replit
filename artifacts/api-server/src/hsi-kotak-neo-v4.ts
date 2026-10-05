@@ -9,6 +9,7 @@ import {
 } from "./kotak-api-adapter";
 import { runProbe, getProbeThreshold } from "./kotak-probe";
 import { processTick, updateLastWsTick } from "./tsl-kotak-neo-v3";
+import { invokeCallbackSafely } from "./invoke-callback-safely";
 
 // This module is the isolated Current v3 implementation. The v4 suffix is an
 // implementation-generation name; the logical Kotak profile remains v3_current.
@@ -98,7 +99,15 @@ async function handleOrderConfirm(
   storage: IStorage,
 ): Promise<void> {
   const callback = orderConfirmRegistry.get(orderId);
-  if (callback) callback({ avgPrc, source });
+  if (callback) {
+    invokeCallbackSafely(
+      () => callback({ avgPrc, source }),
+      error => console.error(
+        `${LOG_PREFIX} Order confirmation callback failed for ${orderId}:`,
+        error instanceof Error ? error.message : error,
+      ),
+    );
+  }
 
   try {
     const trade = await storage.getTradeByOrderId(orderId);
@@ -297,7 +306,13 @@ function connect(config: BrokerConfig, state: HsiState): void {
           const callback = orderRejectRegistry.get(orderId);
           if (callback) {
             orderRejectRegistry.delete(orderId);
-            callback(reason);
+            invokeCallbackSafely(
+              () => callback(reason),
+              error => console.error(
+                `${LOG_PREFIX} Order rejection callback failed for ${orderId}:`,
+                error instanceof Error ? error.message : error,
+              ),
+            );
           }
           if (reason && reason !== "--") {
             state.activeStorage.getActiveErrorRoutes().then(routes => {
