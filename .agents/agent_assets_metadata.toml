@@ -6,3 +6,18 @@ id = "rIB3IlzV5_4Ftd65qlXHk"
 uri = "file://.local/outputs/AlgoApp-MWV.pptx"
 type = "slides"
 title = "AlgoApp MWV.pptx"
+logical_id = "2c410b4c-032d-4009-8bde-179ebeb8e9ca"
+
+[[outputs]]
+id = "61LNb24tczfYZlbA7BHx4"
+uri = "file://attached_assets/kotak-neo-python-delta-report.html"
+type = "html"
+title = "Kotak Neo SDK delta download"
+description = "Download the v3.0.7 → v3.0.8 repository delta ZIP, including a unified text patch, manifest, and the current versions of all added or modified files."
+logical_id = "6f2d6fa8-5ae4-4906-a249-e45ea9d6bc89"
+content_hash = "sha256:9ee2d1284cbe230ef6b8dd1c5e67b50d02df5fe4a92fdc63766d03d55f2df1be"
+size = 239306
+mtime_ms = 1791210513107
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:6c51663f-a3ae-44b5-ad50-685912196dd4/6f2d6fa8-5ae4-4906-a249-e45ea9d6bc89/8b7b61ac-082b-48e5-b886-5cc8752d70b5"
+storage_version_token = "1791210520787814"
+content_type = "text/html"
