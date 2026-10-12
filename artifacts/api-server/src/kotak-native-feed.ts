@@ -13,6 +13,7 @@ type FeedState = {
   lastTickAt: number | null;
   lastError: string | null;
   reconnects: number;
+  recentReconnects: number[];
   failures: number;
   marketStatus?: string;
   lastCasAt?: number;
@@ -92,14 +93,20 @@ function connect(state: FeedState) {
     state.lastError = "Kotak login is missing feed URL, session token, or UCC";
     return;
   }
-  const url = new URL(feedUrl);
-  if (url.protocol === "https:") url.protocol = "wss:";
-  if (url.protocol === "http:") url.protocol = "ws:";
-  if (url.protocol !== "wss:" && url.protocol !== "ws:") {
-    state.lastError = "Kotak feed URL must use HTTP(S) or WS(S)";
+  let ws: WebSocket;
+  try {
+    const url = new URL(feedUrl);
+    if (url.protocol === "https:") url.protocol = "wss:";
+    if (url.protocol === "http:") url.protocol = "ws:";
+    if (url.protocol !== "wss:" && url.protocol !== "ws:") {
+      state.lastError = "Kotak feed URL must use HTTP(S) or WS(S)";
+      return;
+    }
+    ws = new WebSocket(url.toString());
+  } catch (error) {
+    state.lastError = error instanceof Error ? error.message : "Invalid Kotak feed URL";
     return;
   }
-  const ws = new WebSocket(url.toString());
   state.ws = ws;
   ws.on("open", () => {
     ws.send(JSON.stringify({
@@ -131,6 +138,7 @@ function connect(state: FeedState) {
           updatePrice(tick.symbol, tick.ltp);
           processTick(tick.symbol, tick.ltp);
           state.lastTickAt = Date.now();
+          state.failures = 0;
           updateLastWsTick();
         }
         return;
@@ -143,6 +151,7 @@ function connect(state: FeedState) {
           ws.close();
           return;
         }
+        state.dividers.clear();
         for (const [exchange, item] of Object.entries(msg.exchanges || {}) as Array<[string, any]>) {
           state.dividers.set(exchange, Number(item?.divider) || 100);
         }
@@ -156,6 +165,7 @@ function connect(state: FeedState) {
       } else if (msg.message_code === 1120) {
         state.lastError = `Kotak market-feed authentication failed: ${msg.message || "unknown reason"}`;
         state.failures++;
+        ws.close();
       } else if (msg.message_code === 1109 && msg.status && !/ok|success/i.test(String(msg.status))) {
         state.lastError = `Kotak subscription rejected: ${msg.message || msg.status}`;
         state.failures++;
@@ -172,26 +182,58 @@ function connect(state: FeedState) {
   ws.on("close", () => {
     state.ws = null;
     state.reconnects++;
+    state.recentReconnects = state.recentReconnects.filter((at) => Date.now() - at < 300_000);
+    state.recentReconnects.push(Date.now());
     if (state.retryTimer) clearTimeout(state.retryTimer);
-    state.retryTimer = setTimeout(() => connect(state), Math.min(30_000, 1000 * 2 ** Math.min(state.reconnects, 5)));
+    if (state.config.isConnected) {
+      state.retryTimer = setTimeout(() => connect(state), Math.min(30_000, 1000 * 2 ** Math.min(state.reconnects, 5)));
+    }
   });
 }
 
 export async function startNativeFeed(storage: IStorage) {
   const configs = (await storage.getBrokerConfigs()).filter((c) => c.brokerName === "kotak_neo" && c.isConnected);
-  for (const config of configs) configureNativeFeed(config);
+  for (const config of configs) {
+    const plans = await storage.getStrategyPlansByConfig(config.id);
+    configureNativeFeed(config, plans
+      .filter((plan) => plan.deploymentStatus === "active" || plan.deploymentStatus === "deployed")
+      .map((plan) => plan.ticker)
+      .filter((ticker): ticker is string => !!ticker));
+  }
 }
 
-export function configureNativeFeed(config: BrokerConfig) {
+export function configureNativeFeed(config: BrokerConfig, initialSymbols: string[] = []) {
+  if (!config.isConnected) {
+    stopNativeFeed(config.id);
+    return;
+  }
   let state = states.get(config.id);
   if (state?.ws) {
     state.config = config;
+    for (const symbol of initialSymbols) {
+      const token = brokerSymbolToTokenMap.get(symbol);
+      if (token) subscribeToken(state, "nse_fo", token);
+    }
     state.ws.close();
     return;
   }
-  state = { config, ws: null, subscriptions: new Map(), dividers: new Map(), lastTickAt: null, lastError: null, reconnects: 0, failures: 0 };
+  state = { config, ws: null, subscriptions: new Map(), dividers: new Map(), lastTickAt: null, lastError: null, reconnects: 0, recentReconnects: [], failures: 0 };
   states.set(config.id, state);
+  for (const symbol of initialSymbols) {
+    const token = brokerSymbolToTokenMap.get(symbol);
+    if (token) subscribeToken(state, "nse_fo", token);
+  }
   connect(state);
+}
+
+export function stopNativeFeed(brokerConfigId: string) {
+  const state = states.get(brokerConfigId);
+  if (!state) return;
+  state.config = { ...state.config, isConnected: false };
+  if (state.retryTimer) clearTimeout(state.retryTimer);
+  state.retryTimer = undefined;
+  state.ws?.close();
+  states.delete(brokerConfigId);
 }
 
 export function subscribeNativeSymbol(symbol: string) {
@@ -200,12 +242,27 @@ export function subscribeNativeSymbol(symbol: string) {
   for (const state of states.values()) subscribeToken(state, "nse_fo", token);
 }
 
+export function snapshotNativeSymbol(symbol: string) {
+  const token = brokerSymbolToTokenMap.get(symbol);
+  if (!token) return;
+  for (const state of states.values()) send(state, "snapshotScripsLite", `nse_fo|${token}`);
+}
+
 export function getNativeFeedStatus() {
   const now = Date.now();
   const rows = [...states.values()].map((s) => {
     const ageMs = s.lastTickAt === null ? null : now - s.lastTickAt;
-    const score = Math.min(100, s.failures * 20 + s.reconnects * 5 + (ageMs === null ? 65 : ageMs > 10_000 ? 40 : ageMs > 3_000 ? 20 : 0));
-    return { brokerConfigId: s.config.id, connected: s.ws?.readyState === WebSocket.OPEN, status: score >= 60 ? "critical" : score >= 25 ? "degraded" : "healthy", riskScore: score, lastTickAt: s.lastTickAt ? new Date(s.lastTickAt).toISOString() : null, lastError: s.lastError, reconnects: s.reconnects, subscriptions: s.subscriptions.size, marketStatus: s.marketStatus ?? null, lastCasAt: s.lastCasAt ? new Date(s.lastCasAt).toISOString() : null };
+    s.recentReconnects = s.recentReconnects.filter((at) => now - at < 300_000);
+    const connected = s.ws?.readyState === WebSocket.OPEN;
+    const reasons: string[] = [];
+    if (!connected) reasons.push("WebSocket is disconnected");
+    if (ageMs === null) reasons.push("No valid market tick received yet");
+    else if (ageMs > 10_000) reasons.push(`Last valid tick is ${Math.round(ageMs / 1000)}s old`);
+    else if (ageMs > 3_000) reasons.push(`Tick age is elevated (${Math.round(ageMs / 1000)}s)`);
+    if (s.failures) reasons.push(`${s.failures} recent transport/auth/decode failure(s)`);
+    if (s.recentReconnects.length) reasons.push(`${s.recentReconnects.length} reconnect(s) in the last 5 minutes`);
+    const score = Math.min(100, (connected ? 0 : 30) + s.failures * 20 + s.recentReconnects.length * 15 + (ageMs === null ? 65 : ageMs > 10_000 ? 40 : ageMs > 3_000 ? 20 : 0));
+    return { brokerConfigId: s.config.id, connected, status: score >= 60 ? "critical" : score >= 25 ? "degraded" : "healthy", riskScore: score, riskReasons: reasons, lastTickAt: s.lastTickAt ? new Date(s.lastTickAt).toISOString() : null, lastError: s.lastError, reconnects: s.reconnects, subscriptions: s.subscriptions.size, marketStatus: s.marketStatus ?? null, lastCasAt: s.lastCasAt ? new Date(s.lastCasAt).toISOString() : null };
   });
   return { status: rows.some((r) => r.status === "critical") || rows.length === 0 ? "critical" : rows.some((r) => r.status === "degraded") ? "degraded" : "healthy", feeds: rows };
 }

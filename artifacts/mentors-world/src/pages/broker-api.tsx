@@ -46,7 +46,7 @@ function KotakTestHarnessCard() {
   });
   const { data: nativeFeedStatus } = useQuery<{
     status: "healthy" | "degraded" | "critical";
-    feeds: Array<{ brokerConfigId: string; connected: boolean; status: string; riskScore: number; lastTickAt: string | null; lastError: string | null; reconnects: number; subscriptions: number }>;
+    feeds: Array<{ brokerConfigId: string; connected: boolean; status: string; riskScore: number; riskReasons: string[]; lastTickAt: string | null; lastError: string | null; reconnects: number; subscriptions: number }>;
   }>({
     queryKey: ["/api/kotak-native-feed/status"],
     refetchInterval: 5_000,
@@ -161,6 +161,7 @@ function KotakTestHarnessCard() {
               {feed.connected ? "Connected" : "Disconnected"} · risk {feed.riskScore}/100 · {feed.subscriptions} subscriptions · {feed.reconnects} reconnects
               {feed.lastTickAt && <span> · last tick {new Date(feed.lastTickAt).toLocaleTimeString()}</span>}
               {feed.lastError && <div className="mt-1 text-destructive">{feed.lastError}</div>}
+              {!!feed.riskReasons.length && <div className="mt-1">{feed.riskReasons.join(" · ")}</div>}
             </div>
           )) : <p className="mt-1 text-xs text-muted-foreground">No authenticated Kotak native feed is active. New Kotak entries remain blocked while feed risk is critical.</p>}
         </div>

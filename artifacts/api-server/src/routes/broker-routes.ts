@@ -15,7 +15,7 @@ import EL, {
 } from "../kotak-api-adapter";
 import { startPersistentSquareOff } from "../te-kotak-neo-v3";
 import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo";
-import { configureNativeFeed, getNativeFeedStatus } from "../kotak-native-feed";
+import { configureNativeFeed, getNativeFeedStatus, stopNativeFeed } from "../kotak-native-feed";
 import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
 import { calculatePlanMargins, refreshCapitalForBrokerConfig } from "../cm-kotak-neo-v3";
 import { getScripSyncStatus } from "../scrip-sync-scheduler";
@@ -127,7 +127,10 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.status(404).json({ error: "Broker config not found" });
       }
       if (versionChanged) {
+        stopNativeFeed(req.params.id);
         hsiRefreshConfig(config);
+      } else if (existing.isConnected && parsed.data.isConnected === false) {
+        stopNativeFeed(req.params.id);
       }
       tradingCache.invalidateBrokerConfig(req.params.id);
       res.json(config);
@@ -440,8 +443,14 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
 
       if (result.success && updated) {
         hsiRefreshConfig(updated);
-        configureNativeFeed(updated);
+        const plans = await storage.getStrategyPlansByConfig(updated.id);
+        configureNativeFeed(updated, plans
+          .filter((plan) => plan.deploymentStatus === "active" || plan.deploymentStatus === "deployed")
+          .map((plan) => plan.ticker)
+          .filter((ticker): ticker is string => !!ticker));
         console.log(`[WS] Refreshed native market feed and HSI config after successful login (${updated.brokerName})`);
+      } else {
+        stopNativeFeed(req.params.id);
       }
 
       await storage.createBrokerSessionLog({

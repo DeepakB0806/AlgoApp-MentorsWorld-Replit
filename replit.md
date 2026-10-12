@@ -591,3 +591,26 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 2. Run `pnpm --filter @workspace/api-server exec tsx --test tests/kotak-compatibility.test.ts tests/kotak-hsi-router.test.ts`.
 3. Check `GET /api/admin/hsi/status-by-version` and verify the two entries retain their correct logical API versions.
 4. If Current v3 reaches Kotak and is rejected before `cn ok`, re-authenticate the Current v3 broker configuration; the verified development session was expired, while Legacy v2 code was not changed.
+
+### [MILESTONE] Kotak native-batch market feed migration — verified 2026-10-12
+
+**Task:** #312 — Migrate Kotak Native-Batch Market Feed
+
+**What changed:** Replaced HSM as the market-data source with Kotak's native-batch WebSocket, passing the account-specific `feedUrl` returned by MPIN authentication into the configured broker record. Added native packet decoding, reconnect/resubscribe handling, entry risk gating with fresh REST quote fallback, and operator-visible feed health; HSI remains the separate order/fill channel.
+
+**Key files:**
+- `artifacts/api-server/src/kotak-native-feed.ts` — native connection, authentication, subscription, packet parsing, reconnects, status, and risk reasons
+- `artifacts/api-server/src/el-kotak-neo-v3.ts` — returns Kotak's `feedUrl` from the narrowly authorized authenticate change
+- `artifacts/api-server/src/routes/broker-routes.ts` — persists the feed URL and configures/stops feed state with broker lifecycle
+- `artifacts/api-server/src/te-kotak-neo-v3.ts` — routes subscriptions to native feed and gates new entries on fresh prices
+- `artifacts/mentors-world/src/pages/broker-api.tsx` — shows native feed status and explainable risk reasons
+- `artifacts/api-server/tests/kotak-native-feed.test.ts` — verifies sample price scaling, truncated-packet rejection, and adjacent packet decoding
+
+**How it works:** After successful broker login, the returned feed URL and current session are used to send Kotak's JSON `native_batch` authentication frame. Active plan tokens are subscribed, binary batches update validated quote state, and disconnects trigger bounded reconnects with resubscription. New entries are held if the feed is critical unless an immediate REST quote is available; exits and HSI confirmations are unchanged.
+
+**Diagnostic — if this breaks, check:**
+1. Re-authenticate the broker to populate its `feedUrl`; older saved sessions may not have one and should remain critical until refreshed.
+2. Check `GET /api/kotak-native-feed/status` for connection, tick age, subscription count, risk reasons, and last error.
+3. Review API logs for native-feed auth result and reconnect state; never log the feed URL or session token.
+4. Run `pnpm --filter @workspace/api-server exec tsx --test tests/kotak-native-feed.test.ts tests/kotak-compatibility.test.ts tests/kotak-hsi-router.test.ts`.
+5. Live native-feed authentication was not verified in this environment because the broker record did not yet contain the new feed URL; Current v3 HSI authentication was confirmed.

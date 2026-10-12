@@ -33,7 +33,7 @@ import {
   registerOrderRejectCallbackForConfig,
   deregisterOrderRejectCallbackForConfig,
 } from "./hsi-kotak-neo";
-import { subscribe as hsmSubscribe } from "./hsm-kotak-neo-v3";
+import { subscribe as subscribeMarketData } from "./md-kotak-neo-v3";
 import { registerNewTrail } from "./tsl-kotak-neo-v3";
 import { getNativeFeedStatus } from "./kotak-native-feed";
 
@@ -394,7 +394,7 @@ export async function processTradeSignal(
     }
     if ((!feed || feed.status === "critical") && !freshRestQuoteAvailable) {
       blockedForFeedRisk.add(plan.id);
-      const reason = feed?.lastError || "No validated native-feed tick is available; market-feed risk is critical";
+      const reason = feed?.lastError || feed?.riskReasons?.join("; ") || "No validated native-feed tick is available; market-feed risk is critical";
       const msg = `New entry blocked by Kotak feed risk (${reason})`;
       logPFL(plan, bc.brokerName, webhookData, "held", msg, { resolvedAction: signalContext?.resolvedAction, ticker: plan.ticker || "", exchange: plan.exchange || "" });
       results.push({ success: false, action: "hold", broker: bc.brokerName, planId: plan.id, message: msg });
@@ -1203,12 +1203,12 @@ async function executeLegBasket(
       }
       // Wire each newly-opened trade into TSL engine + HSM subscriptions.
       // registerNewTrail is a no-op when trailingStep is null/zero (MIS trades).
-      // hsmSubscribe is idempotent — safe to call even if already subscribed.
+      // Feed subscription is idempotent — safe to call even if already subscribed.
       for (const openTrade of finalTrades) {
         if (openTrade.trailingStep && openTrade.trailingStep > 0) {
           registerNewTrail(openTrade);
         }
-        hsmSubscribe(openTrade.tradingSymbol);
+        subscribeMarketData(openTrade.tradingSymbol);
       }
       finalOrderIds = attemptOrderIds;
       return { trades: finalTrades, orderIds: finalOrderIds };
