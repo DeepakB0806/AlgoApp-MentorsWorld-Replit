@@ -4,7 +4,9 @@ import {
   buildNativeFeedAuthFrame,
   clearSFeedHeartbeatTimers,
   decodeNativeBatch,
+  getNativeFeedStatus,
   getSFeedHeartbeatStatus,
+  requestNativeFeedReconnect,
 } from "../src/kotak-native-feed";
 
 test("native feed auth uses the session ID rather than the REST access token", () => {
@@ -29,6 +31,50 @@ test("SFeed heartbeat recovery returns to healthy after a fresh pong", () => {
   const now = 100_000;
   assert.equal(getSFeedHeartbeatStatus(true, true, now - 46_000, now), "stale");
   assert.equal(getSFeedHeartbeatStatus(true, true, now, now), "healthy");
+});
+
+test("SFeed status exposes HSI-parity connection details without leaking credentials", () => {
+  const config = {
+    id: "broker-config-1",
+    brokerName: "kotak_neo",
+    apiVersion: "v3_current",
+    isConnected: true,
+    feedUrl: "wss://feed.example.test/private-path",
+    sessionId: "private-session",
+    accessToken: "private-token",
+    ucc: "private-ucc",
+  };
+  const status = getNativeFeedStatus([config as any]);
+  const feed = status.feeds[0];
+
+  assert.equal(status.configuredCount, 1);
+  assert.equal(status.runningInstanceCount, 0);
+  assert.equal(feed.lifecycle, "not_running");
+  assert.equal(feed.apiVersion, "v3_current");
+  assert.equal(feed.lastConnectedAt, null);
+  assert.equal(feed.lastDisconnectedAt, null);
+  assert.equal(feed.reconnectDelayMs, 0);
+  assert.equal(feed.endpointConfigured, true);
+  assert.deepEqual(feed.connectionHistory, []);
+  assert.equal(feed.heartbeatStatus, "disconnected");
+  assert.equal(feed.lastTickAt, null);
+
+  const serialized = JSON.stringify(status);
+  for (const secret of [config.feedUrl, config.sessionId, config.accessToken, config.ucc]) {
+    assert.equal(serialized.includes(secret), false);
+  }
+});
+
+test("manual SFeed reconnect refuses an unconfigured feed", () => {
+  const config = {
+    id: "broker-config-2",
+    brokerName: "kotak_neo",
+    isConnected: true,
+    feedUrl: null,
+    sessionId: null,
+    ucc: null,
+  };
+  assert.equal(requestNativeFeedReconnect(config as any), false);
 });
 
 test("SFeed heartbeat timers are cleared when the socket closes", async () => {

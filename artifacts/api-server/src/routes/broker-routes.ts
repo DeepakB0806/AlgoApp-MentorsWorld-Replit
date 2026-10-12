@@ -15,7 +15,7 @@ import EL, {
 } from "../kotak-api-adapter";
 import { startPersistentSquareOff } from "../te-kotak-neo-v3";
 import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo";
-import { configureNativeFeed, getNativeFeedStatus, stopNativeFeed } from "../kotak-native-feed";
+import { configureNativeFeed, getNativeFeedStatus, requestNativeFeedReconnect, stopNativeFeed } from "../kotak-native-feed";
 import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
 import { calculatePlanMargins, refreshCapitalForBrokerConfig } from "../cm-kotak-neo-v3";
 import { getScripSyncStatus } from "../scrip-sync-scheduler";
@@ -42,8 +42,32 @@ function getBinanceSessionFromConfig(config: { consumerKey: string | null; consu
 }
 
 export function registerBrokerRoutes(app: Express, storage: IStorage) {
-  app.get("/api/kotak-native-feed/status", (_req, res) => {
-    res.json(getNativeFeedStatus());
+  app.get("/api/kotak-native-feed/status", async (_req, res): Promise<void> => {
+    const configs = (await storage.getBrokerConfigs()).filter((config) => config.brokerName === "kotak_neo");
+    res.json(getNativeFeedStatus(configs));
+  });
+
+  app.post("/api/kotak-native-feed/:brokerConfigId/reconnect", async (req, res): Promise<void> => {
+    const brokerConfigId = req.params.brokerConfigId;
+    const config = await storage.getBrokerConfig(brokerConfigId);
+    if (!config || config.brokerName !== "kotak_neo") {
+      res.status(404).json({ error: "Kotak feed configuration not found" });
+      return;
+    }
+    if (!config.isConnected) {
+      res.status(409).json({ error: "Authenticate the Kotak broker before reconnecting SFeed" });
+      return;
+    }
+    const plans = await storage.getStrategyPlansByConfig(config.id);
+    const symbols = plans
+      .filter((plan) => plan.deploymentStatus === "active" || plan.deploymentStatus === "deployed")
+      .map((plan) => plan.ticker)
+      .filter((ticker): ticker is string => !!ticker);
+    if (!requestNativeFeedReconnect(config, symbols)) {
+      res.status(409).json({ error: "Kotak feed credentials are not ready for reconnection" });
+      return;
+    }
+    res.json({ success: true });
   });
 
   app.get("/api/binance/proxy-status", async (_req, res) => {

@@ -634,3 +634,24 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 2. A healthy heartbeat with no tick is not market-feed proof: confirm `subscriptions` is nonzero and `lastTickAt` advances during market hours.
 3. Run `pnpm --filter @workspace/api-server exec tsx --test tests/kotak-native-feed.test.ts`, `pnpm --filter @workspace/mentors-world run typecheck`, `pnpm --filter @workspace/mentors-world run test:ui-layout`, and `pnpm run test:regression-gates`.
 4. The broker page is sign-in protected; without an authenticated browser session, the preview can verify only the sign-in screen, not the health card.
+
+### [MILESTONE] SFeed health parity with HSI — verified 2026-10-12
+
+**Task:** #322 — Show SFeed health like HSI
+
+**What changed:** Expanded SFeed health into a collapsible HSI-style diagnostic card with per-configuration lifecycle, auth, heartbeat, connection timestamps/history, reconnect state, tick/subscription/risk details, and a safe targeted reconnect action. Connection history is bounded and in-memory only; feed URLs and credentials remain hidden.
+
+**Key files:**
+- `artifacts/api-server/src/kotak-native-feed.ts` — tracks bounded runtime connection history and returns redacted lifecycle and reconnect diagnostics.
+- `artifacts/api-server/src/routes/broker-routes.ts` — returns all saved Kotak feed configurations and safely reconnects only the selected authenticated Kotak profile.
+- `artifacts/api-server/tests/kotak-native-feed.test.ts` — verifies status fields and that credentials/feed URLs are not serialized.
+- `artifacts/mentors-world/src/pages/broker-api.tsx` — presents the expanded SFeed health card and conditional targeted reconnect control.
+- `artifacts/mentors-world/tests/layout-regressions.test.mjs` — protects key SFeed diagnostics and redaction labels.
+
+**How it works:** The status endpoint merges saved Kotak configuration records with runtime feed state without returning the raw endpoint or authentication values. Socket open/close events populate a 25-entry in-memory history; the reconnect endpoint validates the selected Kotak profile and uses its own configuration and active plan symbols.
+
+**Diagnostic — if this breaks, check:**
+1. `GET /api/kotak-native-feed/status` should report lifecycle, authenticated/connected counts, heartbeat and tick separately, and never include the feed URL, session, access token, or UCC.
+2. Use `POST /api/kotak-native-feed/:brokerConfigId/reconnect` only for a connected Kotak profile with feed credentials; it must not affect other profiles.
+3. Run `pnpm --filter @workspace/api-server exec tsx --test tests/kotak-native-feed.test.ts`, `pnpm --filter @workspace/mentors-world run typecheck`, `pnpm --filter @workspace/mentors-world run test:ui-layout`, and `pnpm run test:regression-gates`.
+4. The signed-in health card could not be visually verified in the browser because the preview has no authenticated session. The API status check showed one authenticated SFeed socket with a healthy heartbeat but no market tick; the market was closed.

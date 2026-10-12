@@ -2521,9 +2521,20 @@ function VersionedGatewayStatusCard({ gateway }: { gateway: "hsi" | "hsm" }) {
 }
 
 type SFeedHeartbeatStatus = "disconnected" | "awaiting_auth" | "awaiting_heartbeat" | "healthy" | "stale";
+type SFeedLifecycle = "running" | "not_running" | "not_configured";
 
 interface SFeedStatus {
   brokerConfigId: string;
+  apiVersion: string | null;
+  lifecycle: SFeedLifecycle;
+  configuredCount: number;
+  runningInstanceCount: number;
+  connectedInstanceCount: number;
+  authenticatedInstanceCount: number;
+  connectionMode: "direct" | null;
+  connecting: boolean;
+  reconnecting: boolean;
+  reconnectDelayMs: number;
   connected: boolean;
   authenticated: boolean;
   authenticatedAt: string | null;
@@ -2532,19 +2543,47 @@ interface SFeedStatus {
   heartbeatLatencyMs: number | null;
   lastMessageAt: string | null;
   lastTickAt: string | null;
+  lastConnectedAt: string | null;
+  lastDisconnectedAt: string | null;
   lastError: string | null;
   reconnects: number;
+  recentReconnects: number;
   subscriptions: number;
+  marketStatus: string | null;
+  lastCasAt: string | null;
+  status: "healthy" | "degraded" | "critical";
+  riskScore: number;
+  riskReasons: string[];
+  endpointConfigured: boolean;
+  connectionHistory: ConnectionEvent[];
 }
 
 function SFeedHealthCard() {
-  const { data, isLoading, isError, dataUpdatedAt } = useQuery<{ feeds: SFeedStatus[] }>({
+  const { toast } = useToast();
+  const { data, isLoading, isError, dataUpdatedAt, refetch } = useQuery<{
+    configuredCount: number;
+    runningInstanceCount: number;
+    connectedInstanceCount: number;
+    authenticatedInstanceCount: number;
+    feeds: SFeedStatus[];
+  }>({
     queryKey: ["/api/kotak-native-feed/status"],
-    refetchInterval: 5_000,
+    refetchInterval: 10_000,
   });
   const feeds = data?.feeds ?? [];
+  const [expanded, setExpanded] = useState(false);
+  const reconnectMutation = useMutation({
+    mutationFn: (brokerConfigId: string) => apiRequest("POST", `/api/kotak-native-feed/${brokerConfigId}/reconnect`, {}),
+    onSuccess: () => {
+      setTimeout(() => refetch(), 1500);
+      toast({ title: "SFeed reconnect requested", description: "The selected Kotak feed is reconnecting." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "SFeed reconnect failed", description: error.message, variant: "destructive" });
+    },
+  });
   const allHealthy = feeds.length > 0 && feeds.every(feed =>
-    feed.connected && feed.authenticated && feed.heartbeatStatus === "healthy",
+    feed.lifecycle === "running" && feed.connected && feed.authenticated && feed.heartbeatStatus === "healthy",
   );
   const anyConnected = feeds.some(feed => feed.connected);
   const summary = isLoading
@@ -2555,7 +2594,9 @@ function SFeedHealthCard() {
     ? "Heartbeat healthy"
     : anyConnected
     ? "Connection needs attention"
-    : "Not connected";
+    : feeds.length > 0
+    ? feeds.every(feed => feed.lifecycle === "not_configured") ? "Not configured" : "Not connected"
+    : "No SFeed configuration";
   const summaryClass = allHealthy
     ? "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400"
     : anyConnected
@@ -2578,25 +2619,75 @@ function SFeedHealthCard() {
     return "text-amber-600 dark:text-amber-400";
   }
 
+  function versionLabel(apiVersion: string | null): string {
+    if (apiVersion === "v2_legacy") return "Legacy v2";
+    if (apiVersion === "v3_current") return "Current v3";
+    return "Kotak connection";
+  }
+
+  function connectionLabel(feed: SFeedStatus): string {
+    if (feed.lifecycle === "not_configured") return "Not configured";
+    if (feed.lifecycle === "not_running") return "Not running";
+    if (feed.connected && feed.authenticated) return "Auth OK";
+    if (feed.connected) return "No Auth";
+    if (feed.reconnecting) return "Reconnecting";
+    if (feed.connecting) return "Connecting";
+    return "Failed";
+  }
+
+  function connectionClass(feed: SFeedStatus): string {
+    if (feed.lifecycle !== "running") return "bg-muted text-muted-foreground border-border";
+    if (feed.connected && feed.authenticated) return "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30";
+    if (feed.connected || feed.reconnecting || feed.connecting) return "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30";
+    return "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30";
+  }
+
+  function feedExact(iso: string | null): string {
+    return iso ? formatGatewayExact(iso) : "—";
+  }
+
   return (
     <Card data-testid="card-sfeed-health">
-      <CardHeader>
+      <CardHeader
+        className="cursor-pointer select-none"
+        onClick={() => setExpanded(value => !value)}
+        data-testid="button-toggle-sfeed-status"
+      >
         <div className="flex items-center justify-between gap-2">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
               <Activity className="h-4 w-4 text-primary" />
-              Kotak Neo SFeed Health
+            </div>
+            <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              Kotak Neo SFeed Connection Health
             </CardTitle>
             <CardDescription className="text-xs">
-              Native market-data WebSocket · transport ping every 20 seconds
+              Native market-data WebSocket · heartbeat confirms transport only, not live market ticks
             </CardDescription>
+            </div>
           </div>
-          <Badge variant="outline" className={summaryClass} data-testid="badge-sfeed-summary">
-            {summary}
-          </Badge>
+          <div className="flex items-center gap-2">
+            {!isLoading && !isError && feeds.length > 0 && (
+              <span className="text-[11px] hidden sm:inline">
+                {feeds.map((feed, index) => (
+                  <span key={feed.brokerConfigId}>
+                    {index > 0 && <span className="text-muted-foreground"> · </span>}
+                    <span className={feed.connected && feed.authenticated ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}>
+                      {feed.apiVersion === "v2_legacy" ? "v2" : feed.apiVersion === "v3_current" ? "v3" : "SFeed"} {connectionLabel(feed)}
+                    </span>
+                  </span>
+                ))}
+              </span>
+            )}
+            <Badge variant="outline" className={summaryClass} data-testid="badge-sfeed-summary">
+              {summary}
+            </Badge>
+            {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+          </div>
         </div>
       </CardHeader>
-      <CardContent>
+      {expanded && <CardContent className="pt-0">
         {isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Checking SFeed connection…
@@ -2605,48 +2696,160 @@ function SFeedHealthCard() {
           <p className="text-sm text-destructive">Could not load SFeed status.</p>
         ) : feeds.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No active SFeed connection. Authenticate the connected Kotak broker to start the market-data feed.
+            No Kotak broker configuration is available for SFeed.
           </p>
         ) : (
           <div className="space-y-3">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span>{data?.configuredCount ?? 0} configured</span>
+              <span>{data?.runningInstanceCount ?? 0} running</span>
+              <span>{data?.connectedInstanceCount ?? 0} connected</span>
+              <span>{data?.authenticatedInstanceCount ?? 0} authenticated</span>
+            </div>
             {feeds.map(feed => (
-              <div key={feed.brokerConfigId} className="rounded-md border p-3 text-xs" data-testid={`sfeed-instance-${feed.brokerConfigId}`}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="font-medium">
-                    WebSocket {feed.connected ? "Connected" : "Disconnected"}
-                    <span className="text-muted-foreground"> · </span>
-                    <span className={feed.authenticated ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}>
-                      {feed.authenticated ? "Authenticated" : "Not authenticated"}
+              <div key={feed.brokerConfigId} className="rounded-lg border border-border/60 bg-muted/10 p-3" data-testid={`sfeed-instance-${feed.brokerConfigId}`}>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div>
+                    <p className="font-semibold text-sm">{versionLabel(feed.apiVersion)}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {feed.configuredCount > 0 ? "Feed URL and login session configured" : "Feed URL or login session unavailable"}
+                    </p>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={connectionClass(feed)}
+                    data-testid={`badge-sfeed-${feed.brokerConfigId}-status`}
+                  >
+                    {connectionLabel(feed)}
+                  </Badge>
+                </div>
+                <div className="rounded-md border border-border/50 bg-muted/20 divide-y divide-border/40 text-xs">
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Connection Mode</span>
+                    <span className="font-medium capitalize">{feed.lifecycle === "running" ? feed.connectionMode ?? "—" : "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Auth Status</span>
+                    <span className={feed.authenticated ? "font-medium text-green-600 dark:text-green-400" : "font-medium text-amber-600 dark:text-amber-400"}>
+                      {feed.lifecycle === "running" ? feed.authenticated ? "Confirmed" : "Pending / not confirmed" : connectionLabel(feed)}
                     </span>
                   </div>
-                  <span className={`font-semibold ${heartbeatClass(feed.heartbeatStatus)}`} data-testid={`sfeed-heartbeat-${feed.brokerConfigId}`}>
-                    Heartbeat: {heartbeatLabel(feed.heartbeatStatus)}
-                  </span>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Authenticated At</span>
+                    <span className="font-mono">{feedExact(feed.authenticatedAt)}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Connected Instances</span>
+                    <span>{feed.connectedInstanceCount}/{feed.runningInstanceCount}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Heartbeat</span>
+                    <span className={`font-medium ${heartbeatClass(feed.heartbeatStatus)}`} data-testid={`sfeed-heartbeat-${feed.brokerConfigId}`}>
+                      {heartbeatLabel(feed.heartbeatStatus)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 px-3 py-2">
+                    <span className="text-muted-foreground">Last Heartbeat</span>
+                    <span className="font-mono text-right">
+                      {feed.lastHeartbeatAt ? `${feedExact(feed.lastHeartbeatAt)} (${formatGatewayRelative(feed.lastHeartbeatAt)})` : "—"}
+                      {feed.heartbeatLatencyMs !== null && ` · ${feed.heartbeatLatencyMs} ms`}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Last Connected At</span>
+                    <span className="font-mono">{feedExact(feed.lastConnectedAt)}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Last Disconnected At</span>
+                    <span className="font-mono">{feedExact(feed.lastDisconnectedAt)}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Reconnect Attempts</span>
+                    <span className={`font-medium ${feed.reconnects >= 3 ? "text-amber-600 dark:text-amber-400" : ""}`}>{feed.reconnects}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Reconnects in Last 5 Minutes</span>
+                    <span>{feed.recentReconnects}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Reconnect State / Delay</span>
+                    <span>{feed.reconnecting ? `Reconnecting · ${feed.reconnectDelayMs} ms` : feed.connecting ? "Connecting" : "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Last Message</span>
+                    <span className="font-mono">{feed.lastMessageAt ? `${feedExact(feed.lastMessageAt)} (${formatGatewayRelative(feed.lastMessageAt)})` : "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Last Market Tick</span>
+                    <span className="font-mono text-right">
+                      {feed.lastTickAt ? `${feedExact(feed.lastTickAt)} (${formatGatewayRelative(feed.lastTickAt)})` : "None yet"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Active Subscriptions</span>
+                    <span>{feed.subscriptions}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Market Status</span>
+                    <span>{feed.marketStatus ?? "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-muted-foreground">Last CAS Message</span>
+                    <span className="font-mono">{feedExact(feed.lastCasAt)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 px-3 py-2">
+                    <span className="text-muted-foreground">WebSocket Endpoint</span>
+                    <span className="font-mono">{feed.endpointConfigured ? "Kotak SFeed (URL hidden)" : "Not configured"}</span>
+                  </div>
                 </div>
-                <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-muted-foreground">
-                  <span>
-                    Last pong: {feed.lastHeartbeatAt ? `${formatGatewayExact(feed.lastHeartbeatAt)} (${formatGatewayRelative(feed.lastHeartbeatAt)})` : "—"}
-                    {feed.heartbeatLatencyMs !== null && ` · ${feed.heartbeatLatencyMs} ms`}
-                  </span>
-                  <span>Last message: {feed.lastMessageAt ? formatGatewayRelative(feed.lastMessageAt) : "—"}</span>
-                  <span>
-                    Last market tick: {feed.lastTickAt
-                      ? formatGatewayRelative(feed.lastTickAt)
-                      : "None yet (market may be closed)"}
-                  </span>
-                  <span>{feed.subscriptions} subscriptions · {feed.reconnects} reconnects</span>
-                </div>
+                {feed.connectionHistory.length > 0 && (
+                  <div className="mt-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+                    <p className="text-[11px] font-medium text-muted-foreground mb-1.5">Connection History</p>
+                    <div className="space-y-1" data-testid={`list-sfeed-${feed.brokerConfigId}-history`}>
+                      {feed.connectionHistory.slice(0, 6).map((event, index) => (
+                        <div key={`${event.timestamp}-${index}`} className="flex items-center gap-2 text-[11px]">
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${event.type === "connected" ? "bg-green-500" : "bg-red-500"}`} />
+                          <span className="font-mono text-muted-foreground">{formatGatewayExact(event.timestamp)}</span>
+                          <span className={event.type === "connected" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                            {event.type === "connected" ? "Connected" : "Disconnected"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {feed.riskReasons.length > 0 && (
+                  <div className={`mt-2 rounded-md border px-3 py-2 ${feed.status === "critical" ? "border-red-500/30 bg-red-500/5 text-red-700 dark:text-red-400" : "border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400"}`}>
+                    <p className="text-[11px] font-medium">Feed risk: {feed.status} · score {feed.riskScore}</p>
+                    <ul className="mt-1 list-disc pl-4 text-[11px]">
+                      {feed.riskReasons.map(reason => <li key={reason}>{reason}</li>)}
+                    </ul>
+                  </div>
+                )}
                 {feed.lastError && <p className="mt-2 text-destructive" data-testid={`sfeed-error-${feed.brokerConfigId}`}>{feed.lastError}</p>}
+                {!isLoading && feed.lifecycle === "running" && (!feed.connected || !feed.authenticated) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full gap-2 mt-2"
+                    disabled={reconnectMutation.isPending || feed.reconnecting}
+                    onClick={() => reconnectMutation.mutate(feed.brokerConfigId)}
+                    data-testid={`button-sfeed-${feed.brokerConfigId}-reconnect`}
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${reconnectMutation.isPending ? "animate-spin" : ""}`} />
+                    {reconnectMutation.isPending && reconnectMutation.variables === feed.brokerConfigId ? "Reconnecting…" : "Reconnect SFeed"}
+                  </Button>
+                )}
               </div>
             ))}
           </div>
         )}
         {dataUpdatedAt > 0 && (
           <p className="mt-2 text-right text-[11px] text-muted-foreground">
-            Updated {formatGatewayRelative(new Date(dataUpdatedAt).toISOString())} · refreshes every 5s
+            Updated {formatGatewayRelative(new Date(dataUpdatedAt).toISOString())} · auto-refreshes every 10s
           </p>
         )}
-      </CardContent>
+      </CardContent>}
     </Card>
   );
 }

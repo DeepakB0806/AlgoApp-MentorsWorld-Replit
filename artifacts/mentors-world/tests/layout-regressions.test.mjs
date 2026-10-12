@@ -85,11 +85,17 @@ test("Broker API health cards keep separate Kotak API version visibility", async
   assert.match(source, /data-testid=\{`panel-\$\{prefix\}`\}/);
 });
 
-test("Broker API shows SFeed heartbeat separately from market tick freshness", async () => {
+test("Broker API shows HSI-parity SFeed diagnostics without exposing feed credentials", async () => {
   const source = await readSource("pages/broker-api.tsx");
   assert.match(source, /function SFeedHealthCard\(\)/);
-  assert.match(source, /Heartbeat: \{heartbeatLabel\(feed\.heartbeatStatus\)\}/);
-  assert.match(source, /Last market tick:/);
+  assert.match(source, /heartbeatLabel\(feed\.heartbeatStatus\)/);
+  assert.match(source, /Last Market Tick/);
+  assert.match(source, /Last Disconnected At/);
+  assert.match(source, /Reconnect Attempts/);
+  assert.match(source, /Connection History/);
+  assert.match(source, /Reconnect SFeed/);
+  assert.match(source, /Kotak SFeed \(URL hidden\)/);
+  assert.match(source, /auto-refreshes every 10s/);
   assert.match(source, /<SFeedHealthCard \/>/);
   assert.doesNotMatch(source, /<VersionedGatewayStatusCard gateway="hsm" \/>/);
 });
