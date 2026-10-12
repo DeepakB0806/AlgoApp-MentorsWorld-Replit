@@ -11,6 +11,7 @@ type FeedState = {
   subscriptions: Map<string, { exchange: string; token: string }>;
   dividers: Map<string, number>;
   lastTickAt: number | null;
+  authenticatedAt: number | null;
   lastError: string | null;
   reconnects: number;
   recentReconnects: number[];
@@ -22,6 +23,18 @@ type FeedState = {
 
 const states = new Map<string, FeedState>();
 const exchangeNames = ["none", "nse_cm", "nse_fo", "cde_fo", "nse_com", "bse_cm", "bse_fo", "bse_cd", "bse_co", "mcx_fo", "ncd_co"];
+
+export function buildNativeFeedAuthFrame(ucc: string, sessionId: string) {
+  // Kotak's native market-feed auth uses the login `sid`, not the REST JWT token.
+  return {
+    user: ucc,
+    auth: sessionId,
+    format: "native_batch",
+    source: "NEOTRADEAPI",
+    sdk_version: 1.1,
+    sdk_date: "2026-10-12",
+  };
+}
 
 export function decodeNativeBatch(frame: Buffer, dividers: Map<string, number>, tokenSymbols: Map<string, string>) {
   const ticks: Array<{ symbol: string; ltp: number; exchange: string; token: string }> = [];
@@ -89,8 +102,10 @@ function subscribeToken(state: FeedState, exchange: string, token: string) {
 
 function connect(state: FeedState) {
   const feedUrl = state.config.feedUrl?.trim();
-  if (!feedUrl || !state.config.accessToken || !state.config.ucc) {
-    state.lastError = "Kotak login is missing feed URL, session token, or UCC";
+  const sessionId = state.config.sessionId;
+  const ucc = state.config.ucc;
+  if (!feedUrl || !sessionId || !ucc) {
+    state.lastError = "Kotak login is missing feed URL, session ID, or UCC";
     return;
   }
   let ws: WebSocket;
@@ -109,14 +124,8 @@ function connect(state: FeedState) {
   }
   state.ws = ws;
   ws.on("open", () => {
-    ws.send(JSON.stringify({
-      user: state.config.ucc,
-      auth: state.config.accessToken,
-      format: "native_batch",
-      source: "NEOTRADEAPI",
-      sdk_version: 1.1,
-      sdk_date: "2026-10-12",
-    }));
+    state.authenticatedAt = null;
+    ws.send(JSON.stringify(buildNativeFeedAuthFrame(ucc, sessionId)));
   });
   ws.on("message", (data, isBinary) => {
     try {
@@ -156,6 +165,7 @@ function connect(state: FeedState) {
           state.dividers.set(exchange, Number(item?.divider) || 100);
         }
         if (msg.message_code === 1117) {
+          state.authenticatedAt = Date.now();
           state.lastError = null;
           state.failures = 0;
           for (const sub of state.subscriptions.values()) {
@@ -163,6 +173,7 @@ function connect(state: FeedState) {
           }
         }
       } else if (msg.message_code === 1120) {
+        state.authenticatedAt = null;
         state.lastError = `Kotak market-feed authentication failed: ${msg.message || "unknown reason"}`;
         state.failures++;
         ws.close();
@@ -180,6 +191,7 @@ function connect(state: FeedState) {
     state.failures++;
   });
   ws.on("close", () => {
+    state.authenticatedAt = null;
     state.ws = null;
     state.reconnects++;
     state.recentReconnects = state.recentReconnects.filter((at) => Date.now() - at < 300_000);
@@ -217,7 +229,7 @@ export function configureNativeFeed(config: BrokerConfig, initialSymbols: string
     state.ws.close();
     return;
   }
-  state = { config, ws: null, subscriptions: new Map(), dividers: new Map(), lastTickAt: null, lastError: null, reconnects: 0, recentReconnects: [], failures: 0 };
+  state = { config, ws: null, subscriptions: new Map(), dividers: new Map(), lastTickAt: null, authenticatedAt: null, lastError: null, reconnects: 0, recentReconnects: [], failures: 0 };
   states.set(config.id, state);
   for (const symbol of initialSymbols) {
     const token = brokerSymbolToTokenMap.get(symbol);
@@ -254,15 +266,17 @@ export function getNativeFeedStatus() {
     const ageMs = s.lastTickAt === null ? null : now - s.lastTickAt;
     s.recentReconnects = s.recentReconnects.filter((at) => now - at < 300_000);
     const connected = s.ws?.readyState === WebSocket.OPEN;
+    const authenticated = connected && s.authenticatedAt !== null;
     const reasons: string[] = [];
     if (!connected) reasons.push("WebSocket is disconnected");
+    else if (!authenticated) reasons.push("Kotak feed authentication not confirmed");
     if (ageMs === null) reasons.push("No valid market tick received yet");
     else if (ageMs > 10_000) reasons.push(`Last valid tick is ${Math.round(ageMs / 1000)}s old`);
     else if (ageMs > 3_000) reasons.push(`Tick age is elevated (${Math.round(ageMs / 1000)}s)`);
     if (s.failures) reasons.push(`${s.failures} recent transport/auth/decode failure(s)`);
     if (s.recentReconnects.length) reasons.push(`${s.recentReconnects.length} reconnect(s) in the last 5 minutes`);
     const score = Math.min(100, (connected ? 0 : 30) + s.failures * 20 + s.recentReconnects.length * 15 + (ageMs === null ? 65 : ageMs > 10_000 ? 40 : ageMs > 3_000 ? 20 : 0));
-    return { brokerConfigId: s.config.id, connected, status: score >= 60 ? "critical" : score >= 25 ? "degraded" : "healthy", riskScore: score, riskReasons: reasons, lastTickAt: s.lastTickAt ? new Date(s.lastTickAt).toISOString() : null, lastError: s.lastError, reconnects: s.reconnects, subscriptions: s.subscriptions.size, marketStatus: s.marketStatus ?? null, lastCasAt: s.lastCasAt ? new Date(s.lastCasAt).toISOString() : null };
+    return { brokerConfigId: s.config.id, connected, authenticated, authenticatedAt: s.authenticatedAt ? new Date(s.authenticatedAt).toISOString() : null, status: score >= 60 ? "critical" : score >= 25 ? "degraded" : "healthy", riskScore: score, riskReasons: reasons, lastTickAt: s.lastTickAt ? new Date(s.lastTickAt).toISOString() : null, lastError: s.lastError, reconnects: s.reconnects, subscriptions: s.subscriptions.size, marketStatus: s.marketStatus ?? null, lastCasAt: s.lastCasAt ? new Date(s.lastCasAt).toISOString() : null };
   });
   return { status: rows.some((r) => r.status === "critical") || rows.length === 0 ? "critical" : rows.some((r) => r.status === "degraded") ? "degraded" : "healthy", feeds: rows };
 }

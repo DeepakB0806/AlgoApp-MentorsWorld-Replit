@@ -2,3 +2,4 @@
 - [Auth session routing](auth-session-routing.md) — Customer/team cookies and Replit OIDC sessions require different logout flows.
 - [Kotak HSI version boundary](kotak-hsi-version-boundary.md) — The v3-suffixed HSI gateway is protected Legacy v2; Current v3 uses the isolated v4-suffixed gateway.
 - [Health card status colors](health-card-status-colors.md) — Collapsed HSI/HSM summaries use green only for authenticated Auth OK; other status colors remain unchanged.
+- [Kotak feed migration](kotak-feed-migration.md) — Kotak discontinued HSM; keep HSI separate from the native market-feed WebSocket migration.

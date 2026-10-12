@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { decodeNativeBatch } from "../src/kotak-native-feed";
+import { buildNativeFeedAuthFrame, decodeNativeBatch } from "../src/kotak-native-feed";
+
+test("native feed auth uses the session ID rather than the REST access token", () => {
+  const frame = buildNativeFeedAuthFrame("UCC-123", "sid-value");
+  assert.equal(frame.user, "UCC-123");
+  assert.equal(frame.auth, "sid-value");
+  assert.equal("accessToken" in frame, false);
+  assert.equal(frame.format, "native_batch");
+});
 
 function miniTouchLine(): Buffer {
   const packet = Buffer.alloc(54);

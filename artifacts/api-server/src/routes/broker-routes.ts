@@ -441,6 +441,11 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         updatedAt: now,
       });
 
+      console.info("[Kotak EL] Session fields persisted", JSON.stringify({
+        feedUrlPresent: Boolean(updated?.feedUrl?.trim()),
+        sessionIdPresent: Boolean(updated?.sessionId),
+      }));
+
       if (result.success && updated) {
         hsiRefreshConfig(updated);
         const plans = await storage.getStrategyPlansByConfig(updated.id);
@@ -458,9 +463,9 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         status: result.success ? "success" : "failed",
         message: `[${profile.label}] ${result.message || (result.success ? "Login successful" : "Login failed")}`,
         errorMessage: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
-        totpUsed: totp,
-        accessToken: result.data?.sessionToken || null,
-        sessionId: result.data?.sidSession || null,
+        totpUsed: totp ? "present" : null,
+        accessToken: null,
+        sessionId: null,
         baseUrl: result.data?.baseUrl || null,
         sessionExpiry,
         loginAt: now,
@@ -1010,7 +1015,12 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
   app.get("/api/broker-configs/:id/session-logs", async (req, res) => {
     try {
       const logs = await storage.getBrokerSessionLogs(req.params.id);
-      res.json(logs);
+      res.json(logs.map((log) => ({
+        ...log,
+        totpUsed: log.totpUsed ? "present" : null,
+        accessToken: null,
+        sessionId: null,
+      })));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch session logs" });
     }

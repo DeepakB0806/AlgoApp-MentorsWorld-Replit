@@ -438,6 +438,18 @@ class ExecutionLayer {
         : { mpin: config.mpin };
 
       const mpinData = await this.executeRequest(mpinEndpoint, mpinHeaders, null, mpinBody);
+      const mpinResponseData = mpinData?.data;
+      const feedUrlFieldPresent = !!mpinResponseData
+        && Object.prototype.hasOwnProperty.call(mpinResponseData, "feedUrl");
+      const feedUrlUsable = typeof mpinResponseData?.feedUrl === "string"
+        && mpinResponseData.feedUrl.trim().length > 0;
+      const sidFieldPresent = !!mpinResponseData
+        && Object.prototype.hasOwnProperty.call(mpinResponseData, "sid");
+      console.info("[Kotak EL] MPIN response field presence", JSON.stringify({
+        feedUrlFieldPresent,
+        feedUrlUsable,
+        sidFieldPresent,
+      }));
 
       if (!mpinData?.data?.token || !mpinData?.data?.sid || !mpinData?.data?.baseUrl) {
         return {
@@ -455,7 +467,7 @@ class ExecutionLayer {
           sidSession: mpinData.data.sid,
           baseUrl: mpinData.data.baseUrl,
           dataCenter: mpinData.data.dataCenter || null,
-          feedUrl: mpinData.data.feedUrl || null,
+          feedUrl: feedUrlUsable ? mpinResponseData.feedUrl.trim() : null,
         },
         message: "Authentication successful - Trading session established",
       };
