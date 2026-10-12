@@ -11,6 +11,10 @@ type FeedState = {
   subscriptions: Map<string, { exchange: string; token: string }>;
   dividers: Map<string, number>;
   lastTickAt: number | null;
+  lastMessageAt: number | null;
+  lastHeartbeatAt: number | null;
+  heartbeatLatencyMs: number | null;
+  pendingPingAt: number | null;
   authenticatedAt: number | null;
   lastError: string | null;
   reconnects: number;
@@ -19,10 +23,43 @@ type FeedState = {
   marketStatus?: string;
   lastCasAt?: number;
   retryTimer?: NodeJS.Timeout;
+  heartbeatInterval?: NodeJS.Timeout;
+  heartbeatTimeout?: NodeJS.Timeout;
 };
 
 const states = new Map<string, FeedState>();
 const exchangeNames = ["none", "nse_cm", "nse_fo", "cde_fo", "nse_com", "bse_cm", "bse_fo", "bse_cd", "bse_co", "mcx_fo", "ncd_co"];
+const SFEED_PING_INTERVAL_MS = 20_000;
+const SFEED_PONG_TIMEOUT_MS = 10_000;
+const SFEED_HEARTBEAT_STALE_MS = 45_000;
+
+export function getSFeedHeartbeatStatus(
+  connected: boolean,
+  authenticated: boolean,
+  lastHeartbeatAt: number | null,
+  now = Date.now(),
+): "disconnected" | "awaiting_auth" | "awaiting_heartbeat" | "healthy" | "stale" {
+  if (!connected) return "disconnected";
+  if (!authenticated) return "awaiting_auth";
+  if (lastHeartbeatAt === null) return "awaiting_heartbeat";
+  return now - lastHeartbeatAt <= SFEED_HEARTBEAT_STALE_MS ? "healthy" : "stale";
+}
+
+export function clearSFeedHeartbeatTimers(
+  state: Pick<FeedState, "heartbeatInterval" | "heartbeatTimeout" | "pendingPingAt">,
+) {
+  if (state.heartbeatInterval) clearInterval(state.heartbeatInterval);
+  if (state.heartbeatTimeout) clearTimeout(state.heartbeatTimeout);
+  state.heartbeatInterval = undefined;
+  state.heartbeatTimeout = undefined;
+  state.pendingPingAt = null;
+}
+
+function sanitizeFeedError(message: string, config: BrokerConfig): string {
+  return [config.feedUrl, config.sessionId, config.accessToken, config.ucc]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .reduce((safeMessage, secret) => safeMessage.split(secret).join("[redacted]"), message);
+}
 
 export function buildNativeFeedAuthFrame(ucc: string, sessionId: string) {
   // Kotak's native market-feed auth uses the login `sid`, not the REST JWT token.
@@ -125,9 +162,42 @@ function connect(state: FeedState) {
   state.ws = ws;
   ws.on("open", () => {
     state.authenticatedAt = null;
+    state.lastHeartbeatAt = null;
+    state.heartbeatLatencyMs = null;
+    state.lastMessageAt = Date.now();
     ws.send(JSON.stringify(buildNativeFeedAuthFrame(ucc, sessionId)));
+    clearSFeedHeartbeatTimers(state);
+    state.heartbeatInterval = setInterval(() => {
+      if (state.ws !== ws || ws.readyState !== WebSocket.OPEN) return;
+      const pingAt = Date.now();
+      state.pendingPingAt = pingAt;
+      try {
+        ws.ping();
+        if (state.heartbeatTimeout) clearTimeout(state.heartbeatTimeout);
+        state.heartbeatTimeout = setTimeout(() => {
+          if (state.ws !== ws || state.pendingPingAt !== pingAt) return;
+          state.lastError = "Kotak SFeed heartbeat timed out waiting for pong";
+          state.failures++;
+          ws.terminate();
+        }, SFEED_PONG_TIMEOUT_MS);
+      } catch (error) {
+        state.lastError = sanitizeFeedError(error instanceof Error ? error.message : "Failed to send Kotak SFeed heartbeat", state.config);
+        state.failures++;
+        ws.terminate();
+      }
+    }, SFEED_PING_INTERVAL_MS);
+  });
+  ws.on("pong", () => {
+    if (state.ws !== ws) return;
+    const now = Date.now();
+    state.lastHeartbeatAt = now;
+    state.heartbeatLatencyMs = state.pendingPingAt === null ? null : now - state.pendingPingAt;
+    state.pendingPingAt = null;
+    if (state.heartbeatTimeout) clearTimeout(state.heartbeatTimeout);
+    state.heartbeatTimeout = undefined;
   });
   ws.on("message", (data, isBinary) => {
+    state.lastMessageAt = Date.now();
     try {
       if (isBinary) {
         const frame = Buffer.from(data as Buffer);
@@ -187,10 +257,11 @@ function connect(state: FeedState) {
     }
   });
   ws.on("error", (error) => {
-    state.lastError = error.message;
+    state.lastError = sanitizeFeedError(error.message, state.config);
     state.failures++;
   });
   ws.on("close", () => {
+    clearSFeedHeartbeatTimers(state);
     state.authenticatedAt = null;
     state.ws = null;
     state.reconnects++;
@@ -229,7 +300,22 @@ export function configureNativeFeed(config: BrokerConfig, initialSymbols: string
     state.ws.close();
     return;
   }
-  state = { config, ws: null, subscriptions: new Map(), dividers: new Map(), lastTickAt: null, authenticatedAt: null, lastError: null, reconnects: 0, recentReconnects: [], failures: 0 };
+  state = {
+    config,
+    ws: null,
+    subscriptions: new Map(),
+    dividers: new Map(),
+    lastTickAt: null,
+    lastMessageAt: null,
+    lastHeartbeatAt: null,
+    heartbeatLatencyMs: null,
+    pendingPingAt: null,
+    authenticatedAt: null,
+    lastError: null,
+    reconnects: 0,
+    recentReconnects: [],
+    failures: 0,
+  };
   states.set(config.id, state);
   for (const symbol of initialSymbols) {
     const token = brokerSymbolToTokenMap.get(symbol);
@@ -244,6 +330,7 @@ export function stopNativeFeed(brokerConfigId: string) {
   state.config = { ...state.config, isConnected: false };
   if (state.retryTimer) clearTimeout(state.retryTimer);
   state.retryTimer = undefined;
+  clearSFeedHeartbeatTimers(state);
   state.ws?.close();
   states.delete(brokerConfigId);
 }
@@ -267,6 +354,7 @@ export function getNativeFeedStatus() {
     s.recentReconnects = s.recentReconnects.filter((at) => now - at < 300_000);
     const connected = s.ws?.readyState === WebSocket.OPEN;
     const authenticated = connected && s.authenticatedAt !== null;
+    const heartbeatStatus = getSFeedHeartbeatStatus(connected, authenticated, s.lastHeartbeatAt, now);
     const reasons: string[] = [];
     if (!connected) reasons.push("WebSocket is disconnected");
     else if (!authenticated) reasons.push("Kotak feed authentication not confirmed");
@@ -276,7 +364,25 @@ export function getNativeFeedStatus() {
     if (s.failures) reasons.push(`${s.failures} recent transport/auth/decode failure(s)`);
     if (s.recentReconnects.length) reasons.push(`${s.recentReconnects.length} reconnect(s) in the last 5 minutes`);
     const score = Math.min(100, (connected ? 0 : 30) + s.failures * 20 + s.recentReconnects.length * 15 + (ageMs === null ? 65 : ageMs > 10_000 ? 40 : ageMs > 3_000 ? 20 : 0));
-    return { brokerConfigId: s.config.id, connected, authenticated, authenticatedAt: s.authenticatedAt ? new Date(s.authenticatedAt).toISOString() : null, status: score >= 60 ? "critical" : score >= 25 ? "degraded" : "healthy", riskScore: score, riskReasons: reasons, lastTickAt: s.lastTickAt ? new Date(s.lastTickAt).toISOString() : null, lastError: s.lastError, reconnects: s.reconnects, subscriptions: s.subscriptions.size, marketStatus: s.marketStatus ?? null, lastCasAt: s.lastCasAt ? new Date(s.lastCasAt).toISOString() : null };
+    return {
+      brokerConfigId: s.config.id,
+      connected,
+      authenticated,
+      authenticatedAt: s.authenticatedAt ? new Date(s.authenticatedAt).toISOString() : null,
+      status: score >= 60 ? "critical" : score >= 25 ? "degraded" : "healthy",
+      riskScore: score,
+      riskReasons: reasons,
+      heartbeatStatus,
+      lastHeartbeatAt: s.lastHeartbeatAt ? new Date(s.lastHeartbeatAt).toISOString() : null,
+      heartbeatLatencyMs: s.heartbeatLatencyMs,
+      lastMessageAt: s.lastMessageAt ? new Date(s.lastMessageAt).toISOString() : null,
+      lastTickAt: s.lastTickAt ? new Date(s.lastTickAt).toISOString() : null,
+      lastError: s.lastError ? sanitizeFeedError(s.lastError, s.config) : null,
+      reconnects: s.reconnects,
+      subscriptions: s.subscriptions.size,
+      marketStatus: s.marketStatus ?? null,
+      lastCasAt: s.lastCasAt ? new Date(s.lastCasAt).toISOString() : null,
+    };
   });
   return { status: rows.some((r) => r.status === "critical") || rows.length === 0 ? "critical" : rows.some((r) => r.status === "degraded") ? "degraded" : "healthy", feeds: rows };
 }

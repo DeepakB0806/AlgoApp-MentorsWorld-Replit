@@ -44,14 +44,6 @@ function KotakTestHarnessCard() {
     queryKey: ["/api/admin/probe/status"],
     refetchInterval: 30_000,
   });
-  const { data: nativeFeedStatus } = useQuery<{
-    status: "healthy" | "degraded" | "critical";
-    feeds: Array<{ brokerConfigId: string; connected: boolean; status: string; riskScore: number; riskReasons: string[]; lastTickAt: string | null; lastError: string | null; reconnects: number; subscriptions: number }>;
-  }>({
-    queryKey: ["/api/kotak-native-feed/status"],
-    refetchInterval: 5_000,
-  });
-
   const probeMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/probe/run", { target: "both" }),
     onSuccess: () => {
@@ -149,22 +141,6 @@ function KotakTestHarnessCard() {
         {!probeLoading && !probeStatus?.hsm && !probeStatus?.hsi && (
           <p className="text-xs text-muted-foreground mt-2">No probe has been run yet. Click "Run Probe Now" to test connectivity.</p>
         )}
-        <div className="mt-4 rounded-md border p-3" data-testid="native-feed-health">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-semibold">Kotak native market feed</span>
-            <Badge variant={nativeFeedStatus?.status === "healthy" ? "default" : "destructive"}>
-              {nativeFeedStatus?.status ?? "critical"}
-            </Badge>
-          </div>
-          {nativeFeedStatus?.feeds.length ? nativeFeedStatus.feeds.map((feed) => (
-            <div key={feed.brokerConfigId} className="mt-2 text-xs text-muted-foreground">
-              {feed.connected ? "Connected" : "Disconnected"} · risk {feed.riskScore}/100 · {feed.subscriptions} subscriptions · {feed.reconnects} reconnects
-              {feed.lastTickAt && <span> · last tick {new Date(feed.lastTickAt).toLocaleTimeString()}</span>}
-              {feed.lastError && <div className="mt-1 text-destructive">{feed.lastError}</div>}
-              {!!feed.riskReasons.length && <div className="mt-1">{feed.riskReasons.join(" · ")}</div>}
-            </div>
-          )) : <p className="mt-1 text-xs text-muted-foreground">No authenticated Kotak native feed is active. New Kotak entries remain blocked while feed risk is critical.</p>}
-        </div>
       </CardContent>
     </Card>
   );
@@ -2544,6 +2520,137 @@ function VersionedGatewayStatusCard({ gateway }: { gateway: "hsi" | "hsm" }) {
   );
 }
 
+type SFeedHeartbeatStatus = "disconnected" | "awaiting_auth" | "awaiting_heartbeat" | "healthy" | "stale";
+
+interface SFeedStatus {
+  brokerConfigId: string;
+  connected: boolean;
+  authenticated: boolean;
+  authenticatedAt: string | null;
+  heartbeatStatus: SFeedHeartbeatStatus;
+  lastHeartbeatAt: string | null;
+  heartbeatLatencyMs: number | null;
+  lastMessageAt: string | null;
+  lastTickAt: string | null;
+  lastError: string | null;
+  reconnects: number;
+  subscriptions: number;
+}
+
+function SFeedHealthCard() {
+  const { data, isLoading, isError, dataUpdatedAt } = useQuery<{ feeds: SFeedStatus[] }>({
+    queryKey: ["/api/kotak-native-feed/status"],
+    refetchInterval: 5_000,
+  });
+  const feeds = data?.feeds ?? [];
+  const allHealthy = feeds.length > 0 && feeds.every(feed =>
+    feed.connected && feed.authenticated && feed.heartbeatStatus === "healthy",
+  );
+  const anyConnected = feeds.some(feed => feed.connected);
+  const summary = isLoading
+    ? "Checking…"
+    : isError
+    ? "Status unavailable"
+    : allHealthy
+    ? "Heartbeat healthy"
+    : anyConnected
+    ? "Connection needs attention"
+    : "Not connected";
+  const summaryClass = allHealthy
+    ? "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400"
+    : anyConnected
+    ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+    : "border-border bg-muted text-muted-foreground";
+
+  function heartbeatLabel(status: SFeedHeartbeatStatus): string {
+    switch (status) {
+      case "healthy": return "Healthy";
+      case "stale": return "Stale";
+      case "awaiting_auth": return "Awaiting authentication";
+      case "awaiting_heartbeat": return "Awaiting first pong";
+      default: return "Disconnected";
+    }
+  }
+
+  function heartbeatClass(status: SFeedHeartbeatStatus): string {
+    if (status === "healthy") return "text-green-600 dark:text-green-400";
+    if (status === "stale") return "text-red-600 dark:text-red-400";
+    return "text-amber-600 dark:text-amber-400";
+  }
+
+  return (
+    <Card data-testid="card-sfeed-health">
+      <CardHeader>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Activity className="h-4 w-4 text-primary" />
+              Kotak Neo SFeed Health
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Native market-data WebSocket · transport ping every 20 seconds
+            </CardDescription>
+          </div>
+          <Badge variant="outline" className={summaryClass} data-testid="badge-sfeed-summary">
+            {summary}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Checking SFeed connection…
+          </div>
+        ) : isError ? (
+          <p className="text-sm text-destructive">Could not load SFeed status.</p>
+        ) : feeds.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No active SFeed connection. Authenticate the connected Kotak broker to start the market-data feed.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {feeds.map(feed => (
+              <div key={feed.brokerConfigId} className="rounded-md border p-3 text-xs" data-testid={`sfeed-instance-${feed.brokerConfigId}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-medium">
+                    WebSocket {feed.connected ? "Connected" : "Disconnected"}
+                    <span className="text-muted-foreground"> · </span>
+                    <span className={feed.authenticated ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}>
+                      {feed.authenticated ? "Authenticated" : "Not authenticated"}
+                    </span>
+                  </div>
+                  <span className={`font-semibold ${heartbeatClass(feed.heartbeatStatus)}`} data-testid={`sfeed-heartbeat-${feed.brokerConfigId}`}>
+                    Heartbeat: {heartbeatLabel(feed.heartbeatStatus)}
+                  </span>
+                </div>
+                <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-muted-foreground">
+                  <span>
+                    Last pong: {feed.lastHeartbeatAt ? `${formatGatewayExact(feed.lastHeartbeatAt)} (${formatGatewayRelative(feed.lastHeartbeatAt)})` : "—"}
+                    {feed.heartbeatLatencyMs !== null && ` · ${feed.heartbeatLatencyMs} ms`}
+                  </span>
+                  <span>Last message: {feed.lastMessageAt ? formatGatewayRelative(feed.lastMessageAt) : "—"}</span>
+                  <span>
+                    Last market tick: {feed.lastTickAt
+                      ? formatGatewayRelative(feed.lastTickAt)
+                      : "None yet (market may be closed)"}
+                  </span>
+                  <span>{feed.subscriptions} subscriptions · {feed.reconnects} reconnects</span>
+                </div>
+                {feed.lastError && <p className="mt-2 text-destructive" data-testid={`sfeed-error-${feed.brokerConfigId}`}>{feed.lastError}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+        {dataUpdatedAt > 0 && (
+          <p className="mt-2 text-right text-[11px] text-muted-foreground">
+            Updated {formatGatewayRelative(new Date(dataUpdatedAt).toISOString())} · refreshes every 5s
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function HsiStatusCard() {
   const { data, isLoading, dataUpdatedAt, refetch } = useQuery<HsiStatusData>({
     queryKey: ["/api/admin/hsi/status"],
@@ -4433,7 +4540,7 @@ export default function BrokerApi() {
 
         {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
           <div className="mt-6">
-            <VersionedGatewayStatusCard gateway="hsm" />
+            <SFeedHealthCard />
           </div>
         )}
 

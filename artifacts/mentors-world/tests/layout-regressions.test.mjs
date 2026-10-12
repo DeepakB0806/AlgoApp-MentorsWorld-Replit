@@ -85,6 +85,15 @@ test("Broker API health cards keep separate Kotak API version visibility", async
   assert.match(source, /data-testid=\{`panel-\$\{prefix\}`\}/);
 });
 
+test("Broker API shows SFeed heartbeat separately from market tick freshness", async () => {
+  const source = await readSource("pages/broker-api.tsx");
+  assert.match(source, /function SFeedHealthCard\(\)/);
+  assert.match(source, /Heartbeat: \{heartbeatLabel\(feed\.heartbeatStatus\)\}/);
+  assert.match(source, /Last market tick:/);
+  assert.match(source, /<SFeedHealthCard \/>/);
+  assert.doesNotMatch(source, /<VersionedGatewayStatusCard gateway="hsm" \/>/);
+});
+
 test("shared styles do not introduce a global scroll lock", async () => {
   const css = await readFile(join(sourceRoot, "index.css"), "utf8");
   assert.doesNotMatch(css, /(?:html|body|#root)[^{]*\{[^}]*overflow(?:-[xy])?\s*:\s*(?:hidden|clip)/s);

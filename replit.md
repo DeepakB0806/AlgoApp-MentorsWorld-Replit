@@ -614,3 +614,23 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 3. Review API logs for native-feed auth result and reconnect state; never log the feed URL or session token.
 4. Run `pnpm --filter @workspace/api-server exec tsx --test tests/kotak-native-feed.test.ts tests/kotak-compatibility.test.ts tests/kotak-hsi-router.test.ts`.
 5. Live native-feed authentication was not verified in this environment because the broker record did not yet contain the new feed URL; Current v3 HSI authentication was confirmed.
+
+### [MILESTONE] SFeed heartbeat health card — verified 2026-10-12
+
+**Task:** #319 — SFeed Heartbeat Health
+
+**What changed:** Added native WebSocket ping/pong monitoring and a dedicated SFeed health card in place of the discontinued HSM market-data status card. The card reports connection/auth state, heartbeat freshness and latency, last message, last market tick, subscriptions, reconnects, and sanitized errors without treating a healthy heartbeat as proof of a live market tick.
+
+**Key files:**
+- `artifacts/api-server/src/kotak-native-feed.ts` — tracks heartbeat and message timestamps, terminates/reconnects after a missed pong, clears timers on close/stop, and exposes sanitized heartbeat status.
+- `artifacts/api-server/tests/kotak-native-feed.test.ts` — covers heartbeat freshness/recovery and timer cleanup.
+- `artifacts/mentors-world/src/pages/broker-api.tsx` — polls and renders the distinct SFeed health card; HSI status remains separate.
+- `artifacts/mentors-world/tests/layout-regressions.test.mjs` — protects the SFeed card and the distinction between heartbeat and tick freshness.
+
+**How it works:** The existing native feed sends a WebSocket ping every 20 seconds and expects a pong within 10 seconds. A missed pong terminates the socket and enters the existing reconnect path. The UI polls the existing feed status endpoint every five seconds and distinguishes transport health from market-tick activity.
+
+**Diagnostic — if this breaks, check:**
+1. `GET /api/kotak-native-feed/status` should expose `heartbeatStatus`, `lastHeartbeatAt`, `heartbeatLatencyMs`, `lastMessageAt`, and `lastTickAt` separately.
+2. A healthy heartbeat with no tick is not market-feed proof: confirm `subscriptions` is nonzero and `lastTickAt` advances during market hours.
+3. Run `pnpm --filter @workspace/api-server exec tsx --test tests/kotak-native-feed.test.ts`, `pnpm --filter @workspace/mentors-world run typecheck`, `pnpm --filter @workspace/mentors-world run test:ui-layout`, and `pnpm run test:regression-gates`.
+4. The broker page is sign-in protected; without an authenticated browser session, the preview can verify only the sign-in screen, not the health card.

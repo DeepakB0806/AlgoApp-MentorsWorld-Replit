@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildNativeFeedAuthFrame, decodeNativeBatch } from "../src/kotak-native-feed";
+import {
+  buildNativeFeedAuthFrame,
+  clearSFeedHeartbeatTimers,
+  decodeNativeBatch,
+  getSFeedHeartbeatStatus,
+} from "../src/kotak-native-feed";
 
 test("native feed auth uses the session ID rather than the REST access token", () => {
   const frame = buildNativeFeedAuthFrame("UCC-123", "sid-value");
@@ -8,6 +13,38 @@ test("native feed auth uses the session ID rather than the REST access token", (
   assert.equal(frame.auth, "sid-value");
   assert.equal("accessToken" in frame, false);
   assert.equal(frame.format, "native_batch");
+});
+
+test("SFeed heartbeat status is independent from market tick activity", () => {
+  const now = 100_000;
+  assert.equal(getSFeedHeartbeatStatus(false, false, null, now), "disconnected");
+  assert.equal(getSFeedHeartbeatStatus(true, false, null, now), "awaiting_auth");
+  assert.equal(getSFeedHeartbeatStatus(true, true, null, now), "awaiting_heartbeat");
+  assert.equal(getSFeedHeartbeatStatus(true, true, now - 20_000, now), "healthy");
+  assert.equal(getSFeedHeartbeatStatus(true, true, now - 46_000, now), "stale");
+  // No tick timestamp is consulted: a quiet market can still have a healthy connection.
+});
+
+test("SFeed heartbeat recovery returns to healthy after a fresh pong", () => {
+  const now = 100_000;
+  assert.equal(getSFeedHeartbeatStatus(true, true, now - 46_000, now), "stale");
+  assert.equal(getSFeedHeartbeatStatus(true, true, now, now), "healthy");
+});
+
+test("SFeed heartbeat timers are cleared when the socket closes", async () => {
+  let fired = false;
+  const timers = {
+    heartbeatInterval: setInterval(() => { fired = true; }, 5),
+    heartbeatTimeout: setTimeout(() => { fired = true; }, 5),
+    pendingPingAt: Date.now(),
+  };
+
+  clearSFeedHeartbeatTimers(timers);
+  assert.equal(timers.heartbeatInterval, undefined);
+  assert.equal(timers.heartbeatTimeout, undefined);
+  assert.equal(timers.pendingPingAt, null);
+  await new Promise(resolve => setTimeout(resolve, 15));
+  assert.equal(fired, false);
 });
 
 function miniTouchLine(): Buffer {
