@@ -739,6 +739,7 @@ export class DatabaseStorage implements IStorage {
       accessToken: null,
       sessionId: null,
       baseUrl: null,
+      feedUrl: null,
       viewToken: null,
       sidView: null,
       lastTotpUsed: null,

@@ -80,12 +80,16 @@ function resolveHsmSubscribe(): ((symbol: string) => void) | null {
 // 🔒 LOCKED BLOCK END
 
 export function subscribe(symbol: string): void {
-  const fn = resolveHsmSubscribe();
-  if (!fn) {
-    console.error(`${LOG_PREFIX} subscribe(${symbol}) dropped — HSM module unavailable`);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const native = require("./kotak-native-feed") as { subscribeNativeSymbol: (s: string) => void };
+    native.subscribeNativeSymbol(symbol);
+  } catch (err) {
+    console.error(`${LOG_PREFIX} native feed subscribe(${symbol}) failed:`, err);
+  }
+  if (!symbol) {
     return;
   }
-  fn(symbol);
 }
 
 export function startMarketDataManager(): void {

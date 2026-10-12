@@ -35,6 +35,7 @@ import {
 } from "./hsi-kotak-neo";
 import { subscribe as hsmSubscribe } from "./hsm-kotak-neo-v3";
 import { registerNewTrail } from "./tsl-kotak-neo-v3";
+import { getNativeFeedStatus } from "./kotak-native-feed";
 
 // ⚠️ SPECIAL INSTRUCTION: NO AI OR DEVELOPER IS PERMITTED TO UNLOCK, MODIFY, OR TAMPER WITH ANY 🔒 LOCKED BLOCK WITHOUT EXPLICIT, PRIOR AUTHORIZATION FROM THE USER.
 // ⚠️ CODING RULE: Any task that requires modifying a 🔒 LOCKED BLOCK MUST (a) explicitly name the locked block in the task description, and (b) obtain the user's written permission before the block is opened. No exceptions.
@@ -373,7 +374,35 @@ export async function processTradeSignal(
     results.push({ success: false, action: "hold", broker: bc?.brokerName || "unknown", planId: plan.id, message: msg });
   }
 
-  const gateablePlans = plans.filter(p => p.autoResume !== false);
+  const nativeFeedByConfig = new Map(getNativeFeedStatus().feeds.map((feed) => [feed.brokerConfigId, feed]));
+  const blockedForFeedRisk = new Set<string>();
+  for (const plan of plans.filter(p => p.autoResume !== false)) {
+    const bc = brokerConfigs.get(plan.brokerConfigId!);
+    if (bc?.brokerName !== "kotak_neo") continue;
+    const feed = nativeFeedByConfig.get(bc.id);
+    let freshRestQuoteAvailable = false;
+    if (!feed || feed.status === "critical") {
+      const token = brokerSymbolToTokenMap.get(plan.ticker || "");
+      if (token && plan.exchange) {
+        try {
+          const quote = await EL.getQuote(bc, EL.mapExchange(plan.exchange), token);
+          freshRestQuoteAvailable = !!quote.success && Number(quote.ltp) > 0;
+        } catch {
+          freshRestQuoteAvailable = false;
+        }
+      }
+    }
+    if ((!feed || feed.status === "critical") && !freshRestQuoteAvailable) {
+      blockedForFeedRisk.add(plan.id);
+      const reason = feed?.lastError || "No validated native-feed tick is available; market-feed risk is critical";
+      const msg = `New entry blocked by Kotak feed risk (${reason})`;
+      logPFL(plan, bc.brokerName, webhookData, "held", msg, { resolvedAction: signalContext?.resolvedAction, ticker: plan.ticker || "", exchange: plan.exchange || "" });
+      results.push({ success: false, action: "hold", broker: bc.brokerName, planId: plan.id, message: msg });
+    } else if (freshRestQuoteAvailable) {
+      logPFL(plan, bc.brokerName, webhookData, "info", "Native feed risk is elevated; fresh Kotak REST quote validated as fallback", { resolvedAction: signalContext?.resolvedAction, ticker: plan.ticker || "", exchange: plan.exchange || "" });
+    }
+  }
+  const gateablePlans = plans.filter(p => p.autoResume !== false && !blockedForFeedRisk.has(p.id));
 
   // #183: Read available capital from DB snapshots (refreshed by Capital Manager at 09:00 IST)
   // E10+E20: missing/zero snapshot → Infinity = no gate

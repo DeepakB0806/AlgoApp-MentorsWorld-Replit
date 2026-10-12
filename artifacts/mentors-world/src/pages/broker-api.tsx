@@ -44,6 +44,13 @@ function KotakTestHarnessCard() {
     queryKey: ["/api/admin/probe/status"],
     refetchInterval: 30_000,
   });
+  const { data: nativeFeedStatus } = useQuery<{
+    status: "healthy" | "degraded" | "critical";
+    feeds: Array<{ brokerConfigId: string; connected: boolean; status: string; riskScore: number; lastTickAt: string | null; lastError: string | null; reconnects: number; subscriptions: number }>;
+  }>({
+    queryKey: ["/api/kotak-native-feed/status"],
+    refetchInterval: 5_000,
+  });
 
   const probeMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/probe/run", { target: "both" }),
@@ -142,6 +149,21 @@ function KotakTestHarnessCard() {
         {!probeLoading && !probeStatus?.hsm && !probeStatus?.hsi && (
           <p className="text-xs text-muted-foreground mt-2">No probe has been run yet. Click "Run Probe Now" to test connectivity.</p>
         )}
+        <div className="mt-4 rounded-md border p-3" data-testid="native-feed-health">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold">Kotak native market feed</span>
+            <Badge variant={nativeFeedStatus?.status === "healthy" ? "default" : "destructive"}>
+              {nativeFeedStatus?.status ?? "critical"}
+            </Badge>
+          </div>
+          {nativeFeedStatus?.feeds.length ? nativeFeedStatus.feeds.map((feed) => (
+            <div key={feed.brokerConfigId} className="mt-2 text-xs text-muted-foreground">
+              {feed.connected ? "Connected" : "Disconnected"} · risk {feed.riskScore}/100 · {feed.subscriptions} subscriptions · {feed.reconnects} reconnects
+              {feed.lastTickAt && <span> · last tick {new Date(feed.lastTickAt).toLocaleTimeString()}</span>}
+              {feed.lastError && <div className="mt-1 text-destructive">{feed.lastError}</div>}
+            </div>
+          )) : <p className="mt-1 text-xs text-muted-foreground">No authenticated Kotak native feed is active. New Kotak entries remain blocked while feed risk is critical.</p>}
+        </div>
       </CardContent>
     </Card>
   );

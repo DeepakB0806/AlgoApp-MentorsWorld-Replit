@@ -14,8 +14,8 @@ import EL, {
   normalizeKotakApiVersion,
 } from "../kotak-api-adapter";
 import { startPersistentSquareOff } from "../te-kotak-neo-v3";
-import { refreshConfig as hsmRefreshConfig } from "../hsm-kotak-neo-v3";
 import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo";
+import { configureNativeFeed, getNativeFeedStatus } from "../kotak-native-feed";
 import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
 import { calculatePlanMargins, refreshCapitalForBrokerConfig } from "../cm-kotak-neo-v3";
 import { getScripSyncStatus } from "../scrip-sync-scheduler";
@@ -42,6 +42,10 @@ function getBinanceSessionFromConfig(config: { consumerKey: string | null; consu
 }
 
 export function registerBrokerRoutes(app: Express, storage: IStorage) {
+  app.get("/api/kotak-native-feed/status", (_req, res) => {
+    res.json(getNativeFeedStatus());
+  });
+
   app.get("/api/binance/proxy-status", async (_req, res) => {
     res.json(getBinanceProxyStatus());
   });
@@ -108,6 +112,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
             accessToken: null,
             sessionId: null,
             baseUrl: null,
+            feedUrl: null,
             dataCenter: null,
             viewToken: null,
             sidView: null,
@@ -122,7 +127,6 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.status(404).json({ error: "Broker config not found" });
       }
       if (versionChanged) {
-        hsmRefreshConfig(config);
         hsiRefreshConfig(config);
       }
       tradingCache.invalidateBrokerConfig(req.params.id);
@@ -422,6 +426,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         accessToken: result.data?.sessionToken || null,
         sessionId: result.data?.sidSession || null,
         baseUrl: result.data?.baseUrl || null,
+        feedUrl: result.data?.feedUrl?.trim() || null,
         dataCenter: result.data?.dataCenter?.trim() || null,
         viewToken: result.data?.viewToken || null,
         sidView: result.data?.sidView || null,
@@ -434,9 +439,9 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       });
 
       if (result.success && updated) {
-        hsmRefreshConfig(updated);
         hsiRefreshConfig(updated);
-        console.log(`[WS] Refreshed HSM/HSI config after successful login (${updated.brokerName})`);
+        configureNativeFeed(updated);
+        console.log(`[WS] Refreshed native market feed and HSI config after successful login (${updated.brokerName})`);
       }
 
       await storage.createBrokerSessionLog({

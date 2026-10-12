@@ -15,8 +15,8 @@ import { startPlanMonitor } from "./plan-monitor";
 import { startDataRetentionJob } from "./data-retention";
 import { resolveAllSignalsFromActionMapper, processTradeSignal, startPersistentExit, startPersistentRollback, closeTradeById, parseTradeParams } from "./te-kotak-neo-v3";
 import { startMarketDataManager } from "./md-kotak-neo-v3";
-import { startWsGateway } from "./hsm-kotak-neo-v3";
 import { startHsiGateway } from "./hsi-kotak-neo";
+import { startNativeFeed } from "./kotak-native-feed";
 import { startSettlementEngine } from "./se-kotak-neo-v3";
 import { startTslEngine } from "./tsl-kotak-neo-v3";
 import { startMtmMonitor } from "./mtm-monitor";
@@ -403,10 +403,10 @@ app.get("/api/health", (_req, res) => {
   }
 
   try {
-    await startWsGateway(storage);
-    log(`WS Gateway started`);
+    await startNativeFeed(storage);
+    log(`Kotak native market feed started`);
   } catch (err) {
-    log(`WS Gateway startup warning (non-fatal): ${err}`);
+    log(`Kotak native market feed startup warning (non-fatal): ${err}`);
   }
 
   try {
