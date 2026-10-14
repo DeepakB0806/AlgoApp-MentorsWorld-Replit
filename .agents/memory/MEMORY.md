@@ -4,3 +4,4 @@
 - [Health card status colors](health-card-status-colors.md) — Collapsed HSI/HSM summaries use green only for authenticated Auth OK; other status colors remain unchanged.
 - [Kotak feed migration](kotak-feed-migration.md) — Kotak discontinued HSM; keep HSI separate from the native market-feed WebSocket migration.
 - [SFeed profile card labels](sfeed-profile-card-labels.md) — distinguish Sandbox and Production using each database-stored profile name, not the shared API version.
+- [Kotak sandbox usage](kotak-sandbox-usage.md) — the separate UAT profile is unused; Kotak's sandbox may not support reliable trade simulation.
