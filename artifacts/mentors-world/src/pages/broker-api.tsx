@@ -29,6 +29,34 @@ interface TestResult {
   error?: string;
 }
 
+type BrokerConfigView = BrokerConfig & {
+  hasConsumerKey?: boolean;
+  hasConsumerSecret?: boolean;
+  hasMobileNumber?: boolean;
+  hasUcc?: boolean;
+  hasMpin?: boolean;
+  sessionExpiresAt?: string | null;
+};
+
+const BROKER_CREDENTIAL_FIELDS = [
+  "consumerKey",
+  "consumerSecret",
+  "mobileNumber",
+  "ucc",
+  "mpin",
+] as const;
+
+function brokerConfigUpdatePayload(data: Partial<InsertBrokerConfig>): Partial<InsertBrokerConfig> {
+  const payload = { ...data };
+  for (const field of BROKER_CREDENTIAL_FIELDS) {
+    const value = payload[field];
+    if (typeof value === "string" && value.trim() === "") {
+      delete payload[field];
+    }
+  }
+  return payload;
+}
+
 interface ProbeResult {
   target: "hsm" | "hsi";
   status: "auth_ok" | "auth_failed" | "unreachable" | "timeout";
@@ -3257,7 +3285,7 @@ function HsmStatusCard() {
   );
 }
 
-function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; onDeleted?: () => void }) {
+function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfigView | null; onDeleted?: () => void }) {
   const { toast } = useToast();
   const { user } = useAuth();
   const isSuperAdmin = (user as any)?.role === "super_admin" || (user as any)?.isSuperAdmin === true;
@@ -3280,11 +3308,11 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
     name: config?.name || defaultName,
     brokerName: brokerName,
     apiVersion: config?.apiVersion || "v3_current",
-    consumerKey: config?.consumerKey || "",
-    consumerSecret: config?.consumerSecret || "",
-    mobileNumber: config?.mobileNumber || "",
-    ucc: config?.ucc || "",
-    mpin: config?.mpin || "",
+    consumerKey: "",
+    consumerSecret: "",
+    mobileNumber: "",
+    ucc: "",
+    mpin: "",
     environment: config?.environment || (isBinance ? "uat" : "prod"),
   });
 
@@ -3345,11 +3373,11 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
         name: config.name || defaultName,
         brokerName: config.brokerName || "kotak_neo",
         apiVersion: config.apiVersion || "v3_current",
-        consumerKey: config.consumerKey || "",
-        consumerSecret: config.consumerSecret || "",
-        mobileNumber: config.mobileNumber || "",
-        ucc: config.ucc || "",
-        mpin: config.mpin || "",
+        consumerKey: "",
+        consumerSecret: "",
+        mobileNumber: "",
+        ucc: "",
+        mpin: "",
         environment: config.environment || (isBinance ? "uat" : "prod"),
       });
       setEditName(config.name || defaultName);
@@ -3514,7 +3542,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
 
   const handleSaveCredentials = () => {
     if (config) {
-      updateMutation.mutate({ id: config.id, data: formData });
+      updateMutation.mutate({ id: config.id, data: brokerConfigUpdatePayload(formData) });
     } else {
       createMutation.mutate(formData);
     }
@@ -3550,7 +3578,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
 
     if (config) {
       try {
-        await apiRequest("PATCH", `/api/broker-configs/${config.id}`, formData);
+        await apiRequest("PATCH", `/api/broker-configs/${config.id}`, brokerConfigUpdatePayload(formData));
         queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
         authenticateMutation.mutate({ id: config.id, totp: isBinance ? "" : totp });
       } catch {
@@ -3579,9 +3607,15 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
     setIsEditingName(false);
   };
 
-  const isFormValid = isBinance 
-    ? !!(formData.consumerKey && formData.consumerSecret)
-    : !!(formData.consumerKey && formData.mobileNumber && formData.ucc && formData.mpin);
+  const isConfiguredOrEntered = (field: typeof BROKER_CREDENTIAL_FIELDS[number], hasSavedValue?: boolean) =>
+    Boolean(formData[field]?.trim() || hasSavedValue);
+  const isFormValid = isBinance
+    ? isConfiguredOrEntered("consumerKey", config?.hasConsumerKey) &&
+      isConfiguredOrEntered("consumerSecret", config?.hasConsumerSecret)
+    : isConfiguredOrEntered("consumerKey", config?.hasConsumerKey) &&
+      isConfiguredOrEntered("mobileNumber", config?.hasMobileNumber) &&
+      isConfiguredOrEntered("ucc", config?.hasUcc) &&
+      isConfiguredOrEntered("mpin", config?.hasMpin);
   const canLogin = isBinance ? isFormValid : (isFormValid && totp.length === 6);
   const isSaving = createMutation.isPending || updateMutation.isPending;
   const displayName = config?.name || formData.name || defaultName;
@@ -3661,34 +3695,24 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                         Primary
                       </Badge>
                     )}
-                    {config?.accessToken && config.brokerName !== "binance" && (() => {
-                      try {
-                        const parts = config.accessToken!.split('.');
-                        if (parts.length === 3) {
-                          const payload = JSON.parse(atob(parts[1]));
-                          if (payload.exp) {
-                            const expiryDate = new Date(payload.exp * 1000);
-                            const now = new Date();
-                            const isExpired = expiryDate <= now;
-                            const diffMs = expiryDate.getTime() - now.getTime();
-                            const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
-                            const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-                            return (
-                              <Badge
-                                variant={isExpired ? "destructive" : "default"}
-                                className="text-xs font-bold"
-                                data-testid="badge-session-expiry-header"
-                              >
-                                <Clock className="w-3 h-3 mr-1" />
-                                {isExpired
-                                  ? "SESSION EXPIRED"
-                                  : `Expires in ${diffHrs}h ${diffMins}m`}
-                              </Badge>
-                            );
-                          }
-                        }
-                      } catch { /* JWT parsing failed */ }
-                      return null;
+                    {config.sessionExpiresAt && config.brokerName !== "binance" && (() => {
+                      const expiryDate = new Date(config.sessionExpiresAt);
+                      if (!Number.isFinite(expiryDate.getTime())) return null;
+                      const now = new Date();
+                      const isExpired = expiryDate <= now;
+                      const diffMs = expiryDate.getTime() - now.getTime();
+                      const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+                      const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                      return (
+                        <Badge
+                          variant={isExpired ? "destructive" : "default"}
+                          className="text-xs font-bold"
+                          data-testid="badge-session-expiry-header"
+                        >
+                          <Clock className="w-3 h-3 mr-1" />
+                          {isExpired ? "SESSION EXPIRED" : `Expires in ${diffHrs}h ${diffMins}m`}
+                        </Badge>
+                      );
                     })()}
                   </>
                 )}
@@ -3773,22 +3797,14 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                           )
                         )}
                       </span>
-                      {!isBinance && config.accessToken && (() => {
-                        try {
-                          const parts = config.accessToken!.split('.');
-                          if (parts.length === 3) {
-                            const payload = JSON.parse(atob(parts[1]));
-                            if (payload.exp) {
-                              const expiryDate = new Date(payload.exp * 1000);
-                              return (
-                                <span className="text-xs font-mono text-muted-foreground">
-                                  Expires: {expiryDate.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "medium" })} IST
-                                </span>
-                              );
-                            }
-                          }
-                        } catch { /* JWT parsing failed */ }
-                        return null;
+                      {!isBinance && config.sessionExpiresAt && (() => {
+                        const expiryDate = new Date(config.sessionExpiresAt);
+                        if (!Number.isFinite(expiryDate.getTime())) return null;
+                        return (
+                          <span className="text-xs font-mono text-muted-foreground">
+                            Expires: {expiryDate.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "medium" })} IST
+                          </span>
+                        );
                       })()}
                     </span>
                   ) : (
@@ -4066,6 +4082,11 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
             {(!config || showCredentials) && (
               <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
                 <div className="space-y-3">
+                  {config && (
+                    <p className="text-xs text-muted-foreground">
+                      Saved credentials are hidden. Leave a field blank to keep its saved value, or enter a replacement.
+                    </p>
+                  )}
                   {isBinance ? (
                     <>
                       <div>
@@ -4085,7 +4106,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                         <Input
                           value={formData.consumerKey || ""}
                           onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
-                          placeholder={formData.environment === "uat" ? "Testnet API Key" : "Binance API Key"}
+                          placeholder={config?.hasConsumerKey ? "Saved — leave blank to keep" : formData.environment === "uat" ? "Testnet API Key" : "Binance API Key"}
                           data-testid={`input-api-key-${config?.id || "new"}`}
                         />
                       </div>
@@ -4105,7 +4126,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                           type="password"
                           value={formData.consumerSecret || ""}
                           onChange={(e) => setFormData({ ...formData, consumerSecret: e.target.value })}
-                          placeholder="Secret Key"
+                          placeholder={config?.hasConsumerSecret ? "Saved — leave blank to keep" : "Secret Key"}
                           data-testid={`input-secret-key-${config?.id || "new"}`}
                         />
                       </div>
@@ -4117,7 +4138,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                         <Input
                           value={formData.consumerKey || ""}
                           onChange={(e) => setFormData({ ...formData, consumerKey: e.target.value })}
-                          placeholder="From Neo Dashboard > Invest > Trade API"
+                          placeholder={config?.hasConsumerKey ? "Saved — leave blank to keep" : "From Neo Dashboard > Invest > Trade API"}
                           data-testid={`input-consumer-key-${config?.id || "new"}`}
                         />
                       </div>
@@ -4137,7 +4158,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                           <Input
                             value={formData.mobileNumber || ""}
                             onChange={(e) => setFormData({ ...formData, mobileNumber: e.target.value })}
-                            placeholder="+919876543210"
+                            placeholder={config?.hasMobileNumber ? "Saved — leave blank to keep" : "+919876543210"}
                             data-testid={`input-mobile-number-${config?.id || "new"}`}
                           />
                         </div>
@@ -4156,7 +4177,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                           <Input
                             value={formData.ucc || ""}
                             onChange={(e) => setFormData({ ...formData, ucc: e.target.value })}
-                            placeholder="Client code"
+                            placeholder={config?.hasUcc ? "Saved — leave blank to keep" : "Client code"}
                             data-testid={`input-ucc-${config?.id || "new"}`}
                           />
                         </div>
@@ -4177,7 +4198,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                             maxLength={6}
                             value={formData.mpin || ""}
                             onChange={(e) => setFormData({ ...formData, mpin: e.target.value })}
-                            placeholder="6-digit"
+                            placeholder={config?.hasMpin ? "Saved — leave blank to keep" : "6-digit"}
                             data-testid={`input-mpin-${config?.id || "new"}`}
                           />
                         </div>

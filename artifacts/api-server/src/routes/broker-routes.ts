@@ -31,6 +31,12 @@ import {
   getProxyStatus as getBinanceProxyStatus,
   type BinanceSession
 } from "../binance-api";
+import {
+  preserveConfiguredCredentials,
+  requireBrokerReadAccess,
+  requireBrokerWriteAccess,
+  toPublicBrokerConfig,
+} from "./broker-config-security";
 
 function getBinanceSessionFromConfig(config: { consumerKey: string | null; consumerSecret: string | null; environment: string | null }): BinanceSession | null {
   if (!config.consumerKey || !config.consumerSecret) return null;
@@ -42,6 +48,14 @@ function getBinanceSessionFromConfig(config: { consumerKey: string | null; consu
 }
 
 export function registerBrokerRoutes(app: Express, storage: IStorage) {
+  app.use("/api/broker-configs", (req, res, next) => {
+    if (req.method === "GET") return requireBrokerReadAccess(req, res, next);
+    return requireBrokerWriteAccess(req, res, next);
+  });
+  app.get("/api/kotak-native-feed/status", requireBrokerReadAccess);
+  app.post("/api/kotak-native-feed/:brokerConfigId/reconnect", requireBrokerWriteAccess);
+  app.get("/api/binance/proxy-status", requireBrokerReadAccess);
+
   app.get("/api/kotak-native-feed/status", async (_req, res): Promise<void> => {
     const configs = (await storage.getBrokerConfigs()).filter((config) => config.brokerName === "kotak_neo");
     res.json(getNativeFeedStatus(configs));
@@ -81,7 +95,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
   app.get("/api/broker-configs", async (req, res) => {
     try {
       const configs = await storage.getBrokerConfigs(req.query.includeArchived === "true");
-      res.json(configs);
+      res.json(configs.map(toPublicBrokerConfig));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch broker configs" });
     }
@@ -93,7 +107,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       if (!config) {
         return res.status(404).json({ error: "Broker config not found" });
       }
-      res.json(config);
+      res.json(toPublicBrokerConfig(config));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch broker config" });
     }
@@ -109,7 +123,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: "Invalid Kotak API version" });
       }
       const config = await storage.createBrokerConfig(parsed.data);
-      res.status(201).json(config);
+      res.status(201).json(toPublicBrokerConfig(config));
     } catch (error) {
       res.status(500).json({ error: "Failed to create broker config" });
     }
@@ -132,13 +146,14 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.status(400).json({ error: "Invalid Kotak API version" });
       }
 
+      const safeUpdates = preserveConfiguredCredentials(parsed.data);
       const versionChanged =
         existing.brokerName === "kotak_neo" &&
-        parsed.data.apiVersion !== undefined &&
-        normalizeKotakApiVersion(existing.apiVersion) !== parsed.data.apiVersion;
+        safeUpdates.apiVersion !== undefined &&
+        normalizeKotakApiVersion(existing.apiVersion) !== safeUpdates.apiVersion;
       const update = versionChanged
         ? {
-            ...parsed.data,
+            ...safeUpdates,
             isConnected: false,
             accessToken: null,
             sessionId: null,
@@ -149,10 +164,10 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
             sidView: null,
             lastTotpUsed: null,
             lastTotpTime: null,
-            connectionError: `API version changed to ${getKotakApiProfileInfo(parsed.data.apiVersion).label}. Fresh login required.`,
+            connectionError: `API version changed to ${getKotakApiProfileInfo(safeUpdates.apiVersion).label}. Fresh login required.`,
             updatedAt: new Date().toISOString().replace("T", " ").slice(0, 19),
           }
-        : parsed.data;
+        : safeUpdates;
       const config = await storage.updateBrokerConfig(req.params.id, update);
       if (!config) {
         return res.status(404).json({ error: "Broker config not found" });
@@ -160,11 +175,11 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       if (versionChanged) {
         stopNativeFeed(req.params.id);
         hsiRefreshConfig(config);
-      } else if (existing.isConnected && parsed.data.isConnected === false) {
+      } else if (existing.isConnected && safeUpdates.isConnected === false) {
         stopNativeFeed(req.params.id);
       }
       tradingCache.invalidateBrokerConfig(req.params.id);
-      res.json(config);
+      res.json(toPublicBrokerConfig(config));
     } catch (error) {
       res.status(500).json({ error: "Failed to update broker config" });
     }
@@ -188,7 +203,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     stopNativeFeed(existing.id);
     stopHsiConfig(existing.id);
     tradingCache.invalidateBrokerConfig(existing.id);
-    res.json(archived);
+    res.json(toPublicBrokerConfig(archived));
   });
 
   app.post("/api/broker-configs/:id/restore", async (req, res): Promise<void> => {
@@ -207,7 +222,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       return;
     }
     tradingCache.invalidateBrokerConfig(existing.id);
-    res.json(restored);
+    res.json(toPublicBrokerConfig(restored));
   });
 
   app.delete("/api/broker-configs/:id", async (req, res) => {
@@ -362,7 +377,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
           success: result.success, 
           message: result.message,
           error: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
-          config: updated 
+          config: toPublicBrokerConfig(updated) 
         });
       }
 
@@ -385,7 +400,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         testedAt: now,
       });
 
-      res.json({ success: false, message: "Broker not yet supported", config: updated2 });
+      res.json({ success: false, message: "Broker not yet supported", config: toPublicBrokerConfig(updated2) });
     } catch (error) {
       res.status(500).json({ error: "Connection test failed", details: error instanceof Error ? error.message : "Unknown error" });
     }
@@ -421,7 +436,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         return res.json({
           success: true,
           message: "Paper Trade engine activated",
-          config: updated,
+          config: toPublicBrokerConfig(updated),
         });
       }
 
@@ -469,7 +484,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
           success: result.success, 
           message: result.message,
           error: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
-          config: updated 
+          config: toPublicBrokerConfig(updated) 
         });
       }
       
@@ -558,7 +573,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
         message: `[${profile.label}] ${result.message || (result.success ? "Login successful" : "Login failed")}`,
         error: typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || null),
         sessionExpiry,
-        config: updated 
+        config: toPublicBrokerConfig(updated) 
       });
 
       if (result.success && updated) {
