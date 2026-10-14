@@ -695,3 +695,18 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 2. The title count should remain visible when collapsed; Restore controls should appear after expansion.
 3. Run `pnpm --filter @workspace/mentors-world run typecheck`, `pnpm --filter @workspace/mentors-world run test:ui-layout`, and `pnpm run test:regression-gates`.
 4. The signed-in page was not visually inspected because the preview browser has no authenticated session; automated source-level UI regression checks passed.
+
+### [MILESTONE] Archive Kotak Neo Sandbox in Production — verified 2026-10-14
+
+**Task:** #327 — Archive Kotak Neo Sandbox in the published database after publishing
+
+**What changed:** Archived only the non-primary Kotak Neo Sandbox profile in the published Production database using the existing archive action. A read-only recheck confirmed Sandbox is archived and Kotak Neo – Live remains the primary profile; no other Production records were copied or modified.
+
+**Key files:** None — this was a Production data-only change through the existing archive endpoint.
+
+**How it works:** The existing archive action sets `is_archived` for the selected Sandbox profile and stops its configured HSI/SFeed connections. The profile row, credentials, and historical links remain available for restore.
+
+**Diagnostic — if this breaks, check:**
+1. A read-only Production query of `name`, `environment`, `is_archived`, and `is_primary` should show Sandbox as `true/false` and Live as `false/true`.
+2. The Broker API page should list Sandbox under Archived broker profiles; Restore should remain available.
+3. The archive action returned HTTP 200, and the Production database recheck confirmed the intended flags. No profile response body or credentials were read.
