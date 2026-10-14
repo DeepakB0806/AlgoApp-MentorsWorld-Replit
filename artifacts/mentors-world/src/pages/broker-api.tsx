@@ -4627,6 +4627,7 @@ function ArchivedBrokerConfigCard({ config }: { config: BrokerConfig }) {
 export default function BrokerApi() {
   const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [isPflSheetOpen, setIsPflSheetOpen] = useState(false);
+  const [isArchivedProfilesExpanded, setIsArchivedProfilesExpanded] = useState(false);
 
   const { data: brokerConfigs = [], isLoading } = useQuery<BrokerConfig[]>({
     queryKey: ["/api/broker-configs", "includeArchived"],
@@ -4798,10 +4799,32 @@ export default function BrokerApi() {
             {archivedBrokerConfigs.length > 0 && (
               <Card data-testid="section-archived-broker-profiles">
                 <CardHeader>
-                  <CardTitle className="text-base">Archived broker profiles</CardTitle>
-                  <CardDescription>Archived profiles are excluded from connections and trading. Restore any profile in one step.</CardDescription>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        Archived broker profiles
+                        <Badge variant="secondary" data-testid="text-archived-broker-count">
+                          {archivedBrokerConfigs.length}
+                        </Badge>
+                      </CardTitle>
+                      <CardDescription>Archived profiles are excluded from connections and trading. Restore any profile in one step.</CardDescription>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsArchivedProfilesExpanded((expanded) => !expanded)}
+                      aria-expanded={isArchivedProfilesExpanded}
+                      aria-controls="archived-broker-profiles-list"
+                      aria-label={`${isArchivedProfilesExpanded ? "Hide" : "Show"} archived broker profiles`}
+                      data-testid="button-toggle-archived-profiles"
+                    >
+                      {isArchivedProfilesExpanded ? <ChevronDown className="mr-1 h-4 w-4" /> : <ChevronRight className="mr-1 h-4 w-4" />}
+                      {isArchivedProfilesExpanded ? "Hide" : "Show"}
+                    </Button>
+                  </div>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent id="archived-broker-profiles-list" hidden={!isArchivedProfilesExpanded} className="space-y-3">
                   {archivedBrokerConfigs.map((config) => (
                     <ArchivedBrokerConfigCard key={config.id} config={config} />
                   ))}

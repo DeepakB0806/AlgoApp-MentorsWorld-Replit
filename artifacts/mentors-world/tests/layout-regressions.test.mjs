@@ -76,6 +76,18 @@ test("Broker API keeps its scroll-container marker", async () => {
   assert.match(source, /<AuthenticatedPageShell testId="broker-api-scroll-container">/);
 });
 
+test("Broker API archived profiles start collapsed and remain expandable without active brokers", async () => {
+  const source = await readSource("pages/broker-api.tsx");
+  assert.match(source, /const \[isArchivedProfilesExpanded, setIsArchivedProfilesExpanded\] = useState\(false\)/);
+  assert.match(source, /data-testid="text-archived-broker-count"[\s\S]*?\{archivedBrokerConfigs\.length\}/);
+  assert.match(source, /aria-expanded=\{isArchivedProfilesExpanded\}/);
+  assert.match(source, /aria-controls="archived-broker-profiles-list"/);
+  assert.match(source, /onClick=\{\(\) => setIsArchivedProfilesExpanded\(\(expanded\) => !expanded\)\}/);
+  assert.match(source, /id="archived-broker-profiles-list" hidden=\{!isArchivedProfilesExpanded\}/);
+  assert.match(source, /activeBrokerConfigs\.length === 0 && archivedBrokerConfigs\.length === 0/);
+  assert.match(source, /archivedBrokerConfigs\.length > 0[\s\S]*?<ArchivedBrokerConfigCard/);
+});
+
 test("Broker API health cards keep separate Kotak API version visibility", async () => {
   const source = await readSource("pages/broker-api.tsx");
   assert.match(source, /status-by-version/);

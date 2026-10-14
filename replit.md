@@ -677,3 +677,21 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 2. `GET /api/broker-configs` should omit Sandbox, while `GET /api/broker-configs?includeArchived=true` should include its archived row.
 3. `GET /api/kotak-native-feed/status` and HSI status should not list archived Sandbox; Production should remain primary and connected.
 4. Run `pnpm --filter @workspace/api-server exec tsx --test tests/kotak-native-feed.test.ts`, the API build, frontend typecheck, UI layout tests, and regression gates. API typecheck currently reports 114 existing diagnostics, with no non-return type errors in the changed files.
+
+### [MILESTONE] Compact archived broker profiles — verified 2026-10-14
+
+**Task:** #329 — Collapse Archived Broker Profiles
+
+**What changed:** The Archived broker profiles section now starts collapsed, shows its profile count while closed, and offers an accessible toggle. Expanding it reveals the existing profile rows and Restore actions; the section remains available when no active broker profiles exist.
+
+**Key files:**
+- `artifacts/mentors-world/src/pages/broker-api.tsx` — adds collapsed-by-default state, visible count, and an aria-labelled expand/collapse control.
+- `artifacts/mentors-world/tests/layout-regressions.test.mjs` — protects the collapsed default, accessible toggle, archived-only page state, and restore-row rendering.
+
+**How it works:** The open/closed state is local React state initialized to false and is not persisted. The Restore rows stay in the DOM under a hidden content panel while collapsed.
+
+**Diagnostic — if this breaks, check:**
+1. The toggle should report `aria-expanded` and point `aria-controls` to `archived-broker-profiles-list`.
+2. The title count should remain visible when collapsed; Restore controls should appear after expansion.
+3. Run `pnpm --filter @workspace/mentors-world run typecheck`, `pnpm --filter @workspace/mentors-world run test:ui-layout`, and `pnpm run test:regression-gates`.
+4. The signed-in page was not visually inspected because the preview browser has no authenticated session; automated source-level UI regression checks passed.
