@@ -1,10 +1,10 @@
 ---
 name: Kotak sandbox usage
-description: The project owner has not used the separate Kotak Sandbox profile and reports Kotak's sandbox is too limited to simulate trades reliably.
+description: The separate Kotak Sandbox is unused; the owner chose reversible archiving over permanent deletion because it cannot reliably simulate trades.
 ---
 
-The project owner says the separate Kotak Neo Sandbox profile has never been used and that Kotak's sandbox does not support enough functionality to simulate trades.
+The project owner says the separate Kotak Neo Sandbox profile has never been used and Kotak's sandbox does not support enough functionality to simulate trades. The owner chose a reversible archive rather than permanent deletion so the profile can be restored with one instruction.
 
-**Why:** Do not assume a profile labeled UAT/Sandbox provides safe or meaningful paper trading; the app must verify actual Kotak endpoint and order behavior.
+**Why:** The broker profile may still have historical plan/trade links, and Replit checkpoints do not restore production database changes. A targeted archive/restore preserves those links and avoids broad production restores.
 
-**How to apply:** Treat Production as the live profile. Keep or remove the separate Sandbox profile only according to whether a real, supported UAT workflow exists; never use the environment toggle alone as evidence that orders are simulated.
+**How to apply:** Treat Production as the live profile. Exclude archived Sandbox from active operations but retain its row and credentials until the owner explicitly chooses permanent deletion. Never assume the environment toggle makes Kotak orders simulated.
