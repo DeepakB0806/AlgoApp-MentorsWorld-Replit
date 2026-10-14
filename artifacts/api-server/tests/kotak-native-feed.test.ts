@@ -77,6 +77,23 @@ test("manual SFeed reconnect refuses an unconfigured feed", () => {
   assert.equal(requestNativeFeedReconnect(config as any), false);
 });
 
+test("archived broker profiles are excluded from SFeed status and reconnect", () => {
+  const archivedConfig = {
+    id: "sandbox-profile",
+    brokerName: "kotak_neo",
+    apiVersion: "v3_current",
+    isConnected: true,
+    isArchived: true,
+    feedUrl: "wss://feed.example.test",
+    sessionId: "session",
+    ucc: "sandbox-ucc",
+  };
+  const status = getNativeFeedStatus([archivedConfig as any]);
+  assert.equal(status.configuredCount, 0);
+  assert.equal(status.feeds.length, 0);
+  assert.equal(requestNativeFeedReconnect(archivedConfig as any), false);
+});
+
 test("SFeed heartbeat timers are cleared when the socket closes", async () => {
   let fired = false;
   const timers = {

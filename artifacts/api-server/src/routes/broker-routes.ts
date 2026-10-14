@@ -14,7 +14,7 @@ import EL, {
   normalizeKotakApiVersion,
 } from "../kotak-api-adapter";
 import { startPersistentSquareOff } from "../te-kotak-neo-v3";
-import { refreshConfig as hsiRefreshConfig } from "../hsi-kotak-neo";
+import { refreshConfig as hsiRefreshConfig, stopConfig as stopHsiConfig } from "../hsi-kotak-neo";
 import { configureNativeFeed, getNativeFeedStatus, requestNativeFeedReconnect, stopNativeFeed } from "../kotak-native-feed";
 import { scripMasterSyncStatus } from "../smc-kotak-neo-v3";
 import { calculatePlanMargins, refreshCapitalForBrokerConfig } from "../cm-kotak-neo-v3";
@@ -54,6 +54,10 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       res.status(404).json({ error: "Kotak feed configuration not found" });
       return;
     }
+    if (config.isArchived) {
+      res.status(409).json({ error: "Restore the archived broker profile before reconnecting SFeed" });
+      return;
+    }
     if (!config.isConnected) {
       res.status(409).json({ error: "Authenticate the Kotak broker before reconnecting SFeed" });
       return;
@@ -76,7 +80,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
 
   app.get("/api/broker-configs", async (req, res) => {
     try {
-      const configs = await storage.getBrokerConfigs();
+      const configs = await storage.getBrokerConfigs(req.query.includeArchived === "true");
       res.json(configs);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch broker configs" });
@@ -85,7 +89,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
 
   app.get("/api/broker-configs/:id", async (req, res) => {
     try {
-      const config = await storage.getBrokerConfig(req.params.id);
+      const config = await storage.getBrokerConfigIncludingArchived(req.params.id);
       if (!config) {
         return res.status(404).json({ error: "Broker config not found" });
       }
@@ -120,6 +124,9 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
       const existing = await storage.getBrokerConfig(req.params.id);
       if (!existing) {
         return res.status(404).json({ error: "Broker config not found" });
+      }
+      if (existing.isArchived || parsed.data.isArchived !== undefined) {
+        return res.status(409).json({ error: "Use the archive/restore action for archived broker profiles" });
       }
       if (existing.brokerName === "kotak_neo" && parsed.data.apiVersion !== undefined && !isKotakApiVersion(parsed.data.apiVersion)) {
         return res.status(400).json({ error: "Invalid Kotak API version" });
@@ -163,8 +170,55 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     }
   });
 
+  app.post("/api/broker-configs/:id/archive", async (req, res): Promise<void> => {
+    const existing = await storage.getBrokerConfigIncludingArchived(req.params.id);
+    if (!existing) {
+      res.status(404).json({ error: "Broker config not found" });
+      return;
+    }
+    if (existing.brokerName !== "kotak_neo" || existing.environment !== "uat" || existing.isPrimary) {
+      res.status(409).json({ error: "Only a non-primary Kotak Neo Sandbox profile can be archived" });
+      return;
+    }
+    const archived = await storage.archiveBrokerConfig(existing.id);
+    if (!archived) {
+      res.status(404).json({ error: "Broker config not found" });
+      return;
+    }
+    stopNativeFeed(existing.id);
+    stopHsiConfig(existing.id);
+    tradingCache.invalidateBrokerConfig(existing.id);
+    res.json(archived);
+  });
+
+  app.post("/api/broker-configs/:id/restore", async (req, res): Promise<void> => {
+    const existing = await storage.getBrokerConfigIncludingArchived(req.params.id);
+    if (!existing) {
+      res.status(404).json({ error: "Broker config not found" });
+      return;
+    }
+    if (existing.brokerName !== "kotak_neo" || existing.environment !== "uat") {
+      res.status(409).json({ error: "Only Kotak Neo Sandbox profiles can be restored here" });
+      return;
+    }
+    const restored = await storage.restoreBrokerConfig(existing.id);
+    if (!restored) {
+      res.status(404).json({ error: "Broker config not found" });
+      return;
+    }
+    tradingCache.invalidateBrokerConfig(existing.id);
+    res.json(restored);
+  });
+
   app.delete("/api/broker-configs/:id", async (req, res) => {
     try {
+      const config = await storage.getBrokerConfigIncludingArchived(req.params.id);
+      if (!config) {
+        return res.status(404).json({ error: "Broker config not found" });
+      }
+      if (config.brokerName === "kotak_neo" && config.environment === "uat") {
+        return res.status(409).json({ error: "Kotak Neo Sandbox profiles must be archived so they can be restored" });
+      }
       const deleted = await storage.deleteBrokerConfig(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Broker config not found" });
@@ -179,6 +233,10 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
     try {
       const config = await storage.getBrokerConfig(req.params.id);
       if (!config) return res.status(404).json({ error: "Broker config not found" });
+      if (config.isArchived) return res.status(409).json({ error: "Archived broker profiles cannot be made primary" });
+      if (config.brokerName === "kotak_neo" && config.environment === "uat") {
+        return res.status(409).json({ error: "Kotak Neo Sandbox cannot be the primary production broker" });
+      }
       await storage.setPrimaryBrokerConfig(req.params.id);
       tradingCache.invalidateBrokerConfig(req.params.id);
       res.json({ success: true, id: req.params.id });
@@ -227,7 +285,7 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
   app.post("/api/broker-configs/:id/calculate-margins", async (req, res) => {
     try {
       const config = await storage.getBrokerConfig(req.params.id);
-      if (!config) return res.status(404).json({ error: "Broker config not found" });
+      if (!config || config.isArchived) return res.status(config ? 409 : 404).json({ error: config ? "Archived broker profiles cannot run margin operations" : "Broker config not found" });
       await calculatePlanMargins(storage, config, { skipPrimaryGuard: true });
       // #261: also refresh Available Funds so the frontend doesn't need a separate manual step
       const capitalResult = await refreshCapitalForBrokerConfig(storage, config.id);
@@ -240,8 +298,8 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
   app.post("/api/broker-configs/:id/test", async (req, res) => {
     try {
       const config = await storage.getBrokerConfig(req.params.id);
-      if (!config) {
-        return res.status(404).json({ error: "Broker config not found" });
+      if (!config || config.isArchived) {
+        return res.status(config ? 409 : 404).json({ error: config ? "Archived broker profiles cannot be tested" : "Broker config not found" });
       }
 
       const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -336,8 +394,8 @@ export function registerBrokerRoutes(app: Express, storage: IStorage) {
   app.post("/api/broker-configs/:id/authenticate", async (req, res) => {
     try {
       const config = await storage.getBrokerConfig(req.params.id);
-      if (!config) {
-        return res.status(404).json({ error: "Broker config not found" });
+      if (!config || config.isArchived) {
+        return res.status(config ? 409 : 404).json({ error: config ? "Archived broker profiles cannot authenticate" : "Broker config not found" });
       }
 
       const { totp } = req.body;

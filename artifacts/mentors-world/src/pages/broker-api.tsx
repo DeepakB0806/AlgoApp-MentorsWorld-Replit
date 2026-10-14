@@ -1458,7 +1458,7 @@ function ScripMasterPreview() {
     queryKey: ["/api/broker-configs"],
   });
 
-  const kotakConfig = (brokerConfigsQuery.data || []).find(c => c.brokerName === "kotak_neo" && c.isConnected);
+  const kotakConfig = (brokerConfigsQuery.data || []).find(c => c.brokerName === "kotak_neo" && !c.isArchived && c.isConnected);
 
   const loadPreview = async () => {
     if (!kotakConfig) {
@@ -3404,6 +3404,17 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
     },
   });
 
+  const archiveMutation = useMutation({
+    mutationFn: async (id: string) => apiRequest("POST", `/api/broker-configs/${id}/archive`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
+      toast({ title: "Kotak Neo Sandbox archived", description: "Its credentials and linked history are preserved. You can restore it below." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Could not archive broker profile", description: error.message, variant: "destructive" });
+    },
+  });
+
   const setPrimaryMutation = useMutation({
     mutationFn: async (id: string) => {
       return apiRequest("PATCH", `/api/broker-configs/${id}/set-primary`);
@@ -3811,7 +3822,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                     <LogIn className="w-4 h-4 mr-1" />
                     Sessions ({sessionLogs.length})
                   </Button>
-                  {isSuperAdmin && !config.isPrimary && config.brokerName !== "paper_trade" && (
+                  {isSuperAdmin && !config.isPrimary && config.brokerName !== "paper_trade" && !(config.brokerName === "kotak_neo" && config.environment === "uat") && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -3829,7 +3840,19 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                       <TooltipContent>Use this broker for scrip master CSV download (Phase A)</TooltipContent>
                     </Tooltip>
                   )}
-                  {!confirmDelete ? (
+                  {isSuperAdmin && config.brokerName === "kotak_neo" && config.environment === "uat" && !config.isArchived && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => archiveMutation.mutate(config.id)}
+                      disabled={archiveMutation.isPending}
+                      data-testid={`button-archive-broker-${config.id}`}
+                    >
+                      {archiveMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                      Archive Sandbox
+                    </Button>
+                  )}
+                  {!(config.brokerName === "kotak_neo" && config.environment === "uat") && (!confirmDelete ? (
                     <Button
                       variant="ghost"
                       size="icon"
@@ -3859,7 +3882,7 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
                         Cancel
                       </Button>
                     </div>
-                  )}
+                  ))}
                 </>
               )}
             </div>
@@ -4568,13 +4591,53 @@ function BrokerConfigCard({ config, onDeleted }: { config: BrokerConfig | null; 
   );
 }
 
+function ArchivedBrokerConfigCard({ config }: { config: BrokerConfig }) {
+  const { toast } = useToast();
+  const restoreMutation = useMutation({
+    mutationFn: async () => apiRequest("POST", `/api/broker-configs/${config.id}/restore`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/broker-configs"] });
+      toast({ title: "Broker profile restored", description: "It is available for active use again." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Could not restore broker profile", description: error.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-lg border border-border/50 bg-muted/20 p-4" data-testid={`archived-broker-${config.id}`}>
+      <div>
+        <div className="font-medium">{config.name || "Kotak Neo Sandbox"}</div>
+        <div className="text-xs text-muted-foreground">Kotak Neo Sandbox · credentials and historical links retained</div>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => restoreMutation.mutate()}
+        disabled={restoreMutation.isPending}
+        data-testid={`button-restore-broker-${config.id}`}
+      >
+        {restoreMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+        Restore
+      </Button>
+    </div>
+  );
+}
+
 export default function BrokerApi() {
   const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [isPflSheetOpen, setIsPflSheetOpen] = useState(false);
 
   const { data: brokerConfigs = [], isLoading } = useQuery<BrokerConfig[]>({
-    queryKey: ["/api/broker-configs"],
+    queryKey: ["/api/broker-configs", "includeArchived"],
+    queryFn: async () => {
+      const response = await fetch("/api/broker-configs?includeArchived=true");
+      if (!response.ok) throw new Error("Failed to fetch broker configs");
+      return response.json();
+    },
   });
+  const activeBrokerConfigs = brokerConfigs.filter((config) => !config.isArchived);
+  const archivedBrokerConfigs = brokerConfigs.filter((config) => config.isArchived);
 
   const { data: pflTotal = 0 } = useQuery({
     queryKey: ["/api/process-flow-logs", "all"],
@@ -4711,7 +4774,7 @@ export default function BrokerApi() {
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
-        ) : brokerConfigs.length === 0 ? (
+        ) : activeBrokerConfigs.length === 0 && archivedBrokerConfigs.length === 0 ? (
           <Card className="text-center py-12">
             <CardContent>
               <Key className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -4729,33 +4792,46 @@ export default function BrokerApi() {
           </Card>
         ) : (
           <div className="space-y-6">
-            {brokerConfigs.map((config) => (
+            {activeBrokerConfigs.map((config) => (
               <BrokerConfigCard key={config.id} config={config} />
             ))}
+            {archivedBrokerConfigs.length > 0 && (
+              <Card data-testid="section-archived-broker-profiles">
+                <CardHeader>
+                  <CardTitle className="text-base">Archived broker profiles</CardTitle>
+                  <CardDescription>Archived profiles are excluded from connections and trading. Restore any profile in one step.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {archivedBrokerConfigs.map((config) => (
+                    <ArchivedBrokerConfigCard key={config.id} config={config} />
+                  ))}
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
 
-        {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
+        {activeBrokerConfigs.some(c => c.brokerName === "kotak_neo") && (
           <div className="mt-6">
             <VersionedGatewayStatusCard gateway="hsi" />
           </div>
         )}
 
-        {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
+        {activeBrokerConfigs.some(c => c.brokerName === "kotak_neo") && (
           <div className="mt-6">
             <SFeedHealthCard />
           </div>
         )}
 
-        {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
+        {activeBrokerConfigs.some(c => c.brokerName === "kotak_neo") && (
           <div className="mt-6">
             <ApiFieldsReference />
           </div>
         )}
 
-        {brokerConfigs.some(c => c.brokerName === "kotak_neo") && (
+        {activeBrokerConfigs.some(c => c.brokerName === "kotak_neo") && (
           <div className="mt-6">
-            <ScripMasterCard brokerConfigs={brokerConfigs} />
+            <ScripMasterCard brokerConfigs={activeBrokerConfigs} />
           </div>
         )}
 

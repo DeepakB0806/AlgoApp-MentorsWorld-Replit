@@ -655,3 +655,25 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 2. Use `POST /api/kotak-native-feed/:brokerConfigId/reconnect` only for a connected Kotak profile with feed credentials; it must not affect other profiles.
 3. Run `pnpm --filter @workspace/api-server exec tsx --test tests/kotak-native-feed.test.ts`, `pnpm --filter @workspace/mentors-world run typecheck`, `pnpm --filter @workspace/mentors-world run test:ui-layout`, and `pnpm run test:regression-gates`.
 4. The signed-in health card could not be visually verified in the browser because the preview has no authenticated session. The API status check showed one authenticated SFeed socket with a healthy heartbeat but no market tick; the market was closed.
+
+### [MILESTONE] Reversible Kotak Neo Sandbox archive — verified 2026-10-14
+
+**Task:** #326 — Archive Unused Kotak Sandbox
+
+**What changed:** Added a persisted archive flag and Broker API actions to archive and restore only non-primary Kotak Neo Sandbox profiles. The development Sandbox profile is archived; its database row and historical links remain in place. Kotak Neo Production remains the active, primary profile. The published Production database was not changed.
+
+**Key files:**
+- `lib/db/src/schema/schema.ts` and `artifacts/mentors-world/src/shared/schema.ts` — add the non-null `is_archived` column with a false default.
+- `artifacts/api-server/src/storage.ts` — keep archived profiles out of default operational lookups while retaining explicit archived reads for the restore screen.
+- `artifacts/api-server/src/routes/broker-routes.ts` — add guarded archive/restore actions; prevent Sandbox from becoming primary or being permanently deleted.
+- `artifacts/api-server/src/hsi-kotak-neo.ts`, `hsi-kotak-neo-v3.ts`, `hsi-kotak-neo-v4.ts`, and `kotak-native-feed.ts` — stop or exclude archived profiles from HSI/SFeed startup and reconnect.
+- `artifacts/mentors-world/src/pages/broker-api.tsx` — show archived profiles separately with one-step restore; only the page requests archived records.
+- `artifacts/api-server/tests/kotak-native-feed.test.ts` — verify archived profiles are omitted from SFeed status and manual reconnect.
+
+**How it works:** Archiving changes only `is_archived`; credentials, IDs, strategy references, and trade history are preserved. Default broker lookups and lists exclude archived rows, while the Broker API page requests them explicitly and offers Restore. The development flow was tested archive → restore → archive, leaving Sandbox archived and Production unchanged.
+
+**Diagnostic — if this breaks, check:**
+1. Confirm the development schema has `broker_configs.is_archived`; production schema migration occurs on Publish, not from this task.
+2. `GET /api/broker-configs` should omit Sandbox, while `GET /api/broker-configs?includeArchived=true` should include its archived row.
+3. `GET /api/kotak-native-feed/status` and HSI status should not list archived Sandbox; Production should remain primary and connected.
+4. Run `pnpm --filter @workspace/api-server exec tsx --test tests/kotak-native-feed.test.ts`, the API build, frontend typecheck, UI layout tests, and regression gates. API typecheck currently reports 114 existing diagnostics, with no non-return type errors in the changed files.

@@ -31,6 +31,10 @@ export async function startHsiGateway(storage: IStorage): Promise<void> {
 }
 
 export function refreshConfig(config: BrokerConfig): void {
+  if (config.isArchived) {
+    stopConfig(config.id);
+    return;
+  }
   // Version changes clear credentials and mark the config disconnected before
   // the user performs a fresh login. Never start either gateway from that
   // reset record.
@@ -40,6 +44,11 @@ export function refreshConfig(config: BrokerConfig): void {
   } else {
     legacyHsi.refreshConfig(config);
   }
+}
+
+export function stopConfig(id: string): void {
+  legacyHsi.stopConfig(id);
+  currentHsi.stopConfig(id);
 }
 
 export function forceReconnect(apiVersion?: KotakApiVersion): { ok: boolean; message: string } {

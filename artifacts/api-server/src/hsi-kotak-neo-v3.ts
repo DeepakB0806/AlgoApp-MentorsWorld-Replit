@@ -554,6 +554,20 @@ export function refreshConfig(config: BrokerConfig): void {
   startHsiStatusTracking(state);
 }
 
+export function stopConfig(id: string): void {
+  const state = hsiInstances.get(id);
+  if (!state) return;
+  if (state.ws) {
+    state.ws.removeAllListeners();
+    try { state.ws.terminate(); } catch {}
+    state.ws = null;
+  }
+  if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+  if (state.heartbeatInterval) clearInterval(state.heartbeatInterval);
+  if (state.hsiStatusInterval) clearInterval(state.hsiStatusInterval);
+  hsiInstances.delete(id);
+}
+
 export function forceReconnect(apiVersion?: KotakApiVersion): { ok: boolean; message: string } {
   const states = [...hsiInstances.values()].filter(state =>
     !apiVersion || normalizeKotakApiVersion(state.activeConfig.apiVersion) === apiVersion,

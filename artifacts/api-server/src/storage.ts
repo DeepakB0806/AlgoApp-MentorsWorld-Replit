@@ -104,8 +104,11 @@ export interface IStorage {
   setSetting(key: string, value: string): Promise<AppSetting>;
 
   // Broker Configs - persisted in database
-  getBrokerConfigs(): Promise<BrokerConfig[]>;
+  getBrokerConfigs(includeArchived?: boolean): Promise<BrokerConfig[]>;
+  archiveBrokerConfig(id: string): Promise<BrokerConfig | undefined>;
+  restoreBrokerConfig(id: string): Promise<BrokerConfig | undefined>;
   getBrokerConfig(id: string): Promise<BrokerConfig | undefined>;
+  getBrokerConfigIncludingArchived(id: string): Promise<BrokerConfig | undefined>;
   getBrokerConfigByUcc(ucc: string): Promise<BrokerConfig | undefined>;
   getBrokerExchangeMaps(brokerName: string): Promise<BrokerExchangeMap[]>;
   createBrokerConfig(config: InsertBrokerConfig): Promise<BrokerConfig>;
@@ -704,17 +707,39 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Broker Configs - PERSISTENT in PostgreSQL database
-  async getBrokerConfigs(): Promise<BrokerConfig[]> {
-    return await db.select().from(brokerConfigs);
+  async getBrokerConfigs(includeArchived = false): Promise<BrokerConfig[]> {
+    const rows = await db.select().from(brokerConfigs);
+    return includeArchived ? rows : rows.filter((config) => !config.isArchived);
+  }
+
+  async archiveBrokerConfig(id: string): Promise<BrokerConfig | undefined> {
+    const [config] = await db.update(brokerConfigs)
+      .set({ isArchived: true })
+      .where(eq(brokerConfigs.id, id))
+      .returning();
+    return config;
+  }
+
+  async restoreBrokerConfig(id: string): Promise<BrokerConfig | undefined> {
+    const [config] = await db.update(brokerConfigs)
+      .set({ isArchived: false })
+      .where(eq(brokerConfigs.id, id))
+      .returning();
+    return config;
   }
 
   async getBrokerConfig(id: string): Promise<BrokerConfig | undefined> {
+    const [config] = await db.select().from(brokerConfigs).where(and(eq(brokerConfigs.id, id), eq(brokerConfigs.isArchived, false)));
+    return config || undefined;
+  }
+
+  async getBrokerConfigIncludingArchived(id: string): Promise<BrokerConfig | undefined> {
     const [config] = await db.select().from(brokerConfigs).where(eq(brokerConfigs.id, id));
     return config || undefined;
   }
 
   async getBrokerConfigByUcc(ucc: string): Promise<BrokerConfig | undefined> {
-    const [config] = await db.select().from(brokerConfigs).where(eq(brokerConfigs.ucc, ucc));
+    const [config] = await db.select().from(brokerConfigs).where(and(eq(brokerConfigs.ucc, ucc), eq(brokerConfigs.isArchived, false)));
     return config || undefined;
   }
 
@@ -1844,14 +1869,14 @@ export class DatabaseStorage implements IStorage {
     const [config] = await db
       .select()
       .from(brokerConfigs)
-      .where(eq(brokerConfigs.isPrimary, true))
+      .where(and(eq(brokerConfigs.isPrimary, true), eq(brokerConfigs.isArchived, false)))
       .limit(1);
     return config ?? undefined;
   }
 
   async setPrimaryBrokerConfig(id: string): Promise<void> {
     await db.update(brokerConfigs).set({ isPrimary: false });
-    await db.update(brokerConfigs).set({ isPrimary: true }).where(eq(brokerConfigs.id, id));
+    await db.update(brokerConfigs).set({ isPrimary: true }).where(and(eq(brokerConfigs.id, id), eq(brokerConfigs.isArchived, false)));
   }
 
   // ── Daily Strategy Fit (#247) ────────────────────────────────────────────────

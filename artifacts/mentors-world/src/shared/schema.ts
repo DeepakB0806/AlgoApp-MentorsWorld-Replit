@@ -484,6 +484,7 @@ export const brokerConfigs = pgTable("broker_configs", {
   
   // Primary flag — used for exchange-level scrip master downloads (Phase A)
   isPrimary: boolean("is_primary").notNull().default(false),
+  isArchived: boolean("is_archived").notNull().default(false),
 
   // Session data
   isConnected: boolean("is_connected").notNull().default(false),

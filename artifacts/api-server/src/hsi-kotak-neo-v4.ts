@@ -431,6 +431,20 @@ export function refreshConfig(config: BrokerConfig): void {
   resetAndConnect(state, config);
 }
 
+export function stopConfig(id: string): void {
+  const state = instances.get(id);
+  if (!state) return;
+  if (state.ws) {
+    state.ws.removeAllListeners();
+    try { state.ws.terminate(); } catch {}
+    state.ws = null;
+  }
+  if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+  if (state.heartbeatInterval) clearInterval(state.heartbeatInterval);
+  if (state.statusInterval) clearInterval(state.statusInterval);
+  instances.delete(id);
+}
+
 let currentStorage: IStorage | null = null;
 
 export async function startHsiGateway(storage: IStorage): Promise<void> {

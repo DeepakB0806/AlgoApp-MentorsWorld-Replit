@@ -487,6 +487,8 @@ export const brokerConfigs = pgTable("broker_configs", {
 
   // Primary flag — used for exchange-level scrip master downloads (Phase A)
   isPrimary: boolean("is_primary").notNull().default(false),
+  // Archived broker profiles remain linked to historical plans/trades but are excluded from active operations.
+  isArchived: boolean("is_archived").notNull().default(false),
 
   // Session data
   isConnected: boolean("is_connected").notNull().default(false),

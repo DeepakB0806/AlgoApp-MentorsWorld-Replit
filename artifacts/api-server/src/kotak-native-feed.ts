@@ -307,7 +307,7 @@ function connect(state: FeedState) {
 }
 
 export async function startNativeFeed(storage: IStorage) {
-  const configs = (await storage.getBrokerConfigs()).filter((c) => c.brokerName === "kotak_neo" && c.isConnected);
+  const configs = (await storage.getBrokerConfigs()).filter((c) => c.brokerName === "kotak_neo" && !c.isArchived && c.isConnected);
   for (const config of configs) {
     const plans = await storage.getStrategyPlansByConfig(config.id);
     configureNativeFeed(config, plans
@@ -318,7 +318,7 @@ export async function startNativeFeed(storage: IStorage) {
 }
 
 export function configureNativeFeed(config: BrokerConfig, initialSymbols: string[] = []) {
-  if (!config.isConnected) {
+  if (config.isArchived || !config.isConnected) {
     stopNativeFeed(config.id);
     return;
   }
@@ -374,7 +374,7 @@ export function stopNativeFeed(brokerConfigId: string) {
 }
 
 export function requestNativeFeedReconnect(config: BrokerConfig, initialSymbols: string[] = []) {
-  if (!config.isConnected || !config.feedUrl || !config.sessionId || !config.ucc) return false;
+  if (config.isArchived || !config.isConnected || !config.feedUrl || !config.sessionId || !config.ucc) return false;
   const state = states.get(config.id);
   if (!state) {
     configureNativeFeed(config, initialSymbols);
@@ -416,7 +416,7 @@ export function snapshotNativeSymbol(symbol: string) {
 
 export function getNativeFeedStatus(configs?: BrokerConfig[]) {
   const now = Date.now();
-  const sourceConfigs = configs?.filter((config) => config.brokerName === "kotak_neo")
+  const sourceConfigs = configs?.filter((config) => config.brokerName === "kotak_neo" && !config.isArchived)
     ?? [...states.values()].map((state) => state.config);
   const rows = sourceConfigs.map((config) => {
     const s = states.get(config.id);
