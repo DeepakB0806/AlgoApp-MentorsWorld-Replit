@@ -112,6 +112,21 @@ test("Broker API shows HSI-parity SFeed diagnostics without exposing feed creden
   assert.doesNotMatch(source, /<VersionedGatewayStatusCard gateway="hsm" \/>/);
 });
 
+test("Scrip Master download uses the safe saved-credential flag", async () => {
+  const source = await readSource("pages/broker-api.tsx");
+  const cardStart = source.indexOf("function ScripMasterCard(");
+  const cardEnd = source.indexOf("\ninterface PFLPlan", cardStart);
+  assert.notEqual(cardStart, -1, "ScripMasterCard must exist");
+  assert.notEqual(cardEnd, -1, "ScripMasterCard boundary must exist");
+  const card = source.slice(cardStart, cardEnd);
+
+  assert.match(card, /kotakConfigs\.find\(c => c\.hasConsumerKey\)/);
+  assert.match(card, /disabled=\{isDownloading \|\| !selectedConfig\?\.hasConsumerKey\}/);
+  assert.match(card, /!selectedConfig\?\.hasConsumerKey/);
+  assert.match(card, /Configure a Kotak Neo broker profile first/);
+  assert.doesNotMatch(card, /(?:c|selectedConfig)\??\.consumerKey/);
+});
+
 test("shared styles do not introduce a global scroll lock", async () => {
   const css = await readFile(join(sourceRoot, "index.css"), "utf8");
   assert.doesNotMatch(css, /(?:html|body|#root)[^{]*\{[^}]*overflow(?:-[xy])?\s*:\s*(?:hidden|clip)/s);

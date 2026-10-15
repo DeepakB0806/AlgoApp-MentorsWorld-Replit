@@ -710,3 +710,21 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 1. A read-only Production query of `name`, `environment`, `is_archived`, and `is_primary` should show Sandbox as `true/false` and Live as `false/true`.
 2. The Broker API page should list Sandbox under Archived broker profiles; Restore should remain available.
 3. The archive action returned HTTP 200, and the Production database recheck confirmed the intended flags. No profile response body or credentials were read.
+
+### [MILESTONE] Fix Scrip Master download after credential redaction — verified 2026-10-15
+
+**Task:** #336 — Fix Scrip Master CSV Download After Credential Redaction
+
+**What changed:** The Broker API Scrip Master card now selects and validates a Kotak profile using the safe `hasConsumerKey` flag instead of the intentionally redacted `consumerKey` value. It distinguishes a missing broker profile from a profile whose saved key is absent; the download endpoint continues to use the server-side database record and returns a clear not-yet-synced response.
+
+**Key files:**
+- `artifacts/mentors-world/src/pages/broker-api.tsx` — uses the safe configured-key flag for selection and download gating.
+- `artifacts/mentors-world/tests/layout-regressions.test.mjs` — prevents the Scrip Master card from depending on a raw credential field.
+
+**How it works:** Broker-config API responses redact credential values but include configured-status booleans. The Scrip Master card now consumes that boolean, while the CSV route independently reads the full broker record on the server and streams the locally synced NFO CSV.
+
+**Diagnostic — if this breaks, check:**
+1. `/api/broker-configs` should return `consumerKey: null` and `hasConsumerKey: true` for a profile with a saved key.
+2. The card should choose a Kotak profile with `hasConsumerKey` and enable Download CSV; it must not inspect `consumerKey`.
+3. If download fails with “Scrip master file not ready”, check the NFO sync logs and whether today’s `scrip_master_nfo_YYYY-MM-DD.csv` exists in the API server working directory.
+4. Run `pnpm --filter @workspace/mentors-world run typecheck`, `pnpm --filter @workspace/mentors-world run test:layout`, and `pnpm run test:regression-gates`.

@@ -1710,12 +1710,12 @@ interface PFLEntry {
   executionTimeMs?: number;
 }
 
-function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfig[] }) {
+function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfigView[] }) {
   const { toast } = useToast();
   const [isDownloading, setIsDownloading] = useState(false);
 
   const kotakConfigs = brokerConfigs.filter(c => c.brokerName === "kotak_neo");
-  const selectedConfig = kotakConfigs.find(c => c.consumerKey) || kotakConfigs[0];
+  const selectedConfig = kotakConfigs.find(c => c.hasConsumerKey) || kotakConfigs[0];
 
   const readinessQuery = useQuery<{ ready: boolean; lastUpdated: string | null; isRecovering: boolean; recoveryAttempt: number }>({
     queryKey: ["/api/te/readiness", selectedConfig?.id],
@@ -1783,7 +1783,7 @@ function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfig[] }) {
           </div>
           <Button
             onClick={handleDownload}
-            disabled={isDownloading || !selectedConfig?.consumerKey}
+            disabled={isDownloading || !selectedConfig?.hasConsumerKey}
             data-testid="button-download-scrip-master"
           >
             {isDownloading ? (
@@ -1794,10 +1794,12 @@ function ScripMasterCard({ brokerConfigs }: { brokerConfigs: BrokerConfig[] }) {
             {isDownloading ? "Downloading…" : "Download CSV"}
           </Button>
         </div>
-        {!selectedConfig?.consumerKey && (
+        {!selectedConfig?.hasConsumerKey && (
           <p className="text-xs text-muted-foreground mt-1">
             <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />
-            Consumer key required — configure broker first
+            {selectedConfig
+              ? "Consumer key required — configure broker first"
+              : "Configure a Kotak Neo broker profile first"}
           </p>
         )}
       </CardHeader>
@@ -4650,7 +4652,7 @@ export default function BrokerApi() {
   const [isPflSheetOpen, setIsPflSheetOpen] = useState(false);
   const [isArchivedProfilesExpanded, setIsArchivedProfilesExpanded] = useState(false);
 
-  const { data: brokerConfigs = [], isLoading } = useQuery<BrokerConfig[]>({
+  const { data: brokerConfigs = [], isLoading } = useQuery<BrokerConfigView[]>({
     queryKey: ["/api/broker-configs", "includeArchived"],
     queryFn: async () => {
       const response = await fetch("/api/broker-configs?includeArchived=true");
