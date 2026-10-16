@@ -5,6 +5,7 @@ import { QueryClientProvider, useQuery, useMutation } from "@tanstack/react-quer
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, ProtectedRoute } from "@/hooks/use-auth";
+import { useAuth } from "@/hooks/use-auth";
 import { Loader2, AlertTriangle, ShieldX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -111,10 +112,12 @@ function Router() {
 }
 
 function TradingHaltBanner() {
+  const { isAuthenticated } = useAuth();
   const { data } = useQuery<{ key: string; value: string } | null>({
     queryKey: ["/api/settings/trading_halted"],
     refetchInterval: 15000,
     retry: false,
+    enabled: isAuthenticated,
   });
 
   const resumeMutation = useMutation({
@@ -124,7 +127,7 @@ function TradingHaltBanner() {
     },
   });
 
-  if (data?.value !== "true") return null;
+  if (!isAuthenticated || data?.value !== "true") return null;
 
   return (
     <div

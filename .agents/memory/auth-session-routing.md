@@ -20,3 +20,9 @@ The app-owned logout caller requests a JSON destination and performs the final b
 **Why:** Express redirect bodies were becoming the visible page instead of the browser completing navigation to home.
 
 **How to apply:** Preserve content negotiation when changing logout routes so the UI never treats an API redirect response as its final document.
+
+Keep the existing customer/team cookie sessions and Replit OIDC sign-in; do not migrate customer/team accounts to Clerk without an explicit request. New app API routes should authenticate using those existing sessions, while health, login, and machine-integration routes remain separately scoped.
+
+**Why:** The app has two working session types with different logout and access behavior, and the user explicitly chose to keep the current sign-in system when extending API protection.
+
+**How to apply:** Add the shared API gate after auth routes are registered. Keep the service-route exceptions exact and review their independent credentials separately; do not make a broad `/api` exception.

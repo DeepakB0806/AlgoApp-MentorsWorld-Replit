@@ -177,7 +177,7 @@ export function registerAuthRoutes(app: Express): void {
       
       // Then check for Replit Auth session
       if (!req.user?.claims?.sub) {
-        return res.status(401).json({ message: "Not authenticated" });
+        return res.json(null);
       }
       
       const userId = req.user.claims.sub;

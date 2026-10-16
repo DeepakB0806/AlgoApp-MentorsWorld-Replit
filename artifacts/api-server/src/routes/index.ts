@@ -11,12 +11,14 @@ import { registerSseRoutes } from "./sse-routes";
 import { registerMarketCalendarRoutes } from "./market-calendar-routes";
 import { registerIndexMarginRoutes } from "./index-margin-routes";
 import healthRouter from "./health";
+import { requireApplicationApiAccess } from "./api-auth";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
   app.use("/api", healthRouter);
+  app.use("/api", requireApplicationApiAccess);
   registerSseRoutes(app);
   registerAdminRoutes(app, storage);
   registerStrategyRoutes(app, storage);
