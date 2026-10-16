@@ -748,3 +748,21 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 2. Run the native-feed tests, frontend typecheck, UI layout suite, configured frontend production build, and regression gates. All executable checks passed; API startup/build also passed.
 3. Authenticated browser checks were skipped without disposable session state; the screenshot verified the sign-in page only, not the protected SFeed card.
 4. Routine generated CSV rotation was already present in the workspace and was not edited for this label-only task.
+
+### [MILESTONE] Reconcile recent task completion — verified 2026-10-16
+
+**Task:** #341 — Reconcile last seven days of task completion
+
+**What changed:** Audited the 30-task date-window inventory and recorded evidence and limitations in the task plan. No original task states or Production records were changed: already-merged tasks remain merged, while incomplete or unverified tasks remain Draft or Archived. The latest Development logs show Current v3 HSI authentication rejected; this is not evidence about Production or SFeed.
+
+**Key files:**
+- `.local/tasks/seven-day-completion-audit.md` — records the audit inventory, focused validation, Production metadata findings, and reasons candidate tasks were not closed.
+- `replit.md` — records this milestone and the checks needed to repeat the audit safely.
+
+**How it works:** Completion was assessed from existing milestones, source and tests, anonymous-route checks, and count-only Production metadata. A stored connected flag was not treated as proof of live authentication. Archived tasks were not reopened, and no candidate was marked complete outside the assigned-task workflow.
+
+**Diagnostic — if this breaks, check:**
+1. Read the audit plan for each task’s current state and evidence gaps before changing any task status.
+2. Production checks must remain read-only and must not retrieve historical TOTP, token, or SID values.
+3. `/api/broker-configs` and `/api/kotak-native-feed/status` should reject anonymous requests; the checks returned HTTP 401.
+4. Authenticated browser verification remains outstanding for the production archive/Restore UI and the credential-edit/login flows. Development HSI auth rejections do not establish SFeed status or Production health.
