@@ -36,6 +36,7 @@ test("SFeed heartbeat recovery returns to healthy after a fresh pong", () => {
 test("SFeed status exposes HSI-parity connection details without leaking credentials", () => {
   const config = {
     id: "broker-config-1",
+    name: "Kotak Neo – Production",
     brokerName: "kotak_neo",
     apiVersion: "v3_current",
     isConnected: true,
@@ -51,6 +52,7 @@ test("SFeed status exposes HSI-parity connection details without leaking credent
   assert.equal(status.runningInstanceCount, 0);
   assert.equal(feed.lifecycle, "not_running");
   assert.equal(feed.apiVersion, "v3_current");
+  assert.equal(feed.brokerProfileName, config.name);
   assert.equal(feed.lastConnectedAt, null);
   assert.equal(feed.lastDisconnectedAt, null);
   assert.equal(feed.reconnectDelayMs, 0);
@@ -63,6 +65,29 @@ test("SFeed status exposes HSI-parity connection details without leaking credent
   for (const secret of [config.feedUrl, config.sessionId, config.accessToken, config.ucc]) {
     assert.equal(serialized.includes(secret), false);
   }
+});
+
+test("SFeed distinguishes saved profile names even when API versions match", () => {
+  const configs = [
+    { id: "sandbox", name: "Kotak Neo – Sandbox" },
+    { id: "production", name: "Kotak Neo – Production" },
+    { id: "custom", name: "Desk B <Primary>" },
+  ].map(config => ({
+    ...config,
+    brokerName: "kotak_neo",
+    apiVersion: "v3_current",
+    isConnected: false,
+  }));
+  const status = getNativeFeedStatus(configs as any);
+  assert.equal(status.configuredCount, 3);
+  assert.deepEqual(status.feeds.map(feed => [feed.brokerConfigId, feed.brokerProfileName, feed.apiVersion]),
+    configs.map(config => [config.id, config.name, config.apiVersion]));
+
+  // Labels follow the latest database record, including renames and a single remaining profile.
+  const renamed = { ...configs[1], name: "Kotak Neo – Live" };
+  assert.equal(getNativeFeedStatus([renamed] as any).feeds[0].brokerProfileName, renamed.name);
+  assert.equal(getNativeFeedStatus([{ ...renamed, name: null }] as any).feeds[0].brokerProfileName, null);
+  assert.deepEqual(getNativeFeedStatus([]).feeds, []);
 });
 
 test("manual SFeed reconnect refuses an unconfigured feed", () => {

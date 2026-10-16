@@ -441,6 +441,7 @@ export function getNativeFeedStatus(configs?: BrokerConfig[]) {
     const score = Math.min(100, (connected ? 0 : 30) + (s?.failures ?? 0) * 20 + (s?.recentReconnects.length ?? 0) * 15 + (ageMs === null ? 65 : ageMs > 10_000 ? 40 : ageMs > 3_000 ? 20 : 0));
     return {
       brokerConfigId: config.id,
+      brokerProfileName: config.name,
       apiVersion: config.apiVersion ?? null,
       lifecycle,
       configuredCount: 1,

@@ -112,6 +112,19 @@ test("Broker API shows HSI-parity SFeed diagnostics without exposing feed creden
   assert.doesNotMatch(source, /<VersionedGatewayStatusCard gateway="hsm" \/>/);
 });
 
+test("SFeed headings and compact summaries identify saved profiles rather than API versions", async () => {
+  const source = await readSource("pages/broker-api.tsx");
+  const start = source.indexOf("function SFeedHealthCard()");
+  const end = source.indexOf("\nfunction ", start + 1);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const card = source.slice(start, end);
+  assert.equal((card.match(/\{feed\.brokerProfileName \|\| "Unnamed Kotak profile"\}/g) ?? []).length, 2);
+  assert.doesNotMatch(card, /versionLabel|feed\.apiVersion/);
+  assert.match(card, /key=\{feed\.brokerConfigId\}/);
+  assert.match(card, /feeds\.length === 0/);
+});
+
 test("Scrip Master download uses the safe saved-credential flag", async () => {
   const source = await readSource("pages/broker-api.tsx");
   const cardStart = source.indexOf("function ScripMasterCard(");

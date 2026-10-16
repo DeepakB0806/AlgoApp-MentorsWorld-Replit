@@ -2555,6 +2555,7 @@ type SFeedLifecycle = "running" | "not_running" | "not_configured";
 
 interface SFeedStatus {
   brokerConfigId: string;
+  brokerProfileName: string | null;
   apiVersion: string | null;
   lifecycle: SFeedLifecycle;
   configuredCount: number;
@@ -2649,12 +2650,6 @@ function SFeedHealthCard() {
     return "text-amber-600 dark:text-amber-400";
   }
 
-  function versionLabel(apiVersion: string | null): string {
-    if (apiVersion === "v2_legacy") return "Legacy v2";
-    if (apiVersion === "v3_current") return "Current v3";
-    return "Kotak connection";
-  }
-
   function connectionLabel(feed: SFeedStatus): string {
     if (feed.lifecycle === "not_configured") return "Not configured";
     if (feed.lifecycle === "not_running") return "Not running";
@@ -2683,7 +2678,7 @@ function SFeedHealthCard() {
         onClick={() => setExpanded(value => !value)}
         data-testid="button-toggle-sfeed-status"
       >
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
               <Activity className="h-4 w-4 text-primary" />
@@ -2697,14 +2692,14 @@ function SFeedHealthCard() {
             </CardDescription>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap min-w-0 items-center gap-2">
             {!isLoading && !isError && feeds.length > 0 && (
-              <span className="text-[11px] hidden sm:inline">
+              <span className="text-[11px] hidden sm:inline break-words [overflow-wrap:anywhere]">
                 {feeds.map((feed, index) => (
                   <span key={feed.brokerConfigId}>
                     {index > 0 && <span className="text-muted-foreground"> · </span>}
                     <span className={feed.connected && feed.authenticated ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}>
-                      {feed.apiVersion === "v2_legacy" ? "v2" : feed.apiVersion === "v3_current" ? "v3" : "SFeed"} {connectionLabel(feed)}
+                      {feed.brokerProfileName || "Unnamed Kotak profile"} {connectionLabel(feed)}
                     </span>
                   </span>
                 ))}
@@ -2739,8 +2734,8 @@ function SFeedHealthCard() {
             {feeds.map(feed => (
               <div key={feed.brokerConfigId} className="rounded-lg border border-border/60 bg-muted/10 p-3" data-testid={`sfeed-instance-${feed.brokerConfigId}`}>
                 <div className="flex items-center justify-between gap-2 mb-2">
-                  <div>
-                    <p className="font-semibold text-sm">{versionLabel(feed.apiVersion)}</p>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm break-words [overflow-wrap:anywhere]">{feed.brokerProfileName || "Unnamed Kotak profile"}</p>
                     <p className="text-[11px] text-muted-foreground">
                       {feed.configuredCount > 0 ? "Feed URL and login session configured" : "Feed URL or login session unavailable"}
                     </p>

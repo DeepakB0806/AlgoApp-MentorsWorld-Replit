@@ -728,3 +728,23 @@ When changing any frontend page, card, table, text block, dialog, sheet, preview
 2. The card should choose a Kotak profile with `hasConsumerKey` and enable Download CSV; it must not inspect `consumerKey`.
 3. If download fails with “Scrip master file not ready”, check the NFO sync logs and whether today’s `scrip_master_nfo_YYYY-MM-DD.csv` exists in the API server working directory.
 4. Run `pnpm --filter @workspace/mentors-world run typecheck`, `pnpm --filter @workspace/mentors-world run test:layout`, and `pnpm run test:regression-gates`.
+
+### [MILESTONE] SFeed cards identify saved broker profiles — verified 2026-10-16
+
+**Task:** #325 — Label SFeed Cards by Broker Profile
+
+**What changed:** Added the persisted broker profile name to each safe SFeed status row and used it in the compact summary and expanded profile heading instead of API-version labels. No profile records, authentication, feed behavior, health calculations, or inclusion rules changed.
+
+**Key files:**
+- `artifacts/api-server/src/kotak-native-feed.ts` — includes only `brokerProfileName` from the existing configuration alongside the existing safe status fields.
+- `artifacts/api-server/tests/kotak-native-feed.test.ts` — checks same-version profiles with distinct names, rename/single-profile/empty states, and existing credential redaction.
+- `artifacts/mentors-world/src/pages/broker-api.tsx` — consumes the saved name in both labels, handles unnamed profiles explicitly, and wraps long names.
+- `artifacts/mentors-world/tests/layout-regressions.test.mjs` — protects name-based headings and compact summaries while retaining ID-based keys.
+
+**How it works:** The status route already reads broker records from storage. The status serializer now returns each record's name without exposing its feed URL or credentials. The existing ten-second polling supplies fresh names to the card; labels do not infer environments from API version.
+
+**Diagnostic — if this breaks, check:**
+1. Each `/api/kotak-native-feed/status` row should contain `brokerProfileName` matching the saved profile name; unnamed profiles display “Unnamed Kotak profile”.
+2. Run the native-feed tests, frontend typecheck, UI layout suite, configured frontend production build, and regression gates. All executable checks passed; API startup/build also passed.
+3. Authenticated browser checks were skipped without disposable session state; the screenshot verified the sign-in page only, not the protected SFeed card.
+4. Routine generated CSV rotation was already present in the workspace and was not edited for this label-only task.
